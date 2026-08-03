@@ -72,6 +72,61 @@ checker that is "slow on large input" (their words) — 6s to typecheck one
 
 ---
 
+## 1b. Positioning vs. the 2026 ecosystem
+
+lean-crush is not being designed in a vacuum. A survey of the current field
+(lean-smt, lean-auto, Lean core's `bv_decide`/`grind`/`LibrarySuggestions`,
+Duper, LeanHammer, Isabelle's Sledgehammer, cvc5's HO support) sharpens exactly
+where we add value and where we should copy rather than reinvent.
+
+**We are not first at programmatic translation.** lean-smt (the cvc5 team's own
+tactic) already has `@[smt_translate] : Translator := Expr → TranslationM (Option
+Term)` — the same shape as our `TranslationHandler`. So the bare attribute is not
+the differentiator. What is:
+
+1. **A declarative term-level tier is the clear open gap.** lean-smt has a
+   programmatic tier (`@[smt_translate]`) and a Lean→Lean simp tier
+   (`@[smt_normalize]`), but *no* declarative "this constant ↦ this SMT term"
+   surface. Our `crush_map` / `crush_map_sort` sugar (desugaring to a handler) is
+   precisely that missing tier — most users want `Nat.succ ↦ (+ _ 1)`, not a
+   `MetaM` function.
+2. **Handler dispatch indexed by head symbol.** lean-smt tries every translator on
+   every subterm in arbitrary order — its source literally carries
+   `-- TODO: Use DiscrTree ... instead of naively looping`. We index handlers by
+   head constant in a `DiscrTree` with explicit priorities, so dispatch is
+   `O(matching)` and override semantics are predictable. (Our current skeleton
+   uses a priority-sorted linear scan; the `DiscrTree` index is a planned
+   refinement — see §4.4.)
+3. **Higher-order actually survives.** lean-smt throws
+   `"SMT-LIB does not support lambdas"` — its only HO answer is monomorphization.
+   We add the encoding layer (§5). Notably even Isabelle's Sledgehammer, after
+   15 years of tuning, uses plain **λ-lifting for all SMT solvers**, which
+   validates our default; and cvc5 *does* support HO natively (below), which
+   lean-smt leaves switched off.
+
+**Things to copy, not reinvent:**
+
+- **Subprocess management from `bv_decide`'s `External.lean`**: `runInterruptible`
+  with a ~50 ms poll loop that checks the elaborator's **cancellation token** (so
+  editor cancellation actually kills the solver), Windows-safe self-implemented
+  timeouts, and a 3-tier solver-path fallback (explicit option → bundled binary →
+  `PATH`). Our `Crush/Solver/Process.lean` already does the hard-timeout race and
+  guaranteed cleanup; adding cancellation-token checking is a tracked refinement.
+- **Premise selection from Lean core `Lean.LibrarySuggestions`**: MePo, SineQuaNon,
+  and the MeSh-style `combine`/`intersperse` combinators are now *in core*. We
+  build the premise hook on `Selector := MVarId → Config → MetaM (Array
+  Suggestion)` with `Config.caller := "crush"`, rather than porting MePo.
+- **lean-auto's `@[rebind]` typed-hole pattern** for pluggable solver/native
+  backends (type-checked at attribute time via `isDefEq`), rather than an untyped
+  name registry.
+- **lean-smt's `skippedGoals`/`addTrust`**: when reconstruction can't close a
+  step, emit it as a residual Lean goal (well-scoped via `mkForallFVars`) instead
+  of hard-failing.
+- **Config ergonomics**: a bare non-Prop identifier in the hint list expands to
+  its equation lemmas via `getEqnsFor?` (i.e. `crush [myFn]` means "unfold
+  `myFn`"); a Verus-style `@[crush_opaque]` + explicit `reveal` for
+  user-controlled definition visibility to keep queries tractable.
+
 ## 2. Design goals
 
 1. **Higher-order first.** Lambdas, partial application, and function-valued
@@ -213,6 +268,45 @@ the built-ins can express, a user can.
 
 ---
 
+## 4b. Monomorphization design (learning from lean-auto's scars)
+
+Layer 3 instantiates polymorphic/dependent facts into universe-monomorphic HOL
+via a saturation loop, as lean-auto does. A close reading of lean-auto's
+`Monomorphization.lean` surfaced four concrete traps we design around from the
+start rather than patching later:
+
+1. **Instantiation reach must not be structurally capped at the first
+   hypothesis.** lean-auto's `LemmaInst.ofLemmaHOL` only makes the *leading*
+   non-`Prop` binder prefix instantiable, so in `∀ α, P α → ∀ β, Q β` the `β` is
+   forever un-instantiable. We track instantiable positions through the whole
+   telescope, not just the prefix.
+2. **Fuel must be a meaningful quantity with a loud failure.** lean-auto's
+   `saturationThreshold = 1024` counts a *bag of unrelated events* (queue pops +
+   group visits + match calls), corresponds to no clean quantity, has no depth or
+   term-size bound, and **silently returns** a truncated set on exhaustion (its
+   own TODO: "Report errors when monomorphization fails"). We separate
+   `crush.mono.fuel` (a real instance-count budget) from `crush.mono.rounds` (a
+   saturation-round bound), add a term-depth guard, and on exhaustion emit a
+   diagnostic naming what was dropped — never a silent truncation.
+3. **Matching needs an index; dedup needs a normal form.** lean-auto has *no*
+   term index and *no* congruence closure — matching is a full `Expr` walk with
+   `Meta.isDefEq` at every candidate node, and dedup is a linear `isDefEq` scan in
+   four separate places, i.e. O(n²) `isDefEq` calls throughout. We index candidate
+   heads with a `DiscrTree` and canonicalize instances by a hashed fingerprint
+   before falling back to `isDefEq`, so the common case is not quadratic.
+4. **Definitional-equality transparency must be consistent across layers.**
+   lean-auto mixes `default` (for `ConstInst`/type-canonicalization) and
+   `reducible` (for reduction/reification); its `Test/SetMembershipDefEq.lean`
+   documents a concrete crash from exactly that mismatch, "fixed" by silently
+   dropping facts. We fix one transparency policy per phase and record it in
+   `Config`, so the reifier and the monomorphizer never disagree about whether
+   `MySet α ≡ α → Prop`.
+
+Also adopted: the `Nonempty`/`Inhabited` → witness conversion for inhabitation
+(via `Classical.choice`/`Inhabited.default`), since SMT-LIB assumes every sort is
+non-empty (see §10.1); and `DTr`-style provenance on every generated instance so a
+dropped or unprovable fact can be named.
+
 ## 5. Higher-order handling (the key capability)
 
 `crush.ho.mode` selects the strategy applied in Layer 4, after monomorphization
@@ -226,10 +320,22 @@ and before first-order translation:
 - **`combinators`** (Sledgehammer-style). Translate λ via S/K/B/C/W combinators
   with their defining equations. Smaller encoding, weaker for extensionality;
   useful when defunctionalization blows up.
-- **`native`**. Emit higher-order SMT to a HO-capable backend (cvc5's HOL mode)
-  and let the solver handle application/partial application directly. Fastest
-  path when the backend supports it; falls back with a diagnostic if the chosen
-  backend is first-order-only (z3).
+- **`native`**. Emit higher-order SMT to a HO-capable backend and let the solver
+  handle application/partial application directly. Fastest path when the backend
+  supports it; falls back with a diagnostic if the chosen backend is
+  first-order-only (z3). **Implementation detail that bites**: cvc5 gates HO on
+  the logic-string prefix — `(set-logic HO_ALL)` / `HO_UF`, *not* `ALL` (its
+  `enableEverything` is gated on the `HO_` prefix). lean-smt emits `ALL` and thus
+  never turns cvc5's HO solver on; the `native` mode must emit the `HO_` logic and
+  can additionally pass `--uf-ho-exp`/`--ho-elim`. cvc5's own mechanism is a lazy
+  applicative encoding plus extensionality + app-encode axioms ("Extending SMT
+  Solvers to Higher-Order", Barbosa et al.) — i.e. our `defunctionalize` mode is
+  the manual version of what cvc5 does internally.
+
+Naming note: what we call `defunctionalize`/`combinators` are Sledgehammer's
+`lam_trans = lifting`/`combs`. Sledgehammer forces `lifting` for *all* SMT
+solvers, which is why `defunctionalize` (λ-lifting into per-closure `apply`
+symbols) is our default rather than combinators.
 
 The IR in `Crush/SMT/Syntax.lean` is deliberately first-order so that the
 `defunctionalize`/`combinators` outputs map 1:1 onto what solvers accept; the

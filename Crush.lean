@@ -1,6 +1,7 @@
 import Crush.SMT.Syntax
 import Crush.SMT.Print
 import Crush.Frontend.Config
+import Crush.Reify.Term
 import Crush.Translation.Monad
 import Crush.Translation.Attr
 import Crush.Translation.Builtins
