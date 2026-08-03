@@ -195,16 +195,17 @@ Module map (⟢ = built & tested, ▷ = designed, □ = todo):
 | `Crush/Translation/Attr.lean` | `@[crush_translate]` extension | ⟢ |
 | `Crush/Translation/Builtins.lean` | `crush_map` sugar + core theories | ⟢ (sugar), □ (theories) |
 | `Crush/Solver/Process.lean` | process mgmt, hard timeout, `unknown` | ⟢ |
-| `Crush/SMT/Parser.lean` | s-expr + result/model/core parsing | □ |
-| `Crush/Reify/Term.lean` | `CTerm`/`CSort` IR (STLC, no `LamWF`) | ▷ |
-| `Crush/Reify/Collect.lean` | hypothesis & hint collection | □ |
+| `Crush/SMT/Sexp.lean` | s-expression parser | ⟢ |
+| `Crush/SMT/Result.lean` | unsat-core + model parsing | ⟢ |
+| `Crush/Reify/Term.lean` | `CTerm`/`CSort` IR (STLC, no `LamWF`) | ⟢ |
+| `Crush/Reify/Collect.lean` | hypothesis & goal collection | ⟢ |
 | `Crush/Reify/Reify.lean` | `Expr → CTerm`, atom allocation, `DTr` provenance | □ |
 | `Crush/Translation/Preprocess.lean` | reduction, skolem prep | □ |
 | `Crush/Translation/Monomorphize.lean` | poly → HOL saturation | □ |
 | `Crush/Translation/HOEncoding.lean` | λ-elimination (defunc/comb) | □ |
-| `Crush/Translation/Translate.lean` | driver: Expr → Command via handlers | ▷ |
+| `Crush/Translation/Translate.lean` | driver: `Expr → SMT.Term` via handlers | ⟢ |
 | `Crush/Solver/Reconstruct.lean` | unsat-core → Lean proof replay | □ |
-| `Crush/Frontend/Tactic.lean` | the `crush` tactic | □ |
+| `Crush/Frontend/Tactic.lean` | the `crush` tactic (`trust` mode) | ⟢ |
 
 ---
 
@@ -390,6 +391,26 @@ crush [h₁, …, hₙ] [*] [* db] (u[c₁,…]) (d[c₁,…])
   (handlers) → solve → discharge, with `trace.*` classes at each boundary and
   the full script available via `crush.trace.script` / `crush.save`.
 
+**Two hard lessons from lean-auto's frontend that shape ours:**
+- **Report the pipeline, always.** lean-auto's most-complained-about error is a
+  bare `"Auto failed to find proof"` that never says which of its three backends
+  ran, what the solver's verdict was, or that a model exists — all of that is
+  computed and thrown into trace classes that are off by default. `crush` emits a
+  one-line outcome by default: backend, verdict (`unsat`/`sat`/`unknown`/timeout),
+  wall time, #facts sent, #facts dropped. A `sat` result is surfaced as a
+  **counterexample** (parsed from `get-model`), not as a generic failure — lean-auto
+  has 527 lines of unused SMT→Expr model-parsing machinery it never wired up.
+- **`(set-logic ...)` must be emitted.** lean-auto never emits it (the constructor
+  exists but is never constructed), which silently disables theory- and
+  HO-specific solver behaviour. `crush` always emits the resolved logic
+  (auto-detected or `crush.logic`), and `HO_`-prefixed for `native` HO mode.
+
+Per-call configuration is a planned surface: `crush (timeout := 5) (backend :=
+cvc5) [hints]` overriding the `set_option` defaults, since lean-auto's 43
+global-only options with no call-site syntax are the root of most of its
+friction. The current milestone reads `Config` from options only; the config
+syntax layers on without changing the pipeline.
+
 ---
 
 ## 8. Configuration options (all implemented as `register_option`)
@@ -417,28 +438,41 @@ SMT IR + printer, config/options, `TranslateM` + name map + provenance,
 Smoke test (`Test/Smoke.lean`) confirms: valid SMT-LIB emission, 3 handlers
 registered via both surfaces, config parse, and a live `z3` `unsat` round-trip.
 
-**Milestone 1 — First-order end-to-end.**
-`SMT/Parser.lean` (results/core), `Reify/Collect.lean`, `Translation/Translate.lean`
-(handler dispatch + default structural translator for Bool/Int/UF), the `crush`
-tactic in `trust` mode. Goal: `example : ∀ x : Int, x + 0 = x := by crush` closes.
+**Milestone 1 — First-order end-to-end (DONE, builds + tested).**
+`SMT/Sexp.lean` + `SMT/Result.lean` (s-expr parser, unsat-core + model parsing),
+`Reify/Collect.lean` (hypotheses + negated goal), `Translation/Translate.lean`
+(handler dispatch + default structural translator for Bool/Prop/Int/Nat/UF with a
+Nat `≥0` quantifier guard), `Frontend/Tactic.lean` (the `crush` tactic in `trust`
+mode with pipeline reporting and `sat`→counterexample). `Test/M1.lean` confirms:
+`∀ x : Int, x + 0 = x`, hypothesis use, propositional logic, linear arithmetic,
+uninterpreted-function congruence all close; a false goal (`x + 1 = x`) is
+correctly *rejected* with a counterexample rather than silently closed.
 
 **Milestone 2 — Theories + Nat.**
-Built-in handlers for Nat→Int (with well-formedness guards), BitVec, String,
-datatypes, `ite`, quantifiers. Regression suite ported from lean-auto's
-`Test/SmtTranslation/*`.
+Built-in handlers for Nat→Int (with well-formedness guards, incl. truncated `sub`
+and correct truncated-vs-Euclidean `div`/`mod`), BitVec, String, datatypes, `ite`.
+Regression suite ported from lean-auto's `Test/SmtTranslation/*`.
 
 **Milestone 3 — Higher-order.**
 `HOEncoding.lean`: defunctionalization first, then combinators; `native` mode for
-cvc5. This is the headline feature — the benchmark is the set of HO goals that
-make lean-auto throw "Higher order input?".
+cvc5 (emit `HO_` logic). This is the headline feature — the benchmark is the set
+of HO goals that make lean-auto throw "Higher order input?". Passes ship trusted,
+with their P4/P5 equivalence theorems stated (as `sorry`) per §10b.
 
 **Milestone 4 — Soundness/reconstruction.**
-Unsat-core-driven reconstruction (core → `duper`/`grind`), then Alethe replay for
-cvc5. Nat-in-constructor soundness fix that lean-auto's TODO flags.
+Unsat-core-driven reconstruction (core → `duper`/`grind`; the "solver-as-oracle"
+model), then Alethe replay for cvc5. Nat-in-constructor soundness fix that
+lean-auto's TODO flags.
 
 **Milestone 5 — Ergonomics & scale.**
-Monomorphization fuel tuning, premise selection hook, portfolio backend, model
-pretty-printing for `sat` (counterexample) reporting, docs and examples.
+Monomorphization fuel tuning, premise selection hook (on Lean core
+`LibrarySuggestions`), portfolio backend, per-call config syntax, richer model
+pretty-printing, docs and examples.
+
+**Milestone 6 — Verified soundness.**
+Discharge the §10b `sorry`s in `Crush/Proofs/`, prioritized P4 → P6 → P8 → P7 (the
+passes that can silently produce a wrong `unsat`), then the definitional ones.
+Each proof shrinks the trusted computing base, à la `bv_decide`.
 
 ---
 
@@ -484,6 +518,105 @@ falsely unsat" case):
 These live in `Crush/Translation/Builtins.lean` as the semantics of the built-in
 handlers, and are the reason built-ins are real handlers with access to full
 `MetaM` (they must synthesize guards and inspect types), not a static table.
+
+## 10b. Formal proof obligations (verified soundness roadmap)
+
+The obligations in §10 are, in Milestone 1–3, discharged by *testing* and by
+*trusting the solver* (`crush.trust`). That is the pragmatic path and it matches
+every deployed hammer. But the long-term goal is that each transformation pass
+carries a **machine-checked semantic-equivalence theorem**, so that a chain of
+passes composes into an end-to-end soundness guarantee and the trust surface
+shrinks to (the solver's `unsat` verdict) + (the kernel). This section is the
+ledger of what must be proven, tracked alongside the code. It is deliberately
+separate from testing: a ✅ here means *a Lean proof exists in the repo*, not that
+a test passes.
+
+### The overarching statement
+
+Let `⟦·⟧` denote the semantics of a fact in the source logic (a Lean `Prop`, or a
+`CTerm` under an interpretation `I` assigning Lean meanings to atoms). Each pass
+`T : Facts → Facts` must satisfy a **meaning-preservation** theorem of one of two
+strengths:
+
+- **Equivalence** (for normalization/encoding passes that must not change
+  provability): `∀ I, (⟦Γ⟧_I) ↔ (⟦T(Γ)⟧_I)`, i.e. the pass neither loses nor
+  invents models.
+- **Equisatisfiability** (for passes introducing fresh symbols, e.g. Skolem/
+  defunctionalization `apply` symbols): `(∃ I, ⟦Γ⟧_I) ↔ (∃ I', ⟦T(Γ)⟧_I')`, i.e.
+  `T(Γ)` is unsat iff `Γ` is. This is the weaker but correct statement whenever a
+  pass adds symbols that a model must interpret (you cannot demand the *same* `I`).
+
+The composed guarantee we ultimately want:
+> If the solver reports `unsat` on the emitted script, and every pass in the
+> chain has its equivalence/equisatisfiability theorem, then the original goal
+> `G` follows — reconstructed as a Lean proof term with no new axioms.
+
+Reaching that fully closes the gap between `crush.trust reconstruct` being
+*implemented* and being *proven*. Until each theorem below is ✅, the
+corresponding pass is in the trusted computing base and must be flagged as such by
+`#print axioms`-style auditing.
+
+### Per-pass obligations
+
+Status legend: 🔴 not started · 🟡 statement drafted, proof pending · ✅ proven.
+
+| # | Pass (module) | Theorem to prove | Strength | Status |
+|---|---|---|---|---|
+| P1 | Preprocessing β/η, `let`/proj reduction (`Translation/Preprocess`) | reduced term is defeq to the original ⇒ same `Prop` | equivalence (definitional — cheap: `Eq.refl`/`rfl`-backed) | 🔴 |
+| P2 | Nat→Int embedding (`Translation/Builtins`) | `⟦n : Nat⟧ = Int.ofNat n` and the `≥0` guard makes `∀`/`∃`/`sub`/`div` agree with Lean on the image | equivalence, per operator | 🔴 |
+| P3 | Monomorphization (`Translation/Monomorphize`) | each generated instance is an instance of a source lemma ⇒ implied by it; instances are sound (already true "by construction" since each carries a Lean proof — the obligation is to *retain* that proof, not re-prove) | equivalence (Γ ⊢ each instance) | 🟡 |
+| **P4** | **Defunctionalization (`Translation/HOEncoding`, `defunctionalize`)** | **for the introduced `apply`/closure symbols and their defining axioms `A`, `(∃ I, ⟦Γ⟧_I) ↔ (∃ I', ⟦defunc(Γ) ∪ A⟧_I')`** — the headline HO theorem: the encoded problem is equisatisfiable with the original | **equisatisfiability** | 🔴 |
+| P5 | Combinator encoding (`HOEncoding`, `combinators`) | S/K/B/C/W defining equations characterize the same functions ⇒ equisatisfiable | equisatisfiability | 🔴 |
+| P6 | Skolemization (`Translation/Preprocess`) | `(∃ I, ⟦∀x∃y.φ⟧) ↔ (∃ I', ⟦∀x.φ[y:=f x]⟧)` with fresh `f`; classical, via `Classical.choice` | equisatisfiability | 🔴 |
+| P7 | Reification `Expr → CTerm` (`Reify/Reify`) | `⟦reify(e)⟧_I = e` for the recovered interpretation `I` (the round-trip that makes reconstruction possible; lean-auto's `reifTermCheckType` checks types but not meaning) | equivalence | 🔴 |
+| P8 | `CTerm → SMT.Term` lowering (`Translation/Translate`) | the SMT term denotes the same boolean/Int/… value as the `CTerm` under the sort interpretation | equivalence | 🔴 |
+| P9 | Inhabitation discharge (`Reify/Collect`) | every sort emitted without a guard is genuinely non-empty (witness recorded), so SMT's non-emptiness assumption is sound | side-condition | 🟡 |
+
+### Defunctionalization in detail (P4 — the one you flagged)
+
+This is the theorem that most needs to exist, because it is the pass with no
+prior art in the Lean SMT tools and the one whose bugs would be silent. Concretely
+the pass, given a set of higher-order facts, produces:
+
+- a fresh first-order sort `Fn σ τ` for each arrow sort `σ → τ` that occurs
+  applied;
+- an uninterpreted `apply_{σ,τ} : Fn σ τ → σ → τ`;
+- for each λ-closure `c = λx. body[x, ȳ]` captured with free vars `ȳ`, a
+  constructor `mk_c : (types of ȳ) → Fn σ τ` and a **defining axiom**
+  `∀ ȳ x, apply_{σ,τ} (mk_c ȳ) x = body[x, ȳ]`.
+
+The obligation, stated in Lean-ish:
+```
+theorem defunc_equisat (Γ : Facts) :
+    (∃ I : Interp, Γ.satisfiedBy I) ↔
+    (∃ J : Interp, (defunc Γ ∪ closureAxioms Γ).satisfiedBy J)
+```
+Proof strategy (the standard applicative-encoding argument): forward, extend any
+model `I` of `Γ` to `J` by interpreting `Fn σ τ` as the function graph and
+`apply` as function application — the closure axioms hold by β. Backward, from a
+model `J` of the encoding, read off Lean functions via `fun x => apply (mk_c ȳ)
+x`; the axioms force these to equal the intended bodies, so `Γ` holds. The subtle
+points to get right in the proof (and thus the test cases): **extensionality**
+(two closures with equal `apply` behaviour need not be equal `Fn` elements unless
+we add an extensionality axiom — so the encoding is equisatisfiable, *not*
+model-isomorphic, and the theorem must be stated as ∃/∃), and **capture** (the
+free-variable list `ȳ` must be complete, or the defining axiom is unsound).
+
+Until P4 is ✅, `crush.ho.mode defunctionalize` is trusted, and a `sat` result
+from the *encoded* problem must not be reported as a genuine Lean counterexample
+without first checking the closure axioms did not themselves cause the model
+(a spurious-model risk the tests must cover).
+
+### How the proofs are staged
+
+We do **not** block Milestone 3's *implementation* on these proofs — the passes
+ship first (trusted), with their equivalence theorems stated as `theorem … := by
+sorry` in a `Crush/Proofs/` directory so the statement is type-checked and the gap
+is visible to `#print axioms`. Discharging the `sorry`s is Milestone 6 ("Verified
+soundness"), prioritized P4 → P6 → P8 → P7 (the passes that can silently produce a
+wrong `unsat`), then the cheaper definitional ones. This mirrors `bv_decide`'s
+history: the reflection loop shipped trusted, then the LRAT checker and bitblaster
+were proven, shrinking the TCB incrementally.
 
 ## 11. Testing strategy
 

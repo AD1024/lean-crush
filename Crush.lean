@@ -1,11 +1,20 @@
 import Crush.SMT.Syntax
 import Crush.SMT.Print
+import Crush.SMT.Sexp
+import Crush.SMT.Result
 import Crush.Frontend.Config
 import Crush.Reify.Term
+import Crush.Reify.Collect
 import Crush.Translation.Monad
 import Crush.Translation.Attr
 import Crush.Translation.Builtins
+import Crush.Translation.Translate
 import Crush.Solver.Process
+import Crush.Frontend.Tactic
+-- Note: `Crush.Proofs.Obligations` (the sorry-backed soundness ledger, §10b) is
+-- deliberately NOT imported here — the tactic must not depend on unproven
+-- obligations, or every downstream proof would pick up `sorryAx`. It is a
+-- separate `Proofs` lake target, built and audited on its own.
 
 /-!
 # lean-crush

@@ -1,0 +1,123 @@
+import Lean
+import Crush.Frontend.Config
+import Crush.Reify.Collect
+import Crush.Translation.Translate
+import Crush.Solver.Process
+import Crush.SMT.Print
+import Crush.SMT.Result
+open Lean Elab Tactic Meta
+
+/-!
+# The `crush` tactic
+
+Milestone-1 end-to-end path:
+
+1. read `Config` from the option environment;
+2. collect local `Prop` hypotheses and the negated goal (`Crush.collectFacts`);
+3. translate each fact to an `SMT.Term`, asserting it with a `:named crush_fact_N`
+   attribute so an unsat core maps back to provenance (`Crush.emitTerm`);
+4. build the script (`set-logic`, declarations, assertions, `check-sat`), optionally
+   saving/tracing it;
+5. run the backend with a hard timeout (`Crush.Solver.runQuery`);
+6. discharge: on `unsat`, close the goal per `crush.trust` (Milestone 1 supports
+   `trust`, closing with the `crushSorry` axiom); on `sat`, report the model as a
+   counterexample; on `unknown`/timeout, say so.
+
+Reconstruction (`reconstruct`/`reconstructOrTrust`) and the full hint grammar are
+later milestones; the pipeline shape does not change.
+-/
+
+namespace Crush
+
+/-- The trust axiom. `Prop`-only (not `Sort u`) and auditable via `#print axioms`,
+unlike lean-auto's `autoSMTSorry.{u} : Sort u`. Used only under `crush.trust`. -/
+axiom crushSorry (P : Prop) : P
+
+initialize registerTraceClass `crush
+initialize registerTraceClass `crush.script
+initialize registerTraceClass `crush.result
+
+open SMT
+
+/-- Resolve the SMT-LIB logic string: explicit `crush.logic`, else a permissive
+default. For the `native` HO mode on cvc5 we would prefix `HO_` (later milestone);
+Milestone 1 targets first-order `ALL`/`AUFLIA`-style logics. -/
+def resolveLogic (cfg : Config) : String :=
+  match cfg.logic with
+  | some l => l
+  | none => "ALL"
+
+/-- Translate all facts into assertion commands, each `:named` for unsat-core
+provenance, prepended by the declarations they induce. Returns the full script
+(minus `check-sat`) and the final `TranslateState` (for provenance lookup). -/
+def buildScript (cfg : Config) (facts : Array Fact) :
+    MetaM (Array SMT.Command × TranslateState) := do
+  let (_, st) ← TranslateM.run cfg do
+    for fact in facts do
+      let id ← TranslateM.recordFact fact.descr fact.proof
+      let body ← emitTerm fact.prop
+      let named := Term.annot body #[.named s!"{factNamePrefix}{id}"]
+      TranslateM.emitCommand (.assert named)
+  -- Prepend set-logic. Declarations are emitted eagerly on first use (before the
+  -- assertion that references them), so command order already satisfies SMT-LIB's
+  -- declare-before-reference rule.
+  return (#[Command.setLogic (resolveLogic cfg)] ++ st.commands, st)
+
+/-- Render a `sat` model into a short counterexample message. -/
+def formatCounterexample (modelText : String) (st : TranslateState) : MessageData := Id.run do
+  let entries := parseModel modelText
+  if entries.isEmpty then
+    return m!"solver found a model (no assignments reported)"
+  let mut lines : Array MessageData := #[]
+  for e in entries do
+    -- Map the SMT symbol back to its Lean origin when known.
+    let origin := (st.nameToAtom.get? e.name).getD e.name
+    lines := lines.push m!"  {origin} := {e.value}"
+  return m!"counterexample:{indentD (MessageData.joinSep lines.toList "\n")}"
+
+/-- The core driver, given a resolved goal and config. -/
+def runCrush (goal : MVarId) (cfg : Config) : TacticM Unit := goal.withContext do
+  let facts ← collectFacts goal
+  let (script, st) ← buildScript cfg facts
+  if cfg.traceScript then
+    logInfo m!"crush SMT script:{indentD (scriptToString script)}"
+  trace[crush.script] "{scriptToString script}"
+  Solver.maybeSave cfg script
+  if cfg.backend == .none then
+    logInfo m!"crush: backend is `none`; emitted {script.size} commands, no solver run."
+    return
+  let result ← Solver.runQuery cfg script
+  match result with
+  | .unsat coreText _ =>
+    let coreIds := parseUnsatCore coreText
+    trace[crush.result] "unsat; core facts: {coreIds}"
+    match cfg.trust with
+    | .trust | .reconstructOrTrust =>
+      if cfg.trust == .reconstructOrTrust then
+        logWarning "crush: proof reconstruction not yet implemented; \
+                    closing with the `crushSorry` axiom (trusting the solver)."
+      let goalType ← goal.getType
+      goal.assign (mkApp (mkConst ``crushSorry) goalType)
+    | .reconstruct =>
+      throwError "crush: solver reported `unsat` but reconstruction is not yet \
+                  implemented (Milestone 4). Set `crush.trust` to `trust` to accept it."
+  | .sat modelText =>
+    throwError m!"crush: the goal is not provable — solver found a {formatCounterexample modelText st}"
+  | .unknown reason =>
+    let reason := if reason.isEmpty then "no reason given" else reason
+    throwError m!"crush: solver returned `unknown` ({reason}). \
+                  Try increasing `crush.timeout` or adding hypotheses."
+
+/-- `crush` tactic. Milestone 1: no arguments; uses all local Prop hypotheses. -/
+syntax (name := crushTac) "crush" : tactic
+
+@[tactic crushTac]
+def evalCrush : Tactic := fun _stx => do
+  let cfg := Config.ofOptions (← getOptions)
+  let goal ← getMainGoal
+  -- Intro any leading binders so ∀-goals become closed props under hypotheses.
+  let (_, goal) ← goal.intros
+  replaceMainGoal [goal]
+  runCrush goal cfg
+
+end Crush

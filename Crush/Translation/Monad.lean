@@ -61,6 +61,11 @@ structure TranslateState where
   facts      : Array FactSource := #[]
   /-- Counter for fresh Skolem/e-vars. -/
   nextFresh  : Nat := 0
+  /-- Lean fvars currently bound by an SMT quantifier, mapped to their SMT
+      variable name. Consulted by the translator before treating an fvar as an
+      uninterpreted symbol, so quantified variables render as references rather
+      than fresh `declare-fun`s. -/
+  boundVars  : Std.HashMap FVarId String := {}
   deriving Inhabited
 
 /-- The translation monad. `MetaM` at the bottom gives us `whnf`, unification,
@@ -121,6 +126,17 @@ def recordFact (descr : String) (proof : Option Expr := none) : TranslateM Nat :
   let id := (← get).facts.size
   modify fun s => { s with facts := s.facts.push { id, proof, descr } }
   return id
+
+/-- Bind `fvar` to SMT variable name `name` for the duration of `k` (a quantifier
+body), restoring the previous binding afterwards. -/
+def withBoundVar {α : Type} (fvar : FVarId) (name : String) (k : TranslateM α) : TranslateM α := do
+  let prev := (← get).boundVars
+  modify fun s => { s with boundVars := s.boundVars.insert fvar name }
+  try k finally modify fun s => { s with boundVars := prev }
+
+/-- The SMT variable name for `fvar` if it is a bound quantifier variable. -/
+def boundVar? (fvar : FVarId) : TranslateM (Option String) := do
+  return (← get).boundVars.get? fvar
 
 end TranslateM
 
