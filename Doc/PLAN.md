@@ -448,10 +448,18 @@ mode with pipeline reporting and `sat`→counterexample). `Test/M1.lean` confirm
 uninterpreted-function congruence all close; a false goal (`x + 1 = x`) is
 correctly *rejected* with a counterexample rather than silently closed.
 
-**Milestone 2 — Theories + Nat.**
-Built-in handlers for Nat→Int (with well-formedness guards, incl. truncated `sub`
-and correct truncated-vs-Euclidean `div`/`mod`), BitVec, String, datatypes, `ite`.
-Regression suite ported from lean-auto's `Test/SmtTranslation/*`.
+**Milestone 2 — Theories + Nat (IN PROGRESS).**
+Done and tested (`Test/M2.lean`): Nat→Int with the **non-negativity soundness
+fix** — every `Nat`-typed variable/atom/function-result carries a `≥0`
+well-formedness constraint (`emitNatWF`), and `Nat.sub` truncates via `ite`
+(closing the `∀ n:Nat, n-1 < n` unsoundness that lean-auto's TODO flags and that
+this tool exhibited before the fix); `ite`/`cond`; `Ne`; Int div/mod (verified:
+Lean's default `Int./`/`%` are Euclidean, matching SMT-LIB, so the direct mapping
+is sound — with a negative test pinning the T-division value as rejected); and
+**datatypes** — non-recursive/non-parametric inductives (enumerations,
+structures) emitted as `declare-datatypes`, with constructor distinctness,
+exhaustiveness, and projections/selectors. Remaining: BitVec, String, recursive
+datatypes; port lean-auto's `Test/SmtTranslation/*` regressions.
 
 **Milestone 3 — Higher-order.**
 `HOEncoding.lean`: defunctionalization first, then combinators; `native` mode for

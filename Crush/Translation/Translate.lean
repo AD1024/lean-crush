@@ -59,31 +59,38 @@ def markFunDeclared (name : String) : TranslateM Unit :=
 def getAppFnArgs' (e : Expr) : Expr × Array Expr :=
   (e.getAppFn, e.getAppArgs)
 
-/-- Sort translation. Interpreted Lean types map to SMT sorts; everything else
-becomes a declared uninterpreted sort keyed by the type's canonical form. -/
-partial def emitSort (e : Expr) : TranslateM SSort := do
-  let e ← whnf e
-  match e with
-  | .const ``Bool _ => return .app (.symb "Bool") #[]
-  | .const ``Nat _  => return .app (.symb "Int") #[]
-  | .const ``Int _  => return .app (.symb "Int") #[]
-  | .sort _         => return .app (.symb "Bool") #[]  -- Prop / Sort ↦ Bool
-  | _ =>
-    -- Non-dependent arrow → we do not (yet) emit a first-order function sort here;
-    -- function-typed things are handled by the HO-encoding layer upstream. For a
-    -- base uninterpreted type, declare a nullary sort.
-    let key := toString (← ppExpr e)
-    let name ← TranslateM.symbolFor key (← sortHint e)
-    -- Ensure a `declare-sort` is emitted once.
-    if !(← declaredSort name) then
-      TranslateM.emitCommand (.declSort name 0)
-      markSortDeclared name
-    return .app (.symb name) #[]
-where
-  sortHint (e : Expr) : TranslateM String := do
-    match e with
-    | .const n _ => return nameHint n
-    | _ => return "s"
+/-- Whether `e`'s Lean type is `Nat` (so it is encoded as a non-negative `Int`). -/
+def isNatTyped (e : Expr) : TranslateM Bool := do
+  return (← whnf (← inferType e)).isConstOf ``Nat
+
+/-- Emit the non-negativity well-formedness constraint for a `Nat`-encoded symbol
+`name` of arity `arity`. Nullary → `(assert (>= name 0))`; higher arity →
+a universally-quantified guard over fresh vars. Emitted once per symbol.
+
+This is the fix for the soundness bug where a `Nat` variable encoded as `Int`
+could take negative values in the solver — making false goals like
+`∀ n : Nat, n - 1 < n` wrongly provable. Mirrors lean-auto's `addWFConstraint`. -/
+def emitNatWF (name : String) (argSorts : Array SSort) : TranslateM Unit := do
+  if argSorts.isEmpty then
+    TranslateM.emitCommand (.assert (.symbApp ">=" #[.const name, .lit (.num 0)]))
+  else
+    let mut binders : Array (String × SSort) := #[]
+    let mut appArgs : Array SMT.Term := #[]
+    for s in argSorts do
+      let v ← TranslateM.freshSymbol "w"
+      binders := binders.push (v, s)
+      appArgs := appArgs.push (.const v)
+    let body := Term.symbApp ">=" #[.app (.symb name) appArgs, .lit (.num 0)]
+    TranslateM.emitCommand (.assert (.forallE binders body))
+
+/-- A supported (non-recursive, non-parametric, non-indexed, `Type`-valued)
+inductive we can emit as an SMT datatype. Enumerations and simple structures. -/
+def isSupportedDatatype (n : Name) : MetaM Bool := do
+  let env ← getEnv
+  let some (.inductInfo iv) := env.find? n | return false
+  if iv.numParams != 0 || iv.numIndices != 0 || iv.isRec then return false
+  if n == ``Nat || n == ``Int || n == ``Bool then return false
+  return iv.type.getForallBody.isType
 
 /-- The `declare` callback exposed to handlers: emit commands from a thunk once
 per key, returning a stable symbol. -/
@@ -97,6 +104,54 @@ partial def declareViaThunk (key hint : String)
   return name
 
 mutual
+  /-- Sort translation. Interpreted Lean types map to SMT theory sorts; supported
+  inductives are declared as SMT datatypes; everything else becomes a declared
+  nullary uninterpreted sort keyed by the type's canonical form. -/
+  partial def emitSort (e : Expr) : TranslateM SSort := do
+    let e ← whnf e
+    match e with
+    | .const ``Bool _ => return .app (.symb "Bool") #[]
+    | .const ``Nat _  => return .app (.symb "Int") #[]
+    | .const ``Int _  => return .app (.symb "Int") #[]
+    | .sort _         => return .app (.symb "Bool") #[]  -- Prop / Sort ↦ Bool
+    | .const n _ =>
+      if ← isSupportedDatatype n then
+        return .app (.symb (← declareDatatype n)) #[]
+      else
+        declareUninterpretedSort e
+    | _ => declareUninterpretedSort e
+
+  /-- Emit a `declare-sort` for an opaque type, once. -/
+  partial def declareUninterpretedSort (e : Expr) : TranslateM SSort := do
+    let key := toString (← ppExpr e)
+    let hint := match e with | .const n _ => nameHint n | _ => "s"
+    let name ← TranslateM.symbolFor key hint
+    if !(← declaredSort name) then
+      TranslateM.emitCommand (.declSort name 0)
+      markSortDeclared name
+    return .app (.symb name) #[]
+
+  /-- Declare a supported inductive as an SMT datatype (idempotent); return its
+  sort symbol. One SMT constructor per Lean constructor, positional selectors. -/
+  partial def declareDatatype (n : Name) : TranslateM String := do
+    let key := s!"__datatype__{n}"
+    if let some name := (← get).atomToName.get? key then
+      return name
+    let sortName ← TranslateM.symbolFor key (nameHint n)
+    let iv ← getConstInfoInduct n
+    let mut ctorDecls : Array CtorDecl := #[]
+    for ctorName in iv.ctors do
+      let ctorInfo ← getConstInfoCtor ctorName
+      let selDecls ← forallTelescopeReducing ctorInfo.type fun args _ => do
+        let mut sels : Array (String × SSort) := #[]
+        for i in [0:args.size] do
+          let s ← emitSort (← inferType args[i]!)
+          sels := sels.push (s!"{nameHint ctorName}_sel{i}", s)
+        return sels
+      ctorDecls := ctorDecls.push { name := nameHint ctorName, selDecls }
+    TranslateM.emitCommand (.declDatatypes #[(sortName, 0, { ctors := ctorDecls })])
+    return sortName
+
   /-- Translate a term, trying user handlers first. -/
   partial def emitTerm (e : Expr) : TranslateM SMT.Term := do
     let e ← instantiateMVars e
@@ -118,8 +173,41 @@ mutual
       for h in (← getTranslationHandlers) do
         if let some t ← h ctx then
           return t
+      -- A constructor of a supported datatype → the SMT constructor symbol.
+      if let some t ← ctorApp? fn args then
+        return t
+      -- A structure projection → the SMT selector.
+      if let some t ← projApp? fn args then
+        return t
       -- Default: uninterpreted function/atom applied to translated args.
       defaultApp fn args
+
+  /-- If `fn` is a projection of a supported single-constructor datatype, translate
+  `fn s` to the SMT selector `<ctor>_sel<i> s`. -/
+  partial def projApp? (fn : Expr) (args : Array Expr) : TranslateM (Option SMT.Term) := do
+    let .const pn _ := fn | return none
+    let some info ← getProjectionFnInfo? pn | return none
+    if !(← isSupportedDatatype info.ctorName.getPrefix) then return none
+    -- Projections take the structure as the argument after `info.numParams`.
+    let some structArg := args[info.numParams]? | return none
+    let _ ← declareDatatype info.ctorName.getPrefix
+    let sel := s!"{nameHint info.ctorName}_sel{info.i}"
+    let extraArgs := args.extract (info.numParams + 1) args.size
+    let sarg ← emitTerm structArg
+    let sextra ← extraArgs.mapM emitTerm
+    return some (.app (.symb sel) (#[sarg] ++ sextra))
+
+  /-- If `fn` is a constructor of a supported datatype, translate the application
+  to the corresponding SMT constructor symbol applied to the translated args
+  (ensuring the datatype is declared first). -/
+  partial def ctorApp? (fn : Expr) (args : Array Expr) : TranslateM (Option SMT.Term) := do
+    let .const cn _ := fn | return none
+    let env ← getEnv
+    let some (.ctorInfo ci) := env.find? cn | return none
+    if !(← isSupportedDatatype ci.induct) then return none
+    let _ ← declareDatatype ci.induct
+    let sargs ← args.mapM emitTerm
+    return some (.app (.symb (nameHint cn)) sargs)
 
   /-- Recognize the built-in logical/arithmetic structure. Returns `none` to let
   handlers / the default path take over. -/
@@ -147,13 +235,29 @@ mutual
     | Not a   => return some (.symbApp "not" #[← emitTerm a])
     | Iff a b => return some (.symbApp "=" #[← emitTerm a, ← emitTerm b])
     | Eq _ a b => return some (.symbApp "=" #[← emitTerm a, ← emitTerm b])
+    | Ne _ a b => return some (.symbApp "not" #[.symbApp "=" #[← emitTerm a, ← emitTerm b]])
     | HAdd.hAdd _ _ _ _ a b => return some (.symbApp "+" #[← emitTerm a, ← emitTerm b])
     | HMul.hMul _ _ _ _ a b => return some (.symbApp "*" #[← emitTerm a, ← emitTerm b])
-    | HSub.hSub _ _ _ _ a b => return some (.symbApp "-" #[← emitTerm a, ← emitTerm b])
+    | HSub.hSub _ _ _ _ a b =>
+      -- `Nat` subtraction truncates at 0: `a - b = if a >= b then a - b else 0`.
+      -- Encoding it as plain SMT `-` (which can go negative) is unsound.
+      let sa ← emitTerm a
+      let sb ← emitTerm b
+      if (← isNatTyped e) then
+        return some (.symbApp "ite"
+          #[.symbApp ">=" #[sa, sb], .symbApp "-" #[sa, sb], .lit (.num 0)])
+      else
+        return some (.symbApp "-" #[sa, sb])
     | LE.le _ _ a b => return some (.symbApp "<=" #[← emitTerm a, ← emitTerm b])
     | LT.lt _ _ a b => return some (.symbApp "<" #[← emitTerm a, ← emitTerm b])
     | GE.ge _ _ a b => return some (.symbApp ">=" #[← emitTerm a, ← emitTerm b])
     | GT.gt _ _ a b => return some (.symbApp ">" #[← emitTerm a, ← emitTerm b])
+    | ite _ c _ a b =>
+      -- `if c then a else b`; the condition `c : Prop` becomes an SMT Bool term.
+      return some (.symbApp "ite" #[← emitTerm c, ← emitTerm a, ← emitTerm b])
+    | cond _ b t e =>
+      -- `Bool.cond`/`cond` with a `Bool` scrutinee.
+      return some (.symbApp "ite" #[← emitTerm b, ← emitTerm t, ← emitTerm e])
     | _ =>
       -- Implication and quantifiers need binder handling.
       if e.isArrow then
@@ -214,16 +318,25 @@ mutual
     else
       return body
 
-  /-- Uninterpreted-function fallback: declare the head, translate the args. -/
+  /-- Uninterpreted-function fallback: declare the head, translate the args.
+
+  If the head's result type is `Nat`, we additionally emit its non-negativity
+  well-formedness constraint (`emitNatWF`) so the `Int` encoding cannot assign it
+  a negative value — closing the soundness hole for `Nat`-valued atoms/functions
+  (a bare `n : Nat` free variable, `f : α → Nat`, etc.). -/
   partial def defaultApp (fn : Expr) (args : Array Expr) : TranslateM SMT.Term := do
     let key := toString (← ppExpr fn)
     let hint ← headHint fn
     let name ← TranslateM.symbolFor key hint
     if !(← declaredFun name) then
       let argSorts ← args.mapM (fun a => do emitSort (← inferType a))
-      let resSort ← emitSort (← inferType (mkAppN fn args))
+      let appExpr := mkAppN fn args
+      let resTy ← whnf (← inferType appExpr)
+      let resSort ← emitSort resTy
       TranslateM.emitCommand (.declFun name argSorts resSort)
       markFunDeclared name
+      if resTy.isConstOf ``Nat then
+        emitNatWF name argSorts
     let sargs ← args.mapM emitTerm
     return .app (.symb name) sargs
 
