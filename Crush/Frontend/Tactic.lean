@@ -10,7 +10,7 @@ open Lean Elab Tactic Meta
 /-!
 # The `crush` tactic
 
-Milestone-1 end-to-end path:
+The end-to-end path:
 
 1. read `Config` from the option environment;
 2. collect local `Prop` hypotheses and the negated goal (`Crush.collectFacts`);
@@ -19,18 +19,20 @@ Milestone-1 end-to-end path:
 4. build the script (`set-logic`, declarations, assertions, `check-sat`), optionally
    saving/tracing it;
 5. run the backend with a hard timeout (`Crush.Solver.runQuery`);
-6. discharge: on `unsat`, close the goal per `crush.trust` (Milestone 1 supports
-   `trust`, closing with the `crushSorry` axiom); on `sat`, report the model as a
-   counterexample; on `unknown`/timeout, say so.
+6. discharge: on `unsat`, close the goal per `crush.trust`; on `sat`, report the
+   model as a counterexample; on `unknown`/timeout, say so.
 
-Reconstruction (`reconstruct`/`reconstructOrTrust`) and the full hint grammar are
-later milestones; the pipeline shape does not change.
+Only `trust` (closing with the `crushSorry` axiom) is implemented today.
+Reconstruction — replaying the solver's reasoning as a checkable Lean proof — is
+not yet built; `reconstruct` reports that and `reconstructOrTrust` falls back with
+a warning. Adding it does not change the pipeline shape above.
 -/
 
 namespace Crush
 
-/-- The trust axiom. `Prop`-only (not `Sort u`) and auditable via `#print axioms`,
-unlike lean-auto's `autoSMTSorry.{u} : Sort u`. Used only under `crush.trust`. -/
+/-- The trust axiom, used only under `crush.trust`. Deliberately `Prop`-only (not
+`Sort u`), so it cannot be used to fabricate data, and auditable via
+`#print axioms`: any theorem closed by trusting the solver names it. -/
 axiom crushSorry (P : Prop) : P
 
 initialize registerTraceClass `crush
@@ -40,17 +42,16 @@ initialize registerTraceClass `crush.result
 open SMT
 
 /-- Resolve the SMT-LIB logic string: explicit `crush.logic`, else a permissive
-default. For the `native` HO mode on cvc5 we would prefix `HO_` (later milestone);
-Milestone 1 targets first-order `ALL`/`AUFLIA`-style logics. -/
+default (`ALL`, or `HO_ALL` when higher-order support must be switched on). -/
 def resolveLogic (cfg : Config) : String :=
   match cfg.logic with
   | some l => l
   | none =>
     -- cvc5 gates its higher-order solver on the *logic-string prefix*: `HO_ALL`
     -- turns it on, plain `ALL` does not (its `enableEverything` checks for `HO_`).
-    -- lean-smt emits `ALL` and therefore never enables cvc5's HO reasoning. Only
-    -- cvc5 understands the prefix — z3 warns "ignoring unsupported logic" and
-    -- carries on — so we emit it solely when it will be honoured.
+    -- Only cvc5 understands the prefix — z3 warns "ignoring unsupported logic" and
+    -- carries on, then fails on the function sorts — so we emit it solely when it
+    -- will actually be honoured.
     if cfg.hoMode == .native && cfg.backend == .cvc5 then "HO_ALL" else "ALL"
 
 /-- Translate all facts into assertion commands, each `:named` for unsat-core
@@ -104,8 +105,7 @@ def runCrush (goal : MVarId) (cfg : Config) : TacticM Unit := goal.withContext d
     else cfg
   if (← getOptions) |> (fun o => crush.ho.mode.get o == HOMode.combinators) then
     logWarning "crush: `crush.ho.mode combinators` is not implemented yet \
-                (Milestone 3 shipped `defunctionalize` and `native`); using \
-                `defunctionalize`."
+                (`defunctionalize` and `native` are); using `defunctionalize`."
   let facts ← collectFacts goal
   let (script, st) ← buildScript cfg facts
   if cfg.traceScript then
@@ -129,7 +129,7 @@ def runCrush (goal : MVarId) (cfg : Config) : TacticM Unit := goal.withContext d
       goal.assign (mkApp (mkConst ``crushSorry) goalType)
     | .reconstruct =>
       throwError "crush: solver reported `unsat` but reconstruction is not yet \
-                  implemented (Milestone 4). Set `crush.trust` to `trust` to accept it."
+                  implemented. Set `crush.trust` to `trust` to accept it."
   | .sat modelText =>
     throwError m!"crush: the goal is not provable — solver found a {formatCounterexample modelText st}"
   | .unknown reason =>
@@ -137,7 +137,7 @@ def runCrush (goal : MVarId) (cfg : Config) : TacticM Unit := goal.withContext d
     throwError m!"crush: solver returned `unknown` ({reason}). \
                   Try increasing `crush.timeout` or adding hypotheses."
 
-/-- `crush` tactic. Milestone 1: no arguments; uses all local Prop hypotheses. -/
+/-- `crush` tactic. Takes no arguments; uses all local `Prop` hypotheses. -/
 syntax (name := crushTac) "crush" : tactic
 
 @[tactic crushTac]

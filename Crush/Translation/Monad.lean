@@ -13,7 +13,7 @@ and ergonomic.
 
 Responsibilities:
 * Allocate and remember SMT symbols for Lean atoms (sorts, constants, e-vars),
-  keeping a bijective high↔low name map like lean-auto's `IR.SMT.State`.
+  keeping a bijective high↔low name map.
 * Accumulate the `Command` list (declarations, definitions, assertions).
 * Provide the recursive entry points (`emitSort`, `emitTerm`) that user handlers
   call to translate sub-expressions, so a handler can translate a constant while
@@ -53,7 +53,7 @@ structure TranslateState where
   /-- Bijection between high-level atoms and emitted SMT symbols. -/
   atomToName : Std.HashMap String String := {}
   nameToAtom : Std.HashMap String String := {}
-  /-- Name-collision counter, mirroring lean-auto's `usedNames`. -/
+  /-- Name-collision counter: how many times each sanitized base name is taken. -/
   usedNames  : Std.HashMap String Nat := {}
   /-- Emitted commands, in order. -/
   commands   : Array SMT.Command := #[]

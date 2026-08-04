@@ -10,8 +10,9 @@ Non-recursive helpers shared by the translation driver. The interesting content
 here is not the symbol tables — it is the **semantic gap analysis** between Lean's
 total functions and SMT-LIB's theory operators.
 
-Every entry below was checked empirically against Lean and against `z3`
-(`Doc/PLAN.md` §10 records the methodology). Two classes of gap show up:
+Every entry below was checked empirically against Lean and against `z3` — the
+values were measured in both, not read off either specification. Two classes of
+gap show up:
 
 * **Underspecified in SMT** (e.g. `Int` `div`/`mod` by zero). SMT-LIB leaves the
   value of `(div x 0)` to the model, so *any* Lean interpretation — including
@@ -94,8 +95,7 @@ with Lean's, rewriting it to `(ite (= b 0) zeroVal (op a b))`.
 
 Concretely, Lean returns `0` for `x / 0`, `BitVec.udiv x 0`, and `BitVec.sdiv x 0`,
 whereas SMT-LIB fixes `bvudiv x 0 = ~0` and `bvsdiv x 0 = ±1`. Emitting the raw
-operator would let the solver prove goals that are false in Lean — see the
-`must_reject_bv_div_zero` regression in `Test/M2.lean`. -/
+operator would let the solver prove goals that are false in Lean. -/
 def bvDivGuard (op : String) (w : Nat) (a b : SMT.Term) : SMT.Term :=
   .symbApp "ite" #[.symbApp "=" #[b, bvLit w 0], bvLit w 0, .symbApp op #[a, b]]
 

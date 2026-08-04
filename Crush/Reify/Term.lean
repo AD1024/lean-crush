@@ -9,18 +9,19 @@ This is lean-crush's intermediate logic: monomorphic, simply-typed λ-calculus
 `CTerm` (after monomorphization), the HO-elimination layer rewrites `CTerm`s, and
 the translator lowers `CTerm` into `Crush.SMT.Term`.
 
-Design lifted from lean-auto's `LamSort`/`LamTerm` (`Auto/Embedding/LamBase.lean`),
-keeping the two ideas that earn their keep and dropping the one that doesn't:
+Two representation choices worth calling out:
 
-* **Keep**: the argument sort is stored on every application node (`app`), so
-  type inference (`check?`) is a single unification-free bottom-up pass.
-* **Keep**: the `atom` (ordinary symbol) vs. `etom` (existential/Skolem symbol,
-  introduced by encoding) split.
-* **Drop**: lean-auto's `LamWF` well-formedness *inductive family* and its
-  `interp` semantics, together with the whole `GLift`/`ILLift`/`IsomType`
-  universe-lifting apparatus. Those exist only to *state and prove* the verified
-  checker's soundness theorem, which lean-crush does not carry on the SMT path
-  (see `Doc/PLAN.md` §10). We keep only a plain `Option`-returning `check?`.
+* The argument sort is stored on every application node (`app`), so type inference
+  (`check?`) is a single unification-free bottom-up pass.
+* Symbols are split into `atom` (ordinary) and `etom` (existential/Skolem,
+  introduced by an encoding pass), so a later pass can tell which symbols it is
+  free to reinterpret.
+
+Well-formedness is a plain `Option`-returning `check?` rather than an inductive
+family indexed by a typing derivation. The latter is what you need to *state and
+prove* a verified checker's soundness theorem; since the SMT path trusts the
+solver's verdict instead of replaying it through a checker, that machinery would
+be dead weight here.
 -/
 
 namespace Crush.Reify
@@ -62,8 +63,7 @@ def CSort.isFirstOrder : CSort → Bool
   | .func a b => (match a with | .func _ _ => false | _ => true) && b.isFirstOrder
 
 /-- Interpreted constant symbols (theory literals & operators). This is where the
-theory vocabulary lives; it mirrors lean-auto's `LamBaseTerm` families but is kept
-flat and extends as theories are added. -/
+theory vocabulary lives; it is kept flat and extends as theories are added. -/
 inductive BaseTerm where
   -- propositional / boolean
   | trueP | falseP | not | and | or | imp | iff

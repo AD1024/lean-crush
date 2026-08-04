@@ -444,16 +444,16 @@ registered via both surfaces, config parse, and a live `z3` `unsat` round-trip.
 `Reify/Collect.lean` (hypotheses + negated goal), `Translation/Translate.lean`
 (handler dispatch + default structural translator for Bool/Prop/Int/Nat/UF with a
 Nat `≥0` quantifier guard), `Frontend/Tactic.lean` (the `crush` tactic in `trust`
-mode with pipeline reporting and `sat`→counterexample). `Test/M1.lean` confirms:
+mode with pipeline reporting and `sat`→counterexample). `Test/FirstOrder.lean` confirms:
 `∀ x : Int, x + 0 = x`, hypothesis use, propositional logic, linear arithmetic,
 uninterpreted-function congruence all close; a false goal (`x + 1 = x`) is
 correctly *rejected* with a counterexample rather than silently closed.
 
 **Milestone 2 — Theories + Nat (DONE, builds + tested).**
-All of `Test/M2.lean` passes: 7 negative tests correctly *rejected* (they fall
-through to `sorry`, which the build reports — the signal we watch), every positive
-test closed, and `#print axioms` confirms `crushSorry` remains the only trust
-axiom.
+All of `Test/Theories.lean` passes: 9 negative tests correctly *rejected* (each
+wrapped in `#guard_msgs`, so a regression that closed one would fail the build),
+every positive test closed, and `#print axioms` confirms `crushSorry` remains the
+only trust axiom.
 
 * **Nat→Int** with the non-negativity soundness fix: every `Nat`-typed
   variable/atom/function-result carries a `≥0` well-formedness constraint, and
@@ -483,7 +483,7 @@ regressions; parametric datatypes (need monomorphization, M5); `BitVec.toNat`
 not started).**
 `HOEncoding.lean` + the HO paths in `Translate.lean`. This is the headline feature —
 the benchmark is the set of HO goals that make lean-auto throw "Higher order
-input?". `Test/M3.lean` passes: 10 positive tests closed, 6 negative correctly
+input?". `Test/HigherOrder.lean` passes: 10 positive tests closed, 6 negative correctly
 rejected, `crushSorry` still the only trust axiom, verified on z3 and cvc5.
 
 **It turned out to be a soundness fix, not only a feature.** Before this milestone
@@ -627,14 +627,16 @@ falsely unsat" case):
    a guard. Regressions: `must_reject_nat_field`, `must_reject_field_sub`, plus
    `pn_field_nonneg`/`pn_field_cong` pinning that the guard is not over-restrictive.
    A recursive datatype with a guarded field yields a *recursive* `wf` axiom
-   (`wf_L x = (is-cons x ⇒ hd x ≥ 0 ∧ wf_L (tl x))`). Tested through the tactic
-   (`Test/M2.lean`, `NList` group): z3 discharges these fine in practice —
-   constructor distinctness, propagation into nested tails, and quantification over
-   the recursive type all close, and false goals about the guarded field are still
-   rejected. A hand-written standalone probe of the same axiom *did* make z3 time
-   out on one consistency query, so the shape can clearly diverge; that would be a
-   `unknown`/timeout (sound degradation), never a wrong answer. Worth revisiting if
-   a real workload hits it.
+   (`wf_L x = (is-cons x ⇒ hd x ≥ 0 ∧ wf_L (tl x))`), and this is the encoding's
+   real cost. Tested through the tactic (`Test/Theories.lean`, `NList` group):
+   many queries do discharge — constructor distinctness, propagation into nested
+   tails, and quantification over the recursive type all close — but
+   `must_not_close_nl_field` **times out**, and a longer budget does not help
+   (checked at 30s), so it is genuine instantiation divergence rather than
+   slowness. The outcome is sound (`unknown` never closes a goal, so no wrong
+   answer), but it is a real loss of completeness on recursive types with guarded
+   fields. Suppressing the guard when the query's arithmetic never touches the
+   guarded field (see item 2's note) would recover most of these.
 4. **Truncated vs. Euclidean division.** ✅ *resolved empirically (M2).* Verified
    directly rather than assumed: Lean's **default** `Int./` and `Int.%` are
    *Euclidean* (`(-7)/2 = -4`, `(-7)%2 = 1`), matching SMT-LIB `div`/`mod`, so the

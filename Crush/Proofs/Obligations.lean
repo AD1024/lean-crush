@@ -5,8 +5,7 @@ import Crush.Reify.Term
 
 This module states — but does not yet prove — the semantic-equivalence and
 equisatisfiability theorems that each translation pass must satisfy for
-lean-crush to be sound *without trusting the solver's translation*. See
-`Doc/PLAN.md` §10b for the full ledger and staging plan.
+lean-crush to be sound *without trusting the solver's translation*.
 
 Every theorem here is currently `sorry`-backed. The point of stating them now is:
 
@@ -14,13 +13,13 @@ Every theorem here is currently `sorry`-backed. The point of stating them now is
    down in Lean rather than only in prose;
 2. `#print axioms` on anything downstream reveals exactly which obligations are
    still open (they show up as `sorryAx`);
-3. discharging them is Milestone 6, and each discharged `sorry` shrinks the
-   trusted computing base — mirroring how `bv_decide` shipped trusted and was
-   then verified incrementally.
+3. each discharged `sorry` shrinks the trusted computing base — the same
+   incremental path `bv_decide` took, shipping trusted and being verified after.
 
 The semantics are given abstractly here (`Interp`, `Sat`) so the statements can
-exist before the concrete interpretation function is built; Milestone 6 replaces
-these opaque placeholders with the real denotational semantics of `CTerm`.
+exist before the concrete interpretation function is built. Discharging any of
+these first requires replacing the opaque placeholders with the real denotational
+semantics of `CTerm`.
 -/
 
 namespace Crush.Proofs
@@ -28,7 +27,7 @@ namespace Crush.Proofs
 open Crush.Reify
 
 /-- An interpretation assigns Lean meanings to the atoms/etoms of the reified
-logic. Left opaque until the denotational semantics land (Milestone 6). -/
+logic. Left opaque until the denotational semantics land. -/
 opaque Interp : Type
 
 /-- `Sat I Γ` : interpretation `I` satisfies every fact in `Γ`. Opaque for now;
@@ -82,15 +81,16 @@ theorem p8_lowering_equiv : Equivalence lowerCTerm := by
 
 end Passes
 
-/-! ## Obligations discovered while implementing Milestone 2
+/-! ## Theory-encoding obligations
 
-The three items below were each a *live bug* found by differential probing against
-Lean and z3 (see `Doc/PLAN.md` §10 items 3–6). They are stated here because a
-passing regression test is weaker than a theorem: the tests pin the specific
-counterexamples that were observed, whereas these statements pin the property.
+The items below each correspond to a *live bug* that was found by differential
+probing — evaluating an operator in both Lean and z3 and comparing. They are stated
+here because a passing regression test is weaker than a theorem: the tests pin the
+specific counterexamples that were observed, whereas these statements pin the
+property that was violated.
 -/
 
-section Milestone2
+section TheoryEncoding
 
 /-- The embedding of a Lean type into its SMT sort, and the well-formedness
 predicate meant to carve out its image. Opaque until the real semantics land. -/
@@ -119,8 +119,8 @@ theorem p10_wf_exact : ∀ t : CTerm, wfPred t ↔ ∃ v : SortImage, embed v = 
 
 The general statement ("each emitted SMT operator denotes the same total function
 as its Lean counterpart") cannot be stated non-trivially until the denotational
-semantics of `SMT.Term` exist — that is Milestone 6, and it is what `p8` will
-carry. What *can* be pinned down now, and is the part that actually bit us, is the
+semantics of `SMT.Term` exist, which is what `p8` will carry. What *can* be
+pinned down now, and is the part that actually bit us, is the
 **Lean side of each boundary case**: the value our guard hard-codes.
 
 These are the `#eval` probes from the design phase promoted to machine-checked
@@ -175,24 +175,27 @@ theorem p12_symbol_injective {Atom : Type} (symbolOf : Atom → String) :
   intro hinj a b hne heq
   exact hne (hinj a b heq)
 
-end Milestone2
+end TheoryEncoding
 
-/-! ## Obligations from Milestone 3 (the higher-order encoding)
+/-! ## Higher-order encoding obligations
 
-`Doc/PLAN.md` §10b P4 states the headline equisatisfiability theorem abstractly.
-The three properties below are the *concrete* lemmas the shipped
-defunctionalization relies on, each of which the implementation could get wrong
-independently — and one of which corresponds to a bug that was live before M3. -/
+`p4_defunctionalize_equisat` above states the headline theorem abstractly. The
+three properties below are the *concrete* lemmas the shipped defunctionalization
+relies on, each of which the implementation could get wrong independently — and one
+of which corresponds to a bug that was once live. -/
 
-section Milestone3
+section HigherOrderEncoding
 
-/-- Function values in the encoded world, and the `app` symbol's denotation. -/
-opaque FnSort : Type
-opaque Dom : Type
-opaque Cod : Type
-opaque appOf : FnSort → Dom → Cod
-/-- The closure constructor for a λ, and the λ's Lean meaning. -/
-opaque closureOf : (Dom → Cod) → FnSort
+-- `FnSort` is the encoded function sort, `Dom`/`Cod` the domain and codomain of the
+-- arrow it encodes. These are `variable`s rather than `opaque` constants so the
+-- statements below are schematic in them: an obligation about *every* arrow type,
+-- not one fixed sort.
+variable {FnSort Dom Cod : Type}
+
+-- `appOf` is the `app` symbol's denotation and `closureOf` the closure constructor
+-- for a λ. Left abstract: the properties below must hold for whatever concrete pair
+-- the encoding produces.
+variable (appOf : FnSort → Dom → Cod) (closureOf : (Dom → Cod) → FnSort)
 
 /-- **P4a — the closure defining axiom is faithful.**
 
@@ -206,7 +209,7 @@ theorem p4a_closure_faithful (φ : Dom → Cod) :
 
 /-- **P4b — a function-typed bound variable must be applied via `app`.**
 
-This is the one that was *wrong* before M3, and the reason the bug was a false
+This is the one that was once *wrong*, and the reason that bug was a false
 `unsat` rather than mere incompleteness. Translating `∀ (f : σ → τ), P (f a)` must
 quantify over the function sort and route the application through `app`:
 
@@ -238,6 +241,6 @@ theorem p4c_extensionality (F G : FnSort) :
     (∀ x, appOf F x = appOf G x) ↔ F = G := by
   sorry
 
-end Milestone3
+end HigherOrderEncoding
 
 end Crush.Proofs

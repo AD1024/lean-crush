@@ -13,7 +13,7 @@ package «crush» where
 lean_lib «Crush» where
   -- Root module re-exports the public API (tactic + attribute + config).
 
--- The soundness-obligation ledger (Doc/PLAN.md §10b). Kept out of the `Crush`
+-- The soundness-obligation ledger. Kept out of the `Crush`
 -- import chain so its `sorry`s never leak into the tactic; built separately so
 -- the statements stay type-checked and `#print axioms` stays honest.
 lean_lib «Crush.Proofs» where

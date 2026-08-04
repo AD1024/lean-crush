@@ -11,7 +11,7 @@ import Crush.Translation.Builtins
 import Crush.Translation.Translate
 import Crush.Solver.Process
 import Crush.Frontend.Tactic
--- Note: `Crush.Proofs.Obligations` (the sorry-backed soundness ledger, §10b) is
+-- Note: `Crush.Proofs.Obligations` (the sorry-backed soundness ledger) is
 -- deliberately NOT imported here — the tactic must not depend on unproven
 -- obligations, or every downstream proof would pick up `sorryAx`. It is a
 -- separate `Proofs` lake target, built and audited on its own.
@@ -29,5 +29,5 @@ This root module re-exports the public API. `import Crush` gives you:
   (`Crush.Translation.Attr`, `Crush.Translation.Builtins`),
 * all `crush.*` `set_option`s (`Crush.Frontend.Config`).
 
-See `Doc/PLAN.md` for the architecture and implementation roadmap.
+See `README.md` and `Doc/PLAN.md` for the architecture and roadmap.
 -/

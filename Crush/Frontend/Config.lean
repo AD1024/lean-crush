@@ -60,7 +60,7 @@ instance : KVMap.Value TrustMode where
 inductive HOMode where
   /-- Monomorphize + lambda-lift + defunctionalize applied HO args (default). -/
   | defunctionalize
-  /-- Use SK/BCKW combinators for lambdas (Sledgehammer-style). -/
+  /-- Use S/K/B/C/W combinators for lambdas, with their defining equations. -/
   | combinators
   /-- Pass HO constructs straight to a HO-capable solver (cvc5 `--ho`). -/
   | native

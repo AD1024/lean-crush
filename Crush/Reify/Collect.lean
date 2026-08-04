@@ -10,10 +10,10 @@ type `Prop`) plus explicit user-provided term hints, and the goal itself. The
 goal is *negated* — `crush` proves `G` by asserting the hypotheses together with
 `¬G` and checking for `unsat`, the standard refutation setup.
 
-Milestone-1 scope: local Prop hypotheses and the goal. Explicit hint terms,
-lemma databases, unfold/defeq hints, and premise selection are layered on in
-later milestones. Each collected fact carries a `descr` for provenance so an
-unsat core / failure can name its source.
+Currently collects local `Prop` hypotheses and the goal. Explicit hint terms,
+lemma databases, unfold/defeq hints, and premise selection are not yet wired in.
+Each collected fact carries a `descr` for provenance, so an unsat core or a
+failure message can name its source.
 -/
 
 namespace Crush

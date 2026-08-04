@@ -14,11 +14,10 @@ Lowers a (monomorphic, first-order-after-encoding) Lean `Expr` into an
 structural translator. This is the piece that constructs the `TranslationCtx`
 closures (`emitTerm`/`emitSort`/`declare`) handlers recurse through.
 
-Milestone-1 scope: propositional/Boolean structure, equality, quantifiers over a
-declared sort, `Int`/`Nat` (Nat via Int with a `≥ 0` guard on quantifiers), and
-uninterpreted functions/atoms. Bit-vectors, strings, datatypes, and the HO
-encoding land in later milestones; anything unrecognized becomes a fresh
-uninterpreted symbol so translation degrades rather than crashing.
+Covers propositional/Boolean structure, equality, quantifiers, `Int`/`Nat` (Nat via
+Int with a `≥ 0` guard), bit-vectors, strings, datatypes, and the higher-order
+encoding. Anything unrecognized becomes a fresh uninterpreted symbol, so
+translation degrades rather than crashing.
 -/
 
 namespace Crush
@@ -72,7 +71,7 @@ is itself recursive — self-recursive types such as `List`-like or tree shapes.
 We still require at least one constructor: SMT-LIB datatypes must be inhabited
 (z3 rejects `(declare-datatypes ((E 0)) (()))`), and more fundamentally every SMT
 sort is non-empty while `Empty` is not, so an empty Lean inductive cannot be
-modelled faithfully and must stay an opaque sort. See `emptyTypeBail`. -/
+modelled faithfully and must stay an opaque sort (see `isEmptyType`). -/
 def isSupportedDatatype (n : Name) : MetaM Bool := do
   let env ← getEnv
   let some (.inductInfo iv) := env.find? n | return false
@@ -83,7 +82,7 @@ def isSupportedDatatype (n : Name) : MetaM Bool := do
   -- Every constructor field must itself be translatable to a sort. A field whose
   -- type mentions the datatype only in a *strictly positive, direct* way (`T`
   -- itself) is fine; a field of function type into `T` is not, and would need the
-  -- HO encoding (Milestone 3).
+  -- higher-order encoding.
   iv.ctors.allM fun ctorName => do
     let ci ← getConstInfoCtor ctorName
     forallTelescopeReducing ci.type fun args _ =>
@@ -159,7 +158,8 @@ mutual
     | none =>
     -- An arrow type is a *function sort*: an uninterpreted `Fn` sort paired with an
     -- `app` symbol (higher-order encoding). Emitting it as a plain opaque sort is
-    -- what made function-typed bound variables unsound — see `HOEncoding.lean`.
+    -- what made function-typed bound variables unsound: the variable ended up
+    -- disconnected from its own quantifier.
     if (← whnf e).isArrow then
       -- `native` mode uses the solver's own function sort `(-> σ τ)`; the other
       -- modes introduce an uninterpreted `Fn` sort plus an `app` symbol.

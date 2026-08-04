@@ -8,7 +8,7 @@ A typed representation of the fragment of SMT-LIB we emit and parse. This is the
 *target language* of translation: everything upstream (reification, HO encoding,
 user annotations) ultimately produces `Crush.SMT.Command`s.
 
-Design notes vs. lean-auto's `Auto/IR/SMT.lean`:
+Design notes:
 * We keep sorts, terms, and commands as plain inductives with `ToString`, but we
   additionally derive `Repr` everywhere so failures print structurally.
 * `Term` carries an optional annotation slot (`.annot`) used for `:named`

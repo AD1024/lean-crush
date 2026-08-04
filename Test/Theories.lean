@@ -1,11 +1,18 @@
 import Crush
 
 /-!
-Milestone-2 tests: theory correctness, especially the Nat→Int soundness
-obligations from `Doc/PLAN.md` §10. Each `example`/`theorem` that elaborates is a
-passing test; the negative cases use `first | (crush; done) | sorry` so a
-regression (crush wrongly closing a false goal) turns the `sorry` into a *closed*
-proof and the file's `sorry` warning disappears — a signal we watch for.
+Theory-correctness tests: `Nat`/`Int` arithmetic, datatypes, bit-vectors, and
+strings. Each `theorem` that elaborates without error is a passing test.
+
+Negative tests — goals that are *false* in Lean and must be rejected rather than
+closed — are wrapped in `#guard_msgs`, which pins the rejection message. If a
+regression ever lets `crush` close one of them, the expected error is not produced
+and the build **fails**. `substring := true` matches only the stable prefix of the
+message, so the solver-dependent counterexample text does not make the test
+brittle.
+
+Several of the negative tests below correspond to bugs that were once live, where
+`crush` proved something false. Each is annotated with what went wrong.
 -/
 
 open Crush
@@ -28,8 +35,9 @@ theorem nat_fun_nonneg (f : Nat → Nat) (n : Nat) : 0 ≤ f n := by crush
 
 -- FALSE: n = 0 gives 0 - 1 = 0, so `0 < 0` is false. The pre-fix naive `Int`
 -- translation wrongly proved this; the `≥0` guard + truncated `sub` fix it.
-theorem must_reject_sub : ∀ n : Nat, n - 1 < n := by
-  first | (crush; done) | sorry
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_sub : ∀ n : Nat, n - 1 < n := by crush
 
 /-! ## Int arithmetic (signed, no truncation) -/
 
@@ -44,8 +52,9 @@ theorem int_emod : ((-7 : Int) % 2) = 1 := by crush
 theorem int_mod_nonneg : ∀ x : Int, x % 2 ≥ 0 := by crush
 
 -- FALSE under Euclidean division (that would be truncated T-division): rejected.
-theorem must_reject_tdiv : ((-7 : Int) / 2) = -3 := by
-  first | (crush; done) | sorry
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_tdiv : ((-7 : Int) / 2) = -3 := by crush
 
 /-! ## if-then-else -/
 
@@ -83,22 +92,24 @@ SMT datatypes are freely generated over their field sorts, so a `Nat` field
 (encoded as `Int`) admits *negative* values that no Lean value has. Unguarded,
 the **true** hypothesis `∀ p : PN, p.x ≥ 0` becomes UNSAT, from which the solver
 derives `False` — a false `unsat`, the dangerous direction. Fixed by emitting a
-`wf_T` predicate and guarding every quantifier over `T` (§10 P9). -/
+`wf_T` predicate and guarding every quantifier over `T`. -/
 
 structure PN where
   x : Nat
 
 -- The hypothesis is true in Lean, so `False` must NOT be derivable from it.
-theorem must_reject_nat_field (h : ∀ p : PN, p.x ≥ 0) : False := by
-  first | (crush; done) | sorry
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_nat_field (h : ∀ p : PN, p.x ≥ 0) : False := by crush
 
 -- The guard must not over-restrict: real facts about `Nat` fields still go through.
 theorem pn_field_nonneg (p : PN) : p.x ≥ 0 := by crush
 theorem pn_field_cong (p q : PN) (h : p = q) : p.x = q.x := by crush
 
 -- Truncated subtraction stays truncated inside a field, too.
-theorem must_reject_field_sub : ∀ p : PN, p.x - 1 < p.x := by
-  first | (crush; done) | sorry
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_field_sub : ∀ p : PN, p.x - 1 < p.x := by crush
 
 /-! ### Uninhabited types
 
@@ -106,8 +117,9 @@ Every SMT sort is non-empty, but `Empty` is not: `∀ x : Empty, P` is vacuously
 true while its naive SMT image `(forall ((x S)) P)` is not. `crush` refuses the
 translation rather than emitting an unsound encoding. -/
 
-theorem must_reject_empty (h : ∀ x : Empty, False) : False := by
-  first | (crush; done) | sorry
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_empty (h : ∀ x : Empty, False) : False := by crush
 
 /-! ### Recursive datatypes
 
@@ -138,8 +150,11 @@ actually recurses. A `Nat` field is the case that produces a genuinely **recursi
 ```
 
 Recursive quantified axioms are the classic way to send a solver into an
-instantiation loop, so these pin that z3 actually copes. A divergence here would
-surface as `unknown`/timeout (sound), never a wrong answer. -/
+instantiation loop, and that is exactly what happens on some of these: the tests
+below record which queries z3 discharges and which one it cannot
+(`must_not_close_nl_field`). Divergence is a *sound* outcome — `unknown` never
+closes a goal — but it is a real loss of completeness, and it is the cost of
+guarding recursive datatypes. -/
 
 inductive NList where
   | nil
@@ -153,10 +168,18 @@ theorem nl_tail_field (l : NList) (n : Nat) (t : NList) (h : l = NList.cons n t)
     n ≥ 0 := by crush
 -- Quantifying over the recursive type is where the recursive axiom gets exercised.
 theorem nl_quant : ∀ l : NList, l = NList.nil ∨ ∃ n t, l = NList.cons n t := by crush
--- ...and a false goal about the guarded field is still rejected.
-theorem must_reject_nl_field : ∀ (n : Nat) (t : NList),
-    NList.cons n t = NList.cons (n - 1) t := by
-  first | (crush; done) | sorry
+-- A false goal about the guarded field must not be closed. Here the recursive
+-- `wf` axiom does send z3 into an instantiation loop, so instead of a
+-- counterexample we get a timeout. That is still a *sound* outcome — `unknown`
+-- never closes a goal — and this test pins the distinction: what matters is that
+-- the goal is not proved, and the message says `unknown`, not `unsat`.
+--
+-- This is the known cost of guarding recursive datatypes; a longer timeout does
+-- not help (verified at 30s), so it is genuine divergence rather than slowness.
+/-- error: crush: solver returned `unknown` -/
+#guard_msgs(error, substring := true) in
+theorem must_not_close_nl_field : ∀ (n : Nat) (t : NList),
+    NList.cons n t = NList.cons (n - 1) t := by crush
 
 /-! ### Transitive well-formedness
 
@@ -167,8 +190,9 @@ reaches one through `Inner`. If `needsWFGuard` stopped at the first level, the
 structure Inner where n : Nat
 structure Outer where i : Inner
 
-theorem must_reject_nested (h : ∀ o : Outer, o.i.n ≥ 0) : False := by
-  first | (crush; done) | sorry
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_nested (h : ∀ o : Outer, o.i.n ≥ 0) : False := by crush
 theorem nested_field_nonneg (o : Outer) : o.i.n ≥ 0 := by crush
 
 /-! ## Bit-vectors
@@ -219,8 +243,9 @@ theorem bv_smod0 (x : BitVec 8) : BitVec.smod x 0 = x := by crush
 
 -- FALSE in Lean (`4 / 0 = 0`), but exactly the value raw SMT `bvudiv` returns.
 -- If this ever closes, the div-by-zero guard has regressed.
-theorem must_reject_bv_div_zero : (4 : BitVec 8) / 0 = 255 := by
-  first | (crush; done) | sorry
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_bv_div_zero : (4 : BitVec 8) / 0 = 255 := by crush
 
 /-! ### Int division by zero
 
@@ -247,5 +272,6 @@ theorem str_len_nonneg (s : String) : s.length ≥ 0 := by crush
 theorem str_cong (a b : String) (h : a = b) : a.length = b.length := by crush
 
 -- FALSE: the empty string has length 0.
-theorem must_reject_str_len : ∀ s : String, s.length > 0 := by
-  first | (crush; done) | sorry
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_str_len : ∀ s : String, s.length > 0 := by crush

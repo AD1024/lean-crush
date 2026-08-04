@@ -7,8 +7,8 @@ open Lean
 /-!
 # Solver process management
 
-Spawns and drives an SMT solver as a child process. This module fixes the
-robustness problems in lean-auto's `Auto/Solver/SMT.lean`:
+Spawns and drives an SMT solver as a child process. The design points, each
+guarding against a way this layer commonly goes wrong:
 
 * **Wall-clock timeout is enforced by us**, not just delegated to the solver's
   own `-T`/`--tlimit` flag. We race `check-sat` against an `IO.sleep` and kill

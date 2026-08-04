@@ -5,8 +5,7 @@ import Lean
 
 Solver responses (`get-unsat-core`, `get-model`, `get-proof`) come back as
 S-expressions. We parse them into a small `Sexp` tree so downstream code can walk
-them structurally instead of doing string surgery — the fragile approach in
-lean-auto's `Solver/SMT.lean`, which sliced output by hand.
+them structurally instead of slicing the output with string operations.
 
 The parser is deliberately permissive: it recognizes atoms, string literals (with
 SMT-LIB `""` escaping), and parenthesized lists, and skips `;` line comments and

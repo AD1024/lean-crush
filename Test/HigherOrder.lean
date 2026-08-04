@@ -1,27 +1,27 @@
 import Crush
 
 /-!
-Milestone-3 tests: the higher-order encoding (`Doc/PLAN.md` §5).
+Tests for the higher-order encoding: λ-abstractions, function-typed quantifiers,
+function equality, and partial application.
 
-This is the capability lean-auto lacks — it throws "Higher order input?" on these
-goals — and the reason the project exists.
+Negative tests — goals that are *false* in Lean and must be rejected rather than
+closed — are wrapped in `#guard_msgs`, which pins the rejection message, so a
+regression that lets `crush` close one **fails the build**. `substring := true`
+matches only the stable prefix, keeping the solver-dependent counterexample text
+out of the expectation.
 
-As in `Test/M2.lean`, negative cases use `first | (crush; done) | sorry`, so a
-regression turns the `sorry` into a closed proof and the build's `sorry` warning
-disappears — the signal we watch for.
-
-**These are regressions for a real unsoundness, not only a feature.** Before this
-milestone an arrow type became an opaque sort and a function-typed bound variable
-was declared as an *unrelated* `declare-fun`. So
+The negative tests here guard against a real unsoundness, not merely
+incompleteness. An arrow type used to become an opaque sort with a function-typed
+bound variable declared as an *unrelated* function symbol, so
 
 ```lean
 h : ∀ (f : Int → Int), g f = f 0
 ```
 
-was emitted as `(forall ((q Fn)) (= (g q) (q' 0)))` with `q'` a fresh constant
+was emitted as `(forall ((q Fn)) (= (g q) (q' 0)))` where `q'` is a fresh constant
 unrelated to `q` — asserting that **`g` is constant**, strictly stronger than `h`.
-`must_reject_ho_constant` below is a goal `crush` *did* close while its negation is
-provable in Lean.
+`must_reject_ho_constant` is a goal `crush` therefore *closed*, even though its
+negation is provable in Lean.
 -/
 
 open Crush
@@ -98,30 +98,36 @@ Every goal here is **false in Lean**. `must_reject_ho_constant` is the original
 unsoundness: `crush` closed it, yet `g (fun x => x) ≠ g (fun x => x + 1)` is
 provable from `h` (the two sides reduce to `0` and `1`). -/
 
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
 theorem must_reject_ho_constant (g : (Int → Int) → Int)
     (h : ∀ (f : Int → Int), g f = f 0) :
-    g (fun x => x) = g (fun x => x + 1) := by
-  first | (crush; done) | sorry
+    g (fun x => x) = g (fun x => x + 1) := by crush
 
 -- Distinct closures must not be conflated even with no hypothesis to relate them.
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
 theorem must_reject_closure_conflate (g : (Int → Int) → Int) :
-    g (fun x => x) = g (fun x => x + 1) := by
-  first | (crush; done) | sorry
+    g (fun x => x) = g (fun x => x + 1) := by crush
 
 -- Extensionality must not be strong enough to equate arbitrary functions.
-theorem must_reject_funext_free (f g : Int → Int) : f = g := by
-  first | (crush; done) | sorry
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_funext_free (f g : Int → Int) : f = g := by crush
 
-theorem must_reject_lambda_eq : (fun x : Int => x) = (fun x : Int => x + 1) := by
-  first | (crush; done) | sorry
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_lambda_eq : (fun x : Int => x) = (fun x : Int => x + 1) := by crush
 
 -- Knowing `g` at one closure says nothing about another.
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
 theorem must_reject_partial_info (g : (Int → Int) → Int) (h : g (fun x => x) = 0) :
-    g (fun x => x + 1) = 0 := by
-  first | (crush; done) | sorry
+    g (fun x => x + 1) = 0 := by crush
 
 -- Different captured values give different results.
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
 theorem must_reject_capture_conflate (g : (Int → Int) → Int)
     (h : ∀ (f : Int → Int), g f = f 0) (n m : Int) :
-    g (fun x => x + n) = g (fun x => x + m) := by
-  first | (crush; done) | sorry
+    g (fun x => x + n) = g (fun x => x + m) := by crush

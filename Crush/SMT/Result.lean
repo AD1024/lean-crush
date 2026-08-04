@@ -8,10 +8,10 @@ structured data the tactic can act on:
 
 * `parseUnsatCore` — the list of fact ids named `crush_fact_<n>` in the core, so
   the discharge layer can select exactly the hypotheses the solver used
-  (lean-auto computes this for TPTP but *discards* it on the SMT path).
+  so a failure can name the hypotheses actually responsible.
 * `parseModel` — the `(define-fun …)` assignments from a `sat` answer, so a
   failed goal can be reported as a concrete counterexample rather than a generic
-  "failed" (lean-auto never surfaces models at all).
+  "failed".
 -/
 
 namespace Crush.SMT

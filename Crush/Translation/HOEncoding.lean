@@ -6,9 +6,8 @@ open Lean Meta
 /-!
 # Higher-order encoding
 
-The layer that makes `crush` usable on higher-order goals — the capability
-lean-auto lacks (it throws "Higher order input?") and the reason this project
-exists. Three strategies, selected by `crush.ho.mode`:
+The layer that makes `crush` usable on higher-order goals. Three strategies,
+selected by `crush.ho.mode`:
 
 * **`defunctionalize`** (default) — λ-lifting into per-arrow-sort `apply` symbols.
   Keeps everything in first-order logics that *every* backend supports.
@@ -29,9 +28,8 @@ h : ∀ (f : Int → Int), g f = f 0
 was emitted as `(forall ((q Fn)) (= (g q) (q' 0)))` where `q'` is a fresh constant
 function unrelated to `q`. That says **`g` is constant** — strictly *stronger*
 than `h`. Goals following from "g is constant" were therefore wrongly proved: a
-false `unsat`. See `Test/M3.lean`'s `must_reject_*` regressions, one of which
-(`g (fun x => x) = g (fun x => x + 1)`) `crush` closed while its negation is
-provable in Lean.
+false `unsat`: `crush` closed `g (fun x => x) = g (fun x => x + 1)` even though its
+negation is provable in Lean.
 
 ## The defunctionalization encoding
 
@@ -56,8 +54,8 @@ function-typed terms actually appears — it is an expensive axiom and most quer
 do not need it.
 
 Both the encoding and the necessity of extensionality were verified against z3
-before implementation; `Doc/PLAN.md` §10b P4 states the equisatisfiability
-theorem this pass owes.
+before implementation. The equisatisfiability theorem this pass owes is stated in
+`Crush/Proofs/Obligations.lean`.
 -/
 
 namespace Crush
@@ -133,7 +131,7 @@ work ("Extending SMT Solvers to Higher-Order", Barbosa et al.) — i.e. our
 Two hard constraints, both verified against the solvers:
 
 * cvc5 enables HO only when the logic string is **`HO_`-prefixed** (`HO_ALL`, not
-  `ALL`). This is the detail lean-smt misses, leaving cvc5's HO solver switched off.
+  `ALL`). Emitting plain `ALL` leaves cvc5's higher-order solver switched off.
 * z3 does **not** support it: it prints "ignoring unsupported logic HO_ALL" and then
   fails on the HO sorts. So `native` must be gated to cvc5 and fall back with a
   diagnostic elsewhere.
