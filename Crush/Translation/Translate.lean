@@ -18,6 +18,36 @@ Covers propositional/Boolean structure, equality, quantifiers, `Int`/`Nat` (Nat 
 Int with a `≥ 0` guard), bit-vectors, strings, datatypes, and the higher-order
 encoding. Anything unrecognized becomes a fresh uninterpreted symbol, so
 translation degrades rather than crashing.
+
+## Why the definitions in this file are `partial`
+
+Elsewhere in the codebase `partial` has been eliminated in favour of real
+termination proofs, because a `partial` def is defined via `Inhabited` rather than by
+recursion: it has no unfold equations and is opaque to `decide`/`simp`/`rfl`, so
+nothing can be proven about it.
+
+Here it is unavoidable, and for a specific reason worth stating precisely. These
+functions recurse on a Lean `Expr` while calling `whnf`, and **the recursion depth is
+not bounded by the input term**. Given
+
+```lean
+def Grow : Nat → Type
+  | 0 => Int
+  | n+1 => Grow n × Grow n
+```
+
+the input `Grow 12` is a three-node `Expr`, but `emitSort` must traverse its unfolded
+form: 4096 leaves. No measure on `sizeOf e` can dominate that, since the work is
+driven by *definitional unfolding* rather than by the syntax of the argument. In
+general `whnf` on a user-supplied definition need not terminate at all; Lean bounds
+it with `maxRecDepth` rather than a proof.
+
+This is the same reason Lean's own elaborator and tactic framework are written with
+`partial`, and it is not a soundness concern: these are metaprograms that *construct*
+SMT terms, and nothing proves theorems about them. What is proven about the pipeline
+concerns the terms they emit — see `Crush/Proofs/Semantics.lean` for the evaluator and
+`Crush/Proofs/Encoding.lean` for obligations stated over actual emitted terms. Those
+are total by construction, precisely so they can be reasoned about.
 -/
 
 namespace Crush

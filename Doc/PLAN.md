@@ -640,6 +640,42 @@ Until P4 is fully ✅, `defunctionalize` is trusted, and a `sat` result from the
 *encoded* problem should not be reported as a genuine Lean counterexample without
 checking that the closure axioms did not themselves produce the model.
 
+## 10c. Totality and termination
+
+`partial def` defines a function via `Inhabited` rather than by recursion. It
+type-checks, but it has no unfold equations and is opaque to `decide`/`simp`/`rfl`, so
+**nothing can be proven about it**. That is disqualifying for any code a proof depends
+on, and it bit us concretely: the first version of `Proofs/Semantics.lean` used
+`partial`, which blocked `decide` and left the semantics unable to refute a false
+claim — the very property it existed to provide.
+
+Everything outside the translator is now total, so `termToString.eq_def` and friends
+exist. Three obstacles came up, each needing a different technique:
+
+| Obstacle | Where | Fix |
+|---|---|---|
+| Nested inductive (`Term`/`SSort`/`Sexp` carry `Array` of themselves), so `Array.map`/`foldl` hides the recursive call | `SMT/Print.lean`, `SMT/Result.lean` | recurse through explicit mutual list helpers; `Array.mk.sizeOf_spec` for `sizeOf a.toList < sizeOf a` |
+| Recursion on a shrinking `List Char` | `SMT/Sexp.lean` | `termination_by cs.length`; needed a local proof of `(l.dropWhile p).length ≤ l.length`, absent from core |
+| Recursion on *another function's output* — `parseList` recurses on what `parseOne` returned | `SMT/Sexp.lean` | explicit fuel, rather than tying the definition to a "consumes ≥ 1 char" theorem about itself |
+
+Two traps worth remembering: an intervening `.map (·.2)` to project a pair defeats
+the termination checker just as `foldl` does, so binder lists need their own helpers;
+and a `.app f #[]` fast-path *pattern* compiles to a decidable-equality test that
+blocks the unfold equations, so it must be written `if args.isEmpty`.
+
+**`Translation/Translate.lean` is the exception and stays `partial`.** Its functions
+recurse on an `Expr` while calling `whnf`, and the recursion depth is not bounded by
+the input. Given `def Grow : Nat → Type | 0 => Int | n+1 => Grow n × Grow n`, the
+input `Grow 12` is a three-node `Expr` but unfolds to 4096 leaves — no measure on
+`sizeOf e` dominates that, because the work is driven by definitional unfolding rather
+than by the syntax of the argument. In general `whnf` on a user definition need not
+terminate; Lean bounds it with `maxRecDepth`, not a proof. This is why Lean's own
+elaborator is written the same way.
+
+That is not a soundness gap: these are metaprograms that *construct* SMT terms, and
+nothing proves theorems about them. What is proven concerns the terms they emit, via
+the total evaluator in `Proofs/Semantics.lean`.
+
 ## 11. Testing strategy
 
 The suite is `Test/`, built by `lake build Test`. Every `theorem` that elaborates is
