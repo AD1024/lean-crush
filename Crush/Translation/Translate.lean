@@ -78,7 +78,14 @@ def isSupportedDatatype (n : Name) : MetaM Bool := do
   if iv.numParams != 0 || iv.numIndices != 0 then return false
   if n == ``Nat || n == ``Int || n == ``Bool || n == ``String then return false
   if iv.ctors.isEmpty then return false
-  unless iv.type.getForallBody.isType do return false
+  -- Must live in `Type`, not `Prop` (propositions map to `Bool`). A
+  -- universe-polymorphic declaration such as `PUnit : Sort u` reports its *generic*
+  -- result as `.sort (u+1)` rather than `Type`, so accept a `.sort` whose level is
+  -- not literally `0`; that admits `PUnit`/`Unit` while still excluding `Prop`.
+  unless (match iv.type.getForallBody with
+          | .sort l => !l.isZero
+          | _ => false) do
+    return false
   -- Every constructor field must itself be translatable to a sort. A field whose
   -- type mentions the datatype only in a *strictly positive, direct* way (`T`
   -- itself) is fine; a field of function type into `T` is not, and would need the
@@ -669,6 +676,16 @@ mutual
     | And a b => return some (.symbApp "and" #[← emitTerm a, ← emitTerm b])
     | Or a b  => return some (.symbApp "or" #[← emitTerm a, ← emitTerm b])
     | Not a   => return some (.symbApp "not" #[← emitTerm a])
+    -- The `Bool`-valued connectives, which are ordinary functions (`not`/`and`/…)
+    -- rather than the `Prop` classes above. Since `Prop` and `Bool` share the SMT
+    -- `Bool` sort, they map to the same operators — but they are distinct `Expr`s
+    -- and must each be recognized, or they become uninterpreted symbols.
+    | not a   => return some (.symbApp "not" #[← emitTerm a])
+    | and a b => return some (.symbApp "and" #[← emitTerm a, ← emitTerm b])
+    | or a b  => return some (.symbApp "or" #[← emitTerm a, ← emitTerm b])
+    | xor a b => return some (.symbApp "xor" #[← emitTerm a, ← emitTerm b])
+    | bne _ _ a b => return some (.symbApp "not" #[.symbApp "=" #[← emitTerm a, ← emitTerm b]])
+    | BEq.beq _ _ a b => return some (.symbApp "=" #[← emitTerm a, ← emitTerm b])
     | Iff a b => return some (.symbApp "=" #[← emitTerm a, ← emitTerm b])
     | Eq _ a b => return some (.symbApp "=" #[← emitTerm a, ← emitTerm b])
     | Ne _ a b => return some (.symbApp "not" #[.symbApp "=" #[← emitTerm a, ← emitTerm b]])
@@ -684,6 +701,22 @@ mutual
           #[.symbApp ">=" #[sa, sb], .symbApp "-" #[sa, sb], .lit (.num 0)])
       else
         return some (.symbApp "-" #[sa, sb])
+    -- SMT-LIB has no `max`/`min`, so they expand to an `ite`. Both are translated
+    -- for whatever ordered sort the arguments have, so the `Nat` guard and the
+    -- `BitVec` dispatch above still apply to the operands.
+    | max _ _ a b =>
+      let sa ← emitTerm a; let sb ← emitTerm b
+      return some (.symbApp "ite" #[.symbApp ">=" #[sa, sb], sa, sb])
+    | min _ _ a b =>
+      let sa ← emitTerm a; let sb ← emitTerm b
+      return some (.symbApp "ite" #[.symbApp "<=" #[sa, sb], sa, sb])
+    -- `Nat.succ n` is `n + 1`; it appears from literals and from recursors.
+    | Nat.succ a => return some (.symbApp "+" #[← emitTerm a, .lit (.num 1)])
+    -- `decide p` is `p` itself once `Prop` is encoded as `Bool`.
+    | decide p _ => return some (← emitTerm p)
+    -- The `Nat → Int` coercion is the identity in this encoding, since `Nat` is
+    -- already represented as a non-negative `Int`.
+    | Nat.cast _ _ a => return some (← emitTerm a)
     | LE.le _ _ a b => return some (.symbApp "<=" #[← emitTerm a, ← emitTerm b])
     | LT.lt _ _ a b => return some (.symbApp "<" #[← emitTerm a, ← emitTerm b])
     | GE.ge _ _ a b => return some (.symbApp ">=" #[← emitTerm a, ← emitTerm b])
@@ -726,8 +759,14 @@ mutual
     match_expr e with
     | BitVec.ofNat w n =>
       let some wv ← natValue? w | return none
-      let some nv ← natValue? n | return none
-      return some (bvLit wv nv)
+      match ← natValue? n with
+      | some nv => return some (bvLit wv nv)
+      | none =>
+        -- A *symbolic* argument needs the `int2bv` conversion rather than a literal.
+        -- Both agree on wrap-around: `int2bv` reduces modulo `2 ^ w`, as
+        -- `BitVec.ofNat` does. Without this the whole application became an
+        -- uninterpreted symbol, losing every fact relating it to its argument.
+        return some (.app (.indexed "int2bv" #[.inr wv]) #[← emitTerm n])
     | OfNat.ofNat ty n _ =>
       -- A `BitVec`-typed numeral must become a bit-vector literal, not an `Int`
       -- one; `OfNat` is shared with `Nat`/`Int`, so dispatch on the type.
@@ -761,6 +800,18 @@ mutual
     -- `bvurem` already agrees with Lean (both return the dividend), so it is raw.
     | HDiv.hDiv _ _ _ _ a b => return some (bvDivGuard "bvudiv" w (← emitTerm a) (← emitTerm b))
     | HMod.hMod _ _ _ _ a b => bin "bvurem" a b
+    -- The named forms of the operators above. Lean exposes both `x + y` (via the
+    -- `HAdd` instance) and `BitVec.add x y`, and they are *different* `Expr`s, so
+    -- recognizing only the notation leaves the named form to become an
+    -- uninterpreted symbol — silently losing every fact about it.
+    | BitVec.add _ a b => bin "bvadd" a b
+    | BitVec.sub _ a b => bin "bvsub" a b
+    | BitVec.mul _ a b => bin "bvmul" a b
+    | BitVec.neg _ a => return some (.symbApp "bvneg" #[← emitTerm a])
+    | BitVec.not _ a => return some (.symbApp "bvnot" #[← emitTerm a])
+    | BitVec.and _ a b => bin "bvand" a b
+    | BitVec.or _ a b  => bin "bvor" a b
+    | BitVec.xor _ a b => bin "bvxor" a b
     | BitVec.udiv _ a b => return some (bvDivGuard "bvudiv" w (← emitTerm a) (← emitTerm b))
     | BitVec.umod _ a b => bin "bvurem" a b
     | BitVec.sdiv _ a b => return some (bvDivGuard "bvsdiv" w (← emitTerm a) (← emitTerm b))
@@ -782,6 +833,14 @@ mutual
     | HShiftLeft.hShiftLeft _ _ _ _ a b => shiftOp "bvshl" w a b
     | HShiftRight.hShiftRight _ _ _ _ a b => shiftOp "bvlshr" w a b
     | BitVec.sshiftRight _ a b => shiftOp "bvashr" w a b
+    | BitVec.shiftLeft _ a b => shiftOp "bvshl" w a b
+    | BitVec.ushiftRight _ a b => shiftOp "bvlshr" w a b
+    -- Rotations. SMT-LIB takes the amount as an *index*, not an operand, so only a
+    -- literal amount is translatable. Both sides reduce the amount modulo the width
+    -- (verified: `rotateLeft 10` on `BitVec 7` equals `rotateLeft 3` in Lean, and
+    -- `(_ rotate_left 10)` agrees), so no explicit normalization is needed.
+    | BitVec.rotateLeft _ a b => rotateOp "rotate_left" a b
+    | BitVec.rotateRight _ a b => rotateOp "rotate_right" a b
     -- Width changes.
     | BitVec.setWidth _ target x =>
       let some tv ← natValue? target | return none
@@ -806,7 +865,22 @@ mutual
       -- `a ++ b` puts `a` in the high bits, matching SMT `concat` (verified:
       -- `(4 : BitVec 8) ++ (5 : BitVec 4) = 0x045#12`).
       return some (.symbApp "concat" #[← emitTerm a, ← emitTerm b])
+    -- Bridges between bit-vectors and the integers. `toNat` is unsigned
+    -- (`bv2nat`), `toInt` two's-complement signed (`sbv_to_int`); `ofInt` wraps.
+    -- Both operators are supported by z3 and cvc5 (checked).
+    | BitVec.toNat _ a => return some (.symbApp "bv2nat" #[← emitTerm a])
+    | BitVec.toInt _ a => return some (.symbApp "sbv_to_int" #[← emitTerm a])
+    | BitVec.ofInt width i =>
+      let some wv ← natValue? width | return none
+      return some (.app (.indexed "int2bv" #[.inr wv]) #[← emitTerm i])
     | _ => return none
+
+  /-- A rotation. SMT-LIB encodes the amount as an identifier *index*
+  (`((_ rotate_left k) x)`), so a symbolic amount cannot be expressed and is
+  refused rather than mistranslated. -/
+  partial def rotateOp (op : String) (a b : Expr) : TranslateM (Option SMT.Term) := do
+    let some amt ← natValue? b | return none
+    return some (.app (.indexed op #[.inr amt]) #[← emitTerm a])
 
   /-- A shift, coercing a `Nat` shift amount to a same-width bit-vector literal as
   SMT-LIB requires. A symbolic `Nat` amount cannot be coerced and is refused. -/

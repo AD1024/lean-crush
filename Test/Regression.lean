@@ -1,0 +1,216 @@
+import Crush
+
+/-!
+Regression tests migrated from another Lean SMT bridge's test corpus, together
+with cases derived from bugs reported against it.
+
+Two reasons this file is worth keeping separate from the hand-written tests:
+
+* It is an *independent* corpus. The hand-written tests exercise the paths their
+  author was thinking about; these were written by someone else, against a
+  different implementation, and so probe places we would not have thought to look.
+  Running them found four real gaps (see below).
+* Several entries correspond to *reported bugs* in that implementation. Each one is
+  a hazard inherent to the Lean→SMT boundary rather than to any particular
+  codebase, so they are exactly the cases most worth pinning here.
+
+Gaps this corpus found in `crush`, all now fixed:
+
+1. Named `BitVec.*` functions (`BitVec.not`, `.add`, `.and`, …) were unrecognized —
+   only the notation (`~~~`, `+`, `&&&`) was. Lean exposes both, as *different*
+   `Expr`s, so the named form silently became an uninterpreted symbol, losing
+   every fact about it.
+2. Rotations, `BitVec.shiftLeft`/`.ushiftRight`, and the `toInt`/`ofInt` bridges
+   were missing entirely.
+3. `BitVec.ofNat` with a *symbolic* argument fell through to an uninterpreted
+   symbol; only literals worked. It needs `int2bv`.
+4. `max`/`min`, `Nat.succ`, `decide`, and the `Nat → Int` coercion (`Nat.cast`)
+   were unrecognized.
+
+All four were incompleteness rather than unsoundness — an unrecognized symbol is
+uninterpreted, which loses facts but never invents them.
+-/
+
+open Crush
+
+set_option crush.trust "trust"
+set_option crush.timeout 15
+
+/-! ## Bit-vectors -/
+
+theorem bv_lit_add : (2 : BitVec 7) + (3 : BitVec 7) = (5 : BitVec 7) := by crush
+theorem bv_comm' (a b : BitVec 10) : a + b = b + a := by crush
+theorem bv_width_one (a b c : BitVec 1) : a = b ∨ b = c ∨ c = a := by crush
+
+-- A `BitVec` of *symbolic* width has no SMT sort, so it degrades to an opaque
+-- sort. Reflexivity still holds there, which is the point: degrade, don't crash.
+theorem bv_symbolic_width {k : Nat} (a : BitVec k) : a = a := by crush
+
+/-! ### Named function forms
+
+Lean exposes both `x + y` (via the `HAdd` instance) and `BitVec.add x y`, and they
+elaborate to different `Expr`s. Recognizing only the notation left the named form
+uninterpreted. -/
+
+theorem bv_named_not (x : BitVec 4) : BitVec.not x = ~~~x := by crush
+theorem bv_named_and (x y : BitVec 4) : BitVec.and x y = x &&& y := by crush
+theorem bv_named_or (x y : BitVec 4) : BitVec.or x y = x ||| y := by crush
+theorem bv_named_xor (x y : BitVec 4) : BitVec.xor x y = x ^^^ y := by crush
+theorem bv_named_add (x y : BitVec 4) : BitVec.add x y = x + y := by crush
+theorem bv_named_sub (x y : BitVec 4) : BitVec.sub x y = x - y := by crush
+theorem bv_named_mul (x y : BitVec 4) : BitVec.mul x y = x * y := by crush
+theorem bv_named_neg (x : BitVec 4) : BitVec.neg x = -x := by crush
+theorem bv_named_shl (x : BitVec 8) : BitVec.shiftLeft x 1 = x <<< (1 : Nat) := by crush
+theorem bv_named_shr (x : BitVec 8) : BitVec.ushiftRight x 1 = x >>> (1 : Nat) := by crush
+
+-- The reported `BitVec.not` bug: an arity mismatch made this fail outright there.
+theorem bv_not_complement (x : BitVec 4) : x + (BitVec.not x) = 0xF#4 := by crush
+
+/-! ### Rotations
+
+SMT-LIB takes the rotation amount as an identifier *index*, not an operand, so only
+literal amounts translate. Both sides reduce the amount modulo the width — verified
+on seven cases including amounts far exceeding the width. -/
+
+theorem bv_rotl : (2 : BitVec 7).rotateLeft 3 = (16 : BitVec 7) := by crush
+theorem bv_rotr : (2 : BitVec 7).rotateRight 3 = (0x20 : BitVec 7) := by crush
+theorem bv_rot_dual (x : BitVec 15) : x.rotateLeft 3 = x.rotateRight 12 := by crush
+-- The amount is a closed arithmetic expression, not a bare literal.
+theorem bv_rot_arith (x : BitVec 8) : x.rotateLeft (7 - 2 * 2) = x.rotateLeft (1 + 2) := by
+  crush
+-- 104 = 13 * 8, a whole number of turns at width 8.
+theorem bv_rot_full (x : BitVec 8) : x.rotateLeft 104 = x := by crush
+
+/-! ### Shifts, width changes, comparisons -/
+
+theorem bv_shr_lit : 434#8 >>> 4 = 0x0b#8 := by crush
+theorem bv_ashr_lit : (434#8).sshiftRight 4 = 0xfb#8 := by crush
+theorem bv_shl_bv : 101#32 <<< 2#32 = 404#32 := by crush
+theorem bv_setwidth_down : BitVec.setWidth 3 5#10 = 5#3 := by crush
+theorem bv_sext_up : BitVec.signExtend 20 645#10 = 1048197#20 := by crush
+
+-- Lean's `<`/`≤` on `BitVec` are the UNSIGNED comparisons. A reported bug had them
+-- emitted as uninterpreted functions, which produced a spurious counterexample on
+-- `bv_ult_inequality` below.
+theorem bv_lt_is_ult (a b : BitVec 6) : (a < b) = (a.ult b) := by crush
+theorem bv_le_is_ule (a b : BitVec 6) : (a ≤ b) = (a.ule b) := by crush
+theorem bv_lit_lt : (2#6) < (3#6) := by crush
+
+theorem bv_ult_inequality (i j max : BitVec 64)
+    (h0 : BitVec.ult i max) (h1 : BitVec.ule j (max - i))
+    (h2 : BitVec.ult 0#64 j) : BitVec.ult (max - (i + j)) (max - i) := by crush
+
+/-! ### Bridges to the integers
+
+`toNat` is unsigned (`bv2nat`), `toInt` two's-complement signed (`sbv_to_int`), and
+`ofNat`/`ofInt` wrap modulo `2 ^ w` exactly as `int2bv` does. -/
+
+theorem bv_tonat : (3#10).toNat = 3 := by crush
+theorem bv_toint_pos : (12#10).toInt = 12 := by crush
+theorem bv_toint_neg : (686#10).toInt = -338 := by crush
+theorem bv_ofint_neg : BitVec.ofInt 4 (-6) = 10#4 := by crush
+theorem bv_ofint_pos : BitVec.ofInt 4 10 = 10#4 := by crush
+
+-- `ofNat` applied to a *symbolic* argument needs `int2bv` rather than a literal.
+-- The encoding is now right, but this particular round-trip mixes the bit-vector
+-- and integer theories and neither z3 nor cvc5 discharges it — hand-writing the
+-- same SMT-LIB times out identically, so it is solver difficulty rather than a
+-- translation gap. `unknown` never closes a goal, so this is sound.
+/-- error: crush: solver returned `unknown` -/
+#guard_msgs(error, substring := true) in
+theorem bv_ofnat_symbolic_solver_limit (x y : BitVec 10) :
+    BitVec.ofNat 10 (BitVec.toNat x + BitVec.toNat y) = x + y := by crush
+
+/-! ## Arithmetic, `Bool`, and coercions -/
+
+theorem nat_refl (a : Nat) : a = a := by crush
+theorem nat_lit_eq : nat_lit 2 = 2 := by crush
+
+-- SMT-LIB has no `max`/`min`; they expand to an `ite`.
+theorem nat_maxmin : max 3 4 = 4 ∧ min 1 2 = 1 := by crush
+theorem int_maxmin : max (-3 : Int) 4 = 4 ∧ min 1 (-2 : Int) = -2 := by crush
+
+-- The `Nat → Int` coercion is the identity here, since `Nat` is already an `Int`
+-- restricted to be non-negative.
+theorem nat_cast_int : (2 : Int) = ((nat_lit 2 : Nat) : Int) := by crush
+
+theorem nat_succ_add : Nat.succ 5 = 5 + 1 := by crush
+theorem nat_sub_le_zero (a b : Nat) (h : a ≤ b) : a - b = 0 := by crush
+theorem bool_decide (a : Bool) : decide a = a := by crush
+
+theorem bool_nested_ite {a b c d : Bool} (h : if (if (2 < 3) then a else b) then c else d) :
+    (a → c) ∧ (¬ a → d) := by crush
+
+theorem uf_ignores_extra_args {α β : Type} (f : α → Nat → β → α → Nat) :
+    ∀ a b c, f a 1 b c = f a 1 b c := by crush
+
+/-! ## Division and modulus by zero
+
+A reported bug mapped Lean's `/` to truncated division when the default `Int./` is
+in fact Euclidean, and left `%` uninterpreted. Lean also pins `x / 0 = 0` and
+`x % 0 = x`, where SMT-LIB leaves them underspecified. -/
+
+theorem nat_mod_zero' : (10 : Nat) % 0 = 10 := by crush
+theorem int_mod_zero' : (10 : Int) % (0 : Int) = 10 := by crush
+theorem int_div_zero' : (10 : Int) / (0 : Int) = 0 := by crush
+
+/-! ## Strings -/
+
+theorem str_len_abc : String.length "abc" = 3 := by crush
+theorem str_prefix_abcd : String.isPrefixOf "ab" "abcd" := by crush
+theorem str_assoc' (a b c : String) : (a ++ b) ++ c = a ++ (b ++ c) := by crush
+
+-- Literals containing characters that need SMT-LIB escaping. Note `\` is *not* an
+-- escape character in SMT-LIB, so it must be emitted literally.
+theorem str_escapes : "|,\\|" = "|,\\|" := by crush
+theorem str_amp : "&" = "&" := by crush
+
+/-! ## Higher-order
+
+A `∃` over a function type, and a function-valued hypothesis — the shapes that
+made the other implementation report "Higher order input?". -/
+
+theorem ho_bool_exists (h : ∃ b, !(!b) ≠ b) : False := by crush
+
+/-! ## Known limitation: parametric datatypes
+
+`Prod`, `Option`, `List`, … take type parameters, and SMT-LIB datatype declarations
+would need them instantiated. Until monomorphization lands, such a type degrades to
+an *opaque sort* with its constructors as uninterpreted functions. That is sound —
+congruence still holds, so `x = y → some x = some y` goes through — but the
+generated constructors are not injective and the type is not known to be generated
+by them, so the converse does not.
+
+These tests pin the boundary: what does work today, and what is expected to fail
+until the types can be instantiated. -/
+
+-- Congruence through an opaque constructor: works.
+theorem option_congr (x y : Int) (h : x = y) : Option.some x = Option.some y := by crush
+theorem prod_congr (x y : Int) (h : x = y) : (x, 0) = (y, 0) := by crush
+
+-- Constructor *injectivity* needs a real datatype declaration, so this is not
+-- provable yet. `#guard_msgs` pins that, and will fail loudly once
+-- monomorphization makes it work — a reminder to promote it to a positive test.
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem option_inj_not_yet (x y : Int) (h : Option.some x = Option.some y) :
+    x = y := by crush
+
+/-! ## Datatypes -/
+
+theorem unit_eq (x y : Unit) : x = y ∧ x = () := by crush
+
+private inductive Color3 where
+  | red
+  | green
+  | ultraviolet
+
+-- Pigeonhole: four values in a three-constructor enumeration must collide.
+theorem enum_pigeonhole (x y z t : Color3) :
+    x = y ∨ x = z ∨ x = t ∨ y = z ∨ y = t ∨ z = t := by crush
+
+-- η for pairs likewise needs `Prod` as a real datatype (with selectors), not an
+-- opaque sort.
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem prod_eta_not_yet (x : Int × Int) : x = (Prod.fst x, Prod.snd x) := by crush

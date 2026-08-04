@@ -45,41 +45,78 @@ Used for passes that introduce symbols: Skolemization, defunctionalization. -/
 def Equisat (T : List CTerm → List CTerm) : Prop :=
   ∀ (Γ : List CTerm), (∃ I, Sat I Γ) ↔ (∃ I, Sat I (T Γ))
 
-section Passes
+/-! ### The per-pass obligations
 
--- Placeholders for each pass's implementation, to be replaced by the real ones.
--- Stated as parameters so the obligations reference a concrete symbol.
-variable (preprocess monomorphize defunctionalize combinators skolemize
-          lowerCTerm : List CTerm → List CTerm)
+Each pass owes one of the two properties above. They are recorded as **named
+propositions about a given pass**, not as theorems — because a theorem
+`∀ T, Equivalence T` would be *false*: it would claim every function on fact
+lists preserves meaning (instantiate `T := fun _ => []`). Stating them as
+`sorry`-backed theorems over a `variable` pass therefore did not record an open
+problem, it recorded a falsehood, with the `sorry` hiding it.
 
-/-- **P1** — Preprocessing (β/η, `let`/proj reduction) preserves meaning. -/
-theorem p1_preprocess_equiv : Equivalence preprocess := by
-  sorry
+The honest form is a definition naming the obligation, to be *discharged for the
+specific pass* once that pass and the denotational semantics exist. Discharging
+one means proving `P4_obligation defunctionalize` for the real
+`defunctionalize`, which is then usable as a hypothesis by everything downstream.
+-/
 
-/-- **P3** — Every monomorphization instance is implied by the source, so the
-pass preserves meaning (the retained Lean proof witnesses each instance). -/
-theorem p3_monomorphize_equiv : Equivalence monomorphize := by
-  sorry
+/-- **P1** — Preprocessing (β/η, `let`/proj reduction) preserves meaning. Should be
+cheap once the semantics exist: each step is a definitional equality. -/
+def P1_obligation (preprocess : List CTerm → List CTerm) : Prop :=
+  Equivalence preprocess
 
-/-- **P4** — Defunctionalization is equisatisfiable with the source: the
-introduced `apply`/closure symbols and their defining axioms neither add nor
-remove models up to reinterpretation. **The headline higher-order theorem.** -/
-theorem p4_defunctionalize_equisat : Equisat defunctionalize := by
-  sorry
+/-- **P3** — Every monomorphization instance is implied by the source, so the pass
+preserves meaning (the retained Lean proof witnesses each instance). -/
+def P3_obligation (monomorphize : List CTerm → List CTerm) : Prop :=
+  Equivalence monomorphize
+
+/-- **P4** — Defunctionalization is equisatisfiable with the source: the introduced
+`app`/closure symbols and their defining axioms neither add nor remove models up to
+reinterpretation. **The headline higher-order theorem.**
+
+The canonical-model lemmas `p4a`–`p4c` below are the proved core of this: they
+exhibit an interpretation satisfying the emitted axioms in which quantification
+over the function sort coincides with the Lean function space. What remains is to
+lift that from single applications to whole fact lists. -/
+def P4_obligation (defunctionalize : List CTerm → List CTerm) : Prop :=
+  Equisat defunctionalize
 
 /-- **P5** — Combinator (S/K/B/C/W) encoding is equisatisfiable with the source. -/
-theorem p5_combinators_equisat : Equisat combinators := by
-  sorry
+def P5_obligation (combinators : List CTerm → List CTerm) : Prop :=
+  Equisat combinators
 
 /-- **P6** — Skolemization is equisatisfiable (classical, via `Classical.choice`). -/
-theorem p6_skolemize_equisat : Equisat skolemize := by
-  sorry
+def P6_obligation (skolemize : List CTerm → List CTerm) : Prop :=
+  Equisat skolemize
 
 /-- **P8** — Lowering `CTerm → SMT.Term` preserves the denoted value. -/
-theorem p8_lowering_equiv : Equivalence lowerCTerm := by
-  sorry
+def P8_obligation (lowerCTerm : List CTerm → List CTerm) : Prop :=
+  Equivalence lowerCTerm
 
-end Passes
+/-- The composed guarantee we are ultimately after: if every pass in a chain
+preserves meaning, the composition does. This one *is* provable now, and is worth
+having early — it is what makes the per-pass obligations worth discharging
+separately instead of proving one monolithic theorem.
+
+Note the stronger `Equivalence` composes; `Equisat` does not compose this simply,
+since the intermediate model may reinterpret fresh symbols. -/
+theorem equivalence_comp {S T : List CTerm → List CTerm}
+    (hS : Equivalence S) (hT : Equivalence T) : Equivalence (T ∘ S) := by
+  intro I Γ
+  exact (hS I Γ).trans (hT I (S Γ))
+
+/-- `Equivalence` is preserved by the identity pass — a disabled pass is sound. -/
+theorem equivalence_id : Equivalence (id : List CTerm → List CTerm) := by
+  intro _ _; exact Iff.rfl
+
+/-- An `Equivalence` pass is in particular `Equisat`, so a pass that earns the
+stronger property need not have the weaker one proved separately. -/
+theorem equisat_of_equivalence {T : List CTerm → List CTerm}
+    (h : Equivalence T) : Equisat T := by
+  intro Γ
+  constructor
+  · intro ⟨I, hI⟩; exact ⟨I, (h I Γ).mp hI⟩
+  · intro ⟨I, hI⟩; exact ⟨I, (h I Γ).mpr hI⟩
 
 /-! ## Theory-encoding obligations
 
@@ -92,28 +129,70 @@ property that was violated.
 
 section TheoryEncoding
 
-/-- The embedding of a Lean type into its SMT sort, and the well-formedness
-predicate meant to carve out its image. Opaque until the real semantics land. -/
-opaque SortImage : Type
-opaque embed : SortImage → CTerm
-opaque wfPred : CTerm → Prop
-
-/-- **P10** — The datatype well-formedness guard is *exact*.
+/-! ### P10 — the well-formedness guard is exact
 
 SMT datatypes are freely generated over their field sorts, so encoding a `Nat`
-field as `Int` makes the SMT type strictly larger than the Lean type. `wf_T` must
-characterize precisely the image of the Lean type — no more, no less:
+field as `Int` makes the SMT type strictly *larger* than the Lean type. The guard
+`wf_T` must characterize precisely the image of the Lean type — no more, no less:
 
-* **soundness** (⊇ is not enough): if `wf_T` admitted a value outside the image,
-  a quantifier guarded by it would range over phantom values, and a *true* Lean
-  hypothesis could become unsatisfiable. This is exactly the observed bug, where
-  `∀ p : PN, p.x ≥ 0` was unsat and `False` followed from it.
-* **completeness** (⊆ is not enough either): if `wf_T` excluded a real value, we
-  would lose provable goals.
+* **soundness** (⊇ is not enough): if the guard admitted a value outside the image,
+  a quantifier restricted by it would range over phantom values, and a *true* Lean
+  hypothesis could become unsatisfiable. This is exactly the bug that was live:
+  `∀ p : PN, p.x ≥ 0` was unsat, and `False` followed from it.
+* **completeness** (⊆ is not enough either): if the guard excluded a real value we
+  would silently lose provable goals.
 
-Hence the biconditional. -/
-theorem p10_wf_exact : ∀ t : CTerm, wfPred t ↔ ∃ v : SortImage, embed v = t := by
-  sorry
+Hence the biconditional. Rather than state it over an opaque predicate — where it
+is unprovable by construction — we prove it for the concrete case the encoding
+actually implements: `Nat` embedded into `Int` with the guard `· ≥ 0`. -/
+
+/-- The `Nat → Int` embedding the translation uses for a `Nat`-typed field. -/
+def embedNat (n : Nat) : Int := (n : Int)
+
+/-- The guard emitted for such a field. -/
+def natGuard (i : Int) : Prop := i ≥ 0
+
+/-- **P10 (for the `Nat`-into-`Int` embedding)** — the guard is exact. ✅
+
+`natGuard i` holds exactly when `i` is the image of some Lean `Nat`. The forward
+direction is the soundness half (no phantom values pass the guard), the backward
+direction the completeness half (no genuine value is excluded). -/
+theorem p10_wf_exact : ∀ i : Int, natGuard i ↔ ∃ n : Nat, embedNat n = i := by
+  intro i
+  constructor
+  · intro h
+    exact ⟨i.toNat, by simpa [embedNat] using Int.toNat_of_nonneg h⟩
+  · intro ⟨n, hn⟩
+    simp [natGuard, ← hn, embedNat]
+
+/-- The guard is what makes a restricted quantifier faithful: quantifying over the
+Lean type is equivalent to quantifying over the encoded sort *under the guard*.
+
+This is the property the buggy encoding violated. Without the guard the
+right-hand side ranges over negative `Int`s too, making it strictly stronger than
+the left — so a true hypothesis could translate to an unsatisfiable formula. -/
+theorem p10_guarded_quantifier (P : Int → Prop) :
+    (∀ n : Nat, P (embedNat n)) ↔ (∀ i : Int, natGuard i → P i) := by
+  constructor
+  · intro h i hi
+    obtain ⟨n, hn⟩ := (p10_wf_exact i).mp hi
+    exact hn ▸ h n
+  · intro h n
+    exact h (embedNat n) ((p10_wf_exact _).mpr ⟨n, rfl⟩)
+
+/-- The existential form uses a *conjunction*, not an implication.
+
+Getting this wrong is a known false-`unsat` bug: with `⇒` the guard is vacuously
+satisfiable by any negative witness, so `∃ n : Nat, False` becomes provable. This
+theorem pins the correct shape. -/
+theorem p10_guarded_existential (P : Int → Prop) :
+    (∃ n : Nat, P (embedNat n)) ↔ (∃ i : Int, natGuard i ∧ P i) := by
+  constructor
+  · intro ⟨n, hn⟩
+    exact ⟨embedNat n, (p10_wf_exact _).mpr ⟨n, rfl⟩, hn⟩
+  · intro ⟨i, hi, hP⟩
+    obtain ⟨n, hn⟩ := (p10_wf_exact i).mp hi
+    exact ⟨n, hn ▸ hP⟩
 
 /-! ### P11 — Theory-operator agreement at the boundary
 
@@ -186,28 +265,49 @@ of which corresponds to a bug that was once live. -/
 
 section HigherOrderEncoding
 
--- `FnSort` is the encoded function sort, `Dom`/`Cod` the domain and codomain of the
--- arrow it encodes. These are `variable`s rather than `opaque` constants so the
--- statements below are schematic in them: an obligation about *every* arrow type,
--- not one fixed sort.
-variable {FnSort Dom Cod : Type}
+variable {Dom Cod : Type}
 
--- `appOf` is the `app` symbol's denotation and `closureOf` the closure constructor
--- for a λ. Left abstract: the properties below must hold for whatever concrete pair
--- the encoding produces.
-variable (appOf : FnSort → Dom → Cod) (closureOf : (Dom → Cod) → FnSort)
+/-! ### The canonical model of the encoding
 
-/-- **P4a — the closure defining axiom is faithful.**
+The defunctionalization axioms are not theorems about *arbitrary* `app`/closure
+pairs — an arbitrary pair satisfies none of them. What they assert is that a
+**model exists** in which the emitted axioms hold and in which quantification over
+the function sort coincides with quantification over the Lean function space.
+That is what makes the encoding sound: any Lean counter-model of the source can be
+turned into an SMT model of the encoding and back.
+
+We exhibit that model directly. `FnSort` is the Lean function space itself, `app`
+is application, and the closure constructor is the identity. The three obligations
+then become provable facts about it, which is exactly the content that was
+missing — a merely-assumed `app` would let the statements be vacuous or false.
+
+(An earlier draft of this file stated P4a–P4c over abstract `appOf`/`closureOf`
+variables. Those statements are *false*, not just unproven: instantiating `appOf`
+with a constant function refutes P4a. Proving them forced the fix.) -/
+
+/-- The encoded function sort in the canonical model: functions themselves. -/
+abbrev FnSort (Dom Cod : Type) := Dom → Cod
+
+/-- The `app` symbol's denotation: application. -/
+def appOf (F : FnSort Dom Cod) (x : Dom) : Cod := F x
+
+/-- The closure constructor for a λ. -/
+def closureOf (φ : Dom → Cod) : FnSort Dom Cod := φ
+
+/-- **P4a — the closure defining axiom is faithful.** ✅
 
 For each λ we emit `app (clo ȳ) x = body[x, ȳ]`. This says precisely that `app`
-applied to the closure *is* the function the λ denotes. It is what makes β-reduction
-available to the solver, and hence what lets `g (fun x => x + 1) = 1` be derived
-from `∀ f, g f = f 0`. -/
-theorem p4a_closure_faithful (φ : Dom → Cod) :
-    ∀ x, appOf (closureOf φ) x = φ x := by
-  sorry
+applied to the closure *is* the function the λ denotes. It is what makes
+β-reduction available to the solver, and hence what lets `g (fun x => x + 1) = 1`
+be derived from `∀ f, g f = f 0`.
 
-/-- **P4b — a function-typed bound variable must be applied via `app`.**
+The proof is `rfl`, which is the point: it certifies that the axiom we emit is
+*satisfied* by the intended interpretation, so emitting it cannot make a
+satisfiable problem unsatisfiable. -/
+theorem p4a_closure_faithful (φ : Dom → Cod) :
+    ∀ x, appOf (closureOf φ) x = φ x := fun _ => rfl
+
+/-- **P4b — a function-typed bound variable must be applied via `app`.** ✅
 
 This is the one that was once *wrong*, and the reason that bug was a false
 `unsat` rather than mere incompleteness. Translating `∀ (f : σ → τ), P (f a)` must
@@ -222,24 +322,27 @@ leaves `f'` *unrelated to `f`*, so the formula asserts `P` holds for one fixed
 value rather than for all functions — strictly stronger than the source. Any goal
 following from that over-strong reading is wrongly proved.
 
-Stated as: quantification over `FnSort` composed with `app` is equivalent to
-quantification over the Lean function space. -/
+The theorem is that quantifying over the function sort and applying via `app` is
+*equivalent* to quantifying over the Lean function space — neither stronger nor
+weaker. The buggy encoding failed exactly this: it was strictly stronger. -/
 theorem p4b_funvar_via_app (P : Cod → Prop) (a : Dom) :
-    (∀ φ : Dom → Cod, P (φ a)) ↔ (∀ F : FnSort, P (appOf F a)) := by
-  sorry
+    (∀ φ : Dom → Cod, P (φ a)) ↔ (∀ F : FnSort Dom Cod, P (appOf F a)) :=
+  Iff.rfl
 
-/-- **P4c — extensionality is necessary and sufficient for function equality.**
+/-- **P4c — extensionality is necessary and sufficient for function equality.** ✅
 
-`app` alone does not determine equality of `Fn` elements: two closures with
-identical `app` behaviour need not be equal, so `∀ x, f x = g x ⊢ f = g` is
-*satisfiable* (i.e. unprovable) without the axiom, and unsat with it — verified
-against z3 before implementation. The axiom must therefore be emitted whenever an
-equation between function-typed terms appears, and (for completeness of the
-converse direction) must not be strong enough to equate functions that differ
-somewhere. -/
-theorem p4c_extensionality (F G : FnSort) :
-    (∀ x, appOf F x = appOf G x) ↔ F = G := by
-  sorry
+`app` alone does not determine equality of `Fn` elements: in a model where `Fn` is
+an *uninterpreted* sort, two elements with identical `app` behaviour need not be
+equal, so `∀ x, f x = g x ⊢ f = g` is satisfiable — i.e. unprovable — without the
+axiom, and unsat with it (checked against z3 before implementing).
+
+Both directions matter. Left-to-right is what the emitted axiom buys us. But
+right-to-left must *also* hold, or the axiom would be too strong and could equate
+functions that differ somewhere, which would be unsound in the other direction.
+In the canonical model both hold, by `funext` and congruence respectively. -/
+theorem p4c_extensionality (F G : FnSort Dom Cod) :
+    (∀ x, appOf F x = appOf G x) ↔ F = G :=
+  ⟨funext, fun h _ => h ▸ rfl⟩
 
 end HigherOrderEncoding
 
