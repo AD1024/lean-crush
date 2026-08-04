@@ -541,6 +541,31 @@ falsely unsat" case):
    **truncated subtraction** (`Nat.sub`, where `3 - 5 = 0`) is emitted as an `ite`,
    not SMT `-`. Regression: `must_reject_sub` (`∀ n : Nat, n - 1 < n`), which this
    tool *did* wrongly prove before the fix.
+
+   **Why not just use a `Nat` sort, or define our own?** This is the obvious first
+   reaction to the guard machinery, so the answer is recorded here. SMT-LIB's
+   arithmetic theory defines exactly `Int` and `Real` — there is **no `Nat` sort**
+   (`(declare-const n Nat)` is an unknown-sort error in both z3 and cvc5), and no
+   subsort or refinement mechanism to carve out "the `Int`s that are `≥ 0`". So
+   non-negativity *must* be expressed as a constraint rather than as a type. The
+   two ways to define our own were benchmarked against the current encoding:
+
+   * **Dedicated uninterpreted sort + bijection to the non-negative `Int`s.**
+     Appealing because non-negativity becomes structural, so datatype fields would
+     need no `wf` at all. But the three bijection axioms (`n2i (i2n i) = i`,
+     `i2n (n2i n) = n`, `n2i n ≥ 0`) are mutually-recursive quantified equalities
+     that send z3 into an instantiation loop: it **times out on the bare
+     consistency check**, before any goal. Strictly worse — it makes everything
+     unsolvable, not just some things.
+   * **Peano datatype (`zero | succ`).** Exact as a set, but discards linear
+     arithmetic: `x + y = y + x` stops being a solver primitive and needs
+     induction, which SMT has no rule for.
+
+   Ranking: guarded `Int` > bijection sort (diverges immediately) > Peano (loses
+   arithmetic). Note the guard is not free but its cost is narrow — a datatype with
+   no `Nat` field gets a constantly-`true` `wf` and no guard is emitted at all.
+   A possible future refinement: suppress the guard when the query's arithmetic
+   never touches the guarded field.
 3. **`Nat` inside inductive constructors.** ✅ *fixed (M2)* — lean-auto's TODO flags
    this as an active unsoundness, and it was live here too. The root cause is
    deeper than "selectors need a `≥ 0` constraint": SMT datatypes are **freely
