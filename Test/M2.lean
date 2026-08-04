@@ -126,6 +126,51 @@ theorem il_cong (a b : IList) (h : a = b) : IList.cons 1 a = IList.cons 1 b := b
 theorem il_inj (x y : Int) (s t : IList) (h : IList.cons x s = IList.cons y t) :
     x = y := by crush
 
+/-! ### Recursive datatypes with a *guarded* field
+
+An `Int` field needs no guard, so `IList`'s `wf` is constantly `true` and never
+actually recurses. A `Nat` field is the case that produces a genuinely **recursive**
+`wf` axiom:
+
+```
+(assert (forall ((x NList)) (= (wf_NList x)
+  (=> ((_ is cons) x) (and (>= (hd x) 0) (wf_NList (tl x)))))))
+```
+
+Recursive quantified axioms are the classic way to send a solver into an
+instantiation loop, so these pin that z3 actually copes. A divergence here would
+surface as `unknown`/timeout (sound), never a wrong answer. -/
+
+inductive NList where
+  | nil
+  | cons (hd : Nat) (tl : NList)
+
+theorem nl_distinct (n : Nat) (t : NList) : NList.cons n t ≠ NList.nil := by crush
+theorem nl_deep (a b c : Nat) (t : NList) :
+    NList.cons a (NList.cons b (NList.cons c t)) ≠ NList.nil := by crush
+-- The recursive guard must propagate into the tail, not just the outermost field.
+theorem nl_tail_field (l : NList) (n : Nat) (t : NList) (h : l = NList.cons n t) :
+    n ≥ 0 := by crush
+-- Quantifying over the recursive type is where the recursive axiom gets exercised.
+theorem nl_quant : ∀ l : NList, l = NList.nil ∨ ∃ n t, l = NList.cons n t := by crush
+-- ...and a false goal about the guarded field is still rejected.
+theorem must_reject_nl_field : ∀ (n : Nat) (t : NList),
+    NList.cons n t = NList.cons (n - 1) t := by
+  first | (crush; done) | sorry
+
+/-! ### Transitive well-formedness
+
+`wf` must compose through nesting: `Outer` has no `Nat` field of its own, but
+reaches one through `Inner`. If `needsWFGuard` stopped at the first level, the
+`Nat`-in-datatype hole would reopen one level down. -/
+
+structure Inner where n : Nat
+structure Outer where i : Inner
+
+theorem must_reject_nested (h : ∀ o : Outer, o.i.n ≥ 0) : False := by
+  first | (crush; done) | sorry
+theorem nested_field_nonneg (o : Outer) : o.i.n ≥ 0 := by crush
+
 /-! ## Bit-vectors
 
 `BitVec w` at a statically-known width maps to the indexed sort `(_ BitVec w)`.

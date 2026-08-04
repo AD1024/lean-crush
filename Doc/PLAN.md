@@ -558,8 +558,15 @@ falsely unsat" case):
    datatypes and degenerates to constantly-`true` (hence free) when no field needs
    a guard. Regressions: `must_reject_nat_field`, `must_reject_field_sub`, plus
    `pn_field_nonneg`/`pn_field_cong` pinning that the guard is not over-restrictive.
-   Recursive datatypes make the `wf` axiom recursive, which z3 typically answers
-   `unknown` on — a *sound* degradation, not a wrong answer.
+   A recursive datatype with a guarded field yields a *recursive* `wf` axiom
+   (`wf_L x = (is-cons x ⇒ hd x ≥ 0 ∧ wf_L (tl x))`). Tested through the tactic
+   (`Test/M2.lean`, `NList` group): z3 discharges these fine in practice —
+   constructor distinctness, propagation into nested tails, and quantification over
+   the recursive type all close, and false goals about the guarded field are still
+   rejected. A hand-written standalone probe of the same axiom *did* make z3 time
+   out on one consistency query, so the shape can clearly diverge; that would be a
+   `unknown`/timeout (sound degradation), never a wrong answer. Worth revisiting if
+   a real workload hits it.
 4. **Truncated vs. Euclidean division.** ✅ *resolved empirically (M2).* Verified
    directly rather than assumed: Lean's **default** `Int./` and `Int.%` are
    *Euclidean* (`(-7)/2 = -4`, `(-7)%2 = 1`), matching SMT-LIB `div`/`mod`, so the
