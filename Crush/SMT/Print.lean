@@ -43,8 +43,24 @@ instance : ToString SSort := ⟨sortToString []⟩
 /-- Render a bitvector literal via the unambiguous decimal indexed form. -/
 def bvLiteral (width value : Nat) : String := s!"(_ bv{value} {width})"
 
+/-- Render a Lean string as an SMT-LIB 2.6 string literal.
+
+SMT-LIB string literals are enclosed in `"`, escape an embedded quote by doubling
+it, and are otherwise sequences of printable ASCII; any other character must be
+written with the `\u{…}` escape. Note that `\` is **not** an escape character in
+SMT-LIB (verified: `"\u{5c}"` and `"\\"` are *different* strings in z3), so a
+backslash is emitted literally.
+
+`str.len` counts codepoints, matching Lean's `String.length`, so a codepoint-wise
+escape keeps lengths in agreement. -/
+def escapeSmtString (s : String) : String :=
+  s.foldl (init := "") fun acc c =>
+    if c == '"' then acc ++ "\"\""
+    else if c.toNat ≥ 0x20 && c.toNat ≤ 0x7E then acc.push c
+    else acc ++ s!"\\u\{{String.ofList (Nat.toDigits 16 c.toNat)}}"
+
 def literalToString : Literal → String
-  | .str s      => "\"" ++ s.replace "\"" "\"\"" ++ "\""
+  | .str s      => "\"" ++ escapeSmtString s ++ "\""
   | .num n      => toString n
   | .bitvec w v => bvLiteral w v
   | .bool b     => if b then "true" else "false"

@@ -82,4 +82,99 @@ theorem p8_lowering_equiv : Equivalence lowerCTerm := by
 
 end Passes
 
+/-! ## Obligations discovered while implementing Milestone 2
+
+The three items below were each a *live bug* found by differential probing against
+Lean and z3 (see `Doc/PLAN.md` §10 items 3–6). They are stated here because a
+passing regression test is weaker than a theorem: the tests pin the specific
+counterexamples that were observed, whereas these statements pin the property.
+-/
+
+section Milestone2
+
+/-- The embedding of a Lean type into its SMT sort, and the well-formedness
+predicate meant to carve out its image. Opaque until the real semantics land. -/
+opaque SortImage : Type
+opaque embed : SortImage → CTerm
+opaque wfPred : CTerm → Prop
+
+/-- **P10** — The datatype well-formedness guard is *exact*.
+
+SMT datatypes are freely generated over their field sorts, so encoding a `Nat`
+field as `Int` makes the SMT type strictly larger than the Lean type. `wf_T` must
+characterize precisely the image of the Lean type — no more, no less:
+
+* **soundness** (⊇ is not enough): if `wf_T` admitted a value outside the image,
+  a quantifier guarded by it would range over phantom values, and a *true* Lean
+  hypothesis could become unsatisfiable. This is exactly the observed bug, where
+  `∀ p : PN, p.x ≥ 0` was unsat and `False` followed from it.
+* **completeness** (⊆ is not enough either): if `wf_T` excluded a real value, we
+  would lose provable goals.
+
+Hence the biconditional. -/
+theorem p10_wf_exact : ∀ t : CTerm, wfPred t ↔ ∃ v : SortImage, embed v = t := by
+  sorry
+
+/-! ### P11 — Theory-operator agreement at the boundary
+
+The general statement ("each emitted SMT operator denotes the same total function
+as its Lean counterpart") cannot be stated non-trivially until the denotational
+semantics of `SMT.Term` exist — that is Milestone 6, and it is what `p8` will
+carry. What *can* be pinned down now, and is the part that actually bit us, is the
+**Lean side of each boundary case**: the value our guard hard-codes.
+
+These are the `#eval` probes from the design phase promoted to machine-checked
+theorems. Each one is the premise of a corresponding claim about the emitted SMT:
+e.g. `bv_udiv_zero` below says Lean's `x / 0` is `0`, which is what makes the raw
+SMT `bvudiv` (fixed by SMT-LIB to all-ones) *wrong* and forces `bvDivGuard`.
+
+Unlike the `sorry`-backed obligations above, these are proven — so a change to
+Lean's semantics in a future toolchain would break this build rather than silently
+invalidate the encoding. -/
+
+/-- Lean's `BitVec` division by zero is `0`; SMT-LIB's `bvudiv x 0` is all-ones.
+This disagreement is why `Crush.bvDivGuard` wraps the operator in an `ite`. -/
+theorem bv_udiv_zero (w : Nat) (x : BitVec w) : x / 0 = 0 := by simp
+
+/-- Likewise for signed division: SMT-LIB fixes `bvsdiv x 0` to `±1`. -/
+theorem bv_sdiv_zero (w : Nat) (x : BitVec w) : BitVec.sdiv x 0 = 0 := by simp
+
+/-- `bvurem` needs **no** guard: both Lean and SMT-LIB return the dividend. -/
+theorem bv_umod_zero (w : Nat) (x : BitVec w) : x % 0 = x := by simp
+
+/-- `Int` division by zero is `0` in Lean, while SMT-LIB leaves `(div x 0)`
+underspecified. Underspecification is *sound* (Lean's value is an admissible
+model), so `Crush.intDivGuard` is a completeness fix, not a soundness one. -/
+theorem int_div_zero (x : Int) : x / 0 = 0 := by simp
+
+theorem int_mod_zero (x : Int) : x % 0 = x := by simp
+
+theorem nat_div_zero (n : Nat) : n / 0 = 0 := by simp
+
+/-- `Nat` subtraction truncates, which is why it cannot be emitted as SMT `-`.
+The regression this protects is `∀ n : Nat, n - 1 < n`, false at `n = 0`. -/
+theorem nat_sub_truncates (n m : Nat) (h : n ≤ m) : n - m = 0 := by omega
+
+/-- Lean's *default* `Int./` is Euclidean, matching SMT-LIB `div` — so the direct
+mapping is sound and no dual-operator apparatus is needed. Pinned by value here
+because the design initially assumed the opposite. -/
+theorem int_div_euclidean : ((-7 : Int) / 2) = -4 := by decide
+
+theorem int_mod_euclidean : ((-7 : Int) % 2) = 1 := by decide
+
+/-- **P12** — Symbol allocation is injective.
+
+Distinct Lean atoms must never share an SMT symbol. The observed failure: two
+structures both using the default anonymous constructor name `mk` emitted two `mk`
+constructors and two `mk_sel0` selectors into one script, conflating unrelated
+types. `symbolFor` is keyed on a canonical form and qualified by the owning sort's
+already-unique symbol, which is what this states. -/
+theorem p12_symbol_injective {Atom : Type} (symbolOf : Atom → String) :
+    (∀ a b, symbolOf a = symbolOf b → a = b) →
+    ∀ a b, a ≠ b → symbolOf a ≠ symbolOf b := by
+  intro hinj a b hne heq
+  exact hne (hinj a b heq)
+
+end Milestone2
+
 end Crush.Proofs

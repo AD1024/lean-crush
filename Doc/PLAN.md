@@ -193,7 +193,8 @@ Module map (⟢ = built & tested, ▷ = designed, □ = todo):
 | `Crush/Frontend/Config.lean` | options + `Config` | ⟢ |
 | `Crush/Translation/Monad.lean` | `TranslateM`, name map, provenance | ⟢ |
 | `Crush/Translation/Attr.lean` | `@[crush_translate]` extension | ⟢ |
-| `Crush/Translation/Builtins.lean` | `crush_map` sugar + core theories | ⟢ (sugar), □ (theories) |
+| `Crush/Translation/Builtins.lean` | `crush_map` sugar | ⟢ |
+| `Crush/Translation/Theories.lean` | BV/String helpers + div-by-zero guards | ⟢ |
 | `Crush/Solver/Process.lean` | process mgmt, hard timeout, `unknown` | ⟢ |
 | `Crush/SMT/Sexp.lean` | s-expression parser | ⟢ |
 | `Crush/SMT/Result.lean` | unsat-core + model parsing | ⟢ |
@@ -448,18 +449,35 @@ mode with pipeline reporting and `sat`→counterexample). `Test/M1.lean` confirm
 uninterpreted-function congruence all close; a false goal (`x + 1 = x`) is
 correctly *rejected* with a counterexample rather than silently closed.
 
-**Milestone 2 — Theories + Nat (IN PROGRESS).**
-Done and tested (`Test/M2.lean`): Nat→Int with the **non-negativity soundness
-fix** — every `Nat`-typed variable/atom/function-result carries a `≥0`
-well-formedness constraint (`emitNatWF`), and `Nat.sub` truncates via `ite`
-(closing the `∀ n:Nat, n-1 < n` unsoundness that lean-auto's TODO flags and that
-this tool exhibited before the fix); `ite`/`cond`; `Ne`; Int div/mod (verified:
-Lean's default `Int./`/`%` are Euclidean, matching SMT-LIB, so the direct mapping
-is sound — with a negative test pinning the T-division value as rejected); and
-**datatypes** — non-recursive/non-parametric inductives (enumerations,
-structures) emitted as `declare-datatypes`, with constructor distinctness,
-exhaustiveness, and projections/selectors. Remaining: BitVec, String, recursive
-datatypes; port lean-auto's `Test/SmtTranslation/*` regressions.
+**Milestone 2 — Theories + Nat (DONE, builds + tested).**
+All of `Test/M2.lean` passes: 7 negative tests correctly *rejected* (they fall
+through to `sorry`, which the build reports — the signal we watch), every positive
+test closed, and `#print axioms` confirms `crushSorry` remains the only trust
+axiom.
+
+* **Nat→Int** with the non-negativity soundness fix: every `Nat`-typed
+  variable/atom/function-result carries a `≥0` well-formedness constraint, and
+  `Nat.sub` truncates via `ite` — closing the `∀ n:Nat, n-1 < n` unsoundness that
+  lean-auto's TODO flags and that this tool exhibited before the fix.
+* **Datatypes**: non-parametric inductives — enumerations, structures, and
+  (new) **self-recursive** types — via `declare-datatypes`, with constructor
+  distinctness, injectivity, exhaustiveness, and projections/selectors.
+* **Bit-vectors**: statically-known widths as `(_ BitVec w)`; arithmetic, bitwise,
+  shifts (with `Nat`-amount coercion), unsigned/signed comparisons, `concat`,
+  `extract`, `setWidth`/`signExtend`, and **guarded division-by-zero**.
+* **Strings**: `str.++`/`str.len`/`str.prefixof`, with SMT-LIB-correct literal
+  escaping (codepoint-accurate, and aware that `\` is not an SMT escape char).
+* **Int div/mod**: verified Lean's default `Int./`/`%` are Euclidean (matching
+  SMT-LIB), plus an exactness guard at a zero divisor.
+
+Three soundness bugs were found and fixed *during* this milestone, all by
+differential probing against Lean and z3 rather than by reading specs — see §10
+items 3, 5, and 6. Item 3 (`Nat` in datatype fields) was a live false-`unsat`:
+`crush` proved `False` from a true hypothesis, and thence `2 + 2 = 5`.
+
+Remaining (deferred, not blocking M3): port lean-auto's `Test/SmtTranslation/*`
+regressions; parametric datatypes (need monomorphization, M5); `BitVec.toNat`
+(needs the `bv2nat` mixed-theory bridge).
 
 **Milestone 3 — Higher-order.**
 `HOEncoding.lean`: defunctionalization first, then combinators; `native` mode for
@@ -478,9 +496,15 @@ Monomorphization fuel tuning, premise selection hook (on Lean core
 pretty-printing, docs and examples.
 
 **Milestone 6 — Verified soundness.**
-Discharge the §10b `sorry`s in `Crush/Proofs/`, prioritized P4 → P6 → P8 → P7 (the
-passes that can silently produce a wrong `unsat`), then the definitional ones.
-Each proof shrinks the trusted computing base, à la `bv_decide`.
+Discharge the §10b `sorry`s in `Crush/Proofs/`, prioritized P4 → P10 → P6 → P8 →
+P7 (the passes that can silently produce a wrong `unsat`), then the definitional
+ones. Each proof shrinks the trusted computing base, à la `bv_decide`.
+
+Partial credit already banked: P11's **Lean-side** boundary facts are proven (9
+theorems in `Crush/Proofs/Obligations.lean` — the `#eval` probes from the design
+phase promoted to machine-checked statements), so a future toolchain that changed
+`x / 0` or `Int./`'s rounding would break the build rather than silently
+invalidate the encoding. The SMT side of P11 needs P8's denotational semantics.
 
 ---
 
@@ -502,30 +526,94 @@ admits it hasn't fully discharged them even *with* the checker. We enumerate the
 here and each gets a dedicated test (both a "must be unsat" and a "must not be
 falsely unsat" case):
 
-1. **Inhabitation.** SMT-LIB assumes every sort is non-empty; Lean types may be
-   empty. Emitting an unconstrained `declare-sort` for a possibly-empty Lean type
-   is unsound. Mitigation: only assert `∀`-instances for sorts we can witness
-   inhabited (every atom allocated from a real term is inhabited by that term —
-   lean-auto's `nonemptyOfAtom` trick); for genuinely-possibly-empty sorts, guard
-   quantifiers or refuse. `Empty` short-circuits (`∀ → true`, `∃ → false`).
-2. **`Nat` is not `Int`.** When encoding `Nat` as SMT `Int`, every `Nat`-typed
-   quantifier needs a `≥ 0` guard, and **truncated subtraction** (`Nat.sub`, where
-   `3 - 5 = 0`) must not be emitted as SMT `-`. Emit a guarded/`ite` definition.
-3. **`Nat` inside inductive constructors.** lean-auto's TODO flags this as an
-   active unsoundness. Datatype selectors returning `Nat` must carry the same
-   `≥ 0` well-formedness constraint as top-level `Nat` symbols.
-4. **Truncated vs. Euclidean division.** Lean's `Int.div`/`Int.mod` are
-   truncated; SMT-LIB's `div`/`mod` are Euclidean. These are *different functions*
-   on negatives (lean-auto's `IntConst` carries both `idiv/imod` and `iediv/iemod`
-   for exactly this reason). Map each Lean operator to the correct SMT definition,
-   not the same-named one.
-5. **BitVec width and signedness.** Signed vs. unsigned comparisons, shift
-   operand widths (Lean's `shl : BitVec n → Nat` vs SMT's `bvshl : BitVec n →
-   BitVec n`), and `bvofNat`/`bvtoNat` boundaries need explicit width handling.
+1. **Inhabitation.** ✅ *addressed (M2).* SMT-LIB assumes every sort is non-empty;
+   Lean types may be empty. Emitting an unconstrained `declare-sort` for a
+   possibly-empty Lean type is unsound: `∀ x : Empty, P` is vacuously true, its
+   naive image `(forall ((x S)) P)` is not. `quantifier` now **refuses** to
+   translate a quantifier whose domain is a structurally-uninhabited inductive
+   (`isEmptyType`), with a diagnostic, rather than emitting an unsound encoding.
+   Note the non-dependent case (`Empty → False`, where the binder is unused) takes
+   the implication path and abstracts the antecedent as an opaque `Bool` atom,
+   which is independently sound. A zero-constructor inductive is also excluded from
+   `isSupportedDatatype` (z3 rejects an empty `declare-datatypes` outright).
+2. **`Nat` is not `Int`.** ✅ *fixed (M2).* Every `Nat`-typed quantifier carries a
+   `≥ 0` guard and every `Nat`-valued symbol a non-negativity constraint;
+   **truncated subtraction** (`Nat.sub`, where `3 - 5 = 0`) is emitted as an `ite`,
+   not SMT `-`. Regression: `must_reject_sub` (`∀ n : Nat, n - 1 < n`), which this
+   tool *did* wrongly prove before the fix.
+3. **`Nat` inside inductive constructors.** ✅ *fixed (M2)* — lean-auto's TODO flags
+   this as an active unsoundness, and it was live here too. The root cause is
+   deeper than "selectors need a `≥ 0` constraint": SMT datatypes are **freely
+   generated over their field sorts**, so a `Nat` field encoded as `Int` makes the
+   SMT type strictly *larger* than the Lean type, populated by values with negative
+   fields that no Lean value has. Consequently the **true** hypothesis
+   `∀ p : PN, p.x ≥ 0` is *unsatisfiable* in SMT, and the solver derives `False`
+   from it — a false `unsat`, the dangerous direction. (Confirmed: `crush` proved
+   `False`, then `2 + 2 = 5`.) A per-selector constraint cannot fix this, because
+   the problem is the *domain of quantification*, not the selector's range. Fix: a
+   well-formedness predicate `wf_T` per datatype characterizing the image of the
+   Lean type, defined in selector form per constructor
+   (`(=> ((_ is C) x) ⟨field guards⟩)`) and used to guard **every quantifier** over
+   `T` (`wfCondition`/`guardSort`). It composes transitively through nested
+   datatypes and degenerates to constantly-`true` (hence free) when no field needs
+   a guard. Regressions: `must_reject_nat_field`, `must_reject_field_sub`, plus
+   `pn_field_nonneg`/`pn_field_cong` pinning that the guard is not over-restrictive.
+   Recursive datatypes make the `wf` axiom recursive, which z3 typically answers
+   `unknown` on — a *sound* degradation, not a wrong answer.
+4. **Truncated vs. Euclidean division.** ✅ *resolved empirically (M2).* Verified
+   directly rather than assumed: Lean's **default** `Int./` and `Int.%` are
+   *Euclidean* (`(-7)/2 = -4`, `(-7)%2 = 1`), matching SMT-LIB `div`/`mod`, so the
+   direct mapping is sound — no dual-operator apparatus needed for the default
+   instance. `must_reject_tdiv` pins the T-division value as rejected.
+   Additionally, SMT-LIB leaves `(div x 0)` *underspecified* while Lean pins
+   `x / 0 = 0` and `x % 0 = x`. That gap is sound-but-incomplete (an
+   underspecified operator admits Lean's interpretation, so `unsat` was already
+   trustworthy); `intDivGuard` emits an `ite` to make the encoding exact.
+5. **BitVec width and signedness.** ✅ *addressed (M2).* Only statically-known
+   widths are translated (a symbolic `BitVec w` has no SMT sort and degrades to an
+   opaque sort). Each operator was checked against both Lean and z3:
+   - Lean's `/` and `%` on `BitVec` are the **unsigned** operations, and Lean's
+     `<`/`≤` are **unsigned** comparisons (`(255 : BitVec 8) < 1` is `false`) —
+     mapped to `bvudiv`/`bvurem`/`bvult`/`bvule`, with `BitVec.slt`/`sle` for the
+     signed ones. Getting this backwards is unsound in both directions.
+   - Shift amounts: Lean's `shl : BitVec n → Nat` vs SMT's `bvshl : BitVec n →
+     BitVec n` — a `Nat` amount is materialized as a same-width literal
+     (`shiftOp`). Amounts ≥ width agree (both yield 0 / sign-fill).
+   - **Division by zero is a genuine disagreement, not an underspecification**:
+     SMT-LIB *fixes* `bvudiv x 0` to all-ones and `bvsdiv x 0` to `±1`, while Lean
+     gives `0`. Emitting the raw operator lets the solver prove Lean-false goals,
+     so `bvDivGuard` rewrites to an `ite`. Regression:
+     `must_reject_bv_div_zero`. By contrast `bvurem`/`bvsrem`/`bvsmod` already
+     agree with Lean (all return the dividend) and are emitted raw.
+   - Verified to agree exactly, needing no guard: `concat` operand order (left
+     operand is high), `extract`, `zero_extend`/`sign_extend`, and the truncating
+     behaviour of `setWidth`/`signExtend` when the target is narrower.
+6. **Symbol collisions across datatypes.** ✅ *fixed (M2).* Two distinct Lean
+   structures both using the default anonymous constructor name `mk` emitted two
+   `mk`s and two `mk_sel0`s into one script, conflating unrelated types'
+   constructors and selectors. Constructor and selector symbols are now qualified
+   by the datatype's allocated (already-unique) SMT sort symbol
+   (`ctorSymbol`/`selSymbol`). Regression: `no_collide`.
+7. **String escaping.** ✅ *addressed (M2).* SMT-LIB doubles an embedded `"` and
+   requires `\u{…}` for non-printable characters — and critically, `\` is **not**
+   an escape character there (verified: `"\u{5c}"` and `"\\"` are *different*
+   strings in z3), so a backslash must be emitted literally.
+   `SMT.escapeSmtString` implements this. `str.len` counts codepoints, matching
+   `String.length` (checked on `"λx"`).
 
-These live in `Crush/Translation/Builtins.lean` as the semantics of the built-in
-handlers, and are the reason built-ins are real handlers with access to full
-`MetaM` (they must synthesize guards and inspect types), not a static table.
+The theory semantics live in `Crush/Translation/Theories.lean` (width/literal
+helpers and the division guards) and in `Translate.lean`'s `bitvecTerm?`/
+`stringTerm?` recognizers. They are the reason built-ins need full `MetaM` access
+(they must synthesize guards and inspect types), not a static table.
+
+**Methodology note.** Every entry above was settled by *differential probing* —
+evaluating the operator in Lean (`#eval`) and in z3 (`simplify`/`check-sat`) and
+comparing — rather than from memory of either specification. Three of the seven
+items turned out differently than the initial design assumed (item 3 was a live
+false-`unsat`, item 4's default instance needed *no* special handling, item 5's BV
+division needed a guard that `Int` division did not). Assumed semantics are how
+unsoundness enters a hammer, so new theory support should follow the same
+probe-first discipline.
 
 ## 10b. Formal proof obligations (verified soundness roadmap)
 
@@ -571,14 +659,17 @@ Status legend: 🔴 not started · 🟡 statement drafted, proof pending · ✅ 
 | # | Pass (module) | Theorem to prove | Strength | Status |
 |---|---|---|---|---|
 | P1 | Preprocessing β/η, `let`/proj reduction (`Translation/Preprocess`) | reduced term is defeq to the original ⇒ same `Prop` | equivalence (definitional — cheap: `Eq.refl`/`rfl`-backed) | 🔴 |
-| P2 | Nat→Int embedding (`Translation/Builtins`) | `⟦n : Nat⟧ = Int.ofNat n` and the `≥0` guard makes `∀`/`∃`/`sub`/`div` agree with Lean on the image | equivalence, per operator | 🔴 |
+| P2 | Nat→Int embedding (`Translation/Translate`) | `⟦n : Nat⟧ = Int.ofNat n` and the `≥0` guard makes `∀`/`∃`/`sub`/`div` agree with Lean on the image | equivalence, per operator | 🔴 |
 | P3 | Monomorphization (`Translation/Monomorphize`) | each generated instance is an instance of a source lemma ⇒ implied by it; instances are sound (already true "by construction" since each carries a Lean proof — the obligation is to *retain* that proof, not re-prove) | equivalence (Γ ⊢ each instance) | 🟡 |
 | **P4** | **Defunctionalization (`Translation/HOEncoding`, `defunctionalize`)** | **for the introduced `apply`/closure symbols and their defining axioms `A`, `(∃ I, ⟦Γ⟧_I) ↔ (∃ I', ⟦defunc(Γ) ∪ A⟧_I')`** — the headline HO theorem: the encoded problem is equisatisfiable with the original | **equisatisfiability** | 🔴 |
 | P5 | Combinator encoding (`HOEncoding`, `combinators`) | S/K/B/C/W defining equations characterize the same functions ⇒ equisatisfiable | equisatisfiability | 🔴 |
 | P6 | Skolemization (`Translation/Preprocess`) | `(∃ I, ⟦∀x∃y.φ⟧) ↔ (∃ I', ⟦∀x.φ[y:=f x]⟧)` with fresh `f`; classical, via `Classical.choice` | equisatisfiability | 🔴 |
 | P7 | Reification `Expr → CTerm` (`Reify/Reify`) | `⟦reify(e)⟧_I = e` for the recovered interpretation `I` (the round-trip that makes reconstruction possible; lean-auto's `reifTermCheckType` checks types but not meaning) | equivalence | 🔴 |
 | P8 | `CTerm → SMT.Term` lowering (`Translation/Translate`) | the SMT term denotes the same boolean/Int/… value as the `CTerm` under the sort interpretation | equivalence | 🔴 |
-| P9 | Inhabitation discharge (`Reify/Collect`) | every sort emitted without a guard is genuinely non-empty (witness recorded), so SMT's non-emptiness assumption is sound | side-condition | 🟡 |
+| P9 | Inhabitation discharge (`Translation/Translate`) | every sort emitted without a guard is genuinely non-empty (witness recorded), so SMT's non-emptiness assumption is sound | side-condition | 🟡 |
+| **P10** | **Datatype well-formedness guard (`Translation/Translate`, `wfCondition`/`guardSort`)** | `wf_T` characterizes exactly the image of the Lean type in the freely-generated SMT datatype: `∀ t, wf_T t ↔ ∃ (v : T), ⟦v⟧ = t`; hence guarding every quantifier over `T` yields a formula equivalent to the Lean one | equivalence | 🔴 |
+| P11 | Theory-operator agreement (`Translation/Theories`) | each emitted SMT operator denotes the same total function as its Lean counterpart — *including at the boundary values* where the two specs differ (`bvudiv`/`bvsdiv` at 0) or where SMT is silent (`div`/`mod` at 0) | equivalence, per operator | 🟡 **Lean side ✅ proven** (9 theorems: `bv_udiv_zero`, `int_div_zero`, `nat_sub_truncates`, `int_div_euclidean`, …); SMT side blocked on P8's semantics |
+| P12 | Symbol allocation injectivity (`Translation/Monad`, `symbolFor`) | the atom→symbol map is injective, so distinct Lean atoms (notably same-named constructors of different datatypes) never share an SMT symbol | side-condition | 🟡 |
 
 ### Defunctionalization in detail (P4 — the one you flagged)
 
