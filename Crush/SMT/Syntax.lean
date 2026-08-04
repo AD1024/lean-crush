@@ -53,6 +53,10 @@ mutual
     | letE    : Array (String × Term) → Term → Term
     | forallE : Array (String × SSort) → Term → Term
     | existsE : Array (String × SSort) → Term → Term
+    /-- A higher-order `lambda` term. Only legal for HO-capable backends under a
+        `HO_`-prefixed logic (see `Crush/Translation/HOEncoding.lean`); the
+        `defunctionalize`/`combinators` modes never produce one. -/
+    | lam     : Array (String × SSort) → Term → Term
     | annot   : Term → Array Attr → Term
     deriving Inhabited, Repr
 

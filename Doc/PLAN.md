@@ -203,7 +203,7 @@ Module map (⟢ = built & tested, ▷ = designed, □ = todo):
 | `Crush/Reify/Reify.lean` | `Expr → CTerm`, atom allocation, `DTr` provenance | □ |
 | `Crush/Translation/Preprocess.lean` | reduction, skolem prep | □ |
 | `Crush/Translation/Monomorphize.lean` | poly → HOL saturation | □ |
-| `Crush/Translation/HOEncoding.lean` | λ-elimination (defunc/comb) | □ |
+| `Crush/Translation/HOEncoding.lean` | λ-elimination (defunc ⟢, native ⟢, comb □) | ⟢ |
 | `Crush/Translation/Translate.lean` | driver: `Expr → SMT.Term` via handlers | ⟢ |
 | `Crush/Solver/Reconstruct.lean` | unsat-core → Lean proof replay | □ |
 | `Crush/Frontend/Tactic.lean` | the `crush` tactic (`trust` mode) | ⟢ |
@@ -479,11 +479,54 @@ Remaining (deferred, not blocking M3): port lean-auto's `Test/SmtTranslation/*`
 regressions; parametric datatypes (need monomorphization, M5); `BitVec.toNat`
 (needs the `bv2nat` mixed-theory bridge).
 
-**Milestone 3 — Higher-order.**
-`HOEncoding.lean`: defunctionalization first, then combinators; `native` mode for
-cvc5 (emit `HO_` logic). This is the headline feature — the benchmark is the set
-of HO goals that make lean-auto throw "Higher order input?". Passes ship trusted,
-with their P4/P5 equivalence theorems stated (as `sorry`) per §10b.
+**Milestone 3 — Higher-order (`defunctionalize` + `native` DONE; `combinators`
+not started).**
+`HOEncoding.lean` + the HO paths in `Translate.lean`. This is the headline feature —
+the benchmark is the set of HO goals that make lean-auto throw "Higher order
+input?". `Test/M3.lean` passes: 10 positive tests closed, 6 negative correctly
+rejected, `crushSorry` still the only trust axiom, verified on z3 and cvc5.
+
+**It turned out to be a soundness fix, not only a feature.** Before this milestone
+an arrow type became an opaque sort and a function-typed *bound variable* was
+declared as an unrelated `declare-fun`, so
+
+```lean
+h : ∀ (f : Int → Int), g f = f 0
+```
+
+emitted `(forall ((q Fn)) (= (g q) (q' 0)))` with `q'` disconnected from `q` — i.e.
+asserting **`g` is constant**, strictly *stronger* than `h`. `crush` therefore
+closed `g (fun x => x) = g (fun x => x + 1)`, whose negation is provable in Lean.
+That goal is now the `must_reject_ho_constant` regression.
+
+Shipped:
+* **`defunctionalize`** (default) — one uninterpreted `Fn` sort and *n*-ary `app`
+  symbol per arrow type; each λ becomes a closure constant with defining axiom
+  `app(clo ȳ, x̄) = body`, parameterized by its captures when it closes over
+  SMT-bound variables; named functions passed as values are η-expanded into
+  closures bridged by `app(clo, x) = f(x)`.
+* **Extensionality**, per arrow sort and *on demand* (only when an equation between
+  function-typed terms occurs, since it is a costly quantifier alternation).
+  Verified load-bearing: `∀ x, f x = g x ⊢ f = g` is `sat` without it, `unsat` with.
+* **`native`** — `(-> σ τ)` sorts, direct application, `lambda` terms, under a
+  `HO_`-prefixed logic. Confirmed empirically that cvc5 gates HO on the prefix
+  (`HO_ALL` works, `ALL` does not) and that z3 ignores it with a warning and then
+  fails on the sorts — so `native` is gated to cvc5 and falls back to
+  `defunctionalize` with a diagnostic elsewhere. Note cvc5 answered `unknown`
+  rather than `sat` on a satisfiable HO query in testing: sound, but it loses
+  counterexamples.
+
+Not done: **`combinators`** (S/K/B/C/W). The mode is accepted but warns and falls
+back to `defunctionalize` rather than silently pretending. Its value is as an escape
+hatch when defunctionalization blows up, which needs a workload that actually blows
+up to tune against — so it is deferred until there is one. P5 stays 🔴.
+
+Note on partial application: `app` is *n*-ary over the flattened argument list
+rather than a chain of unary applies, which keeps the common fully-applied case
+small. Genuine partial application still works, via the same η-expansion used for
+named functions — `g (f 1)` with `f : Int → Int → Int` emits a closure with
+`app(clo, x) = f(1, x)` (tested). What is *not* supported is a partially-applied
+term whose remaining arity is itself higher-order.
 
 **Milestone 4 — Soundness/reconstruction.**
 Unsat-core-driven reconstruction (core → `duper`/`grind`; the "solver-as-oracle"
@@ -632,6 +675,18 @@ falsely unsat" case):
    strings in z3), so a backslash must be emitted literally.
    `SMT.escapeSmtString` implements this. `str.len` counts codepoints, matching
    `String.length` (checked on `"λx"`).
+
+8. **Function-typed bound variables.** ✅ *fixed (M3).* A quantifier over a function
+   type must range over the encoded function sort with applications routed through
+   `app`; declaring a fresh `declare-fun` for the bound variable leaves it
+   *disconnected* from the quantifier, which silently **strengthens** the
+   hypothesis. `∀ (f : Int → Int), g f = f 0` became "g is constant", and goals
+   following from that were wrongly proved — a false `unsat`, confirmed by closing
+   a goal whose negation is provable in Lean. Fixed by the HO encoding (§5); the
+   regression is `must_reject_ho_constant`. Note this is the *same shape* of bug as
+   items 1 and 3: in each case a Lean binder's domain was mapped to an SMT domain
+   that is not its faithful image (too large for `Nat`-fielded datatypes and empty
+   types, effectively too small — a single fixed value — here).
 
 The theory semantics live in `Crush/Translation/Theories.lean` (width/literal
 helpers and the division guards) and in `Translate.lean`'s `bitvecTerm?`/

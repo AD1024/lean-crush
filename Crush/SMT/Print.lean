@@ -82,6 +82,7 @@ mutual
       "(let (" ++ String.intercalate " " bindStr ++ ") " ++ inner ++ ")"
     | .forallE bs body => quantToString "forall" binders bs body
     | .existsE bs body => quantToString "exists" binders bs body
+    | .lam bs body => quantToString "lambda" binders bs body
     | .annot t attrs =>
       "(! " ++ termToString binders t ++ " " ++
         String.intercalate " " (attrs.toList.map (attrToString binders)) ++ ")"

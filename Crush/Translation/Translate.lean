@@ -3,6 +3,7 @@ import Crush.SMT.Syntax
 import Crush.Translation.Monad
 import Crush.Translation.Attr
 import Crush.Translation.Theories
+import Crush.Translation.HOEncoding
 open Lean Meta
 
 /-!
@@ -156,6 +157,18 @@ mutual
     match ← bvWidthOfType? e with
     | some w => return bvSort w
     | none =>
+    -- An arrow type is a *function sort*: an uninterpreted `Fn` sort paired with an
+    -- `app` symbol (higher-order encoding). Emitting it as a plain opaque sort is
+    -- what made function-typed bound variables unsound — see `HOEncoding.lean`.
+    if (← whnf e).isArrow then
+      -- `native` mode uses the solver's own function sort `(-> σ τ)`; the other
+      -- modes introduce an uninterpreted `Fn` sort plus an `app` symbol.
+      if (← TranslateM.getConfig).hoMode == .native then
+        let some shape ← arrowShape? e
+          | throwError "crush: internal — non-arrow in arrow branch: {e}"
+        return nativeArrowSort (← shape.args.mapM emitSort) (← emitSort shape.res)
+      let (sort, _) ← declareArrowSort e
+      return sort
     match e with
     | .const n _ =>
       if ← isSupportedDatatype n then
@@ -163,6 +176,190 @@ mutual
       else
         declareUninterpretedSort e
     | _ => declareUninterpretedSort e
+
+  /-- Declare the `Fn` sort and `app` symbol for an arrow type `σ₁ → … → τ`, once.
+  Returns the sort and its `app` symbol name.
+
+  The `app` symbol is *n*-ary over the flattened argument list rather than a chain
+  of unary applies: `Int → Int → Bool` gets `app (Fn Int Int) Int → Bool` in one
+  step. This keeps the encoding small for the common fully-applied case. Partial
+  application is handled separately (`partialApp?`) by materializing the
+  intermediate closure. -/
+  partial def declareArrowSort (ty : Expr) : TranslateM (SSort × String) := do
+    let key ← arrowKey ty
+    let sortName ← TranslateM.symbolFor key "Fn"
+    let sort := SSort.app (.symb sortName) #[]
+    let aKey ← appKey ty
+    let appName ← TranslateM.symbolFor aKey s!"app_{sortName}"
+    if !(← declaredSort sortName) then
+      markSortDeclared sortName
+      TranslateM.emitCommand (.declSort sortName 0)
+      -- `app` takes the function value plus the flattened argument sorts.
+      let some shape ← arrowShape? ty
+        | throwError "crush: internal — `declareArrowSort` on a non-arrow {ty}"
+      let argSorts ← shape.args.mapM emitSort
+      let resSort ← emitSort shape.res
+      TranslateM.emitCommand (.declFun appName (#[sort] ++ argSorts) resSort)
+      markFunDeclared appName
+    return (sort, appName)
+
+  /-- Emit the extensionality axiom for an arrow sort, on demand and once:
+
+  ```
+  (assert (forall ((a Fn) (b Fn))
+    (=> (forall (x̄) (= (app a x̄) (app b x̄))) (= a b))))
+  ```
+
+  Only needed when an equation between function-typed terms appears. Verified
+  load-bearing: `∀ x, f x = g x ⊢ f = g` is `sat` without it, `unsat` with it. It
+  is a costly axiom (a quantifier alternation), hence emitted lazily rather than
+  for every arrow sort that happens to occur. -/
+  partial def emitExtensionality (ty : Expr) : TranslateM Unit := do
+    let (sort, appName) ← declareArrowSort ty
+    let .app (.symb sortName) _ := sort
+      | return ()
+    if ← declaredFun (extKey sortName) then return
+    markFunDeclared (extKey sortName)
+    let some shape ← arrowShape? ty | return ()
+    let a ← TranslateM.freshSymbol "ext_a"
+    let b ← TranslateM.freshSymbol "ext_b"
+    let mut binders : Array (String × SSort) := #[]
+    let mut argRefs : Array SMT.Term := #[]
+    for argTy in shape.args do
+      let v ← TranslateM.freshSymbol "ext_x"
+      binders := binders.push (v, ← emitSort argTy)
+      argRefs := argRefs.push (.const v)
+    let appA := SMT.Term.app (.symb appName) (#[SMT.Term.const a] ++ argRefs)
+    let appB := SMT.Term.app (.symb appName) (#[SMT.Term.const b] ++ argRefs)
+    let premise := SMT.Term.forallE binders (.symbApp "=" #[appA, appB])
+    TranslateM.emitCommand (.assert
+      (.forallE #[(a, sort), (b, sort)]
+        (.symbApp "=>" #[premise, .symbApp "=" #[.const a, .const b]])))
+
+  /-- Translate a λ-abstraction into a *closure*.
+
+  `fun x => body[x, ȳ]` with captured free variables `ȳ` becomes a closure
+  constructor `clo_k : (sorts of ȳ) → Fn` plus the defining axiom
+
+  ```
+  (assert (forall (ȳ x̄) (= (app (clo_k ȳ) x̄) body[x̄, ȳ])))
+  ```
+
+  Captures are the λ's free fvars that are themselves SMT-bound (quantifier
+  variables); free fvars from the local context are already global symbols and need
+  no parameterization. Keyed on the λ term, so repeated/α-equivalent λs share one
+  closure. -/
+  partial def emitClosure (lam : Expr) : TranslateM SMT.Term := do
+    let lamTy ← whnf (← inferType lam)
+    let (_, appName) ← declareArrowSort lamTy
+    let some shape ← arrowShape? lamTy
+      | throwError "crush: internal — closure for non-arrow type {lamTy}"
+    let key ← closureKey lam
+    -- Captured SMT-bound variables, in a deterministic order.
+    let st ← get
+    let captures := (collectFVars lam).filter fun fid =>
+      st.boundVars.contains fid || st.funVars.contains fid
+    if let some existing := st.atomToName.get? key then
+      -- Already declared: rebuild the application from the recorded captures.
+      let capArgs ← captures.mapM fun fid => emitTerm (.fvar fid)
+      return if capArgs.isEmpty then .const existing
+             else .app (.symb existing) capArgs
+    let cloName ← TranslateM.symbolFor key "clo"
+    let capSorts ← captures.mapM fun fid => do emitSort (← fid.getType)
+    let (arrowSort, _) ← declareArrowSort lamTy
+    TranslateM.emitCommand (.declFun cloName capSorts arrowSort)
+    markFunDeclared cloName
+    -- The defining axiom. Fresh SMT variables for the λ's own parameters; the
+    -- captures are quantified too so the axiom holds for every instantiation.
+    let mut binders : Array (String × SSort) := #[]
+    let mut capRefs : Array SMT.Term := #[]
+    for fid in captures do
+      let nm := (st.boundVars.get? fid).getD ((st.funVars.get? fid).getD "c")
+      let fty ← fid.getType
+      binders := binders.push (nm, ← emitSort fty)
+      capRefs := capRefs.push (.const nm)
+    let cloApp := if capRefs.isEmpty then SMT.Term.const cloName
+                  else SMT.Term.app (.symb cloName) capRefs
+    -- Enter the λ's binders with real fvars so the body becomes closed.
+    let (paramBinders, bodyTerm) ← emitLambdaBody lam shape
+    let lhs := SMT.Term.app (.symb appName)
+      (#[cloApp] ++ paramBinders.map (fun (n, _) => SMT.Term.const n))
+    let axiomBody := SMT.Term.symbApp "=" #[lhs, bodyTerm]
+    let allBinders := binders ++ paramBinders
+    TranslateM.emitCommand (.assert
+      (if allBinders.isEmpty then axiomBody else .forallE allBinders axiomBody))
+    let capArgs ← captures.mapM fun fid => emitTerm (.fvar fid)
+    return if capArgs.isEmpty then .const cloName
+           else .app (.symb cloName) capArgs
+
+  /-- Introduce fresh SMT-named binders for a λ's parameters and translate its body
+  under them. Returns the binders and the translated body. -/
+  partial def emitLambdaBody (lam : Expr) (shape : ArrowShape) :
+      TranslateM (Array (String × SSort) × SMT.Term) := do
+    let mut names : Array String := #[]
+    for _ in shape.args do
+      names := names.push (← TranslateM.freshSymbol "lx")
+    let mut binders : Array (String × SSort) := #[]
+    for (n, argTy) in names.zip shape.args do
+      binders := binders.push (n, ← emitSort argTy)
+    -- Instantiate the λ at fresh fvars bound to the SMT names.
+    let body ← withLambdaFVars lam names shape.args
+    return (binders, body)
+
+  /-- Enter a λ's binders with fresh fvars mapped to the given SMT names, and
+  translate the resulting body. A function-typed parameter is registered as a
+  `funVar` so its applications route through the appropriate `app` symbol. -/
+  partial def withLambdaFVars (lam : Expr) (names : Array String)
+      (argTys : Array Expr) : TranslateM SMT.Term := do
+    let rec go (i : Nat) (e : Expr) (acc : Array Expr) : TranslateM SMT.Term := do
+      if i ≥ names.size then
+        emitTerm (e.instantiateRev acc)
+      else
+        let nm := names[i]!
+        let ty := argTys[i]!
+        withLocalDeclD (Name.mkSimple nm) ty fun x => do
+          let bind (k : TranslateM SMT.Term) : TranslateM SMT.Term :=
+            TranslateM.withBoundVar x.fvarId! nm k
+          -- A function-typed parameter routes through its `app` symbol — except in
+          -- native mode, where it is applied directly and declaring an `Fn` sort
+          -- would leave dead declarations in the script.
+          if (← whnf ty).isArrow && (← TranslateM.getConfig).hoMode != .native then
+            let (_, appSym) ← declareArrowSort ty
+            bind (TranslateM.withFunVar x.fvarId! appSym (go (i + 1) e (acc.push x)))
+          else if (← whnf ty).isArrow then
+            bind (TranslateM.withFunVar x.fvarId! nm (go (i + 1) e (acc.push x)))
+          else
+            bind (go (i + 1) e (acc.push x))
+    -- Peel the λ binders themselves.
+    let body := (← lambdaTelescopeBody lam names.size)
+    go 0 body #[]
+
+  /-- The body of `lam` under `n` peeled λ binders, as an open term with loose
+  bvars (to be instantiated by `withLambdaFVars`). -/
+  partial def lambdaTelescopeBody (lam : Expr) (n : Nat) : TranslateM Expr := do
+    let mut e := lam
+    for _ in [0:n] do
+      match e with
+      | .lam _ _ b _ => e := b
+      | _ =>
+        -- Not syntactically a λ (e.g. a partially-applied constant): η-expand.
+        return e
+    return e
+
+  /-- All free variables of `e`, in first-occurrence order. -/
+  partial def collectFVars (e : Expr) : Array FVarId :=
+    go e #[]
+  where
+    go (e : Expr) (acc : Array FVarId) : Array FVarId :=
+      match e with
+      | .fvar fid => if acc.contains fid then acc else acc.push fid
+      | .app f a => go a (go f acc)
+      | .lam _ t b _ => go b (go t acc)
+      | .forallE _ t b _ => go b (go t acc)
+      | .letE _ t v b _ => go b (go v (go t acc))
+      | .mdata _ b => go b acc
+      | .proj _ _ b => go b acc
+      | _ => acc
 
   /-- Emit a `declare-sort` for an opaque type, once. -/
   partial def declareUninterpretedSort (e : Expr) : TranslateM SSort := do
@@ -301,6 +498,9 @@ mutual
     if let .fvar fid := e then
       if let some vname ← TranslateM.boundVar? fid then
         return .const vname
+    -- Higher-order forms, before the first-order structural path.
+    if let some t ← hoTerm? e then
+      return t
     -- Fast path for the structural logical/theory core.
     match ← structural? e with
     | some t => return t
@@ -323,6 +523,88 @@ mutual
         return t
       -- Default: uninterpreted function/atom applied to translated args.
       defaultApp fn args
+
+  /-- Higher-order forms: λ-abstractions, applications of function-*valued* terms,
+  and equations between function-typed terms. Returns `none` for anything the
+  first-order path should handle.
+
+  This is the entry point for the encoding described in `HOEncoding.lean`, and the
+  fix for the false-`unsat` that arose when a function-typed bound variable was
+  declared as an unrelated `declare-fun`. -/
+  partial def hoTerm? (e : Expr) : TranslateM (Option SMT.Term) := do
+    let mode := (← TranslateM.getConfig).hoMode
+    -- (1) A λ becomes a closure with a defining axiom (or a native `lambda`).
+    if e.isLambda then
+      if mode == .native then
+        return some (← emitNativeLambda e)
+      return some (← emitClosure e)
+    -- (2) An application whose head is a function-typed *bound variable* must route
+    -- through that arrow sort's `app` symbol. Emitting `(f x)` directly would
+    -- declare `f` as a fresh function unrelated to the quantified variable.
+    let fn := e.getAppFn
+    let args := e.getAppArgs
+    if let .fvar fid := fn then
+      if let some appSym ← TranslateM.funVar? fid then
+        if args.isEmpty then
+          -- The bare function value: its SMT name.
+          if let some vname ← TranslateM.boundVar? fid then
+            return some (.const vname)
+          return none
+        let some vname ← TranslateM.boundVar? fid | return none
+        let sargs ← args.mapM emitTerm
+        -- In native mode the variable *is* a function: apply it directly.
+        if mode == .native then
+          return some (.app (.symb vname) sargs)
+        return some (.app (.symb appSym) (#[.const vname] ++ sargs))
+    -- (3) An equation between function-typed terms needs extensionality to be
+    -- provable, and needs both sides encoded as `Fn` values rather than symbols.
+    match_expr e with
+    | Eq ty a b =>
+      if (← whnf ty).isArrow then
+        -- Native mode gets extensionality from the solver itself; the encoded modes
+        -- need it asserted explicitly (verified load-bearing).
+        if mode != .native then
+          emitExtensionality ty
+        return some (.symbApp "=" #[← emitFunValue a, ← emitFunValue b])
+      return none
+    | _ => return none
+
+  /-- A native higher-order `lambda` term, for HO-capable backends. -/
+  partial def emitNativeLambda (lam : Expr) : TranslateM SMT.Term := do
+    let lamTy ← whnf (← inferType lam)
+    let some shape ← arrowShape? lamTy
+      | throwError "crush: internal — native lambda of non-arrow type {lamTy}"
+    let (binders, body) ← emitLambdaBody lam shape
+    return .lam binders body
+
+  /-- Translate a term of function type as an `Fn`-sorted *value* (not as a symbol
+  applied to arguments). A λ becomes its closure; a first-order function constant
+  becomes a closure wrapping it, so that `f = g` compares `Fn` values. -/
+  partial def emitFunValue (e : Expr) : TranslateM SMT.Term := do
+    let e ← instantiateMVars e
+    let mode := (← TranslateM.getConfig).hoMode
+    if e.isLambda then
+      return ← if mode == .native then emitNativeLambda e else emitClosure e
+    if let .fvar fid := e then
+      if let some vname ← TranslateM.boundVar? fid then
+        return .const vname
+    -- A function constant/fvar used as a value: η-expand it so it inhabits the
+    -- function sort. `f` becomes `fun x => f x` — a closure (encoded modes) or a
+    -- native `lambda`.
+    let ty ← whnf (← inferType e)
+    let some shape ← arrowShape? ty | return ← emitTerm e
+    let etaLam ← mkLambdaFVars' shape.args e
+    if mode == .native then emitNativeLambda etaLam else emitClosure etaLam
+
+  /-- η-expand `f` to `fun x₁ … xₙ => f x₁ … xₙ` over the given argument types. -/
+  partial def mkLambdaFVars' (argTys : Array Expr) (f : Expr) : TranslateM Expr := do
+    let rec go (i : Nat) (acc : Array Expr) : TranslateM Expr := do
+      if i ≥ argTys.size then
+        Meta.mkLambdaFVars acc (mkAppN f acc)
+      else
+        withLocalDeclD (Name.mkSimple s!"eta{i}") argTys[i]! fun x =>
+          go (i + 1) (acc.push x)
+    go 0 #[]
 
   /-- If `fn` is a projection of a supported single-constructor datatype, translate
   `fn s` to the SMT selector `<ctor>_sel<i> s`. -/
@@ -585,8 +867,22 @@ mutual
     let vname ← TranslateM.freshSymbol "q"
     -- Enter the binder with a real fvar so `body` becomes a closed Expr, and bind
     -- that fvar to the SMT variable name so occurrences render as `vname`.
+    -- A *function-typed* domain additionally registers the variable as a `funVar`
+    -- so its applications route through the arrow sort's `app` symbol; without
+    -- this the body would declare a fresh function unrelated to the bound
+    -- variable, which is unsound (it over-constrains the hypothesis).
     let inner ← withLocalDeclD (Name.mkSimple vname) ty fun x => do
-      TranslateM.withBoundVar x.fvarId! vname (emitTerm (body.instantiate1 x))
+      let k := emitTerm (body.instantiate1 x)
+      if (← whnf ty).isArrow then
+        -- In native mode the variable is applied directly, so no `app` symbol (and
+        -- no `Fn` sort) is needed; `funVar?` still marks it as function-typed.
+        let appSym ←
+          if (← TranslateM.getConfig).hoMode == .native then pure vname
+          else pure (← declareArrowSort ty).2
+        TranslateM.withBoundVar x.fvarId! vname
+          (TranslateM.withFunVar x.fvarId! appSym k)
+      else
+        TranslateM.withBoundVar x.fvarId! vname k
     let guarded ← guardSort isForall ty vname inner
     if isForall then
       return some (.forallE #[(vname, sort)] guarded)
@@ -626,7 +922,12 @@ mutual
       TranslateM.emitCommand (.declFun name argSorts resSort)
       markFunDeclared name
       emitResultWF name argSorts resTy
-    let sargs ← args.mapM emitTerm
+    -- A *function-typed* argument must be passed as a value of its `Fn` sort, not
+    -- as a first-order symbol: `emitSort` already gave the parameter an `Fn` sort,
+    -- so emitting the bare symbol would be a sort mismatch. `emitFunValue`
+    -- η-expands a named function into a closure.
+    let sargs ← args.mapM fun a => do
+      if ← isFunctionType (← inferType a) then emitFunValue a else emitTerm a
     return .app (.symb name) sargs
 
   /-- Constrain an uninterpreted symbol's *result* to the well-formed subset of its

@@ -177,4 +177,67 @@ theorem p12_symbol_injective {Atom : Type} (symbolOf : Atom → String) :
 
 end Milestone2
 
+/-! ## Obligations from Milestone 3 (the higher-order encoding)
+
+`Doc/PLAN.md` §10b P4 states the headline equisatisfiability theorem abstractly.
+The three properties below are the *concrete* lemmas the shipped
+defunctionalization relies on, each of which the implementation could get wrong
+independently — and one of which corresponds to a bug that was live before M3. -/
+
+section Milestone3
+
+/-- Function values in the encoded world, and the `app` symbol's denotation. -/
+opaque FnSort : Type
+opaque Dom : Type
+opaque Cod : Type
+opaque appOf : FnSort → Dom → Cod
+/-- The closure constructor for a λ, and the λ's Lean meaning. -/
+opaque closureOf : (Dom → Cod) → FnSort
+
+/-- **P4a — the closure defining axiom is faithful.**
+
+For each λ we emit `app (clo ȳ) x = body[x, ȳ]`. This says precisely that `app`
+applied to the closure *is* the function the λ denotes. It is what makes β-reduction
+available to the solver, and hence what lets `g (fun x => x + 1) = 1` be derived
+from `∀ f, g f = f 0`. -/
+theorem p4a_closure_faithful (φ : Dom → Cod) :
+    ∀ x, appOf (closureOf φ) x = φ x := by
+  sorry
+
+/-- **P4b — a function-typed bound variable must be applied via `app`.**
+
+This is the one that was *wrong* before M3, and the reason the bug was a false
+`unsat` rather than mere incompleteness. Translating `∀ (f : σ → τ), P (f a)` must
+quantify over the function sort and route the application through `app`:
+
+```
+(forall ((f Fn)) P (app f a))
+```
+
+Declaring a fresh `f' : σ → τ` and emitting `(forall ((f Fn)) P (f' a))` instead
+leaves `f'` *unrelated to `f`*, so the formula asserts `P` holds for one fixed
+value rather than for all functions — strictly stronger than the source. Any goal
+following from that over-strong reading is wrongly proved.
+
+Stated as: quantification over `FnSort` composed with `app` is equivalent to
+quantification over the Lean function space. -/
+theorem p4b_funvar_via_app (P : Cod → Prop) (a : Dom) :
+    (∀ φ : Dom → Cod, P (φ a)) ↔ (∀ F : FnSort, P (appOf F a)) := by
+  sorry
+
+/-- **P4c — extensionality is necessary and sufficient for function equality.**
+
+`app` alone does not determine equality of `Fn` elements: two closures with
+identical `app` behaviour need not be equal, so `∀ x, f x = g x ⊢ f = g` is
+*satisfiable* (i.e. unprovable) without the axiom, and unsat with it — verified
+against z3 before implementation. The axiom must therefore be emitted whenever an
+equation between function-typed terms appears, and (for completeness of the
+converse direction) must not be strong enough to equate functions that differ
+somewhere. -/
+theorem p4c_extensionality (F G : FnSort) :
+    (∀ x, appOf F x = appOf G x) ↔ F = G := by
+  sorry
+
+end Milestone3
+
 end Crush.Proofs

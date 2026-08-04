@@ -45,7 +45,13 @@ Milestone 1 targets first-order `ALL`/`AUFLIA`-style logics. -/
 def resolveLogic (cfg : Config) : String :=
   match cfg.logic with
   | some l => l
-  | none => "ALL"
+  | none =>
+    -- cvc5 gates its higher-order solver on the *logic-string prefix*: `HO_ALL`
+    -- turns it on, plain `ALL` does not (its `enableEverything` checks for `HO_`).
+    -- lean-smt emits `ALL` and therefore never enables cvc5's HO reasoning. Only
+    -- cvc5 understands the prefix — z3 warns "ignoring unsupported logic" and
+    -- carries on — so we emit it solely when it will be honoured.
+    if cfg.hoMode == .native && cfg.backend == .cvc5 then "HO_ALL" else "ALL"
 
 /-- Translate all facts into assertion commands, each `:named` for unsat-core
 provenance, prepended by the declarations they induce. Returns the full script
@@ -77,6 +83,29 @@ def formatCounterexample (modelText : String) (st : TranslateState) : MessageDat
 
 /-- The core driver, given a resolved goal and config. -/
 def runCrush (goal : MVarId) (cfg : Config) : TacticM Unit := goal.withContext do
+  -- `native` HO mode needs a backend that honours the `HO_` logic prefix. z3 prints
+  -- "ignoring unsupported logic" and then chokes on the function sorts, so fall
+  -- back to the portable encoding rather than emitting a script it cannot read.
+  let cfg :=
+    if cfg.hoMode == .native && !nativeSupported cfg.backend then
+      { cfg with hoMode := .defunctionalize }
+    else cfg
+  if (← getOptions) |> (fun o => crush.ho.mode.get o == HOMode.native) then
+    unless nativeSupported cfg.backend do
+      logWarning m!"crush: `crush.ho.mode native` requires a higher-order capable \
+                    backend (cvc5); `{cfg.backend}` is first-order only. Falling \
+                    back to `defunctionalize`."
+  -- `combinators` is specified but not yet implemented. Say so rather than
+  -- silently behaving as `defunctionalize` — a user who selected it would
+  -- otherwise believe they were exercising the combinator encoding.
+  let cfg :=
+    if cfg.hoMode == .combinators then
+      { cfg with hoMode := .defunctionalize }
+    else cfg
+  if (← getOptions) |> (fun o => crush.ho.mode.get o == HOMode.combinators) then
+    logWarning "crush: `crush.ho.mode combinators` is not implemented yet \
+                (Milestone 3 shipped `defunctionalize` and `native`); using \
+                `defunctionalize`."
   let facts ← collectFacts goal
   let (script, st) ← buildScript cfg facts
   if cfg.traceScript then

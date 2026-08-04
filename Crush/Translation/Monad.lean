@@ -66,6 +66,13 @@ structure TranslateState where
       uninterpreted symbol, so quantified variables render as references rather
       than fresh `declare-fun`s. -/
   boundVars  : Std.HashMap FVarId String := {}
+  /-- Higher-order encoding bookkeeping (`Translation/HOEncoding.lean`).
+
+      A function-typed *bound* variable cannot be a `declare-fun` — it is a value
+      of an `Fn` sort, applied via that sort's `app` symbol. This records, for each
+      such variable, the `app` symbol to route its applications through, keyed the
+      same way as `boundVars`. -/
+  funVars    : Std.HashMap FVarId String := {}
   deriving Inhabited
 
 /-- The translation monad. `MetaM` at the bottom gives us `whnf`, unification,
@@ -137,6 +144,20 @@ def withBoundVar {α : Type} (fvar : FVarId) (name : String) (k : TranslateM α)
 /-- The SMT variable name for `fvar` if it is a bound quantifier variable. -/
 def boundVar? (fvar : FVarId) : TranslateM (Option String) := do
   return (← get).boundVars.get? fvar
+
+/-- Bind `fvar` as a *function-typed* quantifier variable whose applications route
+through the `app` symbol `appSym`, for the duration of `k`. Used by the
+higher-order encoding: such a variable is a value of an `Fn` sort, so
+`f x` becomes `(app f x)` rather than a direct application. -/
+def withFunVar {α : Type} (fvar : FVarId) (appSym : String) (k : TranslateM α) :
+    TranslateM α := do
+  let prev := (← get).funVars
+  modify fun s => { s with funVars := s.funVars.insert fvar appSym }
+  try k finally modify fun s => { s with funVars := prev }
+
+/-- The `app` symbol for `fvar` if it is a function-typed bound variable. -/
+def funVar? (fvar : FVarId) : TranslateM (Option String) := do
+  return (← get).funVars.get? fvar
 
 end TranslateM
 
