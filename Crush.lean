@@ -10,6 +10,7 @@ import Crush.Translation.Attr
 import Crush.Translation.Builtins
 import Crush.Translation.Translate
 import Crush.Solver.Process
+import Crush.Solver.Reconstruct
 import Crush.Frontend.Tactic
 -- Note: `Crush.Proofs.Obligations` (the sorry-backed soundness ledger) is
 -- deliberately NOT imported here — the tactic must not depend on unproven

@@ -3,6 +3,7 @@ import Crush.Frontend.Config
 import Crush.Reify.Collect
 import Crush.Translation.Translate
 import Crush.Solver.Process
+import Crush.Solver.Reconstruct
 import Crush.SMT.Print
 import Crush.SMT.Result
 open Lean Elab Tactic Meta
@@ -22,10 +23,14 @@ The end-to-end path:
 6. discharge: on `unsat`, close the goal per `crush.trust`; on `sat`, report the
    model as a counterexample; on `unknown`/timeout, say so.
 
-Only `trust` (closing with the `crushSorry` axiom) is implemented today.
-Reconstruction — replaying the solver's reasoning as a checkable Lean proof — is
-not yet built; `reconstruct` reports that and `reconstructOrTrust` falls back with
-a warning. Adding it does not change the pipeline shape above.
+Three discharge policies, selected by `crush.trust`:
+
+* `trust` — close with the `crushSorry` axiom. Fast; the solver and its translation
+  are in the trusted computing base.
+* `reconstruct` — replay the verdict as a checked Lean proof using the unsat core
+  (`Crush.tryReconstruct`); error if that fails, so the axiom is never used.
+* `reconstructOrTrust` (default) — replay if possible, else fall back to the axiom
+  with a warning, so the fallback is visible rather than silent.
 -/
 
 namespace Crush
@@ -121,15 +126,30 @@ def runCrush (goal : MVarId) (cfg : Config) : TacticM Unit := goal.withContext d
     let coreIds := parseUnsatCore coreText
     trace[crush.result] "unsat; core facts: {coreIds}"
     match cfg.trust with
-    | .trust | .reconstructOrTrust =>
-      if cfg.trust == .reconstructOrTrust then
-        logWarning "crush: proof reconstruction not yet implemented; \
-                    closing with the `crushSorry` axiom (trusting the solver)."
+    | .trust =>
       let goalType ← goal.getType
       goal.assign (mkApp (mkConst ``crushSorry) goalType)
-    | .reconstruct =>
-      throwError "crush: solver reported `unsat` but reconstruction is not yet \
-                  implemented. Set `crush.trust` to `trust` to accept it."
+    | .reconstruct | .reconstructOrTrust =>
+      -- Solver-as-oracle: the core tells us *which* hypotheses matter, and a Lean
+      -- finishing tactic re-proves the goal from just those. On success the solver
+      -- leaves the trusted computing base — it was only a search heuristic.
+      let coreProofs := coreHypotheses st coreIds
+      trace[crush.result] "reconstructing from core: {coreDescriptions st coreIds}"
+      if ← tryReconstruct goal coreProofs (← finisherTactics) then
+        trace[crush.result] "reconstruction succeeded; no axiom used"
+      else if cfg.trust == .reconstructOrTrust then
+        logWarning m!"crush: solver reported `unsat`, but no finishing tactic could \
+                      replay it from the {coreProofs.size} core \
+                      hypothes{if coreProofs.size == 1 then "is" else "es"}; \
+                      closing with the `crushSorry` axiom (trusting the solver). \
+                      Set `crush.trust` to `reconstruct` to make this an error."
+        let goalType ← goal.getType
+        goal.assign (mkApp (mkConst ``crushSorry) goalType)
+      else
+        throwError m!"crush: solver reported `unsat`, but reconstruction failed — no \
+                      finishing tactic could replay it from the core \
+                      ({coreDescriptions st coreIds}). Set `crush.trust` to \
+                      \"reconstructOrTrust\" to accept the solver's verdict anyway."
   | .sat modelText =>
     throwError m!"crush: the goal is not provable — solver found a {formatCounterexample modelText st}"
   | .unknown reason =>

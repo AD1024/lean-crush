@@ -59,6 +59,42 @@ def backendSpec (b : Backend) : Option BackendSpec :=
       logic := id }
   | .none => none
 
+/-- Split off the first complete parenthesized s-expression, returning it and the
+remaining text. Used to separate a `get-unsat-core` response from the
+`get-proof` output that follows it on the same stream.
+
+Tracks nesting depth and skips over string literals so a `)` inside a quoted string
+cannot end the expression early. Text before the first `(` is dropped (it is
+whitespace or a stray token); if no balanced expression is found, everything is
+returned as the first component so the caller still sees the output. -/
+def splitFirstSexp (s : String) : String × String := Id.run do
+  let cs := s.toList
+  let mut depth : Nat := 0
+  let mut started := false
+  let mut inStr := false
+  let mut acc : List Char := []
+  let mut rest : List Char := []
+  let mut done := false
+  for c in cs do
+    if done then
+      rest := c :: rest
+    else if inStr then
+      acc := c :: acc
+      if c == '"' then inStr := false
+    else if c == '"' then
+      acc := c :: acc; inStr := true
+    else if c == '(' then
+      started := true; depth := depth + 1; acc := c :: acc
+    else if c == ')' then
+      acc := c :: acc
+      depth := depth - 1
+      if started && depth == 0 then done := true
+    else if started then
+      acc := c :: acc
+  let first := String.ofList acc.reverse
+  let remaining := String.ofList rest.reverse
+  if done then (first, remaining) else (s, "")
+
 abbrev SolverProc := IO.Process.Child ⟨.piped, .piped, .piped⟩
 
 /-- Spawn the solver process for the configured backend. -/
@@ -102,8 +138,13 @@ def runQuery (cfg : Config) (script : Array SMT.Command) : MetaM Result := do
         putCmd p .getProof
         let (_, p) ← p.takeStdin
         let rest ← p.stdout.readToEnd
-        -- Split heuristically: unsat core is the first s-expr, proof the rest.
-        return .unsat rest ""
+        -- The core is the *first* s-expression of the response, the proof is
+        -- whatever follows. They must be separated here: a proof term mentions the
+        -- asserted fact names many times over, so scanning the concatenation for
+        -- `crush_fact_<n>` yields the proof's internal references rather than the
+        -- core, complete with duplicates and facts that are not in the core at all.
+        let (core, proof) := splitFirstSexp rest
+        return .unsat core proof
       | "sat" =>
         putCmd p .getModel
         let (_, p) ← p.takeStdin

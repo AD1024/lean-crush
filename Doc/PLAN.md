@@ -205,7 +205,7 @@ Module map (⟢ = built & tested, ▷ = designed, □ = todo):
 | `Crush/Translation/Monomorphize.lean` | poly → HOL saturation | □ |
 | `Crush/Translation/HOEncoding.lean` | λ-elimination (defunc ⟢, native ⟢, comb □) | ⟢ |
 | `Crush/Translation/Translate.lean` | driver: `Expr → SMT.Term` via handlers | ⟢ |
-| `Crush/Solver/Reconstruct.lean` | unsat-core → Lean proof replay | □ |
+| `Crush/Solver/Reconstruct.lean` | unsat-core → Lean proof replay | ⟢ (core-directed), □ (Alethe) |
 | `Crush/Frontend/Tactic.lean` | the `crush` tactic (`trust` mode) | ⟢ |
 
 ---
@@ -528,10 +528,39 @@ named functions — `g (f 1)` with `f : Int → Int → Int` emits a closure wit
 `app(clo, x) = f(1, x)` (tested). What is *not* supported is a partially-applied
 term whose remaining arity is itself higher-order.
 
-**Milestone 4 — Soundness/reconstruction.**
-Unsat-core-driven reconstruction (core → `duper`/`grind`; the "solver-as-oracle"
-model), then Alethe replay for cvc5. Nat-in-constructor soundness fix that
-lean-auto's TODO flags.
+**Milestone 4 — Soundness/reconstruction (core-directed replay DONE; Alethe
+replay not started).**
+`Crush/Solver/Reconstruct.lean` implements the **solver-as-oracle** model, and it
+works: `Test/Reconstruct.lean` shows 12 goals closed with *no* trust axiom
+(`#print axioms` names only Lean's own `propext`/`Classical.choice`/`Quot.sound`),
+including linear arithmetic, propositional logic, UF congruence, quantified UF,
+truncated `Nat` subtraction, bit-vectors, strings, and a **higher-order** goal.
+
+The insight is that the solver's valuable output is not a proof object but a
+*selection*: out of a context with dozens of hypotheses, the unsat core names the
+two or three that matter, which is exactly what a Lean automated tactic cannot
+work out for itself. So we rebuild the goal as the closed implication
+`h₁ → … → hₙ → goal` over only the core hypotheses and hand it to
+`grind`/`omega`/`simp_all`. Restricting the context is what makes the finisher
+tractable — irrelevant arithmetic facts are precisely what makes these tactics time
+out. On success the solver drops out of the trusted computing base entirely; it was
+only a search heuristic.
+
+Fixed along the way: `runQuery` was returning the concatenation of the
+`get-unsat-core` and `get-proof` responses as the "core". Since a proof term
+mentions the asserted fact names many times over, scanning it for `crush_fact_<n>`
+produced duplicates and facts that were not in the core at all (observed:
+`[0,1,3,0,0,0,0,1,1,…]` where the real core was `[0,1,3]`). `splitFirstSexp` now
+separates them, tracking nesting depth and skipping string literals.
+
+Known boundary, pinned by tests: nonlinear arithmetic (`x * x = 4 ∧ x > 0 → x = 2`)
+and finite-domain exhaustiveness (enumeration pigeonhole) are proved by the solver
+but not replayed by the finishers. Under `reconstruct` that is an error; under the
+default `reconstructOrTrust` it warns and falls back to the axiom, so the fallback
+is visible rather than silent.
+
+Not started: Alethe proof replay for cvc5, which would remove the dependence on a
+Lean tactic re-finding the argument and so cover the boundary cases above.
 
 **Milestone 5 — Ergonomics & scale.**
 Monomorphization fuel tuning, premise selection hook (on Lean core
