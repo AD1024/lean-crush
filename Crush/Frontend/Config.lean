@@ -38,7 +38,8 @@ instance : KVMap.Value Backend where
 inductive TrustMode where
   /-- Close the goal with the `crushSorry` axiom (fast, unsound-by-trust). -/
   | trust
-  /-- Attempt to reconstruct a checkable Lean proof; fail if reconstruction fails. -/
+  /-- Attempt to reconstruct a checkable Lean proof; error if reconstruction fails,
+  so the `crushSorry` axiom is never used. The default. -/
   | reconstruct
   /-- Reconstruct if possible, else fall back to trust with a warning. -/
   | reconstructOrTrust
@@ -94,8 +95,12 @@ register_option crush.timeout : Nat := {
 }
 
 register_option crush.trust : TrustMode := {
-  defValue := TrustMode.reconstructOrTrust
-  descr := "How to discharge the goal on `unsat`: trust, reconstruct, or reconstructOrTrust."
+  defValue := TrustMode.reconstruct
+  descr := "How to discharge the goal on `unsat`: trust, reconstruct (default), or \
+            reconstructOrTrust. The default never uses the `crushSorry` axiom — a goal \
+            the finishers cannot replay is an error, so a translation bug that yields a \
+            false `unsat` cannot silently close a false goal. Opt into the axiom fallback \
+            with `reconstructOrTrust`, or skip reconstruction entirely with `trust`."
 }
 
 register_option crush.ho.mode : HOMode := {
@@ -145,7 +150,7 @@ namespace Crush
 structure Config where
   backend        : Backend   := .z3
   timeout        : Nat       := 10
-  trust          : TrustMode := .reconstructOrTrust
+  trust          : TrustMode := .reconstruct
   hoMode         : HOMode    := .defunctionalize
   monoFuel       : Nat       := 512
   monoRounds     : Nat       := 8

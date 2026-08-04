@@ -27,10 +27,14 @@ Three discharge policies, selected by `crush.trust`:
 
 * `trust` — close with the `crushSorry` axiom. Fast; the solver and its translation
   are in the trusted computing base.
-* `reconstruct` — replay the verdict as a checked Lean proof using the unsat core
-  (`Crush.tryReconstruct`); error if that fails, so the axiom is never used.
-* `reconstructOrTrust` (default) — replay if possible, else fall back to the axiom
-  with a warning, so the fallback is visible rather than silent.
+* `reconstruct` (default) — replay the verdict as a checked Lean proof using the
+  unsat core (`Crush.tryReconstruct`); error if that fails, so the axiom is never
+  used. Making this the default means a translation bug that yields a false `unsat`
+  cannot silently close a false goal: it fails reconstruction and errors instead.
+* `reconstructOrTrust` — replay if possible, else fall back to the axiom with a
+  warning, so the fallback is visible rather than silent. Opt in when a goal is
+  genuinely beyond the finishers (nonlinear arithmetic, finite-domain
+  exhaustiveness) and trusting the solver is acceptable.
 -/
 
 namespace Crush
@@ -238,7 +242,7 @@ private def parseHintList (goal : MVarId) (stx : TSyntax ``crushHints) :
         let e ← Term.elabTerm t none
         Term.synthesizeSyntheticMVarsNoPostponing
         let e ← instantiateMVars e
-        let descr := (t.raw.reprint.getD "hint").trim
+        let descr := (t.raw.reprint.getD "hint").trimAscii.toString
         terms := terms.push (e, s!"hint {descr}")
       | _ => throwUnsupportedSyntax
     -- An explicit list without `*` is a *restriction*: only the listed facts.

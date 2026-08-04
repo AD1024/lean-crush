@@ -25,7 +25,10 @@ of its core limitations:
 The `crush` tactic works end-to-end: it collects hypotheses and the negated goal,
 translates them to SMT, runs the backend under a hard timeout, and by default
 reconstructs a kernel-checked Lean proof from the unsat core rather than trusting
-the solver. First-order logic, the `Nat`/`Int`/`BitVec`/`String` theories,
+the solver. The default `crush.trust` policy is `reconstruct`, which **never** uses
+a trust axiom: a goal the finishers cannot replay is an error, so a translation bug
+that yielded a false `unsat` cannot silently close a false goal. First-order logic,
+the `Nat`/`Int`/`BitVec`/`String` theories,
 non-parametric datatypes, and higher-order goals (via defunctionalization, or native
 HO on cvc5) all translate and are tested.
 

@@ -450,10 +450,13 @@ holds the shared naming and shape helpers.
   core.
 - **Discharge policy** (`crush.trust`):
   - `trust` → close with the `crushSorry` axiom, no replay attempted.
-  - `reconstruct` → replay the unsat core into a Lean proof; **fail** if replay
-    fails (sound, no new axioms).
-  - `reconstructOrTrust` (default) → try replay, fall back to trust with a
-    warning.
+  - `reconstruct` (default) → replay the unsat core into a Lean proof; **fail** if
+    replay fails (sound, no new axioms). The default is `reconstruct` precisely so a
+    translation bug that yields a false `unsat` cannot silently close a false goal —
+    it fails reconstruction and errors, rather than reaching for the axiom.
+  - `reconstructOrTrust` → try replay, fall back to trust with a warning; an opt-in
+    for goals genuinely beyond the finishers (nonlinear arithmetic, finite-domain
+    exhaustiveness) where trusting the solver is acceptable.
 - **Reconstruction** (`Crush/Solver/Reconstruct.lean`, built): the **unsat core**
   selects the relevant hypotheses; the goal is rebuilt as the closed implication
   `h₁ → … → hₙ → goal` over only those and handed to `grind`/`omega`/`simp_all`.
@@ -523,7 +526,7 @@ at entry, so this layers on without changing the pipeline.
 |---|---|---|---|
 | `crush.backend` | `z3\|cvc5\|bitwuzla\|none` | `z3` | solver process / translation profile |
 | `crush.timeout` | `Nat` (s) | `10` | hard wall-clock limit (enforced by us) |
-| `crush.trust` | `trust\|reconstruct\|reconstructOrTrust` | `reconstructOrTrust` | how `unsat` discharges the goal |
+| `crush.trust` | `trust\|reconstruct\|reconstructOrTrust` | `reconstruct` | how `unsat` discharges the goal (default never uses the axiom) |
 | `crush.ho.mode` | `defunctionalize\|combinators\|native` | `defunctionalize` | HO elimination strategy |
 | `crush.mono.fuel` | `Nat` | `512` | max monomorphization instances |
 | `crush.mono.rounds` | `Nat` | `8` | max saturation rounds |
