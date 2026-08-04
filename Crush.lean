@@ -7,15 +7,12 @@ import Crush.Reify.Term
 import Crush.Reify.Collect
 import Crush.Translation.Monad
 import Crush.Translation.Attr
+import Crush.Translation.Unfold
 import Crush.Translation.Builtins
 import Crush.Translation.Translate
 import Crush.Solver.Process
 import Crush.Solver.Reconstruct
 import Crush.Frontend.Tactic
--- Note: `Crush.Proofs.Obligations` (the sorry-backed soundness ledger) is
--- deliberately NOT imported here — the tactic must not depend on unproven
--- obligations, or every downstream proof would pick up `sorryAx`. It is a
--- separate `Proofs` lake target, built and audited on its own.
 
 /-!
 # lean-crush

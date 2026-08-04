@@ -3,10 +3,12 @@
 **A Lean 4 ↔ SMT bridge with first-class higher-order support and a
 metaprogrammed, user-extensible translation layer.**
 
-Status: milestones 0–2 complete; 3 and 4 partial (see §9). The `crush` tactic
+Status: milestones 0–2 complete; 3, 4, and 5 partial (see §9). The `crush` tactic
 works end-to-end and, by default, produces kernel-checked proofs rather than
-trusting the solver. This document is the architecture and roadmap; §9 is the
-current status and remaining work.
+trusting the solver. The extension layer covers term handlers, sort handlers, and
+`@[crush_unfold]` auto-unfolding; the hint grammar and datatype monomorphization are
+in. This document is the architecture and roadmap; §9 is the current status and
+remaining work.
 
 ---
 
@@ -136,8 +138,9 @@ the differentiator. What is:
    combinators, or a HO-native backend), not crash.
 2. **User-extensible translation as a first-class metaprogramming API.** A user
    writes a Lean metaprogram — evaluated at elaboration time — that says how a
-   matched `Expr` becomes SMT. The built-in theory mappings are themselves
-   written against this same API (dogfooding).
+   matched `Expr` becomes SMT, and a user handler *overrides* any built-in mapping
+   for the same head (handlers are tried before the structural translator). The
+   extension surface is not second-class.
 3. **Configurable backends and resource limits**, enforced *by us*: solver
    choice, timeout (hard wall-clock kill), extra flags, logic override, trust
    mode.
@@ -194,8 +197,9 @@ Module map (⟢ = built & tested, ▷ = designed, □ = todo):
 | `Crush/SMT/Print.lean` | IR → SMT-LIB text | ⟢ |
 | `Crush/Frontend/Config.lean` | options + `Config` | ⟢ |
 | `Crush/Translation/Monad.lean` | `TranslateM`, name map, provenance | ⟢ |
-| `Crush/Translation/Attr.lean` | `@[crush_translate]` extension | ⟢ |
-| `Crush/Translation/Builtins.lean` | `crush_map` sugar | ⟢ |
+| `Crush/Translation/Attr.lean` | `@[crush_translate]` (term) + `@[crush_translate_sort]` (sort) extensions | ⟢ |
+| `Crush/Translation/Unfold.lean` | `@[crush_unfold]`/`@[crush_defeq]` auto-unfold + relevance filter | ⟢ |
+| `Crush/Translation/Builtins.lean` | `crush_map`/`crush_map_sort` sugar | ⟢ |
 | `Crush/Translation/Theories.lean` | BV/String helpers + div-by-zero guards | ⟢ |
 | `Crush/Solver/Process.lean` | process mgmt, hard timeout, `unknown` | ⟢ |
 | `Crush/SMT/Sexp.lean` | s-expression parser | ⟢ |
@@ -204,11 +208,11 @@ Module map (⟢ = built & tested, ▷ = designed, □ = todo):
 | `Crush/Reify/Collect.lean` | hypothesis & goal collection | ⟢ |
 | `Crush/Reify/Reify.lean` | `Expr → CTerm`, atom allocation, `DTr` provenance | □ |
 | `Crush/Translation/Preprocess.lean` | reduction, skolem prep | □ |
-| `Crush/Translation/Monomorphize.lean` | poly → HOL saturation | □ |
+| `Crush/Translation/Monomorphize.lean` | poly *lemma* → HOL saturation (datatype mono is in `Translate.lean`, done) | □ |
 | `Crush/Translation/HOEncoding.lean` | HO encoding helpers (defunc ⟢, native ⟢, combinators □) | ⟢ |
 | `Crush/Translation/Translate.lean` | driver: `Expr → SMT.Term` via handlers | ⟢ |
 | `Crush/Solver/Reconstruct.lean` | unsat-core → Lean proof replay | ⟢ core-directed; □ Alethe |
-| `Crush/Frontend/Tactic.lean` | the `crush` tactic (`trust` mode) | ⟢ |
+| `Crush/Frontend/Tactic.lean` | the `crush` tactic + hint grammar (`[…] u[…] d[…]`) | ⟢ |
 
 ---
 
@@ -248,6 +252,57 @@ crush_map Nat.add => "+"
 crush_map_sort Nat => "Int"
 ```
 
+**Sort handlers.** A term handler maps an applied *constant*; a
+`@[crush_translate_sort]` handler maps a Lean *type* to an SMT sort, with the same
+`TranslationCtx` (the type's head and arguments in `fn`/`args`, `emitSort` to recurse).
+This is what lets a user retarget a whole type to a *theory* sort rather than an
+uninterpreted one — the motivating case being a finite/total map encoded as SMT's
+`(Array K V)`, with `get`/`set` handlers emitting `select`/`store`:
+
+```lean
+@[crush_translate_sort]
+def amapSort : SortHandler := fun ctx => do
+  let .const ``AMap _ := ctx.fn | return none
+  let #[k, v] := ctx.args | return none
+  return some (.app (.symb "Array") #[← ctx.emitSort k, ← ctx.emitSort v])
+```
+
+Without a sort hook a user could remap a type's operations but not the type itself,
+so `(select m k)` would be applied to a datatype-sorted `m` and the script would be
+ill-sorted. Both hooks are guarded by a cheap "any registered?" check
+(`hasTranslationHandlers`/`hasSortHandlers`) so the common no-handler case skips
+resolution on the `emitTerm`/`emitSort` hot paths. Demonstrated end-to-end in
+`Test/ArrayTheory.lean` (the array read-over-write axioms hold for the user type
+purely because the encoding routed it into the Array theory).
+
+**Automatic unfolding — `@[crush_unfold]` / `@[crush_defeq]`.** A recursive definition
+`crush` must reason about needs its equation lemmas as facts. Rather than spelling out
+`u[f]`/`d[f]` on every call (§7), mark the definition once — like `@[simp]` — and its
+equations are folded into every query automatically:
+
+```lean
+@[crush_unfold] def add : N → N → N | Z, y => y | S x, y => S (add x y)
+theorem add_succ (x y : N) : add x (S y) = S (add x y) := by
+  induction x with | Z => crush | S x ih => crush [ih]   -- no u[add] needed
+```
+
+Two design points, both load-bearing:
+- **Relevance filtering** (`relevantAutoUnfoldLemmas`). A recursive function's equations
+  are *quantified* axioms; adding unrelated ones invites solver instantiation loops
+  (the divergence documented for guarded recursive datatypes). So a marked definition
+  contributes only when reachable from the goal/hypotheses, transitively through the
+  marked set. A `@[crush_unfold]` the query never mentions costs nothing.
+- **Seed instantiation.** Relevance seeds are the constants in the goal and hypothesis
+  types, read *after* `instantiateMVars` — because after a tactic like `induction` the
+  goal type carries unassigned metavariables that `getUsedConstants` will not traverse,
+  so the recursive function under proof would otherwise be invisible to relevance and
+  its equations silently omitted (a bug caught during development, since it makes
+  auto-unfold appear to work outside `induction` but fail inside it).
+
+`set_option crush.autoUnfold false` disables the mechanism; explicit `u[…]`/`d[…]` still
+work. The attributes live in `Crush/Translation/Unfold.lean`; tested in
+`Test/AutoUnfold.lean` and used throughout `Test/TIP.lean`.
+
 ### 4.2 Why elaboration-time metaprograms
 
 The user's requirement — "the meta-program should be able to be evaluated at
@@ -261,23 +316,50 @@ idiom) when the tactic runs. This means:
 - they compose across files/imports (the extension is persistent);
 - they have the full `MetaM` toolbox available.
 
-### 4.3 Built-ins are handlers too
+### 4.3 User handlers override built-ins
 
 The core theory mappings (Bool, `=`, `∧/∨/¬/→`, Nat→Int with well-formedness
-side-conditions, Int, BitVec, String, datatypes) will be registered as
-`@[crush_translate]` handlers at low/default priority in
-`Crush/Translation/Builtins.lean`. User handlers at `high` priority thus override
-built-ins for the same constant. There is no privileged built-in path — anything
-the built-ins can express, a user can.
+side-conditions, Int, BitVec, String, datatypes) live in the **structural
+translator** (`Crush/Translation/Translate.lean`), not as handlers — several need
+type-directed dispatch (`bitvecTerm?`, `stringTerm?`) that the head-constant handler
+shape does not express, and inlining them is simpler and faster than routing every
+built-in through `evalConst`.
+
+What matters for extensibility is the *dispatch order*, and it delivers the same
+guarantee a dogfooded design would: `emitTerm` tries registered `@[crush_translate]`
+handlers (highest priority first) **before** the structural translator, so a user
+handler for any constant — including one the built-ins already handle — takes
+precedence. There is no privileged built-in path in the sense that matters: anything
+a built-in maps, a user can remap. (The earlier plan to register built-ins *as*
+handlers, "dogfooding" the API, was dropped; it bought nothing over the ordering
+guarantee and cost a `evalConst` indirection per built-in.)
 
 ---
 
-## 4b. Monomorphization design (learning from lean-auto's scars)
+## 4b. Monomorphization
 
-Layer 3 instantiates polymorphic/dependent facts into universe-monomorphic HOL
-via a saturation loop, as lean-auto does. A close reading of lean-auto's
-`Monomorphization.lean` surfaced four concrete traps we design around from the
-start rather than patching later:
+Two distinct things go under this name, and lean-crush has one of them:
+
+**Datatype monomorphization — *done*.** A fully-applied parametric type
+(`Option Int`, `Int × Int`, `List Bool`) is emitted as a real SMT datatype at that
+instantiation. `isSupportedDatatypeApp` checks the applied type is ground and its
+constructor fields — instantiated at the type arguments — are all translatable;
+`declareDatatype n typeArgs` keys the SMT sort on the head *and* its arguments (so
+`Option Int` and `Option Bool` are distinct sorts, and same-named constructors across
+instantiations never collide), instantiates each constructor's field types via
+`instantiateForall`, and recurses at the same instantiation for nested/recursive
+occurrences. `needsWFGuard`/`wfCondition` compose the `Nat` `≥0` guard through type
+parameters, so `Option Nat` is not freely generated over negative `Int`s. Type-class
+inductives and function/proof-typed fields stay opaque. Tested in
+`Test/Monomorphize.lean`.
+
+**Lemma-instantiation saturation — *design, not built*.** The rest of this section
+is the plan for the harder loop: instantiating a *polymorphic hypothesis*
+(`∀ α, ∀ x : α, P α x`) at the ground types a query mentions, à la lean-auto's
+`Monomorphization.lean`. This is what a goal needing a polymorphic lemma specialized
+to `Int` requires, and it is not yet implemented (`crush.mono.fuel`/`rounds` are
+registered but inert). A close reading of lean-auto's pass surfaced four concrete
+traps to design around from the start rather than patch later:
 
 1. **Instantiation reach must not be structurally capped at the first
    hypothesis.** lean-auto's `LemmaInst.ofLemmaHOL` only makes the *leading*
@@ -384,22 +466,35 @@ holds the shared naming and shape helpers.
 
 ## 7. Frontend / tactic
 
-**As built**, the tactic takes no arguments: `crush` uses every local `Prop`
-hypothesis and the negated goal. All behaviour is governed by `set_option crush.*`
-(§8), read once into `Config` at entry.
+**As built**, the tactic takes the hint grammar below; bare `crush` still uses every
+local `Prop` hypothesis and the negated goal. All other behaviour is governed by
+`set_option crush.*` (§8), read once into `Config` at entry.
 
-**Planned grammar** (§9 M5 item 1, and the most visible current gap — a user cannot
-today point `crush` at a lemma that is not already a hypothesis):
+**Hint grammar** (§9 M5 item 1 — *done*):
 
 ```
-crush [h₁, …, hₙ] [*] [* db] (u[c₁,…]) (d[c₁,…])
+crush [h₁, …, hₙ, *] (u[c₁,…]) (d[c₁,…])
 ```
 
-- `[…]` explicit facts (terms), `*` = all local hypotheses, `* db` = a named
-  lemma database, `u[…]` unfold, `d[…]` definitional equalities.
-- The tactic: collect → preprocess → monomorphize → HO-encode → translate
-  (handlers) → solve → discharge, with `trace.*` classes at each boundary and
-  the full script available via `crush.trace.script` / `crush.save`.
+- `[…]` an explicit fact list. A `term` element asserts that lemma or hypothesis —
+  this is how you point `crush` at a lemma **not** in the local context, which was
+  the most visible gap when the tactic was argumentless. A `*` element additionally
+  sweeps in all local hypotheses; an explicit list *without* `*` restricts to
+  exactly the listed facts (plus the goal), matching Sledgehammer/`auto`.
+- `u[c₁,…]` unfold: add each constant's equation lemmas (`getEqnsFor?`, falling back
+  to its unfold equation).
+- `d[c₁,…]` definitional equalities: add each constant's unfold equation
+  (`getUnfoldEqnFor? (nonRec := true)`, the `f x = body` form).
+- Parsing/collection lives in `Crush/Frontend/Tactic.lean` (`parseHintList`,
+  `parseUOrDs`) and `Crush/Reify/Collect.lean` (`Hints`, `collectFacts`); tested in
+  `Test/Hints.lean`.
+- The tactic pipeline: collect → HO-encode → translate (handlers) → solve →
+  discharge, with `trace.*` classes at each boundary and the full script available
+  via `crush.trace.script` / `crush.save`. (Preprocess/monomorphize are not yet in
+  the chain — see §9 M5.)
+
+*Not yet in the grammar:* a `* db` named lemma database (there is no `LemDB` yet) and
+premise selection.
 
 **Two hard lessons from lean-auto's frontend that shape ours:**
 - **Report the pipeline, always.** A bare "failed to find proof" that never says
@@ -436,11 +531,13 @@ at entry, so this layers on without changing the pipeline.
 | `crush.additionalArgs` | `String` | `""` | extra solver flags |
 | `crush.save` | `String` | `""` | write script to path |
 | `crush.trace.script` | `Bool` | `false` | log generated script |
+| `crush.autoUnfold` | `Bool` | `true` | fold `@[crush_unfold]`/`@[crush_defeq]` equations of relevant defs into each query |
 
 Two notes. Enum-valued options take a **string literal**
 (`set_option crush.trust "trust"`), since that is how `KVMap.Value` round-trips
-them. And `crush.mono.*` are registered but inert until monomorphization exists
-(§9 M5).
+them. And `crush.mono.*` are registered but inert: datatype monomorphization (§4b) is
+type-directed and needs no fuel, and the lemma-instantiation loop those knobs bound is
+not built yet (§9 M5).
 
 ---
 
@@ -457,16 +554,18 @@ parsing, fact collection, the structural translator, and the `crush` tactic.
 
 **M2 — Theories. done.**
 - `Nat`→`Int` with `≥0` well-formedness constraints and `ite`-truncated `Nat.sub`.
-- Datatypes: non-parametric inductives including self-recursive ones, with
-  distinctness, injectivity, exhaustiveness, and selectors.
+- Datatypes: non-parametric inductives including self-recursive ones, **and
+  fully-applied parametric ones** (`Option Int`, `Int × Int`, `List Bool`) via
+  datatype monomorphization (below), with distinctness, injectivity, exhaustiveness,
+  and selectors. Distinct instantiations get distinct sorts; a `Nat` reached through
+  a type parameter (`Option Nat`) still picks up its `≥0` guard.
 - Bit-vectors at statically-known widths: arithmetic, bitwise, shifts, rotations,
   unsigned/signed comparisons, `concat`/`extract`/`setWidth`/`signExtend`,
   `toNat`/`toInt`/`ofNat`/`ofInt`, and guarded division-by-zero.
 - Strings: `str.++`/`str.len`/`str.prefixof` with correct literal escaping.
 - `Int` div/mod (Euclidean, matching SMT-LIB) with an exactness guard at zero.
 
-*Remaining:* parametric datatypes (`Prod`/`Option`/`List`) — needs
-monomorphization; pinned as expected-to-fail tests in `Test/Regression.lean`.
+Tested in `Test/Theories.lean`, `Test/Regression.lean`, `Test/Monomorphize.lean`.
 
 **M3 — Higher-order. partial.** `defunctionalize` (default) and `native` are done;
 `combinators` is not.
@@ -496,18 +595,39 @@ finishers cannot replay — nonlinear arithmetic and finite-domain exhaustivenes
 both pinned in `Test/Reconstruct.lean` — by replaying the solver's own inferences
 instead of depending on a Lean tactic to re-find the argument.
 
-**M5 — Ergonomics & scale. todo.** In rough priority order:
-1. The hint grammar (§7): `crush [h₁, …] [*] (u[…]) (d[…])`. The tactic currently
-    takes no arguments, so a user cannot point it at a lemma that is not already a
-    hypothesis. This is the most visible gap for anyone using the tool.
-2. Monomorphization (§4b), which also unlocks M2's parametric datatypes.
-3. Premise selection on Lean core `LibrarySuggestions`.
-4. Portfolio backend, per-call config syntax, richer model printing, docs.
+**M5 — Ergonomics & scale. partial.** In rough priority order:
+1. The hint grammar (§7): `crush [h₁, …, *] (u[…]) (d[…])`. **done** — a user can now
+    point `crush` at a lemma that is not in context, restrict to an explicit fact
+    list, and unfold definitions. Tested in `Test/Hints.lean`.
+2. Monomorphization (§4b). **Datatype monomorphization done** — fully-applied
+    parametric types are emitted as real SMT datatypes, unlocking M2's parametric
+    datatypes. The *lemma*-instantiation saturation loop (instantiating a polymorphic
+    hypothesis `∀ α, …` at the ground types a query mentions) is **not** built; a
+    polymorphic fact still translates as-is, so a goal needing an instantiated
+    polymorphic lemma is not yet reached. See §4b.
+3. Auto-unfold attributes (§4). **done** — `@[crush_unfold]`/`@[crush_defeq]` fold a
+    marked definition's equations into every relevant query, so recursive functions in
+    a hammer-in-the-loop proof need no per-call `u[…]` hint. Relevance-filtered to avoid
+    flooding the solver. Tested in `Test/AutoUnfold.lean`, exercised in `Test/TIP.lean`.
+4. Sort handlers (§4.1). **done** — `@[crush_translate_sort]` lets a user retarget a
+    type to a theory sort (e.g. a map to SMT `(Array K V)`); `Test/ArrayTheory.lean`.
+5. Premise selection on Lean core `LibrarySuggestions`.
+6. Portfolio backend, per-call config syntax, richer model printing, docs.
 
-**M6 — Verified soundness. partial.** See §10b for the ledger. The obligations
-that can be stated concretely today are **proved** (`Crush/Proofs/Obligations.lean`
-builds with no `sorry`); the per-pass equivalence theorems are stated as named
-propositions to discharge once the passes and the denotational semantics exist.
+**M6 — Verified soundness. not started (out of scope for now).** An earlier
+`Crush/Proofs/` tree stated per-pass equivalence/equisatisfiability obligations, but
+it never contained a soundness proof of the translation: there was no
+`SMT.Term`→`Prop` interpretation, so the end-to-end statement "solver `unsat` ⇒ the
+Lean goal holds" could not even be stated. The proved content was supporting facts
+(the `Nat`→`Int` guard is exact; Lean's division/modulus boundary values) and trivial
+composition lemmas — none a statement about the translator. That tree has been
+**removed** so the repository does not advertise a verified-soundness story it does
+not have. Today's soundness guarantee is entirely the `reconstruct` discharge policy
+(§6): on the default path the solver's verdict is replayed into a kernel-checked Lean
+proof, so the translator and solver are search heuristics, not part of the trusted
+base. Reviving a machine-checked ledger would mean building the interpretation layer
+and routing the pipeline through a total IR — see the note at the end of §10b for the
+prerequisites — and is deferred.
 
 ---
 
@@ -565,91 +685,45 @@ the query never touches the guarded field would recover most of it.
 came out differently than the design assumed. New theory support should follow the
 same probe-first discipline.
 
-## 10b. Formal proof obligations (verified soundness roadmap)
+## 10b. Machine-checked soundness (deferred)
 
-§10's obligations are discharged by *testing* plus *trusting the solver*. The
-long-term goal is that each pass carries a machine-checked meaning-preservation
-theorem, so a chain of passes composes into an end-to-end guarantee and the trust
-surface shrinks to the solver's verdict plus the kernel. This is the ledger.
+§10's obligations are discharged by *testing* plus the `reconstruct` discharge policy
+(§6). There is **no** machine-checked meaning-preservation proof of the translation,
+and the repository no longer pretends otherwise: an earlier `Crush/Proofs/` tree stated
+per-pass `Equivalence`/`Equisat` obligations, but it could not state the theorem that
+matters — "solver `unsat` ⇒ the Lean goal holds" — because there was no interpretation
+mapping an `SMT.Term` back to a Lean `Prop`. Its proved content was real but beside the
+point (the `Nat`→`Int` guard is exact; Lean's division/modulus boundary values; trivial
+composition lemmas), and its higher-order "proofs" were tautologies that defined both
+sides of the property equal and closed by `rfl`. The whole tree has been removed.
 
-A ✅ means **a Lean proof exists in `Crush/Proofs/Obligations.lean`**, not that a
-test passes. That module builds with **no `sorry`**.
+Should a verified ledger be revived, the prerequisites — in dependency order — are:
 
-Each pass `T` owes one of two strengths:
-- **Equivalence** — `∀ I, ⟦Γ⟧_I ↔ ⟦T Γ⟧_I`: the pass neither loses nor invents
-  models. For normalization and lowering.
-- **Equisatisfiability** — `(∃ I, ⟦Γ⟧_I) ↔ (∃ I', ⟦T Γ⟧_I')`: `T Γ` is unsat iff
-  `Γ` is. The correct (weaker) statement whenever a pass introduces symbols a model
-  must interpret, since you cannot demand the *same* `I`.
+1. **An interpretation `⟦·⟧ : SMT.Term → Prop`** (and `CSort → Type`), the analogue of
+   lean-auto's `LamWF.interp`. Without it no obligation can be *stated*, only named.
+2. **Route the pipeline through the pure `CTerm` IR** (`Reify/Term.lean` exists but is
+   dead code; the live path is `Expr → SMT.Term` directly). A proof about a `CTerm`
+   layer is worthless if nothing runs that layer.
+3. **Make the post-reification passes total.** A `partial def` has no unfold equations
+   and is opaque to `decide`/`simp` (§10c), so nothing can be proved about it. This is
+   feasible for passes over the finite IR, not for the `whnf`-driven reifier itself.
+4. **A higher-order value domain** to state defunctionalization (P4) with `app`/`clo`
+   *uninterpreted*, so the closure axiom does real work rather than holding by `rfl`.
 
-### Status
-
-| # | Pass | Owes | Status |
-|---|---|---|---|
-| P1 | Preprocessing (β/η, `let`/proj) | equivalence, definitional | 🟡 `P1_obligation` stated; pass not built |
-| P2 | `Nat`→`Int` embedding | equivalence, per operator | 🟡 subsumed by P10/P11 for the parts that exist |
-| P3 | Monomorphization | equivalence | 🟡 stated; pass not built |
-| **P4** | **Defunctionalization** | **equisatisfiability** | 🟡 **core ✅** — `p4a`/`p4b`/`p4c` prove the emitted axioms hold in a canonical model where quantification over the function sort coincides with the Lean function space. Lifting to whole fact lists needs the semantics |
-| P5 | Combinator encoding | equisatisfiability | 🔴 mode not implemented |
-| P6 | Skolemization | equisatisfiability | 🔴 pass not built |
-| P7 | Reification `Expr → CTerm` | equivalence | 🔴 pass not built |
-| P8 | `CTerm → SMT.Term` lowering | equivalence | 🔴 blocks P11's SMT half |
-| P9 | Inhabitation discharge | side-condition | 🟡 enforced by refusal (§10.1), not yet proven |
-| **P10** | **Datatype well-formedness guard** | equivalence | ✅ **proved** for the `Nat`→`Int` case implemented (`p10_wf_exact`), plus `p10_guarded_quantifier`/`p10_guarded_existential` pinning the `⇒`-vs-`∧` shapes |
-| P11 | Theory-operator agreement | equivalence, per operator | 🟡 **Lean side ✅** (9 theorems: `bv_udiv_zero`, `int_div_zero`, `nat_sub_truncates`, `int_div_euclidean`, …). SMT side needs P8 |
-| P12 | Symbol allocation injectivity | side-condition | 🟡 stated |
-
-Also proved: `equivalence_comp`, `equivalence_id`, `equisat_of_equivalence` — the
-composition lemmas that make discharging obligations *per pass* worthwhile instead
-of proving one monolithic theorem.
-
-### A lesson about stating obligations
-
-The first draft stated P1–P8 as `theorem … : Equivalence T := by sorry` over a
-`variable` pass. Those statements are **false**, not merely unproven: universally
-quantified over all `T`, they claim every function on fact lists preserves meaning
-(refuted by `T := fun _ => []`). P4a–P4c and P10 had the same defect — quantified
-over an arbitrary `app`, or stated over an opaque predicate, so unprovable by
-construction.
-
-The `sorry`s were hiding falsehoods rather than tracking open work. Attempting the
-proofs is what exposed this. Obligations are therefore now either *proved against a
-concrete construction* (P4a–c, P10, P11's Lean half) or recorded as *named
-propositions to discharge for a specific pass* (`def P4_obligation (pass) : Prop`),
-never as `sorry`-backed universal claims.
-
-### P4 in detail
-
-The pass introduces, for each arrow sort `σ → τ` occurring applied: a sort
-`Fn σ τ`, an uninterpreted `app : Fn σ τ → σ → τ`, and per λ-closure
-`λx. body[x, ȳ]` a constructor `clo : ȳ → Fn σ τ` with axiom
-`∀ ȳ x, app (clo ȳ) x = body[x, ȳ]`.
-
-The standard applicative-encoding argument: forward, extend any model of `Γ` by
-interpreting `Fn` as the function graph and `app` as application — the closure
-axioms then hold by β. Backward, read Lean functions off a model of the encoding via
-`fun x => app (clo ȳ) x`; the axioms force these to be the intended bodies.
-
-Two subtleties the proof must respect, both already reflected in the implementation:
-**extensionality** (two closures with equal `app` behaviour need not be equal `Fn`
-elements without the axiom — which is why the statement is equisatisfiability, not
-model isomorphism) and **capture completeness** (the free-variable list `ȳ` must be
-complete, or the defining axiom is unsound).
-
-Until P4 is fully ✅, `defunctionalize` is trusted, and a `sat` result from the
-*encoded* problem should not be reported as a genuine Lean counterexample without
-checking that the closure axioms did not themselves produce the model.
+With (1)–(4) the end-to-end argument mirrors lean-auto's `LamThmValid.getFalse`. This
+is essentially rebuilding the verified-checker infrastructure §1 deliberately dropped,
+so the higher-leverage investment is instead **Alethe proof replay** (M4), which makes
+the *default* discharge path kernel-checked end-to-end. Both are out of scope for the
+current feature-completion work.
 
 ## 10c. Totality and termination
 
 `partial def` defines a function via `Inhabited` rather than by recursion. It
 type-checks, but it has no unfold equations and is opaque to `decide`/`simp`/`rfl`, so
-**nothing can be proven about it**. That is disqualifying for any code a proof depends
-on, and it bit us concretely: the first version of `Proofs/Semantics.lean` used
-`partial`, which blocked `decide` and left the semantics unable to refute a false
-claim — the very property it existed to provide.
+**nothing can be proven about it**. That is disqualifying for any code a proof would
+depend on, and it is a prerequisite (§10b item 3) for any future verified ledger.
 
-Everything outside the translator is now total, so `termToString.eq_def` and friends
+Everything outside the translator is total, so `termToString.eq_def` and friends
 exist. Three obstacles came up, each needing a different technique:
 
 | Obstacle | Where | Fix |
@@ -672,9 +746,9 @@ than by the syntax of the argument. In general `whnf` on a user definition need 
 terminate; Lean bounds it with `maxRecDepth`, not a proof. This is why Lean's own
 elaborator is written the same way.
 
-That is not a soundness gap: these are metaprograms that *construct* SMT terms, and
-nothing proves theorems about them. What is proven concerns the terms they emit, via
-the total evaluator in `Proofs/Semantics.lean`.
+That is not a soundness gap under the `reconstruct` policy: these are metaprograms that
+*construct* SMT terms, and a closed goal is re-proved from the unsat core by a Lean
+tactic, so the translator never enters the trusted base.
 
 ## 11. Testing strategy
 
@@ -685,10 +759,17 @@ a passing test; the build must be clean and produce **no `sorry`**.
 |---|---|
 | `Smoke.lean` | IR printing, handler registration via both surfaces, config parse, a live `z3` round-trip |
 | `FirstOrder.lean` | the basic end-to-end path: arithmetic, propositional logic, UF congruence |
+| `Extension.lean` | user `@[crush_translate]` handlers *fire* and *override* built-ins (the §4.3 contract), plus the `crush_map` sugar |
+| `ArrayTheory.lean` | `@[crush_translate_sort]` + term handlers retargeting a user map type to SMT's `(Array K V)` theory (`select`/`store`); the array axioms then hold |
+| `Hints.lean` | the hint grammar (§7): explicit lemma hints, `*`, list-as-restriction, `u[…]`/`d[…]` unfolding, and the malformed-hint diagnostics |
+| `AutoUnfold.lean` | `@[crush_unfold]`/`@[crush_defeq]`: the attribute fires without a hint, relevance filtering, transitive reach, `crush.autoUnfold` gating, misuse errors |
 | `Theories.lean` | `Nat`/`Int`, datatypes (incl. recursive), bit-vectors, strings, and the §10 soundness regressions |
+| `Monomorphize.lean` | parametric datatypes: distinct instantiations, nesting, `Nat`-through-parameter guard, selectors/η |
+| `MonoStress.lean` | recursive parametric `Tree`, two-parameter `Map`, nested `FSet`, and all of these combined with higher-order functions |
 | `HigherOrder.lean` | λ-arguments, captures, η-expansion, extensionality, partial application |
 | `Regression.lean` | an independent corpus migrated from another Lean SMT bridge, plus cases derived from bugs reported against it |
 | `Reconstruct.lean` | `#print axioms` assertions — reconstructed theorems must not name `crushSorry` — and the replay boundary |
+| `TIP.lean` | inductive theorems from the TIP `prod` benchmarks, proved hammer-in-the-loop (manual `induction`, `crush` per case, `@[crush_unfold]` definitions) |
 
 **Negative tests use `#guard_msgs`, not `sorry`.** A goal that is *false* must be
 rejected, and the guard pins the rejection message, so a regression that let `crush`

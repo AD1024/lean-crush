@@ -87,8 +87,9 @@ def formatCounterexample (modelText : String) (st : TranslateState) : MessageDat
     lines := lines.push m!"  {origin} := {e.value}"
   return m!"counterexample:{indentD (MessageData.joinSep lines.toList "\n")}"
 
-/-- The core driver, given a resolved goal and config. -/
-def runCrush (goal : MVarId) (cfg : Config) : TacticM Unit := goal.withContext do
+/-- The core driver, given a resolved goal, config, and collected hints. -/
+def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit :=
+  goal.withContext do
   -- `native` HO mode needs a backend that honours the `HO_` logic prefix. z3 prints
   -- "ignoring unsupported logic" and then chokes on the function sorts, so fall
   -- back to the portable encoding rather than emitting a script it cannot read.
@@ -111,7 +112,7 @@ def runCrush (goal : MVarId) (cfg : Config) : TacticM Unit := goal.withContext d
   if (← getOptions) |> (fun o => crush.ho.mode.get o == HOMode.combinators) then
     logWarning "crush: `crush.ho.mode combinators` is not implemented yet \
                 (`defunctionalize` and `native` are); using `defunctionalize`."
-  let facts ← collectFacts goal
+  let facts ← collectFacts goal hints cfg.autoUnfold
   let (script, st) ← buildScript cfg facts
   if cfg.traceScript then
     logInfo m!"crush SMT script:{indentD (scriptToString script)}"
@@ -157,16 +158,106 @@ def runCrush (goal : MVarId) (cfg : Config) : TacticM Unit := goal.withContext d
     throwError m!"crush: solver returned `unknown` ({reason}). \
                   Try increasing `crush.timeout` or adding hypotheses."
 
-/-- `crush` tactic. Takes no arguments; uses all local `Prop` hypotheses. -/
-syntax (name := crushTac) "crush" : tactic
+/-! ## Tactic syntax and the hint grammar
+
+```
+crush [h₁, …, hₙ, *] u[f₁, …] d[g₁, …]
+```
+
+* bare `crush` — assert every local `Prop` hypothesis plus the negated goal;
+* `[…]` — an explicit hint list. A `term` element is a lemma or hypothesis to
+  assert (this is how you point `crush` at a lemma that is *not* in context — the
+  gap that made the tactic argumentless before). A `*` element additionally sweeps
+  in all local hypotheses. An explicit list *without* `*` restricts to exactly the
+  listed facts (plus the goal), matching Sledgehammer/`auto`;
+* `u[f, …]` — unfold: add each `f`'s equation lemmas (`getEqnsFor?`);
+* `d[f, …]` — definitional equality: add each `f`'s unfold equation
+  (`getUnfoldEqnFor?`, the `f x = body` form).
+
+The grammar mirrors lean-auto's so the muscle memory transfers. -/
+
+syntax crushHintElem := term <|> "*"
+syntax crushHints := ("[" crushHintElem,* "]")?
+syntax crushUnfolds := "u[" ident,* "]"
+syntax crushDefeqs := "d[" ident,* "]"
+syntax crushUOrD := crushUnfolds <|> crushDefeqs
+
+/-- `crush` tactic. See the module comment for the hint grammar. -/
+syntax (name := crushTac) "crush" crushHints (ppSpace crushUOrD)* : tactic
+
+/-- Resolve an `ident` hint to the constant name it names, erroring helpfully. -/
+private def resolveHintConst (i : TSyntax `ident) : TacticM Name := do
+  match ← Term.resolveId? i with
+  | some (.const n _) => return n
+  | some e =>
+    match e.getAppFn with
+    | .const n _ => return n
+    | _ => throwError "crush: `{i}` does not name a constant to unfold."
+  | none => throwError "crush: unknown identifier `{i}`."
+
+/-- Gather the equation-lemma names requested by all `u[…]`/`d[…]` groups. `u[f]`
+adds `f`'s full equation set; `d[f]` adds its single unfold equation. -/
+private def parseUOrDs (stxs : Array (TSyntax ``crushUOrD)) : TacticM (Array Name) := do
+  let mut names : Array Name := #[]
+  for stx in stxs do
+    match stx with
+    | `(crushUOrD| u[ $[$is],* ]) =>
+      for i in is do
+        let n ← resolveHintConst i
+        match ← getEqnsFor? n with
+        | some eqns => names := names ++ eqns
+        | none =>
+          -- No equation lemmas (e.g. a non-recursive `def`): fall back to the
+          -- unfold equation (`nonRec` so non-recursive defs are covered too).
+          match ← getUnfoldEqnFor? n (nonRec := true) with
+          | some eqn => names := names.push eqn
+          | none => throwError "crush: `{n}` has no equational lemmas to unfold."
+    | `(crushUOrD| d[ $[$is],* ]) =>
+      for i in is do
+        let n ← resolveHintConst i
+        match ← getUnfoldEqnFor? n (nonRec := true) with
+        | some eqn => names := names.push eqn
+        | none => throwError "crush: `{n}` has no unfold equation."
+    | _ => throwUnsupportedSyntax
+  return names
+
+/-- Parse the `[…]` hint list into elaborated proof terms and the `allHyps` flag. -/
+private def parseHintList (goal : MVarId) (stx : TSyntax ``crushHints) :
+    TacticM (Array (Expr × String) × Bool) := goal.withContext do
+  match stx with
+  | `(crushHints| ) =>
+    -- No list at all: default to all local hypotheses.
+    return (#[], true)
+  | `(crushHints| [ $[$elems],* ]) =>
+    let mut terms : Array (Expr × String) := #[]
+    let mut allHyps := false
+    for elem in elems do
+      match elem with
+      | `(crushHintElem| *) => allHyps := true
+      | `(crushHintElem| $t:term) =>
+        let e ← Term.elabTerm t none
+        Term.synthesizeSyntheticMVarsNoPostponing
+        let e ← instantiateMVars e
+        let descr := (t.raw.reprint.getD "hint").trim
+        terms := terms.push (e, s!"hint {descr}")
+      | _ => throwUnsupportedSyntax
+    -- An explicit list without `*` is a *restriction*: only the listed facts.
+    return (terms, allHyps)
+  | _ => throwUnsupportedSyntax
 
 @[tactic crushTac]
-def evalCrush : Tactic := fun _stx => do
+def evalCrush : Tactic := fun stx => do
   let cfg := Config.ofOptions (← getOptions)
   let goal ← getMainGoal
   -- Intro any leading binders so ∀-goals become closed props under hypotheses.
   let (_, goal) ← goal.intros
   replaceMainGoal [goal]
-  runCrush goal cfg
+  -- Parse the hint grammar: `crush <hints> <uord>*`.
+  let hintsStx : TSyntax ``crushHints := ⟨stx[1]⟩
+  let uordStxs := stx[2].getArgs.map (⟨·⟩ : Syntax → TSyntax ``crushUOrD)
+  let (terms, allHyps) ← parseHintList goal hintsStx
+  let eqnLemmas ← parseUOrDs uordStxs
+  let hints : Hints := { terms, eqnLemmas, allHyps }
+  runCrush goal cfg hints
 
 end Crush

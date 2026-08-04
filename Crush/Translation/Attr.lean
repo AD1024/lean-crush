@@ -18,8 +18,8 @@ Two registration surfaces are provided:
 1. `@[crush_translate]` on a `def h : TranslationHandler` — the general form. `h`
    inspects the head `Expr` and either returns `some smtTerm` or defers (`none`).
 
-2. `crush_sort`/`crush_fun` macros (see `Crush/Translation/Builtins.lean`) — sugar
-   for the common cases of "map this constant to this SMT symbol/sort", which
+2. `crush_map`/`crush_map_sort` macros (see `Crush/Translation/Builtins.lean`) —
+   sugar for the common cases of "map this constant to this SMT symbol/sort", which
    desugar to a `TranslationHandler`.
 
 A handler receives:
@@ -54,6 +54,18 @@ structure TranslationCtx where
 defer to the next handler / the default translator. Runs in `TranslateM`, so it
 may emit declarations, allocate symbols, and inspect the environment. -/
 abbrev TranslationHandler := TranslationCtx → TranslateM (Option SMT.Term)
+
+/-- A user **sort** handler: claims a Lean *type* and maps it to an SMT sort. The
+`fn`/`args` of the `TranslationCtx` are the type's head constant and its arguments
+(`Map`, `#[Int, Bool]`), and `emitSort` recurses into the argument types. Returns
+`some s` to claim the type, `none` to defer.
+
+This is the sort-level counterpart to `TranslationHandler`, needed to retarget a
+Lean type to a *theory* sort — e.g. encoding a finite map as SMT's `(Array K V)`
+rather than an uninterpreted datatype. Without it a user could remap a type's
+operations but not the type itself, so `(select m k)` would be applied to a
+datatype-sorted `m` and the script would be ill-sorted. -/
+abbrev SortHandler := TranslationCtx → TranslateM (Option SMT.SSort)
 
 /-- A registered handler together with its metadata. -/
 structure HandlerEntry where
@@ -112,5 +124,60 @@ unsafe def getTranslationHandlersUnsafe : TranslateM (Array TranslationHandler) 
 
 @[implemented_by getTranslationHandlersUnsafe]
 opaque getTranslationHandlers : TranslateM (Array TranslationHandler)
+
+/-- Whether any `@[crush_translate]` handler is registered. A cheap array read on
+the persistent extension, with no `evalConst` — so the common case of no user
+handlers skips handler resolution entirely on the hot path of `emitTerm`. -/
+def hasTranslationHandlers : TranslateM Bool := do
+  return !(crushTranslateExt.getState (← getEnv)).isEmpty
+
+/-! ## Sort handlers (`@[crush_translate_sort]`)
+
+The sort-level counterpart of the above, with an independent extension so a sort
+handler and a term handler for the same type do not interfere. -/
+
+initialize crushTranslateSortExt :
+    SimplePersistentEnvExtension HandlerEntry (Array HandlerEntry) ←
+  registerSimplePersistentEnvExtension {
+    addEntryFn := fun arr e => arr.push e
+    addImportedFn := fun arrs => arrs.foldl (· ++ ·) #[]
+  }
+
+syntax (name := crushTranslateSortAttr) "crush_translate_sort" (ppSpace prio)? : attr
+
+initialize registerBuiltinAttribute {
+  name := `crushTranslateSortAttr
+  descr := "Register a lean-crush sort handler (SortHandler)."
+  applicationTime := .afterCompilation
+  add := fun declName stx _ => do
+    let prio ← getAttrParamOptPrio stx[1]
+    let env ← getEnv
+    let some info := env.find? declName
+      | throwError "unknown declaration {declName}"
+    let expectedTy := mkConst ``Crush.SortHandler
+    unless (← MetaM.run' (Meta.isDefEq info.type expectedTy)) do
+      throwError "@[crush_translate_sort] expects a declaration of type `SortHandler`, \
+                  but {declName} has type{indentExpr info.type}"
+    modifyEnv fun env =>
+      crushTranslateSortExt.addEntry env { declName, priority := prio }
+}
+
+unsafe def getSortHandlersUnsafe : TranslateM (Array SortHandler) := do
+  let env ← getEnv
+  let opts ← getOptions
+  let entries := crushTranslateSortExt.getState env
+  let sorted := entries.qsort (fun a b => a.priority > b.priority)
+  sorted.filterMapM fun e => do
+    match env.evalConst SortHandler opts e.declName with
+    | .ok h => return some h
+    | .error _ => return none
+
+@[implemented_by getSortHandlersUnsafe]
+opaque getSortHandlers : TranslateM (Array SortHandler)
+
+/-- Whether any `@[crush_translate_sort]` handler is registered. Guards the sort
+hot path (`emitSort`) the same way `hasTranslationHandlers` guards `emitTerm`. -/
+def hasSortHandlers : TranslateM Bool := do
+  return !(crushTranslateSortExt.getState (← getEnv)).isEmpty
 
 end Crush

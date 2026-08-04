@@ -43,11 +43,10 @@ general `whnf` on a user-supplied definition need not terminate at all; Lean bou
 it with `maxRecDepth` rather than a proof.
 
 This is the same reason Lean's own elaborator and tactic framework are written with
-`partial`, and it is not a soundness concern: these are metaprograms that *construct*
-SMT terms, and nothing proves theorems about them. What is proven about the pipeline
-concerns the terms they emit — see `Crush/Proofs/Semantics.lean` for the evaluator and
-`Crush/Proofs/Encoding.lean` for obligations stated over actual emitted terms. Those
-are total by construction, precisely so they can be reasoned about.
+`partial`: these are metaprograms that *construct* SMT terms. Soundness of a closed
+goal comes from the discharge policy (`crush.trust`) — under `reconstruct` the verdict
+is replayed into a kernel-checked Lean proof from the unsat core, so the translator and
+solver are only search heuristics — not from reasoning about the translator itself.
 -/
 
 namespace Crush
@@ -116,20 +115,40 @@ def hasCanonicalInstance (e : Expr) (i : Nat) : TranslateM Bool := do
     -- non-canonical and let the term degrade to an uninterpreted symbol.
     return false
 
-/-- A supported (non-parametric, non-indexed, `Type`-valued) inductive we can emit
-as an SMT datatype: enumerations, simple structures, and — since `declare-datatypes`
-is itself recursive — self-recursive types such as `List`-like or tree shapes.
+/-- A supported inductive we can emit as an SMT datatype: enumerations, simple
+structures, self-recursive `List`- or tree-shaped types, and — via monomorphization —
+*fully-applied parametric* types such as `Option Int`, `Int × Int`, `List Bool`.
 
-We still require at least one constructor: SMT-LIB datatypes must be inhabited
+`typeArgs` are the concrete parameter values the head is applied to (empty for a
+non-parametric type). The type must be **ground** — no remaining type variables — so
+the constructor field sorts are determined; a bare `List` with an un-instantiated
+element type stays an opaque sort.
+
+We require at least one constructor: SMT-LIB datatypes must be inhabited
 (z3 rejects `(declare-datatypes ((E 0)) (()))`), and more fundamentally every SMT
 sort is non-empty while `Empty` is not, so an empty Lean inductive cannot be
 modelled faithfully and must stay an opaque sort (see `isEmptyType`). -/
-def isSupportedDatatype (n : Name) : MetaM Bool := do
+def isSupportedDatatypeApp (n : Name) (typeArgs : Array Expr) : MetaM Bool := do
   let env ← getEnv
   let some (.inductInfo iv) := env.find? n | return false
-  if iv.numParams != 0 || iv.numIndices != 0 then return false
+  -- Indices (true dependent families) are unsupported; parameters are fine once
+  -- instantiated. The applied prefix must supply exactly the parameters.
+  if iv.numIndices != 0 then return false
+  if typeArgs.size != iv.numParams then return false
   if n == ``Nat || n == ``Int || n == ``Bool || n == ``String then return false
   if iv.ctors.isEmpty then return false
+  -- A type *class* (`HAdd`, `Inhabited`, …) is not data: its fields are typically
+  -- functions, and a value is an instance-dictionary chosen by synthesis, not
+  -- something to reason about structurally. Keep classes opaque; this also stops a
+  -- non-canonical operator instance from being datatype-encoded.
+  if isClass env n then return false
+  -- Every parameter argument must itself be a *type* (`Sort`), and ground — a
+  -- remaining metavariable/fvar element type has no SMT sort. This is what keeps a
+  -- polymorphic `List α` opaque while `List Int` is a real datatype.
+  for a in typeArgs do
+    let aty ← whnf (← inferType a)
+    unless aty.isSort do return false
+    if (← instantiateMVars a).hasExprMVar then return false
   -- Must live in `Type`, not `Prop` (propositions map to `Bool`). A
   -- universe-polymorphic declaration such as `PUnit : Sort u` reports its *generic*
   -- result as `.sort (u+1)` rather than `Type`, so accept a `.sort` whose level is
@@ -138,19 +157,28 @@ def isSupportedDatatype (n : Name) : MetaM Bool := do
           | .sort l => !l.isZero
           | _ => false) do
     return false
-  -- Every constructor field must itself be translatable to a sort. A field whose
-  -- type mentions the datatype only in a *strictly positive, direct* way (`T`
-  -- itself) is fine; a field of function type into `T` is not, and would need the
-  -- higher-order encoding.
+  -- Every constructor field, *instantiated at `typeArgs`*, must be translatable to a
+  -- non-function SMT sort. A field mentioning the datatype in a strictly positive,
+  -- direct way (`T ā` itself) is fine; a *function-typed* field cannot be a datatype
+  -- selector's range (SMT datatypes are first-order), so such a type stays opaque.
+  -- Fields must also be data, not proofs (a `Prop` field has no SMT sort).
   iv.ctors.allM fun ctorName => do
     let ci ← getConstInfoCtor ctorName
-    forallTelescopeReducing ci.type fun args _ =>
+    let ctorTy ← instantiateForall ci.type typeArgs
+    forallTelescopeReducing ctorTy fun args _ =>
       args.allM fun a => do
         let ty ← whnf (← inferType a)
-        -- Reject fields that are proofs/dependent or arrow-typed mentioning `n`.
-        if ty.isForall then
-          return !(ty.getForallBody.isAppOf n) && !ty.getForallBody.isConstOf n
+        if ty.isForall then return false
+        if ← isProp ty then return false
         return true
+
+/-- `isSupportedDatatypeApp` for a fully-applied type expression. -/
+def supportedDatatypeType? (e : Expr) : MetaM (Option (Name × Array Expr)) := do
+  let e ← whnf e
+  let .const n _ := e.getAppFn | return none
+  let args := e.getAppArgs
+  if ← isSupportedDatatypeApp n args then return some (n, args) else return none
+
 
 /-- Whether `ty` is an *uninhabited* Lean type, which SMT cannot model: every SMT
 sort is non-empty, so `∀ x : Empty, P` (vacuously true) would translate to the
@@ -227,9 +255,23 @@ partial def declareViaThunk (key hint : String)
 mutual
   /-- Sort translation. Interpreted Lean types map to SMT theory sorts; supported
   inductives are declared as SMT datatypes; everything else becomes a declared
-  nullary uninterpreted sort keyed by the type's canonical form. -/
+  nullary uninterpreted sort keyed by the type's canonical form.
+
+  User `@[crush_translate_sort]` handlers get first refusal (like term handlers in
+  `emitTerm`), so a user can retarget a Lean type to a theory sort — e.g. a finite map
+  to SMT's `(Array K V)`. Skipped wholesale when none are registered. -/
   partial def emitSort (e : Expr) : TranslateM SSort := do
     let e ← whnf e
+    if ← hasSortHandlers then
+      let (fn, args) := getAppFnArgs' e
+      let ctx : TranslationCtx := {
+        fn, args
+        emitTerm := emitTerm
+        emitSort := emitSort
+        declare  := declareViaThunk }
+      for h in (← getSortHandlers) do
+        if let some s ← h ctx then
+          return s
     match e with
     | .const ``Bool _ => return .app (.symb "Bool") #[]
     | .const ``Nat _  => return .app (.symb "Int") #[]
@@ -262,13 +304,13 @@ mutual
         return nativeArrowSort (← shape.args.mapM emitSort) (← emitSort shape.res)
       let (sort, _) ← declareArrowSort e
       return sort
-    match e with
-    | .const n _ =>
-      if ← isSupportedDatatype n then
-        return .app (.symb (← declareDatatype n)) #[]
-      else
-        declareUninterpretedSort e
-    | _ => declareUninterpretedSort e
+    -- A supported inductive — including a fully-applied parametric one like
+    -- `Option Int` or `Int × Int` — becomes a (monomorphized) SMT datatype. The
+    -- instantiation `(n, typeArgs)` keys a distinct SMT sort per element type, so
+    -- `Option Int` and `Option Bool` never share a sort.
+    match ← supportedDatatypeType? e with
+    | some (n, typeArgs) => return .app (.symb (← declareDatatype n typeArgs)) #[]
+    | none => declareUninterpretedSort e
 
   /-- Declare the `Fn` sort and `app` symbol for an arrow type `σ₁ → … → τ`, once.
   Returns the sort and its `app` symbol name.
@@ -480,14 +522,23 @@ mutual
     which the solver derives `False`. We therefore emit a well-formedness predicate
     `wf_T` characterizing the image of the Lean type, and *guard every quantifier
     over `T`* with it (see `quantifier`/`guardSort`). -/
-  partial def declareDatatype (n : Name) : TranslateM String := do
-    let key := s!"__datatype__{n}"
+  partial def declareDatatype (n : Name) (typeArgs : Array Expr := #[]) :
+      TranslateM String := do
+    -- Key on the head *and* its instantiation, so `Option Int` and `Option Bool`
+    -- get distinct sorts, constructors, and selectors. The key uses the
+    -- pretty-printed type arguments, matching how opaque sorts are keyed.
+    let argKey ← if typeArgs.isEmpty then pure ""
+                 else do
+                   let ks ← typeArgs.mapM fun a => do pure (toString (← ppExpr a))
+                   pure s!"@{String.intercalate "," ks.toList}"
+    let key := s!"__datatype__{n}{argKey}"
     if let some name := (← get).atomToName.get? key then
       return name
     let sortName ← TranslateM.symbolFor key (nameHint n)
     -- Register the sort name *before* translating field sorts: a recursive
-    -- datatype's fields mention the type itself, and must resolve to this symbol
-    -- rather than recursing forever.
+    -- datatype's fields mention the type (at this same instantiation), and must
+    -- resolve to this symbol rather than recursing forever. `declareDatatype` is
+    -- idempotent on the key, so a recursive occurrence returns `sortName` directly.
     markSortDeclared sortName
     let iv ← getConstInfoInduct n
     let mut ctorDecls : Array CtorDecl := #[]
@@ -495,7 +546,11 @@ mutual
     let mut wfParts : Array (String × Array (String × Expr)) := #[]
     for ctorName in iv.ctors do
       let ctorInfo ← getConstInfoCtor ctorName
-      let (selDecls, guards) ← forallTelescopeReducing ctorInfo.type fun args _ => do
+      -- Instantiate the constructor's type at the datatype's parameters, so each
+      -- field type is ground (`Option.some : α → Option α` becomes `Int → Option Int`
+      -- at `typeArgs = #[Int]`).
+      let ctorTy ← instantiateForall ctorInfo.type typeArgs
+      let (selDecls, guards) ← forallTelescopeReducing ctorTy fun args _ => do
         let mut sels : Array (String × SSort) := #[]
         let mut gs : Array (String × Expr) := #[]
         for i in [0:args.size] do
@@ -518,14 +573,16 @@ mutual
   partial def needsWFGuard (ty : Expr) : TranslateM Bool := do
     let ty ← whnf ty
     if ty.isConstOf ``Nat then return true
-    let .const n _ := ty.getAppFn | return false
-    if !(← isSupportedDatatype n) then return false
+    let some (n, typeArgs) ← supportedDatatypeType? ty | return false
     -- Guard against cycles: a recursive datatype needs a guard iff some field does,
-    -- and self-reference alone contributes nothing new.
+    -- and self-reference alone contributes nothing new. Fields are examined at this
+    -- instantiation, so a `Nat` reached only through the type parameter (`Option Nat`)
+    -- is caught, while `Option Int` is not.
     let iv ← getConstInfoInduct n
     iv.ctors.anyM fun ctorName => do
       let ci ← getConstInfoCtor ctorName
-      forallTelescopeReducing ci.type fun args _ =>
+      let ctorTy ← instantiateForall ci.type typeArgs
+      forallTelescopeReducing ctorTy fun args _ =>
         args.anyM fun a => do
           let fty ← whnf (← inferType a)
           if fty.getAppFn.isConstOf n then return false  -- self-reference
@@ -578,27 +635,30 @@ mutual
     let ty ← whnf ty
     if ty.isConstOf ``Nat then
       return some (.symbApp ">=" #[t, .lit (.num 0)])
-    let .const n _ := ty.getAppFn | return none
-    if !(← isSupportedDatatype n) then return none
+    let some (n, typeArgs) ← supportedDatatypeType? ty | return none
     if !(← needsWFGuard ty) then return none
-    let sortName ← declareDatatype n
+    let sortName ← declareDatatype n typeArgs
     return some (.app (.symb (wfSymbol sortName)) #[t])
 
-  /-- Translate a term, trying user handlers first. -/
+  /-- Translate a term, trying user handlers first.
+
+  Dispatch order, and why: a quantifier-bound variable resolves to its SMT name
+  first (it is never a declaration); then **user `@[crush_translate]` handlers**,
+  so a user can override *any* built-in mapping for their own constant — this is
+  the extensibility contract in `PLAN.md` §4.3 ("user handlers override built-ins
+  for the same constant; there is no privileged built-in path"). Only if no handler
+  claims the term do the built-in higher-order and first-order structural paths run.
+  The handler loop is skipped wholesale when none are registered
+  (`hasTranslationHandlers`), so the common case pays a single array-empty check. -/
   partial def emitTerm (e : Expr) : TranslateM SMT.Term := do
     let e ← instantiateMVars e
     -- A quantifier-bound variable renders as its SMT name, never a declaration.
     if let .fvar fid := e then
       if let some vname ← TranslateM.boundVar? fid then
         return .const vname
-    -- Higher-order forms, before the first-order structural path.
-    if let some t ← hoTerm? e then
-      return t
-    -- Fast path for the structural logical/theory core.
-    match ← structural? e with
-    | some t => return t
-    | none =>
-      -- Try user handlers on the applied head.
+    -- User handlers get first refusal on the applied head, so they override the
+    -- built-in structural/theory mappings below rather than being shadowed by them.
+    if ← hasTranslationHandlers then
       let (fn, args) := getAppFnArgs' e
       let ctx : TranslationCtx := {
         fn, args
@@ -608,6 +668,14 @@ mutual
       for h in (← getTranslationHandlers) do
         if let some t ← h ctx then
           return t
+    -- Higher-order forms, before the first-order structural path.
+    if let some t ← hoTerm? e then
+      return t
+    -- Fast path for the structural logical/theory core.
+    match ← structural? e with
+    | some t => return t
+    | none =>
+      let (fn, args) := getAppFnArgs' e
       -- A constructor of a supported datatype → the SMT constructor symbol.
       if let some t ← ctorApp? fn args then
         return t
@@ -699,31 +767,39 @@ mutual
           go (i + 1) (acc.push x)
     go 0 #[]
 
-  /-- If `fn` is a projection of a supported single-constructor datatype, translate
-  `fn s` to the SMT selector `<ctor>_sel<i> s`. -/
+  /-- If `fn` is a projection of a supported (possibly parametric) datatype,
+  translate `fn s` to the SMT selector `<ctor>_sel<i> s`. The datatype instantiation
+  is read off the structure argument's type, so `(p : Int × Int).1` selects from the
+  monomorphized `Prod Int Int` sort. -/
   partial def projApp? (fn : Expr) (args : Array Expr) : TranslateM (Option SMT.Term) := do
     let .const pn _ := fn | return none
     let some info ← getProjectionFnInfo? pn | return none
-    if !(← isSupportedDatatype info.ctorName.getPrefix) then return none
     -- Projections take the structure as the argument after `info.numParams`.
     let some structArg := args[info.numParams]? | return none
-    let sortName ← declareDatatype info.ctorName.getPrefix
+    let structTy ← whnf (← inferType structArg)
+    let some (_, typeArgs) ← supportedDatatypeType? structTy | return none
+    let sortName ← declareDatatype info.ctorName.getPrefix typeArgs
     let sel := selSymbol sortName info.ctorName info.i
     let extraArgs := args.extract (info.numParams + 1) args.size
     let sarg ← emitTerm structArg
     let sextra ← extraArgs.mapM emitTerm
     return some (.app (.symb sel) (#[sarg] ++ sextra))
 
-  /-- If `fn` is a constructor of a supported datatype, translate the application
-  to the corresponding SMT constructor symbol applied to the translated args
-  (ensuring the datatype is declared first). -/
+  /-- If `fn` is a constructor of a supported (possibly parametric) datatype,
+  translate the application to the corresponding SMT constructor symbol applied to
+  the *value* args (type parameters are dropped — they select the instantiation, not
+  a field). The datatype is declared at that instantiation first. -/
   partial def ctorApp? (fn : Expr) (args : Array Expr) : TranslateM (Option SMT.Term) := do
     let .const cn _ := fn | return none
     let env ← getEnv
     let some (.ctorInfo ci) := env.find? cn | return none
-    if !(← isSupportedDatatype ci.induct) then return none
-    let sortName ← declareDatatype ci.induct
-    let sargs ← args.mapM emitTerm
+    -- The applied constructor's result type carries the instantiation.
+    let resTy ← whnf (← inferType (mkAppN fn args))
+    let some (_, typeArgs) ← supportedDatatypeType? resTy | return none
+    let sortName ← declareDatatype ci.induct typeArgs
+    -- Drop the leading type-parameter arguments; keep the value fields.
+    let valueArgs := args.extract ci.numParams args.size
+    let sargs ← valueArgs.mapM emitTerm
     return some (.app (.symb (ctorSymbol sortName cn)) sargs)
 
   /-- Recognize the built-in logical/arithmetic structure. Returns `none` to let

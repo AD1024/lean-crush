@@ -133,6 +133,12 @@ register_option crush.trace.script : Bool := {
   descr := "Log the full generated SMT-LIB script as an info message."
 }
 
+register_option crush.autoUnfold : Bool := {
+  defValue := true
+  descr := "Automatically fold the equation lemmas of `@[crush_unfold]`/`@[crush_defeq]` \
+            definitions reachable from the goal into each query (like always-on u[…]/d[…])."
+}
+
 namespace Crush
 
 /-- Resolved configuration, read once from the option environment at tactic entry. -/
@@ -147,6 +153,7 @@ structure Config where
   additionalArgs : Array String := #[]
   logic          : Option String := none
   traceScript    : Bool      := false
+  autoUnfold     : Bool      := true
   deriving Inhabited
 
 /-- Read the current option environment into a `Config`. -/
@@ -165,6 +172,7 @@ def Config.ofOptions (opts : Options) : Config :=
     savePath       := crush.save.get opts
     additionalArgs := split (crush.additionalArgs.get opts)
     logic          := if logicStr.isEmpty then none else some logicStr
-    traceScript    := crush.trace.script.get opts }
+    traceScript    := crush.trace.script.get opts
+    autoUnfold     := crush.autoUnfold.get opts }
 
 end Crush

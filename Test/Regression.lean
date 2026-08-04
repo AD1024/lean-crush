@@ -172,29 +172,29 @@ made the other implementation report "Higher order input?". -/
 
 theorem ho_bool_exists (h : ∃ b, !(!b) ≠ b) : False := by crush
 
-/-! ## Known limitation: parametric datatypes
+/-! ## Parametric datatypes (via monomorphization)
 
-`Prod`, `Option`, `List`, … take type parameters, and SMT-LIB datatype declarations
-would need them instantiated. Until monomorphization lands, such a type degrades to
-an *opaque sort* with its constructors as uninterpreted functions. That is sound —
-congruence still holds, so `x = y → some x = some y` goes through — but the
-generated constructors are not injective and the type is not known to be generated
-by them, so the converse does not.
+`Prod`, `Option`, `List`, … take type parameters. A *fully-applied* such type
+(`Option Int`, `Int × Int`, `List Bool`) is monomorphized into a real SMT datatype at
+that instantiation (see `declareDatatype`/`isSupportedDatatypeApp` in
+`Translation/Translate.lean`), so its constructors are injective, distinct, and
+exhaustive — not merely uninterpreted. Distinct instantiations get distinct sorts, so
+`Option Int` and `Option Bool` never conflate. -/
 
-These tests pin the boundary: what does work today, and what is expected to fail
-until the types can be instantiated. -/
-
--- Congruence through an opaque constructor: works.
+-- Congruence through a monomorphized constructor.
 theorem option_congr (x y : Int) (h : x = y) : Option.some x = Option.some y := by crush
 theorem prod_congr (x y : Int) (h : x = y) : (x, 0) = (y, 0) := by crush
 
--- Constructor *injectivity* needs a real datatype declaration, so this is not
--- provable yet. `#guard_msgs` pins that, and will fail loudly once
--- monomorphization makes it work — a reminder to promote it to a positive test.
-/-- error: crush: the goal is not provable -/
-#guard_msgs(error, substring := true) in
-theorem option_inj_not_yet (x y : Int) (h : Option.some x = Option.some y) :
+-- Constructor *injectivity*: now provable, since `Option Int` is a real datatype.
+theorem option_inj (x y : Int) (h : Option.some x = Option.some y) :
     x = y := by crush
+
+-- Constructors are distinct: `none ≠ some x`.
+theorem option_distinct (x : Int) : (Option.some x) ≠ Option.none := by crush
+
+-- A `List Int` instantiation: `cons` is injective in both head and tail.
+theorem list_cons_inj (a b : Int) (as bs : List Int)
+    (h : a :: as = b :: bs) : a = b ∧ as = bs := by crush
 
 /-! ## Datatypes -/
 
@@ -209,8 +209,6 @@ private inductive Color3 where
 theorem enum_pigeonhole (x y z t : Color3) :
     x = y ∨ x = z ∨ x = t ∨ y = z ∨ y = t ∨ z = t := by crush
 
--- η for pairs likewise needs `Prod` as a real datatype (with selectors), not an
--- opaque sort.
-/-- error: crush: the goal is not provable -/
-#guard_msgs(error, substring := true) in
-theorem prod_eta_not_yet (x : Int × Int) : x = (Prod.fst x, Prod.snd x) := by crush
+-- η for pairs: `Prod Int Int` is now a real datatype with selectors, so the
+-- projection form equals the original.
+theorem prod_eta (x : Int × Int) : x = (Prod.fst x, Prod.snd x) := by crush

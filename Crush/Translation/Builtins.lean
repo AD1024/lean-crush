@@ -3,21 +3,35 @@ import Crush.Translation.Attr
 open Lean Elab Meta
 
 /-!
-# Built-in translation handlers and user-facing sugar
+# User-facing translation sugar
 
-The default theory mappings (Bool, Nat→Int, Int, BitVec, String, `=`, logical
-connectives) are themselves registered as ordinary `@[crush_translate]` handlers.
-This dogfoods the extension API: the built-ins have no privileged path, so any
-behaviour a built-in relies on is available to user handlers too.
-
-We also expose sugar macros so the common cases are one-liners:
+The `crush_map`/`crush_map_sort` macros make the common "this constant ↦ this SMT
+symbol/sort" case a one-liner, desugaring to a `@[crush_translate]` handler:
 
 ```
 crush_map Nat.add    => "+"          -- map a Lean constant to an SMT symbol
 crush_map_sort MyT   => "MySort"     -- map a Lean type to an SMT sort symbol
 ```
 
-These desugar to `@[crush_translate] def … : TranslationHandler := …`.
+Both dispatch through the same handler path as a hand-written
+`@[crush_translate] def`, so — like any handler — they run *before* the built-in
+structural translator and override it for their head constant (see
+`Crush/Translation/Translate.lean` `emitTerm`).
+
+**Scope.** The target string is emitted verbatim as an SMT symbol with **no**
+`declare-fun`, so it must be a symbol the solver already knows: an SMT-LIB theory
+operator (`+`, `abs`, `str.++`, …) or a sort/symbol declared elsewhere in the
+script. Mapping to a fresh name the solver has never seen yields an
+"unknown constant" error from the backend. To introduce a genuinely new
+uninterpreted symbol (with its declaration), write a full handler and use the
+`declare` callback in `TranslationCtx`.
+
+Note: the built-in theory mappings themselves are *not* handlers — they live in the
+structural translator in `Crush/Translation/Translate.lean` for directness and
+because several need type-directed dispatch (`bitvecTerm?`, `stringTerm?`) that the
+head-constant handler shape does not express. A user handler still overrides them,
+so the extension surface is not second-class; it is simply not implemented by
+dogfooding.
 -/
 
 namespace Crush.Builtins

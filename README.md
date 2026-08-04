@@ -22,10 +22,17 @@ of its core limitations:
 
 ## Status
 
-Early scaffolding. The foundational layers build and are tested; the reification
-and tactic layers are in progress. See **[`Doc/PLAN.md`](Doc/PLAN.md)** for the
-full architecture and roadmap, and [`Test/Smoke.lean`](Test/Smoke.lean) for
-runnable examples of the SMT IR, the extension API, and a live solver round-trip.
+The `crush` tactic works end-to-end: it collects hypotheses and the negated goal,
+translates them to SMT, runs the backend under a hard timeout, and by default
+reconstructs a kernel-checked Lean proof from the unsat core rather than trusting
+the solver. First-order logic, the `Nat`/`Int`/`BitVec`/`String` theories,
+non-parametric datatypes, and higher-order goals (via defunctionalization, or native
+HO on cvc5) all translate and are tested.
+
+In progress: the hint grammar (`crush [lemmas]`), monomorphization (which unblocks
+parametric datatypes like `Prod`/`Option`/`List`), Alethe proof replay, and the
+combinator HO mode. See **[`Doc/PLAN.md`](Doc/PLAN.md)** §9 for the milestone status,
+and [`Test/`](Test/) for runnable examples across every supported theory.
 
 ## Requirements
 
@@ -48,6 +55,23 @@ def mySuccHandler : Crush.TranslationHandler := fun ctx => do
 -- Or with sugar:
 crush_map Nat.add => "+"
 crush_map_sort Nat => "Int"
+
+-- Mark a recursive definition so its equations are folded into every `crush`
+-- query automatically (relevance-filtered), instead of writing `u[myFn]` each time:
+@[crush_unfold]
+def myFn : Nat → Nat
+  | 0 => 0
+  | n + 1 => myFn n + 2
+```
+
+Point `crush` at lemmas that are not in context, and combine with a manual `induction`
+for inductive goals:
+
+```lean
+theorem add_succ (x y : N) : N.add x (N.S y) = N.S (N.add x y) := by
+  induction x with
+  | Z => crush            -- @[crush_unfold] on N.add supplies its equations
+  | S x ih => crush [ih]  -- feed the induction hypothesis as a fact
 ```
 
 ## Build

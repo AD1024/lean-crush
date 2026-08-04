@@ -54,8 +54,7 @@ function-typed terms actually appears — it is an expensive axiom and most quer
 do not need it.
 
 Both the encoding and the necessity of extensionality were verified against z3
-before implementation. The equisatisfiability theorem this pass owes is stated in
-`Crush/Proofs/Obligations.lean`.
+before implementation.
 -/
 
 namespace Crush
