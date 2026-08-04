@@ -532,10 +532,16 @@ proved something false — found by differential probing rather than by reading 
 | 7 | **String escaping** | Codepoint-accurate `\u{…}`; note `\` is *not* an SMT-LIB escape character, so a backslash is emitted literally |
 | 8 | **Function-typed bound variables.** A quantifier over an arrow type | Must range over the encoded function sort with applications routed through `app` (§5). ★ Declaring a fresh symbol for the bound variable left it *disconnected from its own quantifier*, so `∀ (f : Int → Int), g f = f 0` asserted "`g` is constant" — strictly stronger than the hypothesis |
 
+| 9 | **Non-value arguments.** A polymorphic constant's *type* argument and a dependent function's *proof* argument have no SMT counterpart | Both are dropped, and the symbol is keyed on the head *together with* its type arguments so distinct instantiations stay distinct. ★ `@List.length Int []` emitted the type as a `Bool`-sorted **term** fed to an `Int`-returning symbol. Worth stressing: **z3 does not reject ill-sorted input** — it silently accepts `(= x true)` for an `Int`-sorted `x`, so nothing surfaces at the boundary and the only symptom is wrong answers |
+| 10 | **`Type` is not `Bool`.** Only `Prop` maps to SMT `Bool` | A larger universe gets an opaque sort. ★ Mapping `Type` to `Bool` puts every Lean type into a two-element set, so three distinct types are forced to collide — `crush` proved `tyfn a = tyfn b ∨ tyfn a = tyfn c ∨ tyfn b = tyfn c`, false for any injective `Nat → Type` |
+| 11 | **Arrows that are not implications.** `Empty → False` is a function type, not `p ⇒ q` | The implication path now requires a `Prop` domain; other arrows fall through to the function-sort/quantifier paths. Emitting a non-`Bool` antecedent to `=>` produced ill-sorted output |
+
 Items 1, 3, and 8 are the same shape of bug: a Lean binder's domain mapped to an
 SMT domain that is not its faithful image — too large in 3, too small (a single
-fixed value) in 8, and wrongly non-empty in 1. That pattern is worth watching for
-in any new binder handling.
+fixed value) in 8, and wrongly non-empty in 1. Items 9–11 are a second recurring
+shape: **a non-value or non-proposition appearing where the encoding expects a term
+of a given sort.** Both patterns are worth checking for deliberately whenever new
+binder or application handling is added, since neither is caught by the solver.
 
 **Why not just use a `Nat` sort, or define our own?** The obvious first reaction to
 the guard machinery, so: SMT-LIB's arithmetic theory defines exactly `Int` and

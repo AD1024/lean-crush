@@ -155,7 +155,13 @@ mutual
     | .const ``Nat _  => return .app (.symb "Int") #[]
     | .const ``Int _  => return .app (.symb "Int") #[]
     | .const ``String _ => return .app (.symb "String") #[]
-    | .sort _         => return .app (.symb "Bool") #[]  -- Prop / Sort ↦ Bool
+    -- `Prop` is the sort of propositions and maps to SMT `Bool`. A *larger* universe
+    -- does not: mapping `Type` to `Bool` would put every Lean type into a
+    -- two-element set, so three distinct types would have to collide and the solver
+    -- could "prove" type equalities that are false. Such a position gets an opaque
+    -- sort instead, which is uninterpreted and therefore sound.
+    | .sort l => if l.isZero then return .app (.symb "Bool") #[]
+                 else declareUninterpretedSort e
     | _ =>
     -- `BitVec w` at a statically-known width maps to the indexed sort
     -- `(_ BitVec w)`. A symbolic width has no SMT counterpart, so it falls through
@@ -735,9 +741,18 @@ mutual
       match e with
       | .forallE _ ty body _ =>
         if (← isProp ty) then
-          -- `p → q` as a Prop implication.
+          -- `∀ (h : p), q`. When `h` does not occur in `q` this is the implication
+          -- `p ⇒ q`. When it *does* occur the binder is a genuine dependency on a
+          -- proof — `∀ n, ∀ hn : n > 0, f n hn = n` — and the body cannot be
+          -- translated without it, since SMT has no proof terms. Introduce a real
+          -- fvar so the body is closed; proof-typed arguments are then dropped by
+          -- `defaultApp`. Passing the open body straight to `emitTerm` used to leak
+          -- a de Bruijn index as an "unexpected bound variable" error.
           let a ← emitTerm ty
-          let b ← emitTermUnderNothing body
+          if body.hasLooseBVar 0 then
+            let b ← withLocalDeclD `hp ty fun hp => emitTerm (body.instantiate1 hp)
+            return some (.symbApp "=>" #[a, b])
+          let b ← emitTerm body
           return some (.symbApp "=>" #[a, b])
         else
           quantifier true ty body
@@ -912,18 +927,20 @@ mutual
       else return none
     | _ => return none
 
-  /-- `p → q` where `p : Prop`. -/
+  /-- `p → q` where `p : Prop`.
+
+  The domain must itself be a *proposition*. A non-dependent arrow whose domain is a
+  `Type` — `Empty → False`, say — is a function type, not an implication: its SMT
+  image is a function sort, and treating the domain as an antecedent emits a
+  non-`Bool` argument to `=>`. Falls through to the quantifier path, which handles
+  the uninhabited domain (there, correctly, by refusing). -/
   partial def tryImplication (e : Expr) : TranslateM (Option SMT.Term) := do
     match e with
     | .forallE _ ty body _ =>
       if body.hasLooseBVar 0 then return none
+      unless (← isProp ty) do return none
       return some (.symbApp "=>" #[← emitTerm ty, ← emitTerm body])
     | _ => return none
-
-  /-- Body of a non-dependent Prop implication translated without introducing a
-  binder (the bound variable does not occur). -/
-  partial def emitTermUnderNothing (body : Expr) : TranslateM SMT.Term := do
-    emitTerm body
 
   /-- Translate `∀ (x : ty), body` / `∃ (x : ty), body` over a non-Prop sort.
   A fresh SMT-bound variable is introduced; a `Nat` domain gets a `≥ 0` guard.
@@ -985,11 +1002,34 @@ mutual
   a negative value — closing the soundness hole for `Nat`-valued atoms/functions
   (a bare `n : Nat` free variable, `f : α → Nat`, etc.). -/
   partial def defaultApp (fn : Expr) (args : Array Expr) : TranslateM SMT.Term := do
-    let key := toString (← ppExpr fn)
+    -- Type and proof arguments carry no runtime content and have no SMT
+    -- counterpart: `List.length Int []` is a function of the list alone. Passing
+    -- them through would emit the *type* as a term — `Int` became a `Bool`-sorted
+    -- constant fed to an `Int`-returning symbol — producing ill-sorted output.
+    -- Note z3 does not reject that; it silently reinterprets, so nothing would
+    -- surface at the boundary.
+    let valueArgs ← args.filterM fun a => do
+      let ty ← inferType a
+      -- Drop the argument when it *is* a type (`α : Type`) or a proof (`h : p`).
+      if (← isProp ty) then return false
+      return !(← whnf ty).isSort
+    -- The symbol is keyed on the head *together with its dropped arguments*, so
+    -- distinct instantiations of a polymorphic constant get distinct symbols
+    -- rather than being conflated into one ill-sorted declaration.
+    let dropped := args.size - valueArgs.size
+    let key ←
+      if dropped == 0 then
+        pure s!"{toString (← ppExpr fn)}"
+      else
+        let tyKeys ← args.filterMapM fun a => do
+          let ty ← inferType a
+          if (← isProp ty) then return none
+          if (← whnf ty).isSort then return some (toString (← ppExpr a)) else return none
+        pure s!"{toString (← ppExpr fn)}@{String.intercalate "," tyKeys.toList}"
     let hint ← headHint fn
     let name ← TranslateM.symbolFor key hint
     if !(← declaredFun name) then
-      let argSorts ← args.mapM (fun a => do emitSort (← inferType a))
+      let argSorts ← valueArgs.mapM (fun a => do emitSort (← inferType a))
       let appExpr := mkAppN fn args
       let resTy ← whnf (← inferType appExpr)
       let resSort ← emitSort resTy
@@ -1000,7 +1040,7 @@ mutual
     -- as a first-order symbol: `emitSort` already gave the parameter an `Fn` sort,
     -- so emitting the bare symbol would be a sort mismatch. `emitFunValue`
     -- η-expands a named function into a closure.
-    let sargs ← args.mapM fun a => do
+    let sargs ← valueArgs.mapM fun a => do
       if ← isFunctionType (← inferType a) then emitFunValue a else emitTerm a
     return .app (.symb name) sargs
 

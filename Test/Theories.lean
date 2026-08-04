@@ -275,3 +275,52 @@ theorem str_cong (a b : String) (h : a = b) : a.length = b.length := by crush
 /-- error: crush: the goal is not provable -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_str_len : ∀ s : String, s.length > 0 := by crush
+
+/-! ## Type and proof arguments must not become terms
+
+A polymorphic constant's *type* argument and a dependent function's *proof*
+argument have no SMT counterpart. Passing them through emitted the type as a term:
+`@List.length Int []` became `length(Int_4, nil(Int_4))` where `Int_4` was a
+`Bool`-sorted constant fed to an `Int`-returning symbol.
+
+That output is ill-sorted, and worth stressing: **z3 does not reject it**. It
+silently reinterprets `(= x true)` for an `Int`-sorted `x`, so nothing surfaces at
+the solver boundary — the only symptom is wrong answers. `defaultApp` now drops such
+arguments and keys the symbol on the head *together with* its type arguments, so
+distinct instantiations stay distinct instead of being conflated. -/
+
+axiom polyConst : {α : Type} → α
+
+-- Two instantiations at different types must get separate, correctly-sorted
+-- symbols rather than one symbol applied to a type-as-term.
+theorem poly_instantiations_distinct
+    (h1 : (polyConst : Int) = 5) (h2 : (polyConst : Bool) = true) :
+    (polyConst : Int) = 5 := by crush
+
+theorem type_arg_dropped (h : @List.length Int [] = 0) :
+    @List.length Int [] = 0 := by crush
+
+-- A dependent binder over a *proof*. The body mentions the proof, so the binder
+-- cannot simply be discarded; introducing a real fvar keeps the body closed. This
+-- used to fail with an internal "unexpected bound variable #0", leaking a de Bruijn
+-- index out of the translator.
+theorem dependent_proof_binder (f : (n : Nat) → n > 0 → Nat) (h5 : (5 : Nat) > 0)
+    (hf : ∀ n, ∀ hn : n > 0, f n hn = n) : f 5 h5 = 5 := by crush
+
+/-! ## `Type` is not `Bool`
+
+`Prop` maps to SMT `Bool`, but a larger universe must not: that would put every Lean
+type into a two-element set, so three distinct types would be forced to collide.
+A type-valued position gets an opaque (uninterpreted) sort instead. -/
+
+-- FALSE for any injective `Nat → Type`, and `crush` proved it when `Type` mapped to
+-- `Bool` — with only two inhabitants, pigeonhole forces a collision.
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_type_pigeonhole (tyfn : Nat → Type) (a b c : Nat) :
+    tyfn a = tyfn b ∨ tyfn a = tyfn c ∨ tyfn b = tyfn c := by crush
+
+-- Reflexivity still goes through with the opaque sort, and `Prop` still maps to
+-- `Bool` as it must.
+theorem type_refl_ok (tyfn : Nat → Type) (a : Nat) : tyfn a = tyfn a := by crush
+theorem prop_still_bool (P : Nat → Prop) (h : ∀ n, P n) : P 5 := by crush
