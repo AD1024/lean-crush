@@ -324,3 +324,47 @@ theorem must_reject_type_pigeonhole (tyfn : Nat → Type) (a b c : Nat) :
 -- `Bool` as it must.
 theorem type_refl_ok (tyfn : Nat → Type) (a : Nat) : tyfn a = tyfn a := by crush
 theorem prop_still_bool (P : Nat → Prop) (h : ∀ n, P n) : P 5 := by crush
+
+/-! ## Overloaded operators require the *standard* instance
+
+Recognizing `HAdd.hAdd _ _ _ inst a b` as SMT `+` commits to `inst` being the
+standard instance. A user may supply another — `⟨fun _ _ => 99⟩` is a perfectly legal
+`HAdd Int Int Int` — and then `1 + 2` is `99`. Matching on the head alone therefore
+imported arithmetic that does not hold. The recognizers now check the instance
+against what synthesis would pick, and fall through to an uninterpreted symbol when
+it differs. -/
+
+/-- A non-standard `HAdd Int Int Int` that ignores its operands. -/
+@[reducible] def weirdAdd : HAdd Int Int Int := ⟨fun _ _ => 99⟩
+
+-- FALSE: the real value is `99`. `crush` proved this by assuming standard `Int`
+-- addition, giving `1 + 2 = 3`.
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_nonstandard_add : @HAdd.hAdd Int Int Int weirdAdd 1 2 = 3 := by crush
+
+-- Standard arithmetic must be unaffected by the instance check.
+theorem standard_add_still_works : ∀ x : Int, x + 0 = x := by crush
+theorem standard_cmp_still_works (x y : Int) (h : x ≤ y) : x < y + 1 := by crush
+theorem standard_max_still_works : max (3 : Int) 4 = 4 := by crush
+
+/-! ## `Nat.cast` is the identity only into `Int`
+
+`Nat` is represented as a non-negative `Int`, so `Nat.cast` into `Int` is the
+identity. Into *any other* `NatCast` type it is an arbitrary function, which may
+collapse distinct values — so treating it as the identity imports `Int`'s
+distinctness and lets the solver prove that equal things differ. -/
+
+/-- A `NatCast` instance collapsing every `Nat` to one value. -/
+structure Collapsed where val : Int
+instance : NatCast Collapsed := ⟨fun _ => ⟨0⟩⟩
+
+-- FALSE: both casts are `⟨0⟩`, so they are equal. `crush` proved them *distinct* by
+-- treating the cast as the identity, and `False` followed from that plus `rfl`.
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_collapsing_cast :
+    ((2 : Nat) : Collapsed) ≠ ((3 : Nat) : Collapsed) := by crush
+
+-- The `Nat → Int` coercion, which *is* the identity here, still works.
+theorem nat_cast_int_still_works : (2 : Int) = ((2 : Nat) : Int) := by crush

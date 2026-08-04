@@ -7,19 +7,24 @@ This module states — but does not yet prove — the semantic-equivalence and
 equisatisfiability theorems that each translation pass must satisfy for
 lean-crush to be sound *without trusting the solver's translation*.
 
-Every theorem here is currently `sorry`-backed. The point of stating them now is:
+**Read this before adding an obligation.** `Interp` and `Sat` below are still
+`opaque`, which means `Equivalence`/`Equisat` constrain *nothing*: nothing can be
+proven or refuted about an opaque predicate. They are therefore recorded as named
+`Prop`s to discharge later, never as theorems — a `theorem … := by sorry` over an
+opaque predicate does not record an open problem, it records a claim with no content,
+and if the statement is also universally quantified over all passes it records an
+outright falsehood.
 
-1. the *statements* type-check, so the intended contract of each pass is pinned
-   down in Lean rather than only in prose;
-2. `#print axioms` on anything downstream reveals exactly which obligations are
-   still open (they show up as `sorryAx`);
-3. each discharged `sorry` shrinks the trusted computing base — the same
-   incremental path `bv_decide` took, shipping trusted and being verified after.
+This module previously contained "proofs" of the higher-order obligations that
+defined both sides of the property and showed they agreed (`appOf F x := F x`,
+`closureOf φ := φ`, then `rfl`). They were tautologies, they were green, and real
+unsoundness bugs kept surfacing in the translator the whole time. That is the
+failure mode to avoid.
 
-The semantics are given abstractly here (`Interp`, `Sat`) so the statements can
-exist before the concrete interpretation function is built. Discharging any of
-these first requires replacing the opaque placeholders with the real denotational
-semantics of `CTerm`.
+Obligations with actual content live in `Crush/Proofs/Encoding.lean`, stated over the
+concrete evaluator in `Crush/Proofs/Semantics.lean` and about terms built by the
+functions the translator really calls. Those are falsifiable: `decide` refutes them
+when they are wrong, and it did during development.
 -/
 
 namespace Crush.Proofs
@@ -74,10 +79,9 @@ def P3_obligation (monomorphize : List CTerm → List CTerm) : Prop :=
 `app`/closure symbols and their defining axioms neither add nor remove models up to
 reinterpretation. **The headline higher-order theorem.**
 
-The canonical-model lemmas `p4a`–`p4c` below are the proved core of this: they
-exhibit an interpretation satisfying the emitted axioms in which quantification
-over the function sort coincides with the Lean function space. What remains is to
-lift that from single applications to whole fact lists. -/
+Not started. Needs a higher-order value domain in the semantics; see the note in
+the `HigherOrderEncoding` section for why the previous "canonical model" proof of
+this was vacuous. -/
 def P4_obligation (defunctionalize : List CTerm → List CTerm) : Prop :=
   Equisat defunctionalize
 
@@ -265,84 +269,39 @@ of which corresponds to a bug that was once live. -/
 
 section HigherOrderEncoding
 
-variable {Dom Cod : Type}
+/-! The defunctionalization obligations previously stated here were **vacuous**, and
+the way they were vacuous is worth recording so it is not repeated.
 
-/-! ### The canonical model of the encoding
+They defined both sides of the property and then proved they agreed:
 
-The defunctionalization axioms are not theorems about *arbitrary* `app`/closure
-pairs — an arbitrary pair satisfies none of them. What they assert is that a
-**model exists** in which the emitted axioms hold and in which quantification over
-the function sort coincides with quantification over the Lean function space.
-That is what makes the encoding sound: any Lean counter-model of the source can be
-turned into an SMT model of the encoding and back.
-
-We exhibit that model directly. `FnSort` is the Lean function space itself, `app`
-is application, and the closure constructor is the identity. The three obligations
-then become provable facts about it, which is exactly the content that was
-missing — a merely-assumed `app` would let the statements be vacuous or false.
-
-(An earlier draft of this file stated P4a–P4c over abstract `appOf`/`closureOf`
-variables. Those statements are *false*, not just unproven: instantiating `appOf`
-with a constant function refutes P4a. Proving them forced the fix.) -/
-
-/-- The encoded function sort in the canonical model: functions themselves. -/
-abbrev FnSort (Dom Cod : Type) := Dom → Cod
-
-/-- The `app` symbol's denotation: application. -/
-def appOf (F : FnSort Dom Cod) (x : Dom) : Cod := F x
-
-/-- The closure constructor for a λ. -/
-def closureOf (φ : Dom → Cod) : FnSort Dom Cod := φ
-
-/-- **P4a — the closure defining axiom is faithful.** ✅
-
-For each λ we emit `app (clo ȳ) x = body[x, ȳ]`. This says precisely that `app`
-applied to the closure *is* the function the λ denotes. It is what makes
-β-reduction available to the solver, and hence what lets `g (fun x => x + 1) = 1`
-be derived from `∀ f, g f = f 0`.
-
-The proof is `rfl`, which is the point: it certifies that the axiom we emit is
-*satisfied* by the intended interpretation, so emitting it cannot make a
-satisfiable problem unsatisfiable. -/
-theorem p4a_closure_faithful (φ : Dom → Cod) :
-    ∀ x, appOf (closureOf φ) x = φ x := fun _ => rfl
-
-/-- **P4b — a function-typed bound variable must be applied via `app`.** ✅
-
-This is the one that was once *wrong*, and the reason that bug was a false
-`unsat` rather than mere incompleteness. Translating `∀ (f : σ → τ), P (f a)` must
-quantify over the function sort and route the application through `app`:
-
-```
-(forall ((f Fn)) P (app f a))
+```lean
+def appOf F x := F x
+def closureOf φ := φ
+theorem p4a : appOf (closureOf φ) x = φ x := rfl   -- unfolds to `φ x = φ x`
 ```
 
-Declaring a fresh `f' : σ → τ` and emitting `(forall ((f Fn)) P (f' a))` instead
-leaves `f'` *unrelated to `f`*, so the formula asserts `P` holds for one fixed
-value rather than for all functions — strictly stronger than the source. Any goal
-following from that over-strong reading is wrongly proved.
+That type-checks, depends on no axioms, and constrains **nothing** about
+`Crush/Translation/Translate.lean`. Choosing `FnSort := Dom → Cod` makes the
+interpretation the identity, so the "canonical model" argument degenerates to a
+tautology. Real unsoundness bugs kept surfacing in the translator while these sat
+green, which is the evidence that they had no contact with the code.
 
-The theorem is that quantifying over the function sort and applying via `app` is
-*equivalent* to quantifying over the Lean function space — neither stronger nor
-weaker. The buggy encoding failed exactly this: it was strictly stronger. -/
-theorem p4b_funvar_via_app (P : Cod → Prop) (a : Dom) :
-    (∀ φ : Dom → Cod, P (φ a)) ↔ (∀ F : FnSort Dom Cod, P (appOf F a)) :=
-  Iff.rfl
+What P4 actually needs is the *emitted* closure axiom
+`(assert (forall (ȳ x̄) (= (app (clo ȳ) x̄) body)))` evaluated against a semantics in
+which `app` and `clo` are **uninterpreted** — so the axiom does work rather than
+holding by definition. That requires a higher-order value domain, which
+`Crush/Proofs/Semantics.lean` does not yet have (its `Value` is first-order, and
+`eval` returns `none` on `.lam` rather than pretending).
 
-/-- **P4c — extensionality is necessary and sufficient for function equality.** ✅
+So P4 is **🔴 not started**, not "core proved". The honest statement is the named
+obligation below; `Crush/Proofs/Encoding.lean` shows the form a real version takes
+for the first-order guards.
+-/
 
-`app` alone does not determine equality of `Fn` elements: in a model where `Fn` is
-an *uninterpreted* sort, two elements with identical `app` behaviour need not be
-equal, so `∀ x, f x = g x ⊢ f = g` is satisfiable — i.e. unprovable — without the
-axiom, and unsat with it (checked against z3 before implementing).
-
-Both directions matter. Left-to-right is what the emitted axiom buys us. But
-right-to-left must *also* hold, or the axiom would be too strong and could equate
-functions that differ somewhere, which would be unsound in the other direction.
-In the canonical model both hold, by `funext` and congruence respectively. -/
-theorem p4c_extensionality (F G : FnSort Dom Cod) :
-    (∀ x, appOf F x = appOf G x) ↔ F = G :=
-  ⟨funext, fun h _ => h ▸ rfl⟩
+/-- **P4a** — the emitted closure axiom is satisfied by the intended interpretation,
+stated over an *uninterpreted* `app`/`clo` pair so that it is not true by definition.
+Needs the higher-order value domain. -/
+def P4a_obligation : Prop := True   -- placeholder: see the note above
 
 end HigherOrderEncoding
 

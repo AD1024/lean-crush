@@ -64,6 +64,28 @@ def getAppFnArgs' (e : Expr) : Expr × Array Expr :=
 def isNatTyped (e : Expr) : TranslateM Bool := do
   return (← whnf (← inferType e)).isConstOf ``Nat
 
+/-- Whether the instance argument at position `i` of the application `e` is the one
+instance synthesis would pick.
+
+Recognizing `HAdd.hAdd _ _ _ inst a b` as SMT `+` assumes `inst` is the *standard*
+instance. A user can supply another — `⟨fun _ _ => 99⟩` is a legal `HAdd Int Int Int`
+— and then `1 + 2` is `99`, not `3`. Matching on the head alone therefore imports
+arithmetic that does not hold, and lets the solver prove false goals.
+
+Returns `false` when synthesis fails, so an exotic instance degrades to an
+uninterpreted symbol rather than being silently mistranslated. -/
+def hasCanonicalInstance (e : Expr) (i : Nat) : TranslateM Bool := do
+  let args := e.getAppArgs
+  let some inst := args[i]? | return false
+  let instTy ← inferType inst
+  try
+    let canon ← synthInstance instTy
+    isDefEq inst canon
+  catch _ =>
+    -- Synthesis failed: we cannot confirm the instance is standard, so treat it as
+    -- non-canonical and let the term degrade to an uninterpreted symbol.
+    return false
+
 /-- A supported (non-parametric, non-indexed, `Type`-valued) inductive we can emit
 as an SMT datatype: enumerations, simple structures, and — since `declare-datatypes`
 is itself recursive — self-recursive types such as `List`-like or tree shapes.
@@ -132,6 +154,34 @@ def testerApp (ctorSym : String) (x : SMT.Term) : SMT.Term :=
 
 /-- The well-formedness predicate symbol for a datatype sort. -/
 def wfSymbol (sortName : String) : String := s!"wf_{sortName}"
+
+/-- Whether `e` is an application of an overloaded arithmetic/comparison operator
+whose instance argument is **not** the one instance synthesis would pick.
+
+The recognizers for `+`, `*`, `≤`, `max`, … match on the head symbol, which commits
+them to the standard interpretation of that symbol. A non-standard instance means the
+operator denotes a different function, so the term must fall through to the
+uninterpreted path rather than being translated as SMT arithmetic.
+
+The instance is argument 3 for the heterogeneous classes (`HAdd`/`HMul`/`HSub`/…,
+whose signature is `{α β γ} [inst] a b`), argument 1 for the homogeneous ones
+(`LE`/`LT`/`Neg`/`Max`/`Min`, `{α} [inst] a b`). -/
+def isNonCanonicalOverload (e : Expr) : TranslateM Bool := do
+  let .const fname _ := e.getAppFn | return false
+  let instIdx : Option Nat :=
+    if fname == ``HAdd.hAdd || fname == ``HMul.hMul || fname == ``HSub.hSub
+       || fname == ``HDiv.hDiv || fname == ``HMod.hMod || fname == ``HAnd.hAnd
+       || fname == ``HOr.hOr || fname == ``HXor.hXor || fname == ``HAppend.hAppend
+       || fname == ``HShiftLeft.hShiftLeft || fname == ``HShiftRight.hShiftRight then
+      some 3
+    else if fname == ``LE.le || fname == ``LT.lt || fname == ``GE.ge || fname == ``GT.gt
+            || fname == ``Neg.neg || fname == ``Complement.complement
+            || fname == ``Max.max || fname == ``Min.min then
+      some 1
+    else
+      none
+  let some i := instIdx | return false
+  return !(← hasCanonicalInstance e i)
 
 /-- The `declare` callback exposed to handlers: emit commands from a thunk once
 per key, returning a stable symbol. -/
@@ -656,6 +706,15 @@ mutual
     | .const ``Bool.false _ => return some (.lit (.bool false))
     | .lit (.strVal s) => return some (.lit (.str s))
     | _ =>
+    -- Every recognizer below that matches an overloaded operator
+    -- (`HAdd.hAdd`, `LE.le`, `max`, …) assumes the *standard* instance. A
+    -- user-supplied instance makes the operator mean something else entirely —
+    -- `⟨fun _ _ => 99⟩ : HAdd Int Int Int` is legal, and then `1 + 2 = 99` — so
+    -- translating it as SMT `+` proves false goals. Bail out to the uninterpreted
+    -- path when the instance is not the one synthesis would choose.
+    if ← isNonCanonicalOverload e then return none
+    match e with
+    | _ =>
     -- Bit-vector and string theories, which need type-directed dispatch.
     match ← bitvecTerm? e with
     | some t => return some t
@@ -720,9 +779,19 @@ mutual
     | Nat.succ a => return some (.symbApp "+" #[← emitTerm a, .lit (.num 1)])
     -- `decide p` is `p` itself once `Prop` is encoded as `Bool`.
     | decide p _ => return some (← emitTerm p)
-    -- The `Nat → Int` coercion is the identity in this encoding, since `Nat` is
-    -- already represented as a non-negative `Int`.
-    | Nat.cast _ _ a => return some (← emitTerm a)
+    -- `Nat.cast` is the identity in this encoding *only* when the target is `Int`
+    -- (or `Nat`), since `Nat` is already represented as a non-negative `Int`. For
+    -- any other `NatCast` instance the coercion is an arbitrary function — it may
+    -- collapse values, as `⟨fun _ => ⟨0⟩⟩` does — so treating it as the identity
+    -- imports `Int`'s distinctness and lets the solver "prove" that equal values
+    -- differ. Fall through to an uninterpreted symbol instead, which keeps
+    -- congruence without assuming injectivity.
+    | Nat.cast target _ a =>
+      let target ← whnf target
+      if target.isConstOf ``Int || target.isConstOf ``Nat then
+        return some (← emitTerm a)
+      else
+        return none
     | LE.le _ _ a b => return some (.symbApp "<=" #[← emitTerm a, ← emitTerm b])
     | LT.lt _ _ a b => return some (.symbApp "<" #[← emitTerm a, ← emitTerm b])
     | GE.ge _ _ a b => return some (.symbApp ">=" #[← emitTerm a, ← emitTerm b])
