@@ -3,8 +3,10 @@
 **A Lean 4 ↔ SMT bridge with first-class higher-order support and a
 metaprogrammed, user-extensible translation layer.**
 
-Status: project scaffolded, foundational layers built and tested (see
-"Milestone 0" below). This document is the architecture and roadmap.
+Status: milestones 0–2 complete; 3 and 4 partial (see §9). The `crush` tactic
+works end-to-end and, by default, produces kernel-checked proofs rather than
+trusting the solver. This document is the architecture and roadmap; §9 is the
+current status and remaining work.
 
 ---
 
@@ -203,9 +205,9 @@ Module map (⟢ = built & tested, ▷ = designed, □ = todo):
 | `Crush/Reify/Reify.lean` | `Expr → CTerm`, atom allocation, `DTr` provenance | □ |
 | `Crush/Translation/Preprocess.lean` | reduction, skolem prep | □ |
 | `Crush/Translation/Monomorphize.lean` | poly → HOL saturation | □ |
-| `Crush/Translation/HOEncoding.lean` | λ-elimination (defunc ⟢, native ⟢, comb □) | ⟢ |
+| `Crush/Translation/HOEncoding.lean` | HO encoding helpers (defunc ⟢, native ⟢, combinators □) | ⟢ |
 | `Crush/Translation/Translate.lean` | driver: `Expr → SMT.Term` via handlers | ⟢ |
-| `Crush/Solver/Reconstruct.lean` | unsat-core → Lean proof replay | ⟢ (core-directed), □ (Alethe) |
+| `Crush/Solver/Reconstruct.lean` | unsat-core → Lean proof replay | ⟢ core-directed; □ Alethe |
 | `Crush/Frontend/Tactic.lean` | the `crush` tactic (`trust` mode) | ⟢ |
 
 ---
@@ -339,16 +341,15 @@ Naming note: what we call `defunctionalize`/`combinators` are Sledgehammer's
 solvers, which is why `defunctionalize` (λ-lifting into per-closure `apply`
 symbols) is our default rather than combinators.
 
-The IR in `Crush/SMT/Syntax.lean` is deliberately first-order so that the
-`defunctionalize`/`combinators` outputs map 1:1 onto what solvers accept; the
-`native` path uses an extended emitter (planned `Crush/SMT/PrintHO.lean`).
+The IR in `Crush/SMT/Syntax.lean` is first-order apart from one `Term.lam`
+constructor used only by `native`, so `defunctionalize` output maps 1:1 onto what
+every solver accepts.
 
-`Crush/Translation/HOEncoding.lean` will expose:
-```lean
-def encodeHO (mode : HOMode) (facts : Array HOFact) : TranslateM (Array HOFact)
-```
-returning facts whose terms are first-order (for the first two modes) together
-with the auxiliary `apply`/combinator declarations emitted into the script.
+As built, the encoding is not a separate pass over a fact list but a set of
+recognizers in the translation driver (`hoTerm?`, `emitClosure`,
+`declareArrowSort`, `emitExtensionality`) plus the arrow case in `emitSort`. That
+avoids a second traversal and lets the mode be selected per-term; `HOEncoding.lean`
+holds the shared naming and shape helpers.
 
 ---
 
@@ -358,59 +359,66 @@ with the auxiliary `apply`/combinator declarations emitted into the script.
   `backendSpec`, our own wall-clock race with a hard `kill`, `try/finally`
   cleanup, and `unknown`/`timeout` as first-class results. Adding a backend is a
   table row.
-- **Result parsing** (`Crush/SMT/Parser.lean`, todo): an s-expression parser
-  feeding a model reader (for `sat` counterexamples) and an unsat-core reader
-  (mapping `crush_fact_<id>` names back through the provenance table in
-  `TranslateState.facts`).
+- **Result parsing** (`Crush/SMT/Sexp.lean` + `Result.lean`, built): an
+  s-expression parser feeding a model reader (for `sat` counterexamples) and an
+  unsat-core reader (mapping `crush_fact_<id>` back through the provenance table in
+  `TranslateState.facts`). The core must be split off the `get-proof` response that
+  follows it on the same stream — a proof term mentions the fact names repeatedly,
+  so scanning the concatenation yields the proof's internal references, not the
+  core.
 - **Discharge policy** (`crush.trust`):
-  - `trust` → close with `crushSorry` axiom (documented as unsound-by-trust,
-    warns).
+  - `trust` → close with the `crushSorry` axiom, no replay attempted.
   - `reconstruct` → replay the unsat core into a Lean proof; **fail** if replay
     fails (sound, no new axioms).
   - `reconstructOrTrust` (default) → try replay, fall back to trust with a
     warning.
-- **Reconstruction** (`Crush/Solver/Reconstruct.lean`, todo): initial version
-  uses the **unsat core** to select the minimal fact set and hands it to a
-  Lean-side finishing tactic (e.g. `duper`/`grind` over exactly those facts),
-  turning "SMT says yes" into a checked proof without a bespoke verified checker.
-  A later version can parse Alethe proofs (cvc5) à la lean-smt.
+- **Reconstruction** (`Crush/Solver/Reconstruct.lean`, built): the **unsat core**
+  selects the relevant hypotheses; the goal is rebuilt as the closed implication
+  `h₁ → … → hₙ → goal` over only those and handed to `grind`/`omega`/`simp_all`.
+  Restricting the context is the point — irrelevant hypotheses are what make those
+  tactics time out. Turns "SMT says yes" into a checked proof with no bespoke
+  verified checker. Alethe replay (cvc5) is the planned follow-up; it would cover
+  the shapes a Lean tactic cannot re-find (§9 M4).
 
 ---
 
 ## 7. Frontend / tactic
+
+**As built**, the tactic takes no arguments: `crush` uses every local `Prop`
+hypothesis and the negated goal. All behaviour is governed by `set_option crush.*`
+(§8), read once into `Config` at entry.
+
+**Planned grammar** (§9 M5 item 1, and the most visible current gap — a user cannot
+today point `crush` at a lemma that is not already a hypothesis):
 
 ```
 crush [h₁, …, hₙ] [*] [* db] (u[c₁,…]) (d[c₁,…])
 ```
 
 - `[…]` explicit facts (terms), `*` = all local hypotheses, `* db` = a named
-  lemma database, `u[…]` unfold, `d[…]` definitional equalities. (Grammar
-  mirrors lean-auto's for familiarity.)
-- All behaviour is governed by `set_option crush.*` (see §8), read once into
-  `Config` at entry.
+  lemma database, `u[…]` unfold, `d[…]` definitional equalities.
 - The tactic: collect → preprocess → monomorphize → HO-encode → translate
   (handlers) → solve → discharge, with `trace.*` classes at each boundary and
   the full script available via `crush.trace.script` / `crush.save`.
 
 **Two hard lessons from lean-auto's frontend that shape ours:**
-- **Report the pipeline, always.** lean-auto's most-complained-about error is a
-  bare `"Auto failed to find proof"` that never says which of its three backends
-  ran, what the solver's verdict was, or that a model exists — all of that is
-  computed and thrown into trace classes that are off by default. `crush` emits a
-  one-line outcome by default: backend, verdict (`unsat`/`sat`/`unknown`/timeout),
-  wall time, #facts sent, #facts dropped. A `sat` result is surfaced as a
-  **counterexample** (parsed from `get-model`), not as a generic failure — lean-auto
-  has 527 lines of unused SMT→Expr model-parsing machinery it never wired up.
+- **Report the pipeline, always.** A bare "failed to find proof" that never says
+  which backend ran or what the verdict was is the single most common complaint
+  about tools in this space, and it happens when the diagnostics exist but sit
+  behind trace classes that default off. *Done:* every failure path names the
+  verdict, and a `sat` result is surfaced as a **counterexample** parsed from
+  `get-model` rather than a generic failure; reconstruction failures name the core
+  hypotheses they could not replay. *Not yet:* a one-line success summary
+  (backend, wall time, facts sent/dropped) is still trace-only — worth adding with
+  the M5 frontend work, since the criticism applies to us until it is.
 - **`(set-logic ...)` must be emitted.** lean-auto never emits it (the constructor
   exists but is never constructed), which silently disables theory- and
   HO-specific solver behaviour. `crush` always emits the resolved logic
   (auto-detected or `crush.logic`), and `HO_`-prefixed for `native` HO mode.
 
-Per-call configuration is a planned surface: `crush (timeout := 5) (backend :=
-cvc5) [hints]` overriding the `set_option` defaults, since lean-auto's 43
-global-only options with no call-site syntax are the root of most of its
-friction. The current milestone reads `Config` from options only; the config
-syntax layers on without changing the pipeline.
+Per-call configuration is likewise planned: `crush (timeout := 5) (backend := cvc5)
+[hints]` overriding the `set_option` defaults. `Config` is already a value read once
+at entry, so this layers on without changing the pipeline.
 
 ---
 
@@ -429,422 +437,232 @@ syntax layers on without changing the pipeline.
 | `crush.save` | `String` | `""` | write script to path |
 | `crush.trace.script` | `Bool` | `false` | log generated script |
 
+Two notes. Enum-valued options take a **string literal**
+(`set_option crush.trust "trust"`), since that is how `KVMap.Value` round-trips
+them. And `crush.mono.*` are registered but inert until monomorphization exists
+(§9 M5).
+
 ---
 
 ## 9. Milestones
 
-**Milestone 0 — Foundations (DONE, builds + tested).**
-SMT IR + printer, config/options, `TranslateM` + name map + provenance,
-`@[crush_translate]` extension + `crush_map` sugar, robust solver process layer.
-Smoke test (`Test/Smoke.lean`) confirms: valid SMT-LIB emission, 3 handlers
-registered via both surfaces, config parse, and a live `z3` `unsat` round-trip.
+Legend: **done** · **partial** (what is missing is named) · **todo**.
 
-**Milestone 1 — First-order end-to-end (DONE, builds + tested).**
-`SMT/Sexp.lean` + `SMT/Result.lean` (s-expr parser, unsat-core + model parsing),
-`Reify/Collect.lean` (hypotheses + negated goal), `Translation/Translate.lean`
-(handler dispatch + default structural translator for Bool/Prop/Int/Nat/UF with a
-Nat `≥0` quantifier guard), `Frontend/Tactic.lean` (the `crush` tactic in `trust`
-mode with pipeline reporting and `sat`→counterexample). `Test/FirstOrder.lean` confirms:
-`∀ x : Int, x + 0 = x`, hypothesis use, propositional logic, linear arithmetic,
-uninterpreted-function congruence all close; a false goal (`x + 1 = x`) is
-correctly *rejected* with a counterexample rather than silently closed.
+**M0 — Foundations. done.** SMT IR + printer, config/options, `TranslateM` with
+the name map and provenance, `@[crush_translate]` + `crush_map` sugar, solver
+process layer with a hard timeout.
 
-**Milestone 2 — Theories + Nat (DONE, builds + tested).**
-All of `Test/Theories.lean` passes: 9 negative tests correctly *rejected* (each
-wrapped in `#guard_msgs`, so a regression that closed one would fail the build),
-every positive test closed, and `#print axioms` confirms `crushSorry` remains the
-only trust axiom.
+**M1 — First-order end-to-end. done.** S-expression parser, unsat-core and model
+parsing, fact collection, the structural translator, and the `crush` tactic.
 
-* **Nat→Int** with the non-negativity soundness fix: every `Nat`-typed
-  variable/atom/function-result carries a `≥0` well-formedness constraint, and
-  `Nat.sub` truncates via `ite` — closing the `∀ n:Nat, n-1 < n` unsoundness that
-  lean-auto's TODO flags and that this tool exhibited before the fix.
-* **Datatypes**: non-parametric inductives — enumerations, structures, and
-  (new) **self-recursive** types — via `declare-datatypes`, with constructor
-  distinctness, injectivity, exhaustiveness, and projections/selectors.
-* **Bit-vectors**: statically-known widths as `(_ BitVec w)`; arithmetic, bitwise,
-  shifts (with `Nat`-amount coercion), unsigned/signed comparisons, `concat`,
-  `extract`, `setWidth`/`signExtend`, and **guarded division-by-zero**.
-* **Strings**: `str.++`/`str.len`/`str.prefixof`, with SMT-LIB-correct literal
-  escaping (codepoint-accurate, and aware that `\` is not an SMT escape char).
-* **Int div/mod**: verified Lean's default `Int./`/`%` are Euclidean (matching
-  SMT-LIB), plus an exactness guard at a zero divisor.
+**M2 — Theories. done.**
+- `Nat`→`Int` with `≥0` well-formedness constraints and `ite`-truncated `Nat.sub`.
+- Datatypes: non-parametric inductives including self-recursive ones, with
+  distinctness, injectivity, exhaustiveness, and selectors.
+- Bit-vectors at statically-known widths: arithmetic, bitwise, shifts, rotations,
+  unsigned/signed comparisons, `concat`/`extract`/`setWidth`/`signExtend`,
+  `toNat`/`toInt`/`ofNat`/`ofInt`, and guarded division-by-zero.
+- Strings: `str.++`/`str.len`/`str.prefixof` with correct literal escaping.
+- `Int` div/mod (Euclidean, matching SMT-LIB) with an exactness guard at zero.
 
-Three soundness bugs were found and fixed *during* this milestone, all by
-differential probing against Lean and z3 rather than by reading specs — see §10
-items 3, 5, and 6. Item 3 (`Nat` in datatype fields) was a live false-`unsat`:
-`crush` proved `False` from a true hypothesis, and thence `2 + 2 = 5`.
+*Remaining:* parametric datatypes (`Prod`/`Option`/`List`) — needs
+monomorphization; pinned as expected-to-fail tests in `Test/Regression.lean`.
 
-Remaining (deferred, not blocking M3): port lean-auto's `Test/SmtTranslation/*`
-regressions; parametric datatypes (need monomorphization, M5); `BitVec.toNat`
-(needs the `bv2nat` mixed-theory bridge).
+**M3 — Higher-order. partial.** `defunctionalize` (default) and `native` are done;
+`combinators` is not.
+- `defunctionalize`: one `Fn` sort and *n*-ary `app` per arrow type; each λ becomes
+  a closure with defining axiom `app(clo ȳ, x̄) = body`, parameterized by its
+  captures; named and partially-applied functions η-expand into closures.
+- Extensionality per arrow sort, emitted on demand (it is a costly quantifier
+  alternation, and only equations between function-typed terms need it).
+- `native`: `(-> σ τ)` sorts and `lambda` terms under a `HO_`-prefixed logic.
+  Gated to cvc5, which is the only backend that honours the prefix; falls back to
+  `defunctionalize` with a diagnostic elsewhere.
 
-**Milestone 3 — Higher-order (`defunctionalize` + `native` DONE; `combinators`
-not started).**
-`HOEncoding.lean` + the HO paths in `Translate.lean`. This is the headline feature —
-the benchmark is the set of HO goals that make lean-auto throw "Higher order
-input?". `Test/HigherOrder.lean` passes: 10 positive tests closed, 6 negative correctly
-rejected, `crushSorry` still the only trust axiom, verified on z3 and cvc5.
+*Remaining:* `combinators` (S/K/B/C/W). Accepted but warns and falls back. Its
+value is as an escape hatch when defunctionalization blows up, so it wants a
+workload that actually blows up to tune against. Also unsupported: a
+partially-applied term whose *remaining* arity is higher-order.
 
-**It turned out to be a soundness fix, not only a feature.** Before this milestone
-an arrow type became an opaque sort and a function-typed *bound variable* was
-declared as an unrelated `declare-fun`, so
+**M4 — Reconstruction. partial.** Core-directed replay is done; Alethe replay is
+not. `Crush/Solver/Reconstruct.lean` uses the unsat core to select the relevant
+hypotheses, rebuilds the goal as `h₁ → … → hₙ → goal` over only those, and hands it
+to `grind`/`omega`/`simp_all`. On success the solver leaves the trusted computing
+base — it was only a search heuristic. This is the default policy
+(`reconstructOrTrust`).
 
-```lean
-h : ∀ (f : Int → Int), g f = f 0
-```
+*Remaining:* Alethe proof replay for cvc5. It would cover the two shapes the
+finishers cannot replay — nonlinear arithmetic and finite-domain exhaustiveness,
+both pinned in `Test/Reconstruct.lean` — by replaying the solver's own inferences
+instead of depending on a Lean tactic to re-find the argument.
 
-emitted `(forall ((q Fn)) (= (g q) (q' 0)))` with `q'` disconnected from `q` — i.e.
-asserting **`g` is constant**, strictly *stronger* than `h`. `crush` therefore
-closed `g (fun x => x) = g (fun x => x + 1)`, whose negation is provable in Lean.
-That goal is now the `must_reject_ho_constant` regression.
+**M5 — Ergonomics & scale. todo.** In rough priority order:
+1. The hint grammar (§7): `crush [h₁, …] [*] (u[…]) (d[…])`. The tactic currently
+    takes no arguments, so a user cannot point it at a lemma that is not already a
+    hypothesis. This is the most visible gap for anyone using the tool.
+2. Monomorphization (§4b), which also unlocks M2's parametric datatypes.
+3. Premise selection on Lean core `LibrarySuggestions`.
+4. Portfolio backend, per-call config syntax, richer model printing, docs.
 
-Shipped:
-* **`defunctionalize`** (default) — one uninterpreted `Fn` sort and *n*-ary `app`
-  symbol per arrow type; each λ becomes a closure constant with defining axiom
-  `app(clo ȳ, x̄) = body`, parameterized by its captures when it closes over
-  SMT-bound variables; named functions passed as values are η-expanded into
-  closures bridged by `app(clo, x) = f(x)`.
-* **Extensionality**, per arrow sort and *on demand* (only when an equation between
-  function-typed terms occurs, since it is a costly quantifier alternation).
-  Verified load-bearing: `∀ x, f x = g x ⊢ f = g` is `sat` without it, `unsat` with.
-* **`native`** — `(-> σ τ)` sorts, direct application, `lambda` terms, under a
-  `HO_`-prefixed logic. Confirmed empirically that cvc5 gates HO on the prefix
-  (`HO_ALL` works, `ALL` does not) and that z3 ignores it with a warning and then
-  fails on the sorts — so `native` is gated to cvc5 and falls back to
-  `defunctionalize` with a diagnostic elsewhere. Note cvc5 answered `unknown`
-  rather than `sat` on a satisfiable HO query in testing: sound, but it loses
-  counterexamples.
-
-Not done: **`combinators`** (S/K/B/C/W). The mode is accepted but warns and falls
-back to `defunctionalize` rather than silently pretending. Its value is as an escape
-hatch when defunctionalization blows up, which needs a workload that actually blows
-up to tune against — so it is deferred until there is one. P5 stays 🔴.
-
-Note on partial application: `app` is *n*-ary over the flattened argument list
-rather than a chain of unary applies, which keeps the common fully-applied case
-small. Genuine partial application still works, via the same η-expansion used for
-named functions — `g (f 1)` with `f : Int → Int → Int` emits a closure with
-`app(clo, x) = f(1, x)` (tested). What is *not* supported is a partially-applied
-term whose remaining arity is itself higher-order.
-
-**Milestone 4 — Soundness/reconstruction (core-directed replay DONE; Alethe
-replay not started).**
-`Crush/Solver/Reconstruct.lean` implements the **solver-as-oracle** model, and it
-works: `Test/Reconstruct.lean` shows 12 goals closed with *no* trust axiom
-(`#print axioms` names only Lean's own `propext`/`Classical.choice`/`Quot.sound`),
-including linear arithmetic, propositional logic, UF congruence, quantified UF,
-truncated `Nat` subtraction, bit-vectors, strings, and a **higher-order** goal.
-
-The insight is that the solver's valuable output is not a proof object but a
-*selection*: out of a context with dozens of hypotheses, the unsat core names the
-two or three that matter, which is exactly what a Lean automated tactic cannot
-work out for itself. So we rebuild the goal as the closed implication
-`h₁ → … → hₙ → goal` over only the core hypotheses and hand it to
-`grind`/`omega`/`simp_all`. Restricting the context is what makes the finisher
-tractable — irrelevant arithmetic facts are precisely what makes these tactics time
-out. On success the solver drops out of the trusted computing base entirely; it was
-only a search heuristic.
-
-Fixed along the way: `runQuery` was returning the concatenation of the
-`get-unsat-core` and `get-proof` responses as the "core". Since a proof term
-mentions the asserted fact names many times over, scanning it for `crush_fact_<n>`
-produced duplicates and facts that were not in the core at all (observed:
-`[0,1,3,0,0,0,0,1,1,…]` where the real core was `[0,1,3]`). `splitFirstSexp` now
-separates them, tracking nesting depth and skipping string literals.
-
-Known boundary, pinned by tests: nonlinear arithmetic (`x * x = 4 ∧ x > 0 → x = 2`)
-and finite-domain exhaustiveness (enumeration pigeonhole) are proved by the solver
-but not replayed by the finishers. Under `reconstruct` that is an error; under the
-default `reconstructOrTrust` it warns and falls back to the axiom, so the fallback
-is visible rather than silent.
-
-Not started: Alethe proof replay for cvc5, which would remove the dependence on a
-Lean tactic re-finding the argument and so cover the boundary cases above.
-
-**Milestone 5 — Ergonomics & scale.**
-Monomorphization fuel tuning, premise selection hook (on Lean core
-`LibrarySuggestions`), portfolio backend, per-call config syntax, richer model
-pretty-printing, docs and examples.
-
-**Milestone 6 — Verified soundness.**
-Discharge the §10b `sorry`s in `Crush/Proofs/`, prioritized P4 → P10 → P6 → P8 →
-P7 (the passes that can silently produce a wrong `unsat`), then the definitional
-ones. Each proof shrinks the trusted computing base, à la `bv_decide`.
-
-Partial credit already banked: P11's **Lean-side** boundary facts are proven (9
-theorems in `Crush/Proofs/Obligations.lean` — the `#eval` probes from the design
-phase promoted to machine-checked statements), so a future toolchain that changed
-`x / 0` or `Int./`'s rounding would break the build rather than silently
-invalidate the encoding. The SMT side of P11 needs P8's denotational semantics.
+**M6 — Verified soundness. partial.** See §10b for the ledger. The obligations
+that can be stated concretely today are **proved** (`Crush/Proofs/Obligations.lean`
+builds with no `sorry`); the per-pass equivalence theorems are stated as named
+propositions to discharge once the passes and the denotational semantics exist.
 
 ---
 
 ## 10. Soundness obligations (the price of dropping the verified checker)
 
-Dropping lean-auto's verified checker for the SMT path is the right call — a deep
-study of the embedding confirms ~75% of lean-auto (~16k lines: all of
-`Auto/Embedding/*`, plus the `Lam2Lam`/`BuildChecker` half of `LamReif.lean`) is
-checker-specific and provides **zero** soundness guarantee on the SMT path (SMT
-results in lean-auto are either closed with the `autoSMTSorry` axiom under
-`smt.trust`, or used only as a premise selector). The entire `GLift`/`ILLift`/
-`IsomType` universe-lifting apparatus (`Auto/Embedding/Lift.lean`) exists *only*
-to state the checker's `LamThmValid` theorem and disappears with it. The
-atoms-as-fvars reconstruction (`Lam2DAtomAsFVar.lean`) shows the unlifted path.
+A verified checker *silently absorbs* a set of obligations that become **our**
+responsibility in unverified translation code. Each one below is a way the Lean and
+SMT semantics can disagree; each has regression tests covering both directions
+("must be unsat" and, more importantly, "must not be falsely unsat").
 
-But the checker also *silently absorbs* a set of obligations that then become
-**our** responsibility in unverified translation code. lean-auto's own `TODO.md`
-admits it hasn't fully discharged them even *with* the checker. We enumerate them
-here and each gets a dedicated test (both a "must be unsat" and a "must not be
-falsely unsat" case):
+All are addressed. The starred ones were **live false-`unsat` bugs** — `crush`
+proved something false — found by differential probing rather than by reading specs.
 
-1. **Inhabitation.** ✅ *addressed (M2).* SMT-LIB assumes every sort is non-empty;
-   Lean types may be empty. Emitting an unconstrained `declare-sort` for a
-   possibly-empty Lean type is unsound: `∀ x : Empty, P` is vacuously true, its
-   naive image `(forall ((x S)) P)` is not. `quantifier` now **refuses** to
-   translate a quantifier whose domain is a structurally-uninhabited inductive
-   (`isEmptyType`), with a diagnostic, rather than emitting an unsound encoding.
-   Note the non-dependent case (`Empty → False`, where the binder is unused) takes
-   the implication path and abstracts the antecedent as an opaque `Bool` atom,
-   which is independently sound. A zero-constructor inductive is also excluded from
-   `isSupportedDatatype` (z3 rejects an empty `declare-datatypes` outright).
-2. **`Nat` is not `Int`.** ✅ *fixed (M2).* Every `Nat`-typed quantifier carries a
-   `≥ 0` guard and every `Nat`-valued symbol a non-negativity constraint;
-   **truncated subtraction** (`Nat.sub`, where `3 - 5 = 0`) is emitted as an `ite`,
-   not SMT `-`. Regression: `must_reject_sub` (`∀ n : Nat, n - 1 < n`), which this
-   tool *did* wrongly prove before the fix.
+| # | Obligation | Resolution |
+|---|---|---|
+| 1 | **Inhabitation.** Every SMT sort is non-empty; Lean types may be empty, so `∀ x : Empty, P` (vacuously true) has no faithful image | `quantifier` refuses an uninhabited domain with a diagnostic. Zero-constructor inductives are excluded from datatype emission (z3 rejects them anyway). The non-dependent case (`Empty → False`) takes the implication path and is independently sound |
+| 2 | **`Nat` is not `Int`.** Encoded as `Int`, a `Nat` could go negative; and `Nat.sub` truncates | `≥0` constraint on every `Nat`-typed quantifier and symbol; `Nat.sub` via `ite`. ★ `∀ n:Nat, n-1 < n` was provable before this |
+| 3 | **`Nat` inside datatype fields.** SMT datatypes are *freely generated over their field sorts*, so a `Nat` field makes the SMT type strictly larger than the Lean one | A per-datatype `wf_T` predicate carving out the image of the Lean type, guarding every quantifier over `T`, composing transitively. ★ The **true** hypothesis `∀ p : PN, p.x ≥ 0` was unsatisfiable, giving `False` and thence `2+2=5`. Note a per-selector constraint cannot fix this: the problem is the *domain of quantification*, not the selector's range |
+| 4 | **Division rounding.** Truncated vs. Euclidean differ on negatives | Verified empirically: Lean's default `Int./`/`%` are *Euclidean*, matching SMT-LIB, so the direct mapping is sound and no dual-operator apparatus is needed |
+| 5 | **BitVec width and signedness** | Only statically-known widths translate. Lean's `/`, `%`, `<`, `≤` on `BitVec` are the **unsigned** operations. Shift amounts coerce `Nat`→same-width literal. ★ SMT-LIB *fixes* `bvudiv x 0` to all-ones where Lean gives `0` — a genuine disagreement, not an underspecification, so it is guarded by an `ite` |
+| 6 | **Symbol collisions.** Two structures both using the default constructor name `mk` | Constructor/selector symbols are qualified by the owning datatype's (already unique) sort symbol. ★ Two `mk`s and two `mk_sel0`s were being emitted into one script, conflating unrelated types |
+| 7 | **String escaping** | Codepoint-accurate `\u{…}`; note `\` is *not* an SMT-LIB escape character, so a backslash is emitted literally |
+| 8 | **Function-typed bound variables.** A quantifier over an arrow type | Must range over the encoded function sort with applications routed through `app` (§5). ★ Declaring a fresh symbol for the bound variable left it *disconnected from its own quantifier*, so `∀ (f : Int → Int), g f = f 0` asserted "`g` is constant" — strictly stronger than the hypothesis |
 
-   **Why not just use a `Nat` sort, or define our own?** This is the obvious first
-   reaction to the guard machinery, so the answer is recorded here. SMT-LIB's
-   arithmetic theory defines exactly `Int` and `Real` — there is **no `Nat` sort**
-   (`(declare-const n Nat)` is an unknown-sort error in both z3 and cvc5), and no
-   subsort or refinement mechanism to carve out "the `Int`s that are `≥ 0`". So
-   non-negativity *must* be expressed as a constraint rather than as a type. The
-   two ways to define our own were benchmarked against the current encoding:
+Items 1, 3, and 8 are the same shape of bug: a Lean binder's domain mapped to an
+SMT domain that is not its faithful image — too large in 3, too small (a single
+fixed value) in 8, and wrongly non-empty in 1. That pattern is worth watching for
+in any new binder handling.
 
-   * **Dedicated uninterpreted sort + bijection to the non-negative `Int`s.**
-     Appealing because non-negativity becomes structural, so datatype fields would
-     need no `wf` at all. But the three bijection axioms (`n2i (i2n i) = i`,
-     `i2n (n2i n) = n`, `n2i n ≥ 0`) are mutually-recursive quantified equalities
-     that send z3 into an instantiation loop: it **times out on the bare
-     consistency check**, before any goal. Strictly worse — it makes everything
-     unsolvable, not just some things.
-   * **Peano datatype (`zero | succ`).** Exact as a set, but discards linear
-     arithmetic: `x + y = y + x` stops being a solver primitive and needs
-     induction, which SMT has no rule for.
+**Why not just use a `Nat` sort, or define our own?** The obvious first reaction to
+the guard machinery, so: SMT-LIB's arithmetic theory defines exactly `Int` and
+`Real`. There is **no `Nat` sort** (`(declare-const n Nat)` is an unknown-sort error
+in both z3 and cvc5) and no subsort or refinement mechanism, so non-negativity must
+be a *constraint* rather than a *type*. Both roll-your-own alternatives measured
+worse: a dedicated sort with a bijection to the non-negative `Int`s would make
+non-negativity structural, but its mutually-recursive bijection axioms make z3 time
+out on the bare consistency check, before any goal; a Peano datatype is exact but
+discards linear arithmetic. The guard's cost is also narrower than it looks — a
+`Nat`-free datatype gets a constantly-`true` `wf` and no guard is emitted.
 
-   Ranking: guarded `Int` > bijection sort (diverges immediately) > Peano (loses
-   arithmetic). Note the guard is not free but its cost is narrow — a datatype with
-   no `Nat` field gets a constantly-`true` `wf` and no guard is emitted at all.
-   A possible future refinement: suppress the guard when the query's arithmetic
-   never touches the guarded field.
-3. **`Nat` inside inductive constructors.** ✅ *fixed (M2)* — lean-auto's TODO flags
-   this as an active unsoundness, and it was live here too. The root cause is
-   deeper than "selectors need a `≥ 0` constraint": SMT datatypes are **freely
-   generated over their field sorts**, so a `Nat` field encoded as `Int` makes the
-   SMT type strictly *larger* than the Lean type, populated by values with negative
-   fields that no Lean value has. Consequently the **true** hypothesis
-   `∀ p : PN, p.x ≥ 0` is *unsatisfiable* in SMT, and the solver derives `False`
-   from it — a false `unsat`, the dangerous direction. (Confirmed: `crush` proved
-   `False`, then `2 + 2 = 5`.) A per-selector constraint cannot fix this, because
-   the problem is the *domain of quantification*, not the selector's range. Fix: a
-   well-formedness predicate `wf_T` per datatype characterizing the image of the
-   Lean type, defined in selector form per constructor
-   (`(=> ((_ is C) x) ⟨field guards⟩)`) and used to guard **every quantifier** over
-   `T` (`wfCondition`/`guardSort`). It composes transitively through nested
-   datatypes and degenerates to constantly-`true` (hence free) when no field needs
-   a guard. Regressions: `must_reject_nat_field`, `must_reject_field_sub`, plus
-   `pn_field_nonneg`/`pn_field_cong` pinning that the guard is not over-restrictive.
-   A recursive datatype with a guarded field yields a *recursive* `wf` axiom
-   (`wf_L x = (is-cons x ⇒ hd x ≥ 0 ∧ wf_L (tl x))`), and this is the encoding's
-   real cost. Tested through the tactic (`Test/Theories.lean`, `NList` group):
-   many queries do discharge — constructor distinctness, propagation into nested
-   tails, and quantification over the recursive type all close — but
-   `must_not_close_nl_field` **times out**, and a longer budget does not help
-   (checked at 30s), so it is genuine instantiation divergence rather than
-   slowness. The outcome is sound (`unknown` never closes a goal, so no wrong
-   answer), but it is a real loss of completeness on recursive types with guarded
-   fields. Suppressing the guard when the query's arithmetic never touches the
-   guarded field (see item 2's note) would recover most of these.
-4. **Truncated vs. Euclidean division.** ✅ *resolved empirically (M2).* Verified
-   directly rather than assumed: Lean's **default** `Int./` and `Int.%` are
-   *Euclidean* (`(-7)/2 = -4`, `(-7)%2 = 1`), matching SMT-LIB `div`/`mod`, so the
-   direct mapping is sound — no dual-operator apparatus needed for the default
-   instance. `must_reject_tdiv` pins the T-division value as rejected.
-   Additionally, SMT-LIB leaves `(div x 0)` *underspecified* while Lean pins
-   `x / 0 = 0` and `x % 0 = x`. That gap is sound-but-incomplete (an
-   underspecified operator admits Lean's interpretation, so `unsat` was already
-   trustworthy); `intDivGuard` emits an `ite` to make the encoding exact.
-5. **BitVec width and signedness.** ✅ *addressed (M2).* Only statically-known
-   widths are translated (a symbolic `BitVec w` has no SMT sort and degrades to an
-   opaque sort). Each operator was checked against both Lean and z3:
-   - Lean's `/` and `%` on `BitVec` are the **unsigned** operations, and Lean's
-     `<`/`≤` are **unsigned** comparisons (`(255 : BitVec 8) < 1` is `false`) —
-     mapped to `bvudiv`/`bvurem`/`bvult`/`bvule`, with `BitVec.slt`/`sle` for the
-     signed ones. Getting this backwards is unsound in both directions.
-   - Shift amounts: Lean's `shl : BitVec n → Nat` vs SMT's `bvshl : BitVec n →
-     BitVec n` — a `Nat` amount is materialized as a same-width literal
-     (`shiftOp`). Amounts ≥ width agree (both yield 0 / sign-fill).
-   - **Division by zero is a genuine disagreement, not an underspecification**:
-     SMT-LIB *fixes* `bvudiv x 0` to all-ones and `bvsdiv x 0` to `±1`, while Lean
-     gives `0`. Emitting the raw operator lets the solver prove Lean-false goals,
-     so `bvDivGuard` rewrites to an `ite`. Regression:
-     `must_reject_bv_div_zero`. By contrast `bvurem`/`bvsrem`/`bvsmod` already
-     agree with Lean (all return the dividend) and are emitted raw.
-   - Verified to agree exactly, needing no guard: `concat` operand order (left
-     operand is high), `extract`, `zero_extend`/`sign_extend`, and the truncating
-     behaviour of `setWidth`/`signExtend` when the target is narrower.
-6. **Symbol collisions across datatypes.** ✅ *fixed (M2).* Two distinct Lean
-   structures both using the default anonymous constructor name `mk` emitted two
-   `mk`s and two `mk_sel0`s into one script, conflating unrelated types'
-   constructors and selectors. Constructor and selector symbols are now qualified
-   by the datatype's allocated (already-unique) SMT sort symbol
-   (`ctorSymbol`/`selSymbol`). Regression: `no_collide`.
-7. **String escaping.** ✅ *addressed (M2).* SMT-LIB doubles an embedded `"` and
-   requires `\u{…}` for non-printable characters — and critically, `\` is **not**
-   an escape character there (verified: `"\u{5c}"` and `"\\"` are *different*
-   strings in z3), so a backslash must be emitted literally.
-   `SMT.escapeSmtString` implements this. `str.len` counts codepoints, matching
-   `String.length` (checked on `"λx"`).
+Its real cost is recursive datatypes with guarded fields, where the `wf` axiom
+becomes recursive and can send the solver into an instantiation loop
+(`must_not_close_nl_field` times out even at 30s). That is sound — `unknown` never
+closes a goal — but it is a genuine completeness loss. Suppressing the guard when
+the query never touches the guarded field would recover most of it.
 
-8. **Function-typed bound variables.** ✅ *fixed (M3).* A quantifier over a function
-   type must range over the encoded function sort with applications routed through
-   `app`; declaring a fresh `declare-fun` for the bound variable leaves it
-   *disconnected* from the quantifier, which silently **strengthens** the
-   hypothesis. `∀ (f : Int → Int), g f = f 0` became "g is constant", and goals
-   following from that were wrongly proved — a false `unsat`, confirmed by closing
-   a goal whose negation is provable in Lean. Fixed by the HO encoding (§5); the
-   regression is `must_reject_ho_constant`. Note this is the *same shape* of bug as
-   items 1 and 3: in each case a Lean binder's domain was mapped to an SMT domain
-   that is not its faithful image (too large for `Nat`-fielded datatypes and empty
-   types, effectively too small — a single fixed value — here).
-
-The theory semantics live in `Crush/Translation/Theories.lean` (width/literal
-helpers and the division guards) and in `Translate.lean`'s `bitvecTerm?`/
-`stringTerm?` recognizers. They are the reason built-ins need full `MetaM` access
-(they must synthesize guards and inspect types), not a static table.
-
-**Methodology note.** Every entry above was settled by *differential probing* —
-evaluating the operator in Lean (`#eval`) and in z3 (`simplify`/`check-sat`) and
-comparing — rather than from memory of either specification. Three of the seven
-items turned out differently than the initial design assumed (item 3 was a live
-false-`unsat`, item 4's default instance needed *no* special handling, item 5's BV
-division needed a guard that `Int` division did not). Assumed semantics are how
-unsoundness enters a hammer, so new theory support should follow the same
-probe-first discipline.
+**Methodology.** Every item was settled by evaluating the operator in Lean (`#eval`)
+*and* in the solver and comparing, not from memory of either specification. Three
+came out differently than the design assumed. New theory support should follow the
+same probe-first discipline.
 
 ## 10b. Formal proof obligations (verified soundness roadmap)
 
-The obligations in §10 are, in Milestone 1–3, discharged by *testing* and by
-*trusting the solver* (`crush.trust`). That is the pragmatic path and it matches
-every deployed hammer. But the long-term goal is that each transformation pass
-carries a **machine-checked semantic-equivalence theorem**, so that a chain of
-passes composes into an end-to-end soundness guarantee and the trust surface
-shrinks to (the solver's `unsat` verdict) + (the kernel). This section is the
-ledger of what must be proven, tracked alongside the code. It is deliberately
-separate from testing: a ✅ here means *a Lean proof exists in the repo*, not that
-a test passes.
+§10's obligations are discharged by *testing* plus *trusting the solver*. The
+long-term goal is that each pass carries a machine-checked meaning-preservation
+theorem, so a chain of passes composes into an end-to-end guarantee and the trust
+surface shrinks to the solver's verdict plus the kernel. This is the ledger.
 
-### The overarching statement
+A ✅ means **a Lean proof exists in `Crush/Proofs/Obligations.lean`**, not that a
+test passes. That module builds with **no `sorry`**.
 
-Let `⟦·⟧` denote the semantics of a fact in the source logic (a Lean `Prop`, or a
-`CTerm` under an interpretation `I` assigning Lean meanings to atoms). Each pass
-`T : Facts → Facts` must satisfy a **meaning-preservation** theorem of one of two
-strengths:
+Each pass `T` owes one of two strengths:
+- **Equivalence** — `∀ I, ⟦Γ⟧_I ↔ ⟦T Γ⟧_I`: the pass neither loses nor invents
+  models. For normalization and lowering.
+- **Equisatisfiability** — `(∃ I, ⟦Γ⟧_I) ↔ (∃ I', ⟦T Γ⟧_I')`: `T Γ` is unsat iff
+  `Γ` is. The correct (weaker) statement whenever a pass introduces symbols a model
+  must interpret, since you cannot demand the *same* `I`.
 
-- **Equivalence** (for normalization/encoding passes that must not change
-  provability): `∀ I, (⟦Γ⟧_I) ↔ (⟦T(Γ)⟧_I)`, i.e. the pass neither loses nor
-  invents models.
-- **Equisatisfiability** (for passes introducing fresh symbols, e.g. Skolem/
-  defunctionalization `apply` symbols): `(∃ I, ⟦Γ⟧_I) ↔ (∃ I', ⟦T(Γ)⟧_I')`, i.e.
-  `T(Γ)` is unsat iff `Γ` is. This is the weaker but correct statement whenever a
-  pass adds symbols that a model must interpret (you cannot demand the *same* `I`).
+### Status
 
-The composed guarantee we ultimately want:
-> If the solver reports `unsat` on the emitted script, and every pass in the
-> chain has its equivalence/equisatisfiability theorem, then the original goal
-> `G` follows — reconstructed as a Lean proof term with no new axioms.
+| # | Pass | Owes | Status |
+|---|---|---|---|
+| P1 | Preprocessing (β/η, `let`/proj) | equivalence, definitional | 🟡 `P1_obligation` stated; pass not built |
+| P2 | `Nat`→`Int` embedding | equivalence, per operator | 🟡 subsumed by P10/P11 for the parts that exist |
+| P3 | Monomorphization | equivalence | 🟡 stated; pass not built |
+| **P4** | **Defunctionalization** | **equisatisfiability** | 🟡 **core ✅** — `p4a`/`p4b`/`p4c` prove the emitted axioms hold in a canonical model where quantification over the function sort coincides with the Lean function space. Lifting to whole fact lists needs the semantics |
+| P5 | Combinator encoding | equisatisfiability | 🔴 mode not implemented |
+| P6 | Skolemization | equisatisfiability | 🔴 pass not built |
+| P7 | Reification `Expr → CTerm` | equivalence | 🔴 pass not built |
+| P8 | `CTerm → SMT.Term` lowering | equivalence | 🔴 blocks P11's SMT half |
+| P9 | Inhabitation discharge | side-condition | 🟡 enforced by refusal (§10.1), not yet proven |
+| **P10** | **Datatype well-formedness guard** | equivalence | ✅ **proved** for the `Nat`→`Int` case implemented (`p10_wf_exact`), plus `p10_guarded_quantifier`/`p10_guarded_existential` pinning the `⇒`-vs-`∧` shapes |
+| P11 | Theory-operator agreement | equivalence, per operator | 🟡 **Lean side ✅** (9 theorems: `bv_udiv_zero`, `int_div_zero`, `nat_sub_truncates`, `int_div_euclidean`, …). SMT side needs P8 |
+| P12 | Symbol allocation injectivity | side-condition | 🟡 stated |
 
-Reaching that fully closes the gap between `crush.trust reconstruct` being
-*implemented* and being *proven*. Until each theorem below is ✅, the
-corresponding pass is in the trusted computing base and must be flagged as such by
-`#print axioms`-style auditing.
+Also proved: `equivalence_comp`, `equivalence_id`, `equisat_of_equivalence` — the
+composition lemmas that make discharging obligations *per pass* worthwhile instead
+of proving one monolithic theorem.
 
-### Per-pass obligations
+### A lesson about stating obligations
 
-Status legend: 🔴 not started · 🟡 statement drafted, proof pending · ✅ proven.
+The first draft stated P1–P8 as `theorem … : Equivalence T := by sorry` over a
+`variable` pass. Those statements are **false**, not merely unproven: universally
+quantified over all `T`, they claim every function on fact lists preserves meaning
+(refuted by `T := fun _ => []`). P4a–P4c and P10 had the same defect — quantified
+over an arbitrary `app`, or stated over an opaque predicate, so unprovable by
+construction.
 
-| # | Pass (module) | Theorem to prove | Strength | Status |
-|---|---|---|---|---|
-| P1 | Preprocessing β/η, `let`/proj reduction (`Translation/Preprocess`) | reduced term is defeq to the original ⇒ same `Prop` | equivalence (definitional — cheap: `Eq.refl`/`rfl`-backed) | 🟡 `P1_obligation` stated; pass not built |
-| P2 | Nat→Int embedding (`Translation/Translate`) | `⟦n : Nat⟧ = Int.ofNat n` and the `≥0` guard makes `∀`/`∃`/`sub`/`div` agree with Lean on the image | equivalence, per operator | 🔴 |
-| P3 | Monomorphization (`Translation/Monomorphize`) | each generated instance is an instance of a source lemma ⇒ implied by it; instances are sound (already true "by construction" since each carries a Lean proof — the obligation is to *retain* that proof, not re-prove) | equivalence (Γ ⊢ each instance) | 🟡 |
-| **P4** | **Defunctionalization (`Translation/HOEncoding`, `defunctionalize`)** | **for the introduced `apply`/closure symbols and their defining axioms `A`, `(∃ I, ⟦Γ⟧_I) ↔ (∃ I', ⟦defunc(Γ) ∪ A⟧_I')`** — the headline HO theorem | **equisatisfiability** | 🟡 **core ✅ proved** — `p4a`/`p4b`/`p4c` exhibit a canonical model satisfying the emitted axioms, with quantification over the function sort provably coinciding with the Lean function space; lifting to whole fact lists needs the semantics |
-| P5 | Combinator encoding (`HOEncoding`, `combinators`) | S/K/B/C/W defining equations characterize the same functions ⇒ equisatisfiable | equisatisfiability | 🔴 |
-| P6 | Skolemization (`Translation/Preprocess`) | `(∃ I, ⟦∀x∃y.φ⟧) ↔ (∃ I', ⟦∀x.φ[y:=f x]⟧)` with fresh `f`; classical, via `Classical.choice` | equisatisfiability | 🔴 |
-| P7 | Reification `Expr → CTerm` (`Reify/Reify`) | `⟦reify(e)⟧_I = e` for the recovered interpretation `I` (the round-trip that makes reconstruction possible; lean-auto's `reifTermCheckType` checks types but not meaning) | equivalence | 🔴 |
-| P8 | `CTerm → SMT.Term` lowering (`Translation/Translate`) | the SMT term denotes the same boolean/Int/… value as the `CTerm` under the sort interpretation | equivalence | 🔴 |
-| P9 | Inhabitation discharge (`Translation/Translate`) | every sort emitted without a guard is genuinely non-empty (witness recorded), so SMT's non-emptiness assumption is sound | side-condition | 🟡 |
-| **P10** | **Datatype well-formedness guard (`Translation/Translate`, `wfCondition`/`guardSort`)** | `wf_T` characterizes exactly the image of the Lean type: `∀ t, wf_T t ↔ ∃ (v : T), ⟦v⟧ = t`; hence guarding every quantifier over `T` yields a formula equivalent to the Lean one | equivalence | ✅ **proved** for the `Nat`→`Int` case the encoding implements (`p10_wf_exact`), plus `p10_guarded_quantifier` and `p10_guarded_existential` pinning the `⇒`-vs-`∧` shapes |
-| P11 | Theory-operator agreement (`Translation/Theories`) | each emitted SMT operator denotes the same total function as its Lean counterpart — *including at the boundary values* where the two specs differ (`bvudiv`/`bvsdiv` at 0) or where SMT is silent (`div`/`mod` at 0) | equivalence, per operator | 🟡 **Lean side ✅ proven** (9 theorems: `bv_udiv_zero`, `int_div_zero`, `nat_sub_truncates`, `int_div_euclidean`, …); SMT side blocked on P8's semantics |
-| P12 | Symbol allocation injectivity (`Translation/Monad`, `symbolFor`) | the atom→symbol map is injective, so distinct Lean atoms (notably same-named constructors of different datatypes) never share an SMT symbol | side-condition | 🟡 |
+The `sorry`s were hiding falsehoods rather than tracking open work. Attempting the
+proofs is what exposed this. Obligations are therefore now either *proved against a
+concrete construction* (P4a–c, P10, P11's Lean half) or recorded as *named
+propositions to discharge for a specific pass* (`def P4_obligation (pass) : Prop`),
+never as `sorry`-backed universal claims.
 
-### Defunctionalization in detail (P4 — the one you flagged)
+### P4 in detail
 
-This is the theorem that most needs to exist, because it is the pass with no
-prior art in the Lean SMT tools and the one whose bugs would be silent. Concretely
-the pass, given a set of higher-order facts, produces:
+The pass introduces, for each arrow sort `σ → τ` occurring applied: a sort
+`Fn σ τ`, an uninterpreted `app : Fn σ τ → σ → τ`, and per λ-closure
+`λx. body[x, ȳ]` a constructor `clo : ȳ → Fn σ τ` with axiom
+`∀ ȳ x, app (clo ȳ) x = body[x, ȳ]`.
 
-- a fresh first-order sort `Fn σ τ` for each arrow sort `σ → τ` that occurs
-  applied;
-- an uninterpreted `apply_{σ,τ} : Fn σ τ → σ → τ`;
-- for each λ-closure `c = λx. body[x, ȳ]` captured with free vars `ȳ`, a
-  constructor `mk_c : (types of ȳ) → Fn σ τ` and a **defining axiom**
-  `∀ ȳ x, apply_{σ,τ} (mk_c ȳ) x = body[x, ȳ]`.
+The standard applicative-encoding argument: forward, extend any model of `Γ` by
+interpreting `Fn` as the function graph and `app` as application — the closure
+axioms then hold by β. Backward, read Lean functions off a model of the encoding via
+`fun x => app (clo ȳ) x`; the axioms force these to be the intended bodies.
 
-The obligation, stated in Lean-ish:
-```
-theorem defunc_equisat (Γ : Facts) :
-    (∃ I : Interp, Γ.satisfiedBy I) ↔
-    (∃ J : Interp, (defunc Γ ∪ closureAxioms Γ).satisfiedBy J)
-```
-Proof strategy (the standard applicative-encoding argument): forward, extend any
-model `I` of `Γ` to `J` by interpreting `Fn σ τ` as the function graph and
-`apply` as function application — the closure axioms hold by β. Backward, from a
-model `J` of the encoding, read off Lean functions via `fun x => apply (mk_c ȳ)
-x`; the axioms force these to equal the intended bodies, so `Γ` holds. The subtle
-points to get right in the proof (and thus the test cases): **extensionality**
-(two closures with equal `apply` behaviour need not be equal `Fn` elements unless
-we add an extensionality axiom — so the encoding is equisatisfiable, *not*
-model-isomorphic, and the theorem must be stated as ∃/∃), and **capture** (the
-free-variable list `ȳ` must be complete, or the defining axiom is unsound).
+Two subtleties the proof must respect, both already reflected in the implementation:
+**extensionality** (two closures with equal `app` behaviour need not be equal `Fn`
+elements without the axiom — which is why the statement is equisatisfiability, not
+model isomorphism) and **capture completeness** (the free-variable list `ȳ` must be
+complete, or the defining axiom is unsound).
 
-Until P4 is ✅, `crush.ho.mode defunctionalize` is trusted, and a `sat` result
-from the *encoded* problem must not be reported as a genuine Lean counterexample
-without first checking the closure axioms did not themselves cause the model
-(a spurious-model risk the tests must cover).
-
-### How the proofs are staged
-
-We do **not** block Milestone 3's *implementation* on these proofs — the passes
-ship first (trusted), with their equivalence theorems stated as `theorem … := by
-sorry` in a `Crush/Proofs/` directory so the statement is type-checked and the gap
-is visible to `#print axioms`. Discharging the `sorry`s is Milestone 6 ("Verified
-soundness"), prioritized P4 → P6 → P8 → P7 (the passes that can silently produce a
-wrong `unsat`), then the cheaper definitional ones. This mirrors `bv_decide`'s
-history: the reflection loop shipped trusted, then the LRAT checker and bitblaster
-were proven, shrinking the TCB incrementally.
+Until P4 is fully ✅, `defunctionalize` is trusted, and a `sat` result from the
+*encoded* problem should not be reported as a genuine Lean counterexample without
+checking that the closure axioms did not themselves produce the model.
 
 ## 11. Testing strategy
 
-- **Unit**: IR printing (golden strings), config parsing, name-map idempotence.
-- **Extension**: handler registration/priority/override, `crush_map` desugaring.
-- **Solver**: round-trip against z3 and cvc5 for `sat`/`unsat`/`unknown`/timeout;
-  process-cleanup assertions (no zombies after exceptions).
-- **Translation**: per-theory golden SMT scripts; diff-review on changes.
-- **End-to-end**: a `crush`-closes-this corpus, plus a `crush`-must-fail corpus
-  (unsound patterns must not be silently trusted under `reconstruct`).
-- **HO benchmark**: the goals lean-auto rejects, tracked as an xfail→pass list.
+The suite is `Test/`, built by `lake build Test`. Every `theorem` that elaborates is
+a passing test; the build must be clean and produce **no `sorry`**.
 
-Solvers on this machine: `z3` (homebrew), `cvc5` (in `~/Downloads`). CI will pin
-both. `vampire`/`zipperposition` are optional TPTP backends for a later phase.
+| File | Covers |
+|---|---|
+| `Smoke.lean` | IR printing, handler registration via both surfaces, config parse, a live `z3` round-trip |
+| `FirstOrder.lean` | the basic end-to-end path: arithmetic, propositional logic, UF congruence |
+| `Theories.lean` | `Nat`/`Int`, datatypes (incl. recursive), bit-vectors, strings, and the §10 soundness regressions |
+| `HigherOrder.lean` | λ-arguments, captures, η-expansion, extensionality, partial application |
+| `Regression.lean` | an independent corpus migrated from another Lean SMT bridge, plus cases derived from bugs reported against it |
+| `Reconstruct.lean` | `#print axioms` assertions — reconstructed theorems must not name `crushSorry` — and the replay boundary |
+
+**Negative tests use `#guard_msgs`, not `sorry`.** A goal that is *false* must be
+rejected, and the guard pins the rejection message, so a regression that let `crush`
+close it fails the build. An earlier `first | (crush; done) | sorry` idiom was
+strictly worse: a regression made a warning *disappear*, which nothing enforced.
+Switching immediately exposed one test that was passing for the wrong reason (it was
+timing out, not being refuted).
+
+`substring := true` matches only the stable message prefix, keeping
+solver-dependent counterexample text out of the expectation.
+
+**Known-limitation tests are also pinned**, not omitted — parametric datatypes, the
+recursive-`wf` divergence, and the mixed BV/Int query neither solver discharges. Each
+expects the current failure, so when a future change makes one work, the build fails
+and prompts promoting it to a positive test.
+
+Solvers on this machine: `z3` (homebrew), `cvc5` (in `~/Downloads`). Both are
+exercised; CI will pin both. `vampire`/`zipperposition` are optional TPTP backends
+for a later phase.
