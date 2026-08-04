@@ -20,16 +20,28 @@ namespace Crush.SMT
 suffix indexes back into `TranslateState.facts`. -/
 def factNamePrefix : String := "crush_fact_"
 
-/-- All fact ids named `crush_fact_<n>` anywhere within an S-expression. -/
-private partial def collectFactIds : Sexp → Array Nat
-  | .atom name =>
-    if name.startsWith factNamePrefix then
-      match (name.drop factNamePrefix.length).toNat? with
-      | some n => #[n]
-      | none => #[]
-    else #[]
-  | .list xs => xs.foldl (fun acc x => acc ++ collectFactIds x) #[]
-  | .str _ => #[]
+-- Nested inductive over `Array`; the recursion goes through a list helper so the
+-- descent is structural and this is total rather than `partial`.
+mutual
+  /-- All fact ids named `crush_fact_<n>` anywhere within an S-expression. -/
+  private def collectFactIds : Sexp → Array Nat
+    | .atom name =>
+      if name.startsWith factNamePrefix then
+        match (name.drop factNamePrefix.length).toNat? with
+        | some n => #[n]
+        | none => #[]
+      else #[]
+    | .list xs => collectFactIdsList xs.toList
+    | .str _ => #[]
+  termination_by x => sizeOf x
+  decreasing_by obtain ⟨l⟩ := xs; simp [Array.mk.sizeOf_spec]; omega
+
+  private def collectFactIdsList : List Sexp → Array Nat
+    | [] => #[]
+    | x :: xs => collectFactIds x ++ collectFactIdsList xs
+  termination_by xs => sizeOf xs
+  decreasing_by all_goals (simp_wf; omega)
+end
 
 /-- Extract the fact ids referenced in an unsat core. The core text is an
 S-expression list of names, e.g. `(crush_fact_3 crush_fact_7)`. Robust to a

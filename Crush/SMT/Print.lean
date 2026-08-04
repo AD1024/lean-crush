@@ -31,12 +31,26 @@ def identToString : Ident → String
 
 instance : ToString Ident := ⟨identToString⟩
 
-partial def sortToString (binders : List String) : SSort → String
-  | .bvar i => binders[i]?.getD s!"?bv{i}"
-  | .app f #[] => identToString f
-  | .app f args =>
-    "(" ++ identToString f ++ " " ++
-      String.intercalate " " (args.toList.map (sortToString binders)) ++ ")"
+-- `SSort` is a *nested* inductive (`app` carries `Array SSort`), and recursing
+-- through `Array.map` hides the recursive call from the termination checker.
+-- Recursing through an explicit mutual list helper exposes the structural descent,
+-- so these are total definitions rather than `partial` — which matters because a
+-- `partial` def is opaque to `decide`/`simp`/`rfl` and so cannot be reasoned about.
+mutual
+  /-- Render a sort to SMT-LIB text. -/
+  def sortToString (binders : List String) : SSort → String
+    | .bvar i => binders[i]?.getD s!"?bv{i}"
+    | .app f args =>
+      if args.isEmpty then identToString f
+      else
+        "(" ++ identToString f ++ " " ++
+          String.intercalate " " (sortListToStrings binders args.toList) ++ ")"
+
+  /-- Render each sort in a list; the helper that makes the descent structural. -/
+  def sortListToStrings (binders : List String) : List SSort → List String
+    | [] => []
+    | s :: ss => sortToString binders s :: sortListToStrings binders ss
+end
 
 instance : ToString SSort := ⟨sortToString []⟩
 
@@ -67,17 +81,29 @@ def literalToString : Literal → String
 
 instance : ToString Literal := ⟨literalToString⟩
 
+-- `Term` and `Attr` are mutually nested inductives, each carrying `Array` of the
+-- other. As with sorts above, the recursion goes through explicit list helpers so
+-- the structural descent is visible and these are total rather than `partial`.
+-- Note the `letE`/`quantToString` cases need their *own* helpers rather than reusing
+-- `termListToStrings`: an intervening `.map (·.2)` to project the pair would itself
+-- defeat the termination checker.
 mutual
-  partial def termToString (binders : List String) : Term → String
+  /-- Render a term to SMT-LIB text, resolving `bvar`s against `binders`. -/
+  def termToString (binders : List String) : Term → String
     | .lit l => literalToString l
     | .bvar i => binders[i]?.getD s!"?bv{i}"
-    | .app f #[] => identToString f
+    -- A nullary application renders as the bare symbol. Written as an `if` on the
+    -- argument list rather than an `#[]` pattern: the latter compiles to a decidable
+    -- equality test on the array, which blocks Lean from deriving the unfold
+    -- equations a well-founded definition needs.
     | .app f args =>
-      "(" ++ identToString f ++ " " ++
-        String.intercalate " " (args.toList.map (termToString binders)) ++ ")"
+      if args.isEmpty then identToString f
+      else
+        "(" ++ identToString f ++ " " ++
+          String.intercalate " " (termListToStrings binders args.toList) ++ ")"
     | .letE binds body =>
       let names := binds.toList.map (·.1)
-      let bindStr := binds.toList.map (fun (n, t) => s!"({quoteSymbol n} {termToString binders t})")
+      let bindStr := letBindsToStrings binders binds.toList
       let inner := termToString (names.reverse ++ binders) body
       "(let (" ++ String.intercalate " " bindStr ++ ") " ++ inner ++ ")"
     | .forallE bs body => quantToString "forall" binders bs body
@@ -85,20 +111,66 @@ mutual
     | .lam bs body => quantToString "lambda" binders bs body
     | .annot t attrs =>
       "(! " ++ termToString binders t ++ " " ++
-        String.intercalate " " (attrs.toList.map (attrToString binders)) ++ ")"
+        String.intercalate " " (attrListToStrings binders attrs.toList) ++ ")"
+  termination_by t => sizeOf t
+  decreasing_by
+    -- Each recursive call descends into a strict sub-term. The `Array → List`
+    -- conversions are the only non-obvious step: `sizeOf a.toList < sizeOf a` holds
+    -- because `sizeOf ⟨l⟩ = 1 + sizeOf l` (`Array.mk.sizeOf_spec`), so destructing
+    -- the array exposes the inequality to `omega`.
+    all_goals first
+      | omega
+      | (obtain ⟨l⟩ := ts; simp [Array.mk.sizeOf_spec]; omega)
+      | (obtain ⟨l⟩ := args; simp [Array.mk.sizeOf_spec]; omega)
+      | (obtain ⟨l⟩ := attrs; simp [Array.mk.sizeOf_spec]; omega)
+      | (obtain ⟨l⟩ := binds; simp [Array.mk.sizeOf_spec]; omega)
+      | simp_wf
 
-  partial def quantToString (kw : String) (binders : List String)
+  /-- Render `(forall|exists|lambda) ((x σ) …) body`. -/
+  def quantToString (kw : String) (binders : List String)
       (bs : Array (String × SSort)) (body : Term) : String :=
     let names := bs.toList.map (·.1)
-    let sortedVars := bs.toList.map (fun (n, s) => s!"({quoteSymbol n} {sortToString binders s})")
+    let sortedVars := binderListToStrings binders bs.toList
     let inner := termToString (names.reverse ++ binders) body
     s!"({kw} (" ++ String.intercalate " " sortedVars ++ ") " ++ inner ++ ")"
+  termination_by sizeOf bs + sizeOf body
+  decreasing_by
+    -- `0 < sizeOf bs`: an array's `sizeOf` is `1 + sizeOf toList`, hence positive.
+    obtain ⟨l⟩ := bs; simp [Array.mk.sizeOf_spec]; omega
 
-  partial def attrToString (binders : List String) : Attr → String
+  def attrToString (binders : List String) : Attr → String
     | .named n => s!":named {quoteSymbol n}"
-    | .pattern ts => ":pattern (" ++ String.intercalate " " (ts.toList.map (termToString binders)) ++ ")"
+    | .pattern ts =>
+      ":pattern (" ++ String.intercalate " " (termListToStrings binders ts.toList) ++ ")"
     | .keyword k none => s!":{k}"
     | .keyword k (some v) => s!":{k} {v}"
+  termination_by a => sizeOf a
+  decreasing_by
+    obtain ⟨l⟩ := ts; simp [Array.mk.sizeOf_spec]; omega
+
+  def termListToStrings (binders : List String) : List Term → List String
+    | [] => []
+    | t :: ts => termToString binders t :: termListToStrings binders ts
+  termination_by ts => sizeOf ts
+  decreasing_by all_goals (simp_wf; omega)
+
+  def attrListToStrings (binders : List String) : List Attr → List String
+    | [] => []
+    | a :: as => attrToString binders a :: attrListToStrings binders as
+  termination_by as => sizeOf as
+  decreasing_by all_goals (simp_wf; omega)
+
+  def letBindsToStrings (binders : List String) : List (String × Term) → List String
+    | [] => []
+    | (n, t) :: rest =>
+      s!"({quoteSymbol n} {termToString binders t})" :: letBindsToStrings binders rest
+  termination_by bs => sizeOf bs
+  decreasing_by all_goals (simp_wf; omega)
+
+  def binderListToStrings (binders : List String) : List (String × SSort) → List String
+    | [] => []
+    | (n, s) :: rest =>
+      s!"({quoteSymbol n} {sortToString binders s})" :: binderListToStrings binders rest
 end
 
 instance : ToString Term := ⟨termToString []⟩

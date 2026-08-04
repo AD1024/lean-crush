@@ -96,7 +96,7 @@ inductive CTerm where
   deriving BEq, Hashable, Inhabited, Repr
 
 /-- Head-spine view: peel off a left-nested application into (head, args). -/
-partial def CTerm.spine (t : CTerm) : CTerm × Array CTerm :=
+def CTerm.spine (t : CTerm) : CTerm × Array CTerm :=
   go t #[]
 where
   go : CTerm → Array CTerm → CTerm × Array CTerm
