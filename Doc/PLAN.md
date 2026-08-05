@@ -827,6 +827,7 @@ a passing test; the build must be clean and produce **no `sorry`**.
 | `Regression.lean` | an independent corpus migrated from another Lean SMT bridge, plus cases derived from bugs reported against it |
 | `Reconstruct.lean` | `#print axioms` assertions — reconstructed theorems must not name `crushSorry` — and the replay boundary |
 | `TIP.lean` | inductive theorems from the TIP `prod` benchmarks over a *polymorphic* element type, proved hammer-in-the-loop (manual `induction`, `crush` per case, `@[crush_unfold]` definitions) |
+| `Cvc5.lean` | the **cvc5 backend** and **`native` HO mode** (`HO_ALL`, `(-> σ τ)` sorts, `lambda`), which the default `z3`/`defunctionalize` suite never exercises; plus the z3-vs-cvc5 `sat`/`unknown` difference on false HO goals |
 
 **Negative tests use `#guard_msgs`, not `sorry`.** A goal that is *false* must be
 rejected, and the guard pins the rejection message, so a regression that let `crush`
@@ -850,10 +851,29 @@ versions are pinned rather than floating because several `#guard_msgs` expectati
 contain solver-dependent text, so an unannounced upgrade could redden the build for a
 reason unrelated to a code change.
 
-The default backend is `z3`, and **no test currently sets `crush.backend` or
-`crush.ho.mode`**, so the suite exercises only the `z3` / `defunctionalize` path. The
-`cvc5` and `native`-HO paths are built but *not* covered by a test yet — CI installs
-`cvc5` so that adding such a test needs no CI change, but until one exists that
-install is latent. Closing that gap (a handful of `set_option crush.backend "cvc5"`
-and `crush.ho.mode "native"` tests) is a near-term testing todo. `vampire`/
-`zipperposition` are optional TPTP backends for a later phase.
+The default backend is `z3`, so most of the suite exercises the
+`z3` / `defunctionalize` path. `Test/Cvc5.lean` covers the other two: the **cvc5**
+backend (process round-trip, theories, backend-agnostic reconstruction) and the
+**`native` higher-order mode** (`HO_ALL` logic, `(-> σ τ)` sorts, `lambda` terms),
+which gates on cvc5 and so is tested alongside it. CI installs cvc5, so these run in
+CI.
+
+A behavioural difference surfaced there, and investigating it (saving the exact
+scripts and running the solvers directly) is worth recording because the naive
+reading is wrong. On a *false* higher-order goal, z3 (defunctionalize) returns a
+`sat` counterexample, but cvc5 returns `unknown` under *both* HO modes. cvc5 is not
+failing to find a model: `(get-model)` after its `unknown` returns a valid
+counterexample (`k := λx.7`, `g := λf. ite (f = λx.7) 7 0`, so `g k = 7 ≠ 8`). It
+declines to report `sat` because it will not *certify* that model complete over the
+infinite function domain the `∀ (q : …)` quantifier ranges over — a conservative
+choice, unchanged by `--finite-model-find`/`--fmf-fun`/`--full-saturate-quant`. z3's
+model-based quantifier instantiation is willing to commit; cvc5 is not. The scripts
+are correct in both encodings; this is a solver-philosophy difference, not a
+translation fault. Both verdicts are sound (`unknown` never closes a goal); z3 is
+simply more informative on false HO goals.
+
+That cvc5 computes a model it then withholds points at a diagnostics improvement not
+yet built: on `unknown`, `(get-model)` output is currently discarded, but it often
+holds a *candidate* counterexample that could be surfaced as a tentative,
+explicitly-uncertified hint. `vampire`/`zipperposition` are optional TPTP backends
+for a later phase.
