@@ -28,11 +28,16 @@ jobs:
       - name: Install z3
         run: |
           set -euo pipefail
-          Z3_VERSION=4.13.0
+          # 4.15.x is required: the translator emits the standard SMT-LIB BV→Int
+          # conversions `sbv_to_int` / `bv2nat` (for `BitVec.toInt`/`toNat`), and
+          # older z3 (≤4.13) rejects `sbv_to_int` as an unknown constant, failing
+          # the BitVec tests. The glibc-2.39 asset matches ubuntu-latest (24.04).
+          Z3_VERSION=4.15.4
+          Z3_DIR="z3-${Z3_VERSION}-x64-glibc-2.39"
           curl -sSfL -o z3.zip \
-            "https://github.com/Z3Prover/z3/releases/download/z3-${Z3_VERSION}/z3-${Z3_VERSION}-x64-glibc-2.35.zip"
+            "https://github.com/Z3Prover/z3/releases/download/z3-${Z3_VERSION}/${Z3_DIR}.zip"
           unzip -q z3.zip
-          sudo install -m755 "z3-${Z3_VERSION}-x64-glibc-2.35/bin/z3" /usr/local/bin/z3
+          sudo install -m755 "${Z3_DIR}/bin/z3" /usr/local/bin/z3
           z3 --version
 
       # cvc5 is needed for the `native` higher-order mode, which gates on it (z3
