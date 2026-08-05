@@ -153,6 +153,12 @@ register_option crush.autoUnfold : Bool := {
             definitions reachable from the goal into each query (like always-on u[…]/d[…])."
 }
 
+register_option crush.profile : Bool := {
+  defValue := false
+  descr := "Log a per-phase wall-clock breakdown of the tactic (collect, monomorphize, \
+            translate, solve, reconstruct) as an info message, to find where time goes."
+}
+
 namespace Crush
 
 /-- Resolved configuration, read once from the option environment at tactic entry. -/
@@ -169,6 +175,7 @@ structure Config where
   logic          : Option String := none
   traceScript    : Bool      := false
   autoUnfold     : Bool      := true
+  profile        : Bool      := false
   deriving Inhabited
 
 /-- Read the current option environment into a `Config`. -/
@@ -189,6 +196,7 @@ def Config.ofOptions (opts : Options) : Config :=
     additionalArgs := split (crush.additionalArgs.get opts)
     logic          := if logicStr.isEmpty then none else some logicStr
     traceScript    := crush.trace.script.get opts
-    autoUnfold     := crush.autoUnfold.get opts }
+    autoUnfold     := crush.autoUnfold.get opts
+    profile        := crush.profile.get opts }
 
 end Crush

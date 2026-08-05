@@ -136,8 +136,7 @@ def runQuery (cfg : Config) (script : Array SMT.Command) : MetaM Result := do
       | "unsat" =>
         putCmd p .getUnsatCore
         putCmd p .getProof
-        let (_, p) ← p.takeStdin
-        let rest ← p.stdout.readToEnd
+        let rest ← drainResponse p
         -- The core is the *first* s-expression of the response, the proof is
         -- whatever follows. They must be separated here: a proof term mentions the
         -- asserted fact names many times over, so scanning the concatenation for
@@ -147,18 +146,25 @@ def runQuery (cfg : Config) (script : Array SMT.Command) : MetaM Result := do
         return .unsat core proof
       | "sat" =>
         putCmd p .getModel
-        let (_, p) ← p.takeStdin
-        let model ← p.stdout.readToEnd
-        return .sat model
+        return .sat (← drainResponse p)
       | "unknown" =>
-        let (_, p) ← p.takeStdin
-        let rest ← p.stdout.readToEnd
-        return .unknown rest
+        return .unknown (← drainResponse p)
       | other => return .unknown s!"unexpected solver response: {other}"
   finally
     -- Kill unconditionally; harmless if already exited.
     try p.kill catch _ => pure ()
 where
+  /-- Read the solver's remaining response after the verdict line, then let it exit.
+  Sends `(exit)` and closes stdin *before* reading so the child terminates and the
+  stdout pipe reaches EOF — otherwise `readToEnd` blocks until the solver's own
+  timeout (`-T`/`--tlimit`) kills it, adding the full budget to every call. `(exit)`
+  is the fast path; `takeStdin` (closing stdin) is the belt-and-suspenders EOF for a
+  solver that ignores it. Only the follow-up queries (`get-model`/`get-unsat-core`/
+  `get-proof`) have been sent at this point, so nothing after `(exit)` is lost. -/
+  drainResponse (p : SolverProc) : MetaM String := do
+    putCmd p .exit
+    let (_, p) ← p.takeStdin
+    p.stdout.readToEnd
   /-- Poll `task` until it finishes or `budgetMs` elapses. -/
   raceWithTimeout (task : Task (Except IO.Error String)) (budgetMs : Nat) :
       MetaM (Option String) := do

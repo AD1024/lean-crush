@@ -583,6 +583,7 @@ at entry, so this layers on without changing the pipeline.
 | `crush.save` | `String` | `""` | write script to path |
 | `crush.trace.script` | `Bool` | `false` | log generated script |
 | `crush.autoUnfold` | `Bool` | `true` | fold `@[crush_unfold]`/`@[crush_defeq]` equations of relevant defs into each query |
+| `crush.profile` | `Bool` | `false` | log a per-phase wall-clock breakdown (collect/monomorphize/translate/solve/reconstruct) |
 
 Two notes. Enum-valued options take a **string literal**
 (`set_option crush.trust "trust"`), since that is how `KVMap.Value` round-trips

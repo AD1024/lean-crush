@@ -3,6 +3,7 @@ import Crush.Frontend.Config
 import Crush.Reify.Collect
 import Crush.Translation.Monomorphize
 import Crush.Translation.Translate
+import Crush.Util.Profile
 import Crush.Solver.Process
 import Crush.Solver.Reconstruct
 import Crush.SMT.Print
@@ -118,12 +119,17 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
   if (← getOptions) |> (fun o => crush.ho.mode.get o == HOMode.combinators) then
     logWarning "crush: `crush.ho.mode combinators` is not implemented yet \
                 (`defunctionalize` and `native` are); using `defunctionalize`."
-  let facts ← collectFacts goal hints cfg.autoUnfold
+  -- Profiling: when `crush.profile` is on, each phase below is wall-clock timed and a
+  -- breakdown is logged at the end. Off by default and costs only a branch per phase.
+  let mut prof := if cfg.profile then Profiler.on else Profiler.off
+  let (facts, prof') ← prof.time "collect" (collectFacts goal hints cfg.autoUnfold)
+  prof := prof'
   -- Specialize polymorphic facts at the types the query mentions. Without this a
   -- polymorphic lemma is emitted at an abstract instantiation, giving SMT symbols
   -- disjoint from the goal's, so it cannot discharge anything — even for a ground
   -- goal (see `Crush.monomorphizeFacts`).
-  let mono ← monomorphizeFacts cfg facts
+  let (mono, prof') ← prof.time "monomorphize" (monomorphizeFacts cfg facts)
+  prof := prof'
   let facts := mono.facts
   trace[crush.mono] "generated {mono.generated} instance(s); \
                      dropped: {mono.dropped}; rejected: {mono.rejected}; \
@@ -144,15 +150,18 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
                   instance(s) that failed certification and were dropped \
                   ({mono.rejected}); this indicates an internal bug in the \
                   monomorphizer. The affected facts were not asserted."
-  let (script, st) ← buildScript cfg facts
+  let ((script, st), prof') ← prof.time "translate" (buildScript cfg facts)
+  prof := prof'
   if cfg.traceScript then
     logInfo m!"crush SMT script:{indentD (scriptToString script)}"
   trace[crush.script] "{scriptToString script}"
   Solver.maybeSave cfg script
   if cfg.backend == .none then
     logInfo m!"crush: backend is `none`; emitted {script.size} commands, no solver run."
+    if cfg.profile then logInfo prof.report
     return
-  let result ← Solver.runQuery cfg script
+  let (result, prof') ← prof.time "solve" (Solver.runQuery cfg script)
+  prof := prof'
   match result with
   | .unsat coreText _ =>
     let coreIds := parseUnsatCore coreText
@@ -161,14 +170,18 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
     | .trust =>
       let goalType ← goal.getType
       goal.assign (mkApp (mkConst ``crushSorry) goalType)
+      if cfg.profile then logInfo prof.report
     | .reconstruct | .reconstructOrTrust =>
       -- Solver-as-oracle: the core tells us *which* hypotheses matter, and a Lean
       -- finishing tactic re-proves the goal from just those. On success the solver
       -- leaves the trusted computing base — it was only a search heuristic.
       let coreProofs := coreHypotheses st coreIds
       trace[crush.result] "reconstructing from core: {coreDescriptions st coreIds}"
-      if ← tryReconstruct goal coreProofs (← finisherTactics) then
+      let (ok, prof') ← prof.time "reconstruct" (tryReconstruct goal coreProofs (← finisherTactics))
+      prof := prof'
+      if ok then
         trace[crush.result] "reconstruction succeeded; no axiom used"
+        if cfg.profile then logInfo prof.report
       else if cfg.trust == .reconstructOrTrust then
         logWarning m!"crush: solver reported `unsat`, but no finishing tactic could \
                       replay it from the {coreProofs.size} core \
@@ -177,6 +190,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
                       Set `crush.trust` to `reconstruct` to make this an error."
         let goalType ← goal.getType
         goal.assign (mkApp (mkConst ``crushSorry) goalType)
+        if cfg.profile then logInfo prof.report
       else
         throwError m!"crush: solver reported `unsat`, but reconstruction failed — no \
                       finishing tactic could replay it from the core \
