@@ -764,6 +764,13 @@ SMT semantics can disagree; each has regression tests covering both directions
 All are addressed. The starred ones were **live false-`unsat` bugs** — `crush`
 proved something false — found by differential probing rather than by reading specs.
 
+External validation of obligation 1: porting lean-auto's `SmtTranslation` suite
+(`Test/LeanAutoPort.lean`) shows lean-auto *proves* `∀ x y : Empty, x = y` via an
+encoding its own source flags as unsound ("SMT-LIB assume that all types are
+inhabited, while in DTT it's not"), whereas `crush` declines it — the inhabitation
+guard doing exactly its job. The same port also drove two BitVec translation gaps to
+ground (`zeroExtend`, `extractLsb hi lo`), now fixed.
+
 | # | Obligation | Resolution |
 |---|---|---|
 | 1 | **Inhabitation.** Every SMT sort is non-empty; Lean types may be empty, so `∀ x : Empty, P` (vacuously true) has no faithful image | `quantifier` refuses an uninhabited domain with a diagnostic. Zero-constructor inductives are excluded from datatype emission (z3 rejects them anyway). The non-dependent case (`Empty → False`) takes the implication path and is independently sound |
@@ -926,6 +933,7 @@ a passing test; the build must be clean and produce **no `sorry`**.
 | `TIP.lean` | inductive theorems from the TIP `prod` benchmarks over a *polymorphic* element type, proved hammer-in-the-loop (manual `induction`, `crush` per case, `@[crush_unfold]` definitions) |
 | `Cvc5.lean` | the **cvc5 backend** and **`native` HO mode** (`HO_ALL`, `(-> σ τ)` sorts, `lambda`), which the default `z3`/`defunctionalize` suite never exercises; plus the z3-vs-cvc5 `sat`/`unknown` difference on false HO goals |
 | `Alethe.lean` | the Alethe proof **parser** (M4 phase 1) against verbatim cvc5 output: command/clause/`:named` structure, premise reading, the empty-clause conclusion, and that an `(error …)` reply parses to `none` |
+| `LeanAutoPort.lean` | goals ported from lean-auto's `SmtTranslation/` suite (BoolNatInt, BitVec, String, inductive/enum, recursive-with-unfold): demonstrates the same corpus translates and solves, and pins the `Empty`-type cases where we are deliberately *sound* and lean-auto documents itself unsound |
 
 **Negative tests use `#guard_msgs`, not `sorry`.** A goal that is *false* must be
 rejected, and the guard pins the rejection message, so a regression that let `crush`

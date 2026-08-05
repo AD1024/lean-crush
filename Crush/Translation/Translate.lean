@@ -1037,10 +1037,33 @@ mutual
       let some tv ← natValue? target | return none
       let some xw ← bvWidthOf? x | return none
       return some (bvResize false xw tv (← emitTerm x))
+    | BitVec.zeroExtend _ target x =>
+      -- `zeroExtend` is definitionally `setWidth` (both `{w} → (v) → BitVec w →
+      -- BitVec v`), but it is a *distinct* declaration, so the `setWidth` arm above
+      -- does not fire on it and it would otherwise fall through to an uninterpreted
+      -- symbol. Same unsigned resize.
+      let some tv ← natValue? target | return none
+      let some xw ← bvWidthOf? x | return none
+      return some (bvResize false xw tv (← emitTerm x))
     | BitVec.signExtend _ target x =>
       let some tv ← natValue? target | return none
       let some xw ← bvWidthOf? x | return none
       return some (bvResize true xw tv (← emitTerm x))
+    | BitVec.extractLsb _ hi lo x =>
+      -- The `hi lo` (inclusive high/low bit) form. `extractLsb hi lo` is
+      -- `extractLsb' lo (hi + 1 - lo)`; reduce to the `extractLsb'` treatment below
+      -- by computing the length. When `hi < lo` the length is zero (empty slice),
+      -- which SMT `extract` cannot express, so fall through to opaque.
+      let some hv ← natValue? hi | return none
+      let some lv ← natValue? lo | return none
+      let some xw ← bvWidthOf? x | return none
+      if hv < lv then return none
+      let len := hv + 1 - lv
+      let sx ← emitTerm x
+      if lv ≥ xw then return some (bvLit len 0)
+      let avail := xw - lv
+      let sliced := bvExtract (min (lv + len) xw - 1) lv sx
+      return some (if len ≤ avail then sliced else bvExtend false (len - avail) sliced)
     | BitVec.extractLsb' _ start len x =>
       let some sv ← natValue? start | return none
       let some lv ← natValue? len | return none
