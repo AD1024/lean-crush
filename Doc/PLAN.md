@@ -626,13 +626,47 @@ partially-applied term whose *remaining* arity is higher-order.
 not. `Crush/Solver/Reconstruct.lean` uses the unsat core to select the relevant
 hypotheses, rebuilds the goal as `h₁ → … → hₙ → goal` over only those, and hands it
 to `grind`/`omega`/`simp_all`. On success the solver leaves the trusted computing
-base — it was only a search heuristic. This is the default policy
-(`reconstructOrTrust`).
+base — it was only a search heuristic. This is the default policy (`reconstruct`),
+which errors rather than falling back to the axiom when the finishers cannot replay.
 
-*Remaining:* Alethe proof replay for cvc5. It would cover the two shapes the
-finishers cannot replay — nonlinear arithmetic and finite-domain exhaustiveness,
-both pinned in `Test/Reconstruct.lean` — by replaying the solver's own inferences
-instead of depending on a Lean tactic to re-find the argument.
+*Remaining:* Alethe proof replay for cvc5. The intent was to cover the two shapes the
+finishers cannot replay — nonlinear arithmetic and finite-domain exhaustiveness, both
+pinned in `Test/Reconstruct.lean`. **Probing cvc5 1.3.4's actual Alethe output on
+those exact cases reshaped the scope, and the naive version of this plan does not
+work:**
+
+- *Finite-domain exhaustiveness* (the `pigeonhole` case) cannot be produced at all:
+  cvc5 answers `unsat` but `--dump-proofs --proof-format-mode=alethe` returns
+  `(error "Proof unsupported by Alethe: contains operator DUMMY_SKOLEM")`. The
+  datatype-exhaustiveness argument uses skolemization Alethe cannot express, so there
+  is no certificate to replay. Alethe replay would **not** cover this pinned case.
+- *Nonlinear arithmetic* is more subtle. At the default proof granularity the
+  certificate is full of `:rule hole :args ("untranslated rewrite")` steps — 37 of
+  them out of 315 — i.e. cvc5 admitting it cannot render its nonlinear rewriting in
+  Alethe, which would make the certificate unreplayable. But
+  `--proof-granularity=dsl-rewrite` turns every hole into a concrete `rare_rewrite`
+  step naming a specific rule (`bool-double-not-elim`, …), giving a hole-free proof.
+  So this case *is* replayable in principle — but only with the right granularity
+  flag, and it requires implementing a Lean-side checker for the Alethe/RARE rule set
+  the proof uses (dozens of distinct rules, each needing a soundness lemma).
+
+Net: Alethe replay is real work with a payoff narrower than first assumed — it buys
+the nonlinear shape but not the finite-domain one, and only under a specific cvc5
+flag. The cheaper alternative — (a) adding a nonlinear finisher to the existing
+core-directed path — was probed and **does not pan out on this toolchain**: no
+built-in tactic (`omega`, `grind` incl. `arith := true`, `decide`, `simp_all; omega`)
+closes `x*x=4 ∧ x>0 → x=2`, and the tactic that would (`nlinarith`) lives in Mathlib,
+which is not a dependency and is far too heavy to add for one edge case. So the only
+route to the nonlinear case is the full Alethe checker.
+
+Given all this, **M4 is deprioritized on the evidence**, not merely unstarted: it is
+weeks of work (large rule set, each rule needing a proven-sound Lean replay), covers
+one of the two motivating pinned cases (not `pigeonhole`), needs
+`--proof-granularity=dsl-rewrite`, and — because the default `reconstruct` policy
+already makes both cases fail *soundly* as an error rather than a false close — it is
+a **completeness** upgrade, not a soundness fix. Worth doing if nonlinear goals become
+a common workload; not the best next investment otherwise. See `Test/Reconstruct.lean`
+for the pinned cases and this section for the probe findings.
 
 **M5 — Ergonomics & scale. partial.** In rough priority order:
 1. The hint grammar (§7): `crush [h₁, …, *] (u[…]) (d[…])`. **done** — a user can now
