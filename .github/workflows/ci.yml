@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A push that supersedes an in-flight run cancels it; the suite spawns real
+# solver processes, so overlapping runs are worth avoiding.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # The suite runs a solver per `crush` call under a wall-clock timeout, so it is
+    # slower than a pure compile. This is a ceiling, not an expectation.
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned rather than floating: the suite's `#guard_msgs` expectations include
+      # solver-dependent text, so an unannounced solver upgrade can turn a green
+      # build red for reasons unrelated to a code change. Bump deliberately.
+      - name: Install z3
+        run: |
+          set -euo pipefail
+          Z3_VERSION=4.13.0
+          curl -sSfL -o z3.zip \
+            "https://github.com/Z3Prover/z3/releases/download/z3-${Z3_VERSION}/z3-${Z3_VERSION}-x64-glibc-2.35.zip"
+          unzip -q z3.zip
+          sudo install -m755 "z3-${Z3_VERSION}-x64-glibc-2.35/bin/z3" /usr/local/bin/z3
+          z3 --version
+
+      # cvc5 is needed for the `native` higher-order mode, which gates on it (z3
+      # ignores the `HO_` logic prefix and then fails on the function sorts).
+      - name: Install cvc5
+        run: |
+          set -euo pipefail
+          CVC5_VERSION=1.2.0
+          curl -sSfL -o cvc5.zip \
+            "https://github.com/cvc5/cvc5/releases/download/cvc5-${CVC5_VERSION}/cvc5-Linux-x86_64-static.zip"
+          unzip -q cvc5.zip
+          sudo install -m755 cvc5-Linux-x86_64-static/bin/cvc5 /usr/local/bin/cvc5
+          cvc5 --version | head -1
+
+      - name: Install Lean toolchain
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            -o elan-init.sh
+          sh elan-init.sh -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      # Keyed on the toolchain and manifest: a toolchain bump or dependency change
+      # must not silently reuse stale artifacts.
+      - name: Cache build artifacts
+        uses: actions/cache@v4
+        with:
+          path: .lake
+          key: lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lake-manifest.json') }}
+          restore-keys: lake-${{ runner.os }}-
+
+      - name: Build library
+        run: lake build
+
+      # Separate step from the library so a test failure is distinguishable from a
+      # library failure at a glance in the run summary.
+      - name: Build test suite
+        run: lake build Test
+
+      # `lake build` reports a `sorry` as a warning, not an error, so a proof that
+      # regressed to `sorry` would otherwise pass CI. The suite's contract is that
+      # every theorem is fully proved.
+      - name: Assert no sorry
+        run: |
+          set -euo pipefail
+          # Lean reports this as a *warning*, so `lake build` exits 0 even when a
+          # proof regressed to `sorry`. Match the literal message; note it is
+          # backtick-quoted (declaration uses `sorry`), so the pattern is quote-
+          # agnostic rather than assuming a particular quote character.
+          if lake build Test 2>&1 | grep -nE "declaration uses .sorry."; then
+            echo "::error::a declaration uses sorry; the suite must be sorry-free"
+            exit 1
+          fi
+          echo "no sorry found"

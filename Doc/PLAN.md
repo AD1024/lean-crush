@@ -831,6 +831,17 @@ recursive-`wf` divergence, and the mixed BV/Int query neither solver discharges.
 expects the current failure, so when a future change makes one work, the build fails
 and prompts promoting it to a positive test.
 
-Solvers on this machine: `z3` (homebrew), `cvc5` (in `~/Downloads`). Both are
-exercised; CI will pin both. `vampire`/`zipperposition` are optional TPTP backends
-for a later phase.
+**CI** (`.github/workflows/ci.yml`) builds the library and the whole suite on every
+push and PR against pinned `z3` and `cvc5` releases, and fails on any `sorry` (Lean
+reports `sorry` as a *warning*, so `lake build` exits 0 without this guard). Solver
+versions are pinned rather than floating because several `#guard_msgs` expectations
+contain solver-dependent text, so an unannounced upgrade could redden the build for a
+reason unrelated to a code change.
+
+The default backend is `z3`, and **no test currently sets `crush.backend` or
+`crush.ho.mode`**, so the suite exercises only the `z3` / `defunctionalize` path. The
+`cvc5` and `native`-HO paths are built but *not* covered by a test yet — CI installs
+`cvc5` so that adding such a test needs no CI change, but until one exists that
+install is latent. Closing that gap (a handful of `set_option crush.backend "cvc5"`
+and `crush.ho.mode "native"` tests) is a near-term testing todo. `vampire`/
+`zipperposition` are optional TPTP backends for a later phase.
