@@ -70,33 +70,24 @@ def coreDescriptions (st : TranslateState) (coreIds : Array Nat) : Array String 
 /-- The finishing tactics tried, in order, on the core-restricted goal.
 
 Reconstruction does not know *why* the solver said `unsat`, so the ladder is a fixed
-set of closers ordered by (roughly) increasing cost, each aimed at a goal shape the
-solver commonly produces. `tryReconstruct` runs them under backtracking and takes the
-first that closes the goal; a rung that does not fit fails fast and costs little.
-`intros` heads every entry because the goal is the implication `h₁ → … → hₙ → concl`
-we build from the core, so the hypotheses must be moved into context first.
+set of closers, ordered by rising cost, each aimed at a goal shape the solver commonly
+produces. `tryReconstruct` backtracks and takes the first that closes the goal; a
+mis-fitting rung fails fast. `intros` heads every entry because the goal is the
+implication `h₁ → … → hₙ → concl` built from the core.
 
 The shape → rung map:
 
-* **arithmetic / congruence / case-split** → `grind`, then `omega`. `grind` is the
-  general closer (congruence closure, case-splitting, light arithmetic); `omega` is
-  complete for *linear* integer/`Nat` arithmetic, so it catches the linear-arith shape
-  `grind` may not finish. These two carry most first-order verdicts.
-* **propositional / rewriting** → `simp_all`: normalizes with all hypotheses as rewrite
-  rules, closing Boolean and equational goals the above leave open.
-* **function equality `f = g`** (a *higher-order* verdict — a Church-numeral identity,
-  β-reduction through a closure) → the `funext`/`ext`-prefixed rungs. The first-order
-  closers cannot touch `f = g`; `funext` reduces it to the pointwise `f x = g x`, then
-  `simp_all`/`grind` finish the body. `funext` fails cleanly on a non-function equality,
-  so these are harmless on the common case — hence placed after it.
-* **ground evaluation** (`String.length "ab" = 2`, arithmetic on literals) → the
-  `subst_vars`-then-`decide`/`rfl`/`simp_arith` rungs. This is the shape the *reasoning*
-  closers above structurally cannot handle: they rewrite and case-split but never
-  *compute* a closed term. `subst_vars` first replaces variables by the ground values
-  the core's equations pin (`s = "ab"`), turning the goal closed, then `decide`
-  (decidable props) or `rfl`/`simp_arith` (definitional computation) evaluates it.
-  Placed last: `decide` on a large term is the most expensive rung, and it only closes
-  goals nothing above it can.
+* **arithmetic / congruence / case-split** → `grind` (general closer), then `omega`
+  (complete for linear `Int`/`Nat`, catching what `grind` may not finish).
+* **propositional / rewriting** → `simp_all`.
+* **function equality `f = g`** (a higher-order verdict — a Church-numeral identity,
+  β-through-a-closure) → the `funext`/`ext` rungs: `funext` reduces it to the pointwise
+  `f x = g x`, then a first-order closer finishes the body. Harmless on a non-function
+  equality (`funext` fails cleanly), hence after the common case.
+* **ground evaluation** (`String.length "ab" = 2`) → `subst_vars` then `decide`/`rfl`.
+  The reasoning closers rewrite and case-split but never *compute*; `subst_vars`
+  replaces variables with the values the core's equations pin, then `decide`/`rfl`
+  evaluates the now-closed term. Last, because `decide` is the costliest rung.
 
 Kept as syntax rather than names so each is elaborated once, here, where a typo is
 a build error instead of a runtime "unknown tactic". -/

@@ -20,36 +20,29 @@ of its core limitations:
   `crush.timeout` (hard wall-clock, enforced by lean-crush), `crush.trust`,
   `crush.ho.mode`, and more.
 
-## Status
+## How it works
 
-The `crush` tactic works end-to-end: it collects hypotheses and the negated goal,
-translates them to SMT, runs the backend under a hard timeout, and by default
-reconstructs a kernel-checked Lean proof from the unsat core rather than trusting
-the solver. The default `crush.trust` policy is `reconstruct`, which **never** uses
-a trust axiom: a goal the finishers cannot replay is an error, so a translation bug
-that yielded a false `unsat` cannot silently close a false goal. First-order logic,
-the `Nat`/`Int`/`BitVec`/`String` theories,
-non-parametric datatypes, and higher-order goals (via defunctionalization, or native
-HO on cvc5) all translate and are tested.
+The `crush` tactic collects the hypotheses and negated goal, translates them to SMT,
+runs the backend under a hard wall-clock timeout, and — by default — **reconstructs a
+kernel-checked Lean proof** from the unsat core rather than trusting the solver. The
+default `crush.trust` policy is `reconstruct`, which never uses a trust axiom: a goal
+the finishers cannot replay is an error, so a translation bug that yielded a false
+`unsat` cannot silently close a false goal.
 
-Also done: the hint grammar (`crush [lemmas] u[…] d[…]`), the `@[crush_unfold]`
-auto-unfold attributes, and monomorphization — both of datatypes (a fully-applied
-`Option Int` becomes a real SMT datatype) and of polymorphic *lemmas*, which are
-specialized to the types a query mentions. The latter is what lets a bare library
-lemma such as `List.append_assoc`, and the TIP list theorems (`rev (rev x) = x`
-included), be proved over an arbitrary element type. In progress: Alethe proof replay
-and the combinator HO mode.
+It covers first-order logic; the `Nat`/`Int`/`BitVec`/`String` theories; datatypes,
+including fully-applied parametric ones (`Option Int` becomes a real SMT datatype); and
+higher-order goals via defunctionalization or native HO on cvc5. A hint grammar
+(`crush [lemmas] u[…] d[…]`) points the tactic at lemmas outside the local context,
+`@[crush_unfold]` folds a definition's equations into every query, and monomorphization
+specializes a polymorphic lemma to the types a query mentions — what lets a bare
+`List.append_assoc`, or the TIP list theorems (`rev (rev x) = x` among them), be proved
+over an arbitrary element type.
 
-**Case studies** ([`Test/CaseStudies/`](Test/CaseStudies/)) port lean-auto's harder
-test corpus and representative [Loom](https://github.com/verse-lab/loom) verification
-conditions to `crush`, mapping coverage into handled / sound-refusal / known-gap.
-They drove four translation fixes (mutually-recursive datatypes, polymorphic-hint
-connection, the monomorphization candidate filter, and partial application of a
-function-typed variable) and *closed* three of the four gaps they first surfaced —
-higher-order Church numerals, the Paxos consensus goal (via cvc5
-`--full-saturate-quant`), and `Option.orElse` (via an unfold hint). See
-**[`Doc/PLAN.md`](Doc/PLAN.md)** §11b for the coverage map, §9 for the milestone
-status, and [`Test/`](Test/) for runnable examples across every supported theory.
+**Case studies** ([`Test/CaseStudies/`](Test/CaseStudies/)) run `crush` on external
+corpora: lean-auto's harder test suite, representative Loom/Velvet/Cashmere verification
+conditions, and mathlib-scale goals (nonlinear arithmetic, real mathlib datatypes). See
+**[`Doc/PLAN.md`](Doc/PLAN.md)** for the architecture and coverage map, and
+[`Test/`](Test/) for runnable examples across every supported theory.
 
 ## Requirements
 
@@ -97,3 +90,16 @@ theorem add_succ (x y : N) : N.add x (N.S y) = N.S (N.add x y) := by
 lake build          # library
 lake build Test.Smoke   # smoke tests (needs z3 on PATH for the round-trip)
 ```
+
+## Acknowledgements
+
+lean-crush builds on ideas and test material from several projects:
+
+- [lean-auto](https://github.com/leanprover-community/lean-auto) — the tool this
+  redesigns; its monomorphization approach, typed SMT IR shape, and test corpus
+  informed the design, and its `SmtTranslation` suite is ported in the case studies.
+- [Loom](https://github.com/verse-lab/loom) and its verifiers
+  [Velvet](https://github.com/verse-lab/velvet) (Dafny-style imperative) and Cashmere
+  (effectful monadic) — the source of the verification-condition case study.
+- [Veil](https://github.com/verse-lab/veil) — its model-minimization approach
+  (`z3model.py`) informs the planned counterexample minimization.

@@ -92,10 +92,9 @@ theorem higher_order (g : (Int → Int) → Int) (h : ∀ (f : Int → Int), g f
 #guard_msgs in
 #print axioms higher_order
 
--- Ground evaluation: the goal turns on *computing* a closed term (`String.length "ab"`
--- = 2) once the core's equation is substituted, which the reasoning finishers
--- (`grind`/`omega`/`simp_all`) do not do — they rewrite and case-split but never
--- evaluate. The `subst_vars; decide`/`rfl` rungs close it, and it stays kernel-checked.
+-- Ground evaluation: after substituting `s = "ab"` the goal is a closed computation
+-- (`String.length "ab" = 2`) that the reasoning finishers never evaluate; the
+-- `subst_vars; decide`/`rfl` rungs close it, kernel-checked.
 theorem eval_string_len (s : String) (h : s = "ab") : s.length = 2 := by crush
 /-- info: 'eval_string_len' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
