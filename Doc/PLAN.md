@@ -212,9 +212,8 @@ Module map (⟢ = built & tested, ▷ = designed, □ = todo):
 | `Crush/Translation/Monomorphize.lean` | poly *lemma* → ground instances, saturating (datatype mono is in `Translate.lean`) | ⟢ |
 | `Crush/Translation/HOEncoding.lean` | HO encoding helpers (defunc ⟢, native ⟢, combinators □) | ⟢ |
 | `Crush/Translation/Translate.lean` | driver: `Expr → SMT.Term` via handlers | ⟢ |
-| `Crush/Solver/Reconstruct.lean` | unsat-core → Lean proof replay | ⟢ core-directed + eval finishers |
-| `Crush/Solver/Alethe.lean` | cvc5 Alethe proof parser | ⟢ |
-| `Crush/Solver/ProofGuide.lean` | Alethe proof → finisher guide (`hole` ⇒ unusable) | ⟢ |
+| `Crush/Solver/Reconstruct.lean` | unsat-core → Lean proof replay (finisher ladder) | ⟢ core-directed |
+| `Crush/Solver/Alethe.lean` | cvc5 Alethe proof parser (checker backlogged) | ⟢ parser only |
 | `Crush/Frontend/Tactic.lean` | the `crush` tactic + hint grammar (`[…] u[…] d[…]`) | ⟢ |
 
 ---
@@ -525,14 +524,15 @@ holds the shared naming and shape helpers.
     covered for the common 1–2 arrows; deeper equalities and *non-equational* HO
     verdicts (an ∃ over a function, genuine HO unification) are what Alethe replay is
     for.
-  - *Ground-evaluation obligations reconstruct via the cvc5 proof.* When the refutation
-    turns on **computing** a ground term rather than reasoning about it — cvc5's Alethe
-    `evaluate` rule, e.g. `str.len "ab" = 2` — none of the above finishers apply, since
-    they reason but do not compute. `Crush/Solver/ProofGuide.lean` detects this from the
-    proof and appends evaluating finishers (`subst_vars; decide`, `rfl`, `simp_arith`),
-    which is what makes the string-length shapes kernel-checked (`Test/ProofGuide.lean`).
-    The guide only ever *adds* attempts, so it cannot turn an unproved goal into a
-    proved one; a `hole` step (cvc5 admitting an untranslated rewrite) makes it unusable.
+  - *Ground-evaluation obligations reconstruct too.* When the refutation turns on
+    **computing** a ground term rather than reasoning about it — `String.length "ab" = 2`
+    — none of the above finishers apply, since they rewrite and case-split but never
+    evaluate. The ladder therefore ends with `subst_vars`-then-`decide`/`rfl` rungs:
+    `subst_vars` replaces variables with the ground values the core's equations pin, then
+    `decide`/`rfl` computes. This makes the string-length shapes kernel-checked
+    (`Test/Reconstruct.lean`), and needs no solver proof, so it works under z3 as well as
+    cvc5. The rungs are placed last (`decide` is the most expensive) and fail fast when
+    the goal is not a computation.
   - A full per-rule Alethe *checker* remains the backlogged follow-up for shapes a Lean
     tactic cannot re-find at all — a checked certificate rather than a re-search (§9 M4).
 
@@ -667,19 +667,29 @@ Tested in `Test/Theories.lean`, `Test/Regression.lean`, `Test/Monomorphize.lean`
 value is as an escape hatch when defunctionalization blows up, so it wants a
 workload that actually blows up to tune against.
 
-**M4 — Reconstruction. partial.** Core-directed replay is done, as is proof-*guided*
-reconstruction for cvc5 (parser + guide); the full per-rule Alethe checker is
-backlogged. `Crush/Solver/Reconstruct.lean` uses the unsat core to
-select the relevant hypotheses, rebuilds the goal as `h₁ → … → hₙ → goal` over only
-those, and hands it to `grind`/`omega`/`simp_all` — plus `funext`-prefixed variants
-for a function-equality verdict, which is what makes higher-order `unsat`s (Church
-numerals, funext) kernel-checked rather than trusted (§6). On success the solver leaves
-the trusted computing base — it was only a search heuristic. This is the default policy
-(`reconstruct`), which errors rather than falling back to the axiom when the finishers
-cannot replay.
+**M4 — Reconstruction. partial.** Core-directed replay is done; the Alethe *checker* is
+backlogged (only its parser exists). `Crush/Solver/Reconstruct.lean` uses the unsat core
+to select the relevant hypotheses, rebuilds the goal as `h₁ → … → hₙ → goal` over only
+those, and runs a ladder of finishers on it, taking the first that closes it (§6 maps
+each rung to the goal shape it targets). On success the solver leaves the trusted
+computing base — it was only a search heuristic. This is the default policy
+(`reconstruct`), which errors rather than falling back to the axiom when the ladder
+cannot replay. The ladder covers three shapes the finishers reach that a naive
+whole-context `grind` would not:
 
-*Alethe replay — staged, phase 1 done.* A sound Lean *checker* for Alethe is a large
-undertaking (see the scope findings below), so it is built in phases under one
+- *Function equalities* (`funext`-prefixed rungs) — a higher-order `unsat` (Church
+  numerals, funext) reduces to a pointwise body a first-order closer finishes.
+- *Ground evaluation* (`subst_vars; decide`/`rfl`) — a goal that turns on *computing* a
+  closed term once the core's equations are substituted (`String.length "ab" = 2`),
+  which the reasoning closers structurally cannot do. This is what makes the
+  string-length shapes kernel-checked (`Test/Reconstruct.lean`); it needs no solver
+  proof, so it applies to z3 and cvc5 alike. (An earlier revision gated these rungs on
+  a cvc5 Alethe proof "guide"; measurement showed the gate withheld the win from z3 and
+  the proof added nothing over just trying the rungs, so the ladder tries them
+  unconditionally — a mis-fitting rung fails fast.)
+
+*Alethe checker — staged, phase 1 (the parser) done.* A sound Lean *checker* for Alethe
+is a large undertaking (see the scope findings below), so it is built in phases under one
 invariant: **any step a replay cannot discharge is a hard failure, never a trusted
 gap**, so partial coverage stays sound and merely falls back to the core-directed
 finisher. Phase 1 — a structured parser (`Crush/Solver/Alethe.lean`) turning cvc5's
@@ -714,37 +724,27 @@ work:**
 
 Net: Alethe replay is real work with a payoff narrower than first assumed — it buys
 the nonlinear shape but not the finite-domain one, and only under a specific cvc5
-flag. The cheaper alternative — (a) adding a nonlinear finisher to the existing
-core-directed path — was probed and **does not pan out on this toolchain**: no
-built-in tactic (`omega`, `grind` incl. `arith := true`, `decide`, `simp_all; omega`)
-closes `x*x=4 ∧ x>0 → x=2`, and the tactic that would (`nlinarith`) lives in Mathlib,
-which is not a dependency and is far too heavy to add for one edge case. So the only
-route to the nonlinear case is the full Alethe checker.
+flag. Two cheaper alternatives to a full checker were probed:
 
-*Phase 2 — proof-guided reconstruction. done.* Rather than the full checker (phase 3),
-the proof is consumed as a **guide** (`Crush/Solver/ProofGuide.lean`): cvc5 now runs with
-`--proof-format-mode=alethe --proof-granularity=dsl-rewrite` (the granularity flag is
-what removes `hole` steps — measured 4 → 0 on a small linear goal), the proof text is
-parsed, and the guide reports whether the refutation turns on **ground evaluation**
-(Alethe's `evaluate`/`rare_rewrite` family). When it does, the finisher ladder is
-extended with evaluating tactics (`subst_vars; decide`, `rfl`, `simp_arith`) that the
-default ladder omits, because `grind`/`omega`/`simp_all` *reason* but do not *compute*.
+- *A nonlinear finisher* on the core-directed path **does not pan out on this
+  toolchain**: no built-in tactic (`omega`, `grind` incl. `arith := true`, `decide`,
+  `simp_all; omega`) closes `x*x=4 ∧ x>0 → x=2`, and the tactic that would (`nlinarith`)
+  lives in Mathlib, too heavy to add for one edge case. And cvc5 itself cannot prove the
+  nonlinear cases — it times out where z3's nlsat succeeds in ~40 ms — so no cvc5 proof
+  work reaches them either. The nonlinear shape stays a documented `trust`-mode win.
+- *Reading the cvc5 proof to pick finishers* was built and then removed. A measurement
+  sweep (quantifier, arithmetic, datatype, bitvector, string) found that on every goal
+  where cvc5 returns `unsat`, the existing finishers already reconstruct **except**
+  goals turning on ground evaluation, and that `forall_inst` witnesses add nothing
+  (`grind` is strictly stronger than cvc5's instantiation on every shape tested). So the
+  only new win was the ground-evaluation one — and that needs no proof at all: adding
+  `subst_vars; decide`/`rfl` rungs to the ladder closes `s = "ab" ⊢ s.length = 2` and the
+  append shape (kernel-checked, `#print axioms` shows no `crushSorry`; `Test/Reconstruct
+  .lean`) under **z3 as well as cvc5**. Gating those rungs on a cvc5 proof withheld the
+  win from the default backend and added nothing, so the ladder tries them
+  unconditionally.
 
-This closes a real class: `s = "ab" ⊢ s.length = 2` and `s ++ t = "abc" ⊢ (s ++ t).length
-= 3` previously failed reconstruction and are now kernel-checked (`#print axioms` shows
-no `crushSorry`; `Test/ProofGuide.lean`). Measurement drove the design — a sweep of
-quantifier, arithmetic, datatype, bitvector, and string goals found that on *every* goal
-where cvc5 returns `unsat`, the existing finishers already reconstruct except the
-ground-evaluation ones, and that `forall_inst` witnesses (the other obvious candidate)
-add nothing, since `grind` is strictly stronger than cvc5's instantiation on every shape
-tested.
-
-The guide can only *add* finisher attempts; reconstruction still succeeds only when a
-Lean tactic closes the goal and the kernel accepts the term. A `hole` step makes the
-guide `none`, so an unjustified proof licenses nothing — pinned by a test that fails the
-build if the check is removed.
-
-**Phase 3 (the full per-rule checker) stays backlogged**: weeks of work (3b's rule set is
+**The full per-rule checker stays backlogged**: weeks of work (3b's rule set is
 large, each rule needing a proven-sound Lean replay; 3a is a new
 Alethe-`Sexp`→Lean-`Expr` reverse map, since translation is one-directional today), it
 covers one of the two motivating pinned cases (not `pigeonhole`), and — because the
@@ -992,7 +992,6 @@ a passing test; the build must be clean and produce **no `sorry`**.
 | `TIP.lean` | inductive theorems from the TIP `prod` benchmarks over a *polymorphic* element type, proved hammer-in-the-loop (manual `induction`, `crush` per case, `@[crush_unfold]` definitions) |
 | `Cvc5.lean` | the **cvc5 backend** and **`native` HO mode** (`HO_ALL`, `(-> σ τ)` sorts, `lambda`), which the default `z3`/`defunctionalize` suite never exercises; plus the z3-vs-cvc5 `sat`/`unknown` difference on false HO goals |
 | `Alethe.lean` | the Alethe proof **parser** (M4 phase 1) against verbatim cvc5 output: command/clause/`:named` structure, premise reading, the empty-clause conclusion, and that an `(error …)` reply parses to `none` |
-| `ProofGuide.lean` | proof-**guided** reconstruction (M4 phase 2): the guide flags ground-evaluation proofs (extra `decide`/`rfl` finishers) and rejects holed/absent/`(error …)` proofs; end-to-end, the string-length shapes reconstruct kernel-checked where they previously failed. Removing the `hole` check fails the build |
 | `LeanAutoPort.lean` | goals ported from lean-auto's `SmtTranslation/` suite (BoolNatInt, BitVec, String, inductive/enum, recursive-with-unfold): demonstrates the same corpus translates and solves, and pins the `Empty`-type cases where we are deliberately *sound* and lean-auto documents itself unsound |
 | `CaseStudies/LeanAuto.lean` | the *harder* lean-auto corpus (§11b): mutually-recursive and single-ctor datatypes, HO Church numerals (kernel-reconstructed), polymorphic lemmas, leading-∀ matching, `Function.comp_def`, and the Paxos consensus goal — each filed as handled / sound-refusal / known-gap; drove four translation fixes and closed three of four gaps |
 | `CaseStudies/Loom.lean` | representative Loom verification conditions (§11b): GCD/MaxElem/IsSorted/SumOfDigits/sqrt/cbrt/binary-search arithmetic, quantified array invariants, an array-update VC, and Cashmere balance invariants; the Mathlib-bound `Multiset`/`Finset` VCs reduce (hammer-in-the-loop) to arithmetic residuals `crush` closes |

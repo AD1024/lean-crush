@@ -8,8 +8,9 @@ The mechanism is solver-as-oracle. The solver's real contribution is not a proof
 object but a **selection**: the unsat core names which two or three of the ambient
 hypotheses actually matter. That is precisely what a Lean automated tactic cannot
 work out for itself, and irrelevant hypotheses are what make such tactics time out.
-So we rebuild the goal with only the core hypotheses in scope and hand it to
-`grind`/`omega`/`simp_all`.
+So we rebuild the goal with only the core hypotheses in scope and hand it to a ladder
+of finishers (`grind`/`omega`/`simp_all`, `funext`-prefixed for function equalities,
+and `subst_vars; decide`/`rfl` for goals that turn on ground evaluation).
 
 When that succeeds the solver leaves the trusted computing base entirely — it was a
 search heuristic, and the resulting term is kernel-checked. The assertions below are
@@ -90,6 +91,21 @@ theorem higher_order (g : (Int → Int) → Int) (h : ∀ (f : Int → Int), g f
 /-- info: 'higher_order' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms higher_order
+
+-- Ground evaluation: the goal turns on *computing* a closed term (`String.length "ab"`
+-- = 2) once the core's equation is substituted, which the reasoning finishers
+-- (`grind`/`omega`/`simp_all`) do not do — they rewrite and case-split but never
+-- evaluate. The `subst_vars; decide`/`rfl` rungs close it, and it stays kernel-checked.
+theorem eval_string_len (s : String) (h : s = "ab") : s.length = 2 := by crush
+/-- info: 'eval_string_len' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms eval_string_len
+
+theorem eval_string_append (s t : String) (h : s ++ t = "abc") :
+    (s ++ t).length = 3 := by crush
+/-- info: 'eval_string_append' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms eval_string_append
 
 end Succeeds
 
