@@ -3,7 +3,7 @@ import Crush
 /-!
 # Case study: Loom verification conditions, discharged by `crush`
 
-[Loom](https://github.com/AD1024/loom) is a framework for building foundational
+[Loom](https://github.com/verse-lab/loom/) is a framework for building foundational
 program verifiers (Velvet for Dafny-style imperative code, Cashmere for effectful
 monadic programs). Its `loom_solve` tactic runs weakest-precondition generation and
 then dispatches each resulting VC to a **swappable** `loom_solver` backend — a single
@@ -22,8 +22,9 @@ SumOfDigits, the sqrt/cbrt/binary-search methods in `Examples_Total.lean`, inser
 sort) and Cashmere (`withdraw`/`withdrawSession`). Most are core-Lean arithmetic and
 quantified array invariants — no Mathlib in the *goal* — so they are stateable and
 solvable here. The two genuinely Mathlib-bound VC classes (`Array.toMultiset`
-permutation equality and `Finset.range`/`∑` big-operator sums) are recorded as known
-gaps at the end.
+permutation equality and `Finset.range`/`∑` big-operator sums) keep the *type* with
+`grind`/`aesop`, but the arithmetic residual they reduce to comes to `crush`, shown
+at the end (the hammer-in-the-loop split).
 
 Arrays: Loom VCs index with `arr[i]!` and mutate with `arr[i] := v`. In SMT terms
 that is `select`/`store` over the theory of arrays. Two faithful renderings are used
@@ -141,24 +142,45 @@ example (balance tmp_sum amounts_sum balancePrev : Int)
 -- contradiction (`balance ≥ s ∧ balance < s`) is what closes.
 example (balance s : Int) (h1 : balance ≥ s) (h2 : balance < s) : False := by crush [*]
 
-/-! ## Known gap: Mathlib-bound VCs (`Examples.lean`, `SpMSpV_Example.lean`)
+/-! ## Mathlib-bound VCs: the type is a gap, the arithmetic residual is handled
 
-Two VC classes in Velvet depend on Mathlib types in the *goal*, not just the
-framework internals, and are out of scope for `crush`'s current theory support:
+Two VC classes in Velvet depend on Mathlib types in the *goal*. `crush` has no
+first-order SMT theory for either type itself:
 
 * **Multiset permutation** — insertion sort's correctness includes `arr.toMultiset =
-  arrOld.toMultiset` (the sort permutes, does not lose, elements). `Multiset` is a
-  quotient of `List` by permutation; it has no first-order SMT theory, and `crush`
-  keeps it an opaque sort, so the permutation equality cannot be discharged. This is
-  a datatype-support boundary, not a translation bug.
+  arrOld.toMultiset`. `Multiset` is a quotient of `List` by permutation, so the
+  quotient equality has no SMT counterpart and `crush` keeps the type opaque.
 
 * **`Finset.range` + `∑`** — the sparse mat-vec example sums `∑ i ∈ Finset.range b,
-  spv[i] * v[spv.ind[i]]`, with the key lemma `Finset.sum_range_succ`. Big operators
-  over `Finset` are higher-order folds with no SMT counterpart; discharging them
-  needs the induction/`simp` layer Loom runs *around* the solver, not the solver
-  itself.
+  spv[i] * v[spv.ind[i]]`, keyed on `Finset.sum_range_succ`. A big operator is a
+  higher-order fold with no SMT counterpart.
 
-Both are recorded rather than attempted: they mark where a `loom_solver` → `crush`
-swap would fall back to `grind`/`aesop`/manual proof, which is the honest boundary of
-an SMT hammer. See `Doc/PLAN.md` §10.
--/
+But this is not where the proof stops — it is where the *split* happens, and the
+split is exactly the hammer-in-the-loop pattern `Test/TIP.lean` uses. Loom's own
+verifiers apply the Mathlib structural lemma (`Finset.sum_range_succ`, the swap-
+preserves-multiset lemma) in Lean via `grind`/`aesop`/`simp`, which reduces the VC to
+an *arithmetic residual* — and that residual is squarely `crush`'s. The two examples
+below are those residuals, stated in core Lean (no Mathlib dependency), with the
+structural equation supplied as the hypothesis the outer tactic would have rewritten
+with. So the boundary is: the `Multiset`/`Finset` *type* stays with `grind`/`aesop`;
+the arithmetic it reduces to comes to `crush`. -/
+
+-- `Finset.sum` residual: the `sum_range_succ` unfolding step of the SpMSpV sum, then
+-- the arithmetic. `sumUpTo (n+1) = sumUpTo n + S n` is what `Finset.sum_range_succ`
+-- supplies; `crush` closes the resulting equation.
+example (sumUpTo : Nat → Int) (S : Nat → Int) (n : Nat)
+    (sum_succ : ∀ m, sumUpTo (m + 1) = sumUpTo m + S m)
+    (out : Int) (hout : out = sumUpTo n) :
+    out + S n = sumUpTo (n + 1) := by crush [*]
+
+-- `Multiset` permutation residual: swapping two adjacent elements preserves the sum
+-- (the invariant behind `toMultiset` equality for a sort that only swaps). The cons-
+-- sum equation stands in for what `simp [List.sum_cons]` / the multiset lemma gives.
+example (l : List Int) (a b : Int)
+    (hsum : ∀ (x : Int) (xs : List Int), (x :: xs).sum = x + xs.sum) :
+    (a :: b :: l).sum = (b :: a :: l).sum := by crush [hsum]
+
+/-! The whole-VC versions (with the Mathlib types live) mark where a `loom_solver` →
+`crush` swap hands off to `grind`/`aesop`, which is the honest division of labour in an
+SMT hammer: the solver does not reason about quotient types or big-operator folds; it
+finishes the arithmetic they unfold to. See `Doc/PLAN.md` §10. -/

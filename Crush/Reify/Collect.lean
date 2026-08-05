@@ -84,22 +84,16 @@ def collectFacts (goal : MVarId) (hints : Hints := {}) (autoUnfold : Bool := tru
             descr := s!"hyp {decl.userName}" }
     -- Explicit term hints (lemmas or hypotheses the user named).
     for (proof, descr) in hints.terms do
-      -- Re-abstract leftover metavariables into leading binders. Elaborating a bare
-      -- polymorphic lemma (`crush [List.append_assoc]`) auto-binds its implicit
-      -- `{α}` into a metavariable, so the type arrives as `∀ (as … : List ?m), …` —
-      -- the leading *type* binder is gone and the fact reads as monomorphic over an
-      -- abstract sort `?m`, disconnected from the goal. `abstractMVars` turns those
-      -- mvars back into `∀`-binders (`fun α => proof : ∀ α, …`), which is exactly the
-      -- shape monomorphization specializes at the query's types. Sound: the abstracted
-      -- term proves the abstracted (more general) proposition by construction. A hint
-      -- with no leftover mvars (a hypothesis, or a fully-applied lemma) is unchanged.
-      --
-      -- `levels := false` is load-bearing: it leaves each unassigned universe as a
-      -- metavariable rather than turning it into a rigid parameter. Monomorphization
-      -- specializes a type binder by `isDefEq (inferType candidate) binderDomain`; a
-      -- library lemma is universe-polymorphic (`{α : Type u}`), and `Type u` with a
-      -- rigid `u` does *not* unify with the candidate's `Type 0`, so a rigid parameter
-      -- would leave the fact un-instantiable — the very failure this abstraction fixes.
+      -- Re-abstract leftover mvars into leading binders. Elaborating a bare
+      -- polymorphic lemma (`crush [List.append_assoc]`) auto-binds its `{α}` into a
+      -- metavariable, so the fact arrives as `∀ (as … : List ?m), …` — the leading
+      -- type binder gone, reading as monomorphic over an abstract sort disconnected
+      -- from the goal, which monomorphization then can't specialize. `abstractMVars`
+      -- restores the `∀ α`-binder (sound: the abstracted term proves the more general
+      -- proposition by construction); a hint with no leftover mvars is unchanged.
+      -- `levels := false` keeps each unassigned universe an mvar, not a rigid param —
+      -- else `Type u` would not unify with a candidate's `Type 0` and the fact would
+      -- stay un-instantiable, the very failure this fixes.
       let proof ← if proof.hasExprMVar || proof.hasLevelMVar
                   then do pure (← abstractMVars proof (levels := false)).expr
                   else pure proof

@@ -41,10 +41,13 @@ included), be proved over an arbitrary element type. In progress: Alethe proof r
 and the combinator HO mode.
 
 **Case studies** ([`Test/CaseStudies/`](Test/CaseStudies/)) port lean-auto's harder
-test corpus and representative [Loom](https://github.com/AD1024/loom) verification
-conditions to `crush`, mapping coverage into handled / sound-refusal / known-gap and
-driving three translation fixes (mutually-recursive datatypes, polymorphic-hint
-connection, and the monomorphization candidate filter). See
+test corpus and representative [Loom](https://github.com/verse-lab/loom) verification
+conditions to `crush`, mapping coverage into handled / sound-refusal / known-gap.
+They drove four translation fixes (mutually-recursive datatypes, polymorphic-hint
+connection, the monomorphization candidate filter, and partial application of a
+function-typed variable) and *closed* three of the four gaps they first surfaced —
+higher-order Church numerals, the Paxos consensus goal (via cvc5
+`--full-saturate-quant`), and `Option.orElse` (via an unfold hint). See
 **[`Doc/PLAN.md`](Doc/PLAN.md)** §11b for the coverage map, §9 for the milestone
 status, and [`Test/`](Test/) for runnable examples across every supported theory.
 

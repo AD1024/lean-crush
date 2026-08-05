@@ -14,7 +14,9 @@ The point of a case study is an honest coverage map, so each goal is filed under
 one of three headings and the reason is stated:
 
 * **Handled** — a real `theorem`/`example` that `crush` discharges. These are the
-  positive coverage claims.
+  positive coverage claims. Several started as gaps this study surfaced and were
+  closed here (see `Doc/PLAN.md` §11b): the mutually-recursive datatypes, the Church
+  numerals (a partial-application translation fix), and Paxos (the right cvc5 flag).
 * **Sound refusal** — a goal that is *true in Lean* but that `crush` declines
   (reports a counterexample or `unknown`) rather than close, because its faithful
   SMT image is out of reach of the first-order defunctionalized encoding. Pinned
@@ -22,8 +24,9 @@ one of three headings and the reason is stated:
   possible via an unsound encoding) fails the build. Declining is the correct
   behaviour under the `reconstruct`/`trust` contract; a hammer is allowed to be
   incomplete, never unsound.
-* **Known gap** — a goal `crush` cannot yet handle, with the emitted-SMT diagnosis
-  in a comment. These drive the roadmap; see `Doc/PLAN.md` §10.
+* **Known gap** — a goal `crush` cannot yet handle, with the diagnosis in a comment.
+  These drive the roadmap; see `Doc/PLAN.md` §10. Only one remains here: the Church
+  tower over an *abstract universe* (the ground-type version is handled).
 
 Ports run under `crush.trust "trust"` to measure *translation + solving* coverage
 in isolation (matching `LeanAutoPort.lean`), not reconstruction — that is
@@ -169,71 +172,172 @@ example {α β γ : Type}
     P ((g ∘ h) ∘ f) = P (fun x => g (h (f x))) := by
   crush [Function.comp_def]
 
-/-! ## Sound refusal: `Option.orElse` with a λ (`Inductive.lean`)
+/-! ## `Option.orElse` with a λ (`Inductive.lean`): refused bare, closed with unfold
 
 `Inductive.lean` flags this "**TODO**: Requires higher-order to first-order
-translation". `Option.orElse x (fun _ => none) = x` is *true* in Lean, but the
-encoding leaves `orElse` an uninterpreted function over the closure `fun _ => none`,
-with no axiom relating `orElse a (const none)` to `a` — that identity is `orElse`'s
-*definition*, which is not unfolded here. The solver finds a model where they
-differ and `crush` reports a counterexample rather than close. Declining is sound;
-lean-auto's own comment marks this a translation gap too. (Unfolding `Option.orElse`
-via `u[Option.orElse]` would supply the missing equation — this pins the *bare*
-behaviour, matching lean-auto's `auto` with no `d[…]`.) -/
+translation". `Option.orElse x (fun _ => none) = x` is *true* in Lean, and the
+outcome depends on whether `orElse`'s defining equation is available:
 
+* **Bare** (`crush`, no unfold) — the encoding leaves `orElse` an uninterpreted
+  function over the closure `fun _ => none`, with no axiom relating `orElse a (const
+  none)` to `a` (that identity *is* `orElse`'s definition). The solver finds a model
+  where they differ and `crush` reports a counterexample rather than close. Declining
+  is sound; lean-auto's own comment marks the bare case a translation gap too.
+* **With `u[Option.orElse]`** — the unfold hint supplies the missing equation and the
+  goal closes. This is the intended way to discharge a definitional identity, and the
+  `crush` analogue of lean-auto's `d[Option.orElse]`. -/
+
+-- Bare: sound refusal, pinned so a regression that starts closing it (only possible
+-- unsoundly) fails the build.
 /-- error: crush: the goal is not provable -/
 #guard_msgs(error, substring := true) in
 example {α : Type} (x : Option α) :
     Option.orElse x (fun _ => Option.none) = x := by crush
 
-/-! ## Known gap: the Paxos consensus goal (`SmtTranslation/Names.lean`)
+-- With the definitional equation, it closes.
+example {α : Type} (x : Option α) :
+    Option.orElse x (fun _ => Option.none) = x := by crush u[Option.orElse]
 
-lean-auto's largest single SMT goal — a Paxos safety obligation with `TotalOrder`
-and `Quorum` typeclasses, six-level quantifier nesting, and higher-order state
-updates encoded as function equalities (`st'_one_b = fun x x_1 => …`). It
-*translates* cleanly (the state functions are uninterpreted, the class methods are
-uninterpreted predicates, and the `fun`-valued equalities defunctionalize), but the
-resulting query has ≈60 universal and 14 existential quantifiers in deep
-alternation, and neither backend closes it: z3 spins past 60 s, cvc5 returns
-`unknown` in 60 ms (it will not certify a model over the quantifiers). lean-auto
-discharges it because its pipeline emits SMT `trigger` annotations that steer
-E-matching (`SmtTranslation/Trigger.lean`); `crush` has no trigger or
-premise-selection support yet, so a query this quantifier-heavy is out of reach.
-Tracked in `Doc/PLAN.md` §10. The full statement is preserved (commented) so it can
-be re-run once triggers land; `set_option crush.timeout` higher to try z3 directly.
+/-! ## Handled — and *reconstructed* — higher-order Church numerals (`Test_Regression.lean`)
 
-```lean
-theorem extracted_paxos_goal {node : Type} [DecidableEq node] {value : Type}
-    [DecidableEq value] {quorum : Type} [Quorum node quorum]
-    {round : Type} [DecidableEq round] [TotalOrder round] … :
-    ∃ n r3 rmax v, Quorum.member n q = true ∧ … := by
-  crush [hnext, hinv, h]   -- z3: > 60 s; cvc5: unknown
-```
--/
+The full Church-numeral tower — `mul three (add two (add three three)) = mul three
+(mul two (add two two))` — over a ground function space. This was a translation gap
+until this case study surfaced it: the defunctionalized `app` symbol is n-ary over an
+arrow's *fully flattened* argument list, so a Church numeral applying such a value to
+a *single* argument (`x (y f)`, leaving a function result) emitted `app`
+under-applied — an ill-sorted term z3 rejected with `unknown constant app_Fn (Fn
+Fn)`. Fixed in `hoTerm?` (`Crush/Translation/Translate.lean`): a partially-applied
+function-typed bound variable is now η-expanded to a closure of the residual arrow
+sort, so `x (y f)` becomes a proper `Fn` value. The script is then well-formed and z3
+discharges the whole equation in ~40 ms.
 
-/-! ## Known gap: higher-order over an abstract function space (`Test_Regression.lean`)
+It closes under the **default `reconstruct` policy** — a *kernel-checked* proof, not a
+trusted verdict — so this example overrides the file's `trust` back to `reconstruct`
+and `#print axioms` witnesses that `crushSorry` is absent. The verdict is a function
+equality, and the reconstruction finishers now include `funext`-prefixed variants
+(`Crush/Solver/Reconstruct.lean`): `funext` reduces `f = g` to the pointwise body, and
+`simp_all` closes it using the core hypotheses. Higher-order equational obligations no
+longer force the trust axiom. -/
 
-The full Church-numeral goal — `mul three (add two (add three three)) = …` over an
-abstract `{α : Sort u}`. The defunctionalized `app` symbol is flattened over the
-*fully applied* argument list of an arrow sort, e.g. `((α→α)→(α→α))` gets an
-arity-3 `app_Fn (Fn (α→α) α) → α`. But a Church numeral applies such a value to a
-*single* argument and leaves a function-typed result — a partial application of
-`app`, which SMT-LIB (first-order) forbids: z3 rejects the script with
-`unknown constant app_Fn_… (Fn Fn)`. Handling this needs either a per-arrow-level
-unary `app` (the combinator encoding, `crush.ho.mode combinators`, not yet built)
-or `native` HO. Tracked in `Doc/PLAN.md` §10. Left commented so the suite stays
-green; uncomment under `crush.ho.mode combinators` once that lands.
+theorem church_tower
+    {A : Type}
+    (add : ((A → A) → (A → A)) → ((A → A) → (A → A)) → ((A → A) → (A → A)))
+    (hadd : ∀ x y f n, add x y f n = (x f) ((y f) n))
+    (mul : ((A → A) → (A → A)) → ((A → A) → (A → A)) → ((A → A) → (A → A)))
+    (hmul : ∀ x y f, mul x y f = x (y f))
+    (two : (A → A) → (A → A)) (htwo : ∀ f x, two f x = f (f x))
+    (three : (A → A) → (A → A)) (hthree : ∀ f x, three f x = f (f (f x))) :
+    mul three (add two (add three three)) = mul three (mul two (add two two)) := by
+  set_option crush.trust "reconstruct" in
+  crush [hadd, hmul, htwo, hthree]
+
+/-- info: 'church_tower' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms church_tower
+
+/-! ## Handled: the Paxos consensus goal (`SmtTranslation/Names.lean`)
+
+lean-auto's largest single SMT goal — a Paxos safety obligation with `TotalOrder` and
+`Quorum` typeclasses, six-level quantifier nesting, and higher-order state updates
+encoded as function equalities (`st'_one_b = fun x x_1 => …`). It translates cleanly
+(state functions uninterpreted, class methods uninterpreted predicates, `fun`-valued
+equalities defunctionalized), but the query has ≈60 universal and 14 existential
+quantifiers in deep alternation — z3's default E-matching spins on it, and so does
+cvc5's. The key is the *solver configuration*: cvc5 with `--full-saturate-quant`
+(instantiation-based quantifier handling, exposed via `crush.additionalArgs`) closes
+it in ~0.2 s. That the goal was reachable at all with the right flag — not an
+unfixable trigger gap — was the finding here; lean-auto reaches it via its own
+`trigger` annotations (`SmtTranslation/Trigger.lean`), a different route to the same
+end.
+
+Under `crush.trust "trust"`: like the Church tower, the verdict is a heavy
+quantified UF proof no core-directed finisher replays. -/
+
+section Paxos
+set_option crush.backend "cvc5"
+set_option crush.additionalArgs "--full-saturate-quant"
+set_option crush.timeout 30
+
+class TotalOrder (t : Type) where
+  le (x y : t) : Bool
+  none : t
+  le_refl       (x : t) : le x x
+  le_trans  (x y z : t) : le x y → le y z → le x z
+  le_antisymm (x y : t) : le x y → le y x → x = y
+  le_total    (x y : t) : le x y ∨ le y x
+
+class Quorum (node : Type) (quorum : outParam Type) where
+  member (a : node) (q : quorum) : Bool
+  quorum_intersection :
+    ∀ (q1 q2 : quorum), ∃ (a : node), member a q1 ∧ member a q2
+
+theorem extracted_paxos_goal {node : Type} [inst : DecidableEq node] {value : Type}
+    [inst_1 : DecidableEq value] {quorum : Type} [inst_2 : Quorum node quorum]
+    {round : Type} [inst_3 : DecidableEq round] [inst_4 : TotalOrder round]
+    (st_one_a : round → Bool) (st_one_b_max_vote : node → round → round → value → Bool)
+    (st_one_b st_leftRound : node → round → Bool) (st_proposal : round → value → Bool)
+    (st_vote st_decision : node → round → value → Bool)
+    (hinv :
+      (∀ (n1 n2 : node) (r1 r2 : round) (v1 v2 : value),
+          st_decision n1 r1 v1 = true ∧ st_decision n2 r2 v2 = true → r1 = r2 ∧ v1 = v2) ∧
+        (∀ (r : round) (v1 v2 : value), st_proposal r v1 = true ∧ st_proposal r v2 = true → v1 = v2) ∧
+          (∀ (n : node) (r : round) (v : value), st_vote n r v = true → st_proposal r v = true) ∧
+            (∀ (r : round) (v : value),
+                (∃ n, st_decision n r v = true) → ∃ q, ∀ (n : node), Quorum.member n q = true → st_vote n r v = true) ∧
+              (∀ (n : node) (v : value), ¬st_vote n TotalOrder.none v = true) ∧
+                (∀ (r1 r2 : round) (v1 v2 : value) (q : quorum),
+                    ¬TotalOrder.le r2 r1 = true ∧ st_proposal r2 v2 = true ∧ v1 ≠ v2 →
+                      ∃ n r3 rmax v,
+                        Quorum.member n q = true ∧
+                          ¬TotalOrder.le r3 r1 = true ∧ st_one_b_max_vote n r3 rmax v = true ∧ ¬st_vote n r1 v1 = true) ∧
+                  ∀ (n : node) (r1 r2 : round),
+                    st_one_b n r2 = true ∧ ¬TotalOrder.le r2 r1 = true → st_leftRound n r1 = true)
+    (st'_one_a : round → Bool) (st'_one_b_max_vote : node → round → round → value → Bool)
+    (st'_one_b st'_leftRound : node → round → Bool) (st'_proposal : round → value → Bool)
+    (st'_vote st'_decision : node → round → value → Bool)
+    (hnext :
+      ∃ n r max_round max_val,
+        r ≠ TotalOrder.none ∧
+          st_one_a r = true ∧
+            ¬st_leftRound n r = true ∧
+              ((max_round = TotalOrder.none ∧
+                    ∀ (MAXR : round) (V : value), ¬(¬TotalOrder.le r MAXR = true ∧ st_vote n MAXR V = true)) ∨
+                  max_round ≠ TotalOrder.none ∧
+                    ¬TotalOrder.le r max_round = true ∧
+                      st_vote n max_round max_val = true ∧
+                        ∀ (MAXR : round) (V : value),
+                          ¬TotalOrder.le r MAXR = true ∧ st_vote n MAXR V = true → TotalOrder.le MAXR max_round = true) ∧
+                st'_one_a = st_one_a ∧
+                  (st'_one_b_max_vote = fun x x_1 x_2 x_3 =>
+                      if (x, x_1, x_2, x_3, ()) = (n, r, max_round, max_val, ()) then true
+                      else st_one_b_max_vote x x_1 x_2 x_3) ∧
+                    (st'_one_b = fun x x_1 => if (x, x_1, ()) = (n, r, ()) then true else st_one_b x x_1) ∧
+                      (st'_leftRound = fun N R => decide (st_leftRound N R = true ∨ N = n ∧ ¬TotalOrder.le r R = true)) ∧
+                        st'_proposal = st_proposal ∧ st'_vote = st_vote ∧ st'_decision = st_decision)
+    (r1 r2 : round) (v1 v2 : value) (q : quorum)
+    (h : ¬TotalOrder.le r2 r1 = true ∧ st'_proposal r2 v2 = true ∧ v1 ≠ v2) :
+    ∃ n r3 rmax v,
+      Quorum.member n q = true ∧
+        ¬TotalOrder.le r3 r1 = true ∧ st'_one_b_max_vote n r3 rmax v = true ∧ ¬st'_vote n r1 v1 = true := by
+  crush [hnext, hinv, h]
+end Paxos
+
+/-! ## Remaining known gap: higher-order over an *abstract* universe (`Test_Regression.lean`)
+
+The Church tower above is over a concrete `{A : Type}`. lean-auto's original states it
+over an abstract `{α : Sort u}` with the operations *universe-polymorphic in the
+hypotheses* (`add : ∀ {α}, …`, `hadd : ∀ {α} x y f n, …`). That form still does not go
+through: monomorphization would have to instantiate the `{α}` bound *inside* each
+hypothesis at the goal's function types, which are themselves arrows the encoding
+handles at use rather than as monomorphization candidates — the nested-binder boundary
+documented in `Crush/Translation/Monomorphize.lean`. The ground-`A` version (handled
+above) is the payload case; the abstract-universe form is tracked in `Doc/PLAN.md` §10.
 
 ```lean
 example
     {A : Sort u}
     (add : ∀ {α}, ((α → α) → (α → α)) → ((α → α) → (α → α)) → ((α → α) → (α → α)))
-    (hadd : ∀ {α} x y f n, @add α x y f n = (x f) ((y f) n))
-    (mul : ∀ {α}, ((α → α) → (α → α)) → ((α → α) → (α → α)) → ((α → α) → (α → α)))
-    (hmul : ∀ {α} x y f, @mul α x y f = x (y f))
-    (two : (A → A) → (A → A)) (htwo : ∀ f x, two f x = f (f x))
-    (three : (A → A) → (A → A)) (hthree : ∀ f x, three f x = f (f (f x))) :
-    mul three (add two (add three three)) = mul three (mul two (add two two)) := by
+    (hadd : ∀ {α} x y f n, @add α x y f n = (x f) ((y f) n)) … : … := by
   crush [hadd, hmul, htwo, hthree]
 ```
 -/

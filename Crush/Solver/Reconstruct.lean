@@ -73,7 +73,13 @@ def coreDescriptions (st : TranslateState) (coreIds : Array Nat) : Array String 
 * `grind` — Lean's general-purpose closer: congruence, case-splitting, arithmetic;
 * `omega` — complete for linear integer/natural arithmetic, so it lands the shape
   the solver most often reports `unsat` for and `grind` may not finish;
-* `simp_all` — cheap normalization that closes propositional and rewriting goals.
+* `simp_all` — cheap normalization that closes propositional and rewriting goals;
+* `funext`-prefixed variants — for a **higher-order** verdict whose goal is a
+  *function equality* `f = g`, which the first-order finishers cannot touch. `funext`
+  reduces it to the pointwise `f x = g x`, then `simp_all`/`grind` close the body — so
+  a higher-order `unsat` (a Church-numeral identity, funext) becomes a kernel-checked
+  proof rather than a trusted verdict. `funext` fails cleanly on a non-function
+  equality, so these cost nothing on the common case, hence last.
 
 Kept as syntax rather than names so each is elaborated once, here, where a typo is
 a build error instead of a runtime "unknown tactic". -/
@@ -81,7 +87,10 @@ def finisherTactics : CoreM (Array (TSyntax `tactic)) := do
   return #[
     (← `(tactic| (intros; grind))),
     (← `(tactic| (intros; omega))),
-    (← `(tactic| (intros; simp_all)))]
+    (← `(tactic| (intros; simp_all))),
+    (← `(tactic| (intros; funext _; simp_all))),
+    (← `(tactic| (intros; funext _ _; simp_all))),
+    (← `(tactic| (intros; ext; grind)))]
 
 /-- `t₁ → … → tₙ → concl`. The binders are non-dependent — each hypothesis is a
 closed `Prop` — so a plain `mkForall` chain suffices. -/

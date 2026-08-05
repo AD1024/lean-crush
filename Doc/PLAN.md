@@ -509,8 +509,23 @@ holds the shared naming and shape helpers.
   `h₁ → … → hₙ → goal` over only those and handed to `grind`/`omega`/`simp_all`.
   Restricting the context is the point — irrelevant hypotheses are what make those
   tactics time out. Turns "SMT says yes" into a checked proof with no bespoke
-  verified checker. Alethe replay (cvc5) is the planned follow-up; it would cover
-  the shapes a Lean tactic cannot re-find (§9 M4).
+  verified checker.
+  - *Higher-order obligations reconstruct too.* When the verdict is a **function
+    equality** `f = g`, the first-order finishers cannot make progress, so the set
+    also includes `funext`-prefixed variants (`funext …; simp_all`, `ext; grind`):
+    `funext` reduces the goal to its pointwise body and a first-order closer finishes
+    it. This is what lets a higher-order `unsat` — a Church-numeral identity,
+    β-reduction through a closure, function extensionality — be replayed as a
+    kernel-checked proof instead of falling back to the trust axiom
+    (`CaseStudies/LeanAuto.lean`'s `church_tower` has `#print axioms` witnessing
+    `crushSorry` is absent; the `Test/HigherOrder.lean` shapes reconstruct under the
+    default policy for the same reason). The `funext` binder depth is currently
+    covered for the common 1–2 arrows; deeper equalities and *non-equational* HO
+    verdicts (an ∃ over a function, genuine HO unification) are what Alethe replay is
+    for.
+  - Alethe replay (cvc5) is the planned follow-up; it would cover the shapes a Lean
+    tactic cannot re-find at all — a checked certificate rather than a re-search
+    (§9 M4).
 
 ---
 
@@ -624,16 +639,24 @@ Tested in `Test/Theories.lean`, `Test/Regression.lean`, `Test/Monomorphize.lean`
 - `defunctionalize`: one `Fn` sort and *n*-ary `app` per arrow type; each λ becomes
   a closure with defining axiom `app(clo ȳ, x̄) = body`, parameterized by its
   captures; named and partially-applied functions η-expand into closures.
+- *Partial application whose result is itself higher-order* is handled: applying a
+  function-typed variable to fewer than the flattened `app` arity (`x (y f)` in a
+  Church numeral) η-expands to a closure of the residual arrow sort, rather than
+  emitting `app` under-applied. This was a translation bug (`unknown constant app_Fn
+  (Fn Fn)`) the lean-auto case study surfaced; see §11b.
 - Extensionality per arrow sort, emitted on demand (it is a costly quantifier
   alternation, and only equations between function-typed terms need it).
 - `native`: `(-> σ τ)` sorts and `lambda` terms under a `HO_`-prefixed logic.
   Gated to cvc5, which is the only backend that honours the prefix; falls back to
   `defunctionalize` with a diagnostic elsewhere.
+- Higher-order verdicts now *reconstruct* (kernel-checked), not merely translate:
+  the reconstruction finishers include `funext`-prefixed variants, so a function-
+  equality `unsat` (Church numerals, β-through-a-closure, funext) closes under the
+  default policy without the trust axiom (§6).
 
 *Remaining:* `combinators` (S/K/B/C/W). Accepted but warns and falls back. Its
 value is as an escape hatch when defunctionalization blows up, so it wants a
-workload that actually blows up to tune against. Also unsupported: a
-partially-applied term whose *remaining* arity is higher-order.
+workload that actually blows up to tune against.
 
 **M4 — Reconstruction. partial.** Core-directed replay is done; Alethe replay is in
 progress (the parser is built). `Crush/Solver/Reconstruct.lean` uses the unsat core to
@@ -1016,7 +1039,7 @@ Cashmere's balance invariants. Most Loom VCs are core-Lean arithmetic + quantifi
 (a one-`macro_rules` change, the seam Cashmere already uses for `aesop`) would target
 them directly.
 
-**Three `crush` improvements the case studies drove**, each surfaced by probing a
+**Four `crush` improvements the case studies drove**, each surfaced by probing a
 ported goal, diagnosed from the emitted SMT, and fixed with a regression:
 
 1. *Mutually-recursive datatypes* (`Translate.lean`, `declareDatatype`). Each member
@@ -1048,12 +1071,39 @@ ported goal, diagnosed from the emitted SMT, and fixed with a regression:
    not arrows). Purely a completeness restriction — it only shrinks the instance set,
    so it cannot cause a false `unsat`.
 
-**Known gaps the case studies map** (roadmap, not regressions): the abstract-function-
-space Church numerals (a partial application of the flattened `app`, needing the
-combinator or `native` HO mode); the Paxos consensus goal (translates cleanly but has
-≈60 ∀ / 14 ∃ in deep alternation — z3 spins past 60 s, cvc5 returns `unknown`; lean-auto
-closes it via SMT `trigger` annotations `crush` does not yet emit); `Option.orElse`
-without its unfold hint (an uninterpreted function with no defining axiom); and Loom's
-Mathlib-bound VCs (`Array.toMultiset` permutation equality, `Finset.range`/`∑` big
-operators), which have no first-order SMT theory and are where a `crush` swap would
-fall back to `grind`/`aesop`.
+4. *Partial application of a function-typed variable* (`Translate.lean`, `hoTerm?`).
+   The defunctionalized `app` symbol is n-ary over an arrow's *fully flattened*
+   argument list, so a higher-order term applying a function-valued bound variable to
+   *fewer* arguments than that arity (`x (y f)` in a Church numeral, where `x :
+   (A→A)→(A→A)` has flattened arity 2 but gets one argument) emitted `app`
+   under-applied — an ill-sorted term z3 rejected (`unknown constant app_Fn (Fn Fn)`),
+   and the result is a *function* value, not a base-sort one. Such a partial
+   application is now η-expanded to a closure of the residual arrow sort, so the result
+   is a proper `Fn` value and the script is well-formed. This closed the Church-numeral
+   goal (§11b gaps below): once the SMT is valid, z3 discharges the whole tower in
+   ~40 ms — the earlier "times out" reading was the malformed script, not solver
+   difficulty. Native HO mode is unaffected (cvc5 applies functions directly).
+
+**Gaps the case studies closed.** Three of the four originally-documented gaps turned
+out to be reachable and are now passing tests:
+
+* *Higher-order Church numerals* (over a ground function space) — closed by fix 4
+  above.
+* *The Paxos consensus goal* — translates cleanly, but the ≈60 ∀ / 14 ∃ deep
+  alternation defeats z3's and cvc5's *default* E-matching. cvc5 with
+  `--full-saturate-quant` (instantiation-based, passed via `crush.additionalArgs`)
+  closes it in ~0.2 s. The finding was that the goal was reachable with the right
+  solver flag, not blocked on the trigger support `crush` lacks; lean-auto reaches it
+  via its own `trigger` annotations, a different route to the same end.
+* *`Option.orElse` with a λ* — the bare goal is a sound refusal (no defining axiom for
+  `orElse`), but `crush u[Option.orElse]` supplies the equation and closes it, the
+  `crush` analogue of lean-auto's `d[Option.orElse]`.
+
+**Gaps that remain** (roadmap, not regressions): the Church tower over an *abstract
+universe* (`{α : Sort u}` bound *inside* each hypothesis — the nested-binder
+monomorphization boundary; the ground-type version is handled); and Loom's
+Mathlib-bound VCs, where the `Multiset`/`Finset` *type* has no first-order SMT theory —
+but even there the split is hammer-in-the-loop, not a dead end: the structural lemma
+(`Finset.sum_range_succ`, the permutation lemma) is applied in Lean by `grind`/`aesop`
+and `crush` finishes the arithmetic residual, demonstrated on core-Lean renderings in
+`CaseStudies/Loom.lean`.

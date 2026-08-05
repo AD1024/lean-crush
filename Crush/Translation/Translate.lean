@@ -534,24 +534,19 @@ mutual
     let key := s!"__datatype__{n}{argKey}"
     if let some name := (← get).atomToName.get? key then
       return name
-    -- Gather the whole mutual block. SMT-LIB requires mutually-recursive datatypes
-    -- to be declared *together* in one `declare-datatypes` (`tree`'s selector range
-    -- `treelist` must be in scope when `tree` is declared), and each member's `wf`
-    -- axiom may reference a sibling's `wf` predicate. `iv.all` is the whole block —
-    -- a singleton for an ordinary inductive, so the non-mutual path is unchanged.
-    -- A mutual block shares its parameters, so the same `typeArgs`/`argKey` keys
-    -- every member (matching how `emitSort` would reach a sibling field).
+    -- Emit the whole mutual block together: SMT-LIB requires mutually-recursive
+    -- datatypes in one `declare-datatypes` (`tree`'s selector range `treelist` must
+    -- be in scope when `tree` is), and a member's `wf` axiom may reference a sibling's
+    -- `wf`. `iv.all` is a singleton for an ordinary inductive, so that path is
+    -- unchanged; a mutual block shares parameters, so one `argKey` keys every member.
     let iv ← getConstInfoInduct n
-    -- Reserve a sort name for every member *first*, so a field mentioning a sibling
-    -- resolves to its reserved name via the idempotent early-return above rather
-    -- than recursing.
+    -- Reserve every member's sort name first, so a field mentioning a sibling resolves
+    -- to it via the idempotent early-return above rather than recursing.
     let mut memberSorts : Array (Name × String) := #[]
     for m in iv.all do
       let mSort ← TranslateM.symbolFor s!"__datatype__{m}{argKey}" (nameHint m)
       markSortDeclared mSort
       memberSorts := memberSorts.push (m, mSort)
-    -- Build the constructor declarations for every member, collecting the wf field
-    -- descriptors per member for the guard axioms emitted afterward.
     let mut dtInfos : Array (String × Nat × DatatypeDecl) := #[]
     let mut memberWF : Array (String × Array (String × Array (String × Expr))) := #[]
     for (m, mSort) in memberSorts do
@@ -614,9 +609,9 @@ mutual
           if fty.getAppFn.isConstOf n then return false  -- self-reference
           needsWFGuard fty
 
-  /-- Emit `wf_T`'s declaration and defining axiom, once per datatype.
-
-  The axiom is stated in *selector* form per constructor,
+  /-- Declare `wf_T` (returns whether it was newly declared, i.e. still needs its
+  axiom). The `wf` predicate carves the Lean type's image out of its freely-generated
+  SMT sort; its axiom (`emitDatatypeWFAxiom`) is stated in *selector* form,
 
   ```
   (declare-fun wf_T (T) Bool)
@@ -624,14 +619,12 @@ mutual
     (and (=> ((_ is C₁) x) ⟨guards on C₁'s fields of x⟩) …))))
   ```
 
-  which z3 handles far better than the constructor-applied form. When no field
-  needs a guard the predicate is defined as constantly `true`, so the guard added
-  at each quantifier is trivially discharged and costs nothing.
+  which z3 handles far better than the constructor-applied form. When no field needs a
+  guard the predicate is constantly `true`, so the quantifier guard costs nothing.
 
-  Split into declaration (`declDatatypeWF`) and defining axiom
-  (`emitDatatypeWFAxiom`) so a mutual block can declare *all* members' `wf`
-  predicates before emitting any axiom — a member's axiom may reference a sibling's
-  `wf`. `declareDatatype` drives the two in that order across the whole block. -/
+  Declaration and axiom are split so a mutual block can declare *all* members' `wf`
+  before emitting any axiom — a member's axiom may reference a sibling's `wf`.
+  `declareDatatype` drives the two in that order across the whole block. -/
   partial def declDatatypeWF (sortName : String) : TranslateM Bool := do
     let wf := wfSymbol sortName
     if ← declaredFun wf then return false
@@ -752,6 +745,15 @@ mutual
             return some (.const vname)
           return none
         let some vname ← TranslateM.boundVar? fid | return none
+        -- Partial application: `app` is n-ary over the *fully flattened* arg list, so
+        -- fewer args than that arity (`x (y f)`, result still a function) would emit
+        -- `app` under-applied — ill-sorted, and the result is a function value. Emit
+        -- it as a closure of the residual arrow sort instead. (Native mode applies
+        -- functions directly, so partial application is fine there.)
+        if mode != .native then
+          if let some shape ← arrowShape? (← whnf (← fid.getType)) then
+            if args.size < shape.args.size then
+              return some (← emitFunValue e)
         let sargs ← args.mapM emitTerm
         -- In native mode the variable *is* a function: apply it directly.
         if mode == .native then
