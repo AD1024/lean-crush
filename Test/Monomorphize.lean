@@ -1,9 +1,9 @@
 import Crush
 
 /-!
-Tests for datatype monomorphization (`Doc/PLAN.md` §4b / M5.2): a fully-applied
-parametric type becomes a real SMT datatype at that instantiation, with injective,
-distinct, exhaustive constructors and working selectors.
+Tests for datatype monomorphization: a fully-applied parametric type becomes a real
+SMT datatype at that instantiation, with injective, distinct, exhaustive
+constructors and working selectors.
 
 Covers the cases beyond the basic `Test/Regression.lean` promotions: distinct
 instantiations must not conflate, nesting must work, and a `Nat` reached *through* a

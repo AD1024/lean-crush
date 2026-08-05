@@ -100,7 +100,7 @@ the differentiator. What is:
    head constant in a `DiscrTree` with explicit priorities, so dispatch is
    `O(matching)` and override semantics are predictable. (Our current skeleton
    uses a priority-sorted linear scan; the `DiscrTree` index is a planned
-   refinement — see §4.4.)
+   refinement.)
 3. **Higher-order actually survives.** lean-smt throws
    `"SMT-LIB does not support lambdas"` — its only HO answer is monomorphization.
    We add the encoding layer (§5). Notably even Isabelle's Sledgehammer, after
@@ -390,7 +390,8 @@ traps to design around from the start rather than patch later:
 
 Also adopted: the `Nonempty`/`Inhabited` → witness conversion for inhabitation
 (via `Classical.choice`/`Inhabited.default`), since SMT-LIB assumes every sort is
-non-empty (see §10.1); and `DTr`-style provenance on every generated instance so a
+non-empty (see §10, obligation 1); and `DTr`-style provenance on every generated
+instance so a
 dropped or unprovable fact can be named.
 
 ## 5. Higher-order handling (the key capability)

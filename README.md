@@ -32,10 +32,13 @@ the `Nat`/`Int`/`BitVec`/`String` theories,
 non-parametric datatypes, and higher-order goals (via defunctionalization, or native
 HO on cvc5) all translate and are tested.
 
-In progress: the hint grammar (`crush [lemmas]`), monomorphization (which unblocks
-parametric datatypes like `Prod`/`Option`/`List`), Alethe proof replay, and the
-combinator HO mode. See **[`Doc/PLAN.md`](Doc/PLAN.md)** §9 for the milestone status,
-and [`Test/`](Test/) for runnable examples across every supported theory.
+Also done: the hint grammar (`crush [lemmas] u[…] d[…]`), the `@[crush_unfold]`
+auto-unfold attributes, and datatype monomorphization — a fully-applied parametric
+type like `Option Int` or `List Int` becomes a real SMT datatype. In progress:
+lemma-instantiation monomorphization (specializing polymorphic *lemmas* to the
+ground types a query mentions), Alethe proof replay, and the combinator HO mode. See
+**[`Doc/PLAN.md`](Doc/PLAN.md)** §9 for the milestone status, and [`Test/`](Test/)
+for runnable examples across every supported theory.
 
 ## Requirements
 

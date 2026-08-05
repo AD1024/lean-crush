@@ -644,12 +644,13 @@ mutual
 
   Dispatch order, and why: a quantifier-bound variable resolves to its SMT name
   first (it is never a declaration); then **user `@[crush_translate]` handlers**,
-  so a user can override *any* built-in mapping for their own constant — this is
-  the extensibility contract in `PLAN.md` §4.3 ("user handlers override built-ins
-  for the same constant; there is no privileged built-in path"). Only if no handler
-  claims the term do the built-in higher-order and first-order structural paths run.
-  The handler loop is skipped wholesale when none are registered
-  (`hasTranslationHandlers`), so the common case pays a single array-empty check. -/
+  so a user can override *any* built-in mapping for their own constant. The
+  extensibility contract is that user handlers override built-ins for the same
+  constant — there is no privileged built-in path — so the handlers must get first
+  refusal. Only if no handler claims the term do the built-in higher-order and
+  first-order structural paths run. The handler loop is skipped wholesale when none
+  are registered (`hasTranslationHandlers`), so the common case pays a single
+  array-empty check. -/
   partial def emitTerm (e : Expr) : TranslateM SMT.Term := do
     let e ← instantiateMVars e
     -- A quantifier-bound variable renders as its SMT name, never a declaration.

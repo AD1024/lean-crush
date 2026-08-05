@@ -3,9 +3,9 @@ import Crush
 /-!
 Tests for the user-extensible translation layer: that `@[crush_translate]`
 handlers are not merely *registered* but actually *run*, and that they **override**
-the built-in structural/theory mappings for the same head constant (the contract in
-`Doc/PLAN.md` §4.3: "user handlers override built-ins for the same constant; there
-is no privileged built-in path").
+the built-in structural/theory mappings for the same head constant. The contract is
+that user handlers override built-ins for the same constant — there is no privileged
+built-in path.
 
 Each theorem below is provable *only* if the handler fired in place of the built-in
 translation, so a regression that shadowed handlers behind the built-ins (as an

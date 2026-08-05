@@ -89,10 +89,10 @@ exhaustive constructors — exactly what an inductive-step residual needs), but 
 *polymorphic* `List α` with opaque `α` stays an uninterpreted sort, and then even a
 trivial step case like `(a::as).append [] = a::as` cannot be discharged — the solver has
 no `cons`-injectivity to work with and times out. So these are stated over `List Int`.
-Generalizing over an arbitrary element type would need the lemma-instantiation
-monomorphization that is not yet built (PLAN §4b) — a real, documented boundary. The
-proof *structure* is identical to the polymorphic version; only the element type is
-pinned. -/
+Generalizing over an arbitrary element type would need lemma-instantiation
+monomorphization — specializing a polymorphic lemma to the ground types a query
+mentions — which is not yet built; a real boundary. The proof *structure* is
+identical to the polymorphic version; only the element type is pinned. -/
 
 namespace L
 

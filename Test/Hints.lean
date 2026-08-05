@@ -1,7 +1,7 @@
 import Crush
 
 /-!
-Tests for the hint grammar (`Doc/PLAN.md` §7, M5.1):
+Tests for the hint grammar:
 
 ```
 crush [h₁, …, *] u[f₁, …] d[g₁, …]
