@@ -634,14 +634,28 @@ value is as an escape hatch when defunctionalization blows up, so it wants a
 workload that actually blows up to tune against. Also unsupported: a
 partially-applied term whose *remaining* arity is higher-order.
 
-**M4 — Reconstruction. partial.** Core-directed replay is done; Alethe replay is
-not. `Crush/Solver/Reconstruct.lean` uses the unsat core to select the relevant
-hypotheses, rebuilds the goal as `h₁ → … → hₙ → goal` over only those, and hands it
-to `grind`/`omega`/`simp_all`. On success the solver leaves the trusted computing
-base — it was only a search heuristic. This is the default policy (`reconstruct`),
-which errors rather than falling back to the axiom when the finishers cannot replay.
+**M4 — Reconstruction. partial.** Core-directed replay is done; Alethe replay is in
+progress (the parser is built). `Crush/Solver/Reconstruct.lean` uses the unsat core to
+select the relevant hypotheses, rebuilds the goal as `h₁ → … → hₙ → goal` over only
+those, and hands it to `grind`/`omega`/`simp_all`. On success the solver leaves the
+trusted computing base — it was only a search heuristic. This is the default policy
+(`reconstruct`), which errors rather than falling back to the axiom when the finishers
+cannot replay.
 
-*Remaining:* Alethe proof replay for cvc5. The intent was to cover the two shapes the
+*Alethe replay — staged, phase 1 done.* A sound Lean *checker* for Alethe is a large
+undertaking (see the scope findings below), so it is built in phases under one
+invariant: **any step a replay cannot discharge is a hard failure, never a trusted
+gap**, so partial coverage stays sound and merely falls back to the core-directed
+finisher. Phase 1 — a structured parser (`Crush/Solver/Alethe.lean`) turning cvc5's
+`--dump-proofs --proof-format-mode=alethe` output into an `AletheProof` of
+`assume`/`step`/`anchor` commands over clauses — is built and tested against verbatim
+cvc5 output (`Test/Alethe.lean`), including that an `(error …)` reply parses to `none`
+so the caller falls back rather than mis-reading. Parsing decides nothing, so this
+phase is sound on its own. Remaining phases: request the proof from the solver behind
+an option; map Alethe terms back to Lean `Expr`s (our translation is one-directional
+today, so this is new); and a per-rule replay checker.
+
+*Scope findings.* The intent was to cover the two shapes the
 finishers cannot replay — nonlinear arithmetic and finite-domain exhaustiveness, both
 pinned in `Test/Reconstruct.lean`. **Probing cvc5 1.3.4's actual Alethe output on
 those exact cases reshaped the scope, and the naive version of this plan does not
@@ -907,6 +921,7 @@ a passing test; the build must be clean and produce **no `sorry`**.
 | `Reconstruct.lean` | `#print axioms` assertions — reconstructed theorems must not name `crushSorry` — and the replay boundary |
 | `TIP.lean` | inductive theorems from the TIP `prod` benchmarks over a *polymorphic* element type, proved hammer-in-the-loop (manual `induction`, `crush` per case, `@[crush_unfold]` definitions) |
 | `Cvc5.lean` | the **cvc5 backend** and **`native` HO mode** (`HO_ALL`, `(-> σ τ)` sorts, `lambda`), which the default `z3`/`defunctionalize` suite never exercises; plus the z3-vs-cvc5 `sat`/`unknown` difference on false HO goals |
+| `Alethe.lean` | the Alethe proof **parser** (M4 phase 1) against verbatim cvc5 output: command/clause/`:named` structure, premise reading, the empty-clause conclusion, and that an `(error …)` reply parses to `none` |
 
 **Negative tests use `#guard_msgs`, not `sorry`.** A goal that is *false* must be
 rejected, and the guard pins the rejection message, so a regression that let `crush`
