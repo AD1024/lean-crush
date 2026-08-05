@@ -165,6 +165,11 @@ structure MonoReport where
   /-- Descriptions of polymorphic facts left un-instantiated (no candidate fit, or
   the budget ran out). Reported so a truncation is never silent. -/
   dropped : Array String := #[]
+  /-- Descriptions of candidate instances that failed **certification** — the proof
+  term did not actually have the proposition we attached to it (`inferType p` not
+  defeq `t`). This should never fire: it indicates a bug in `specializations`, not a
+  user error. Surfaced so such a bug is loud rather than silently translated. -/
+  rejected : Array String := #[]
   /-- Whether a bound (fuel or rounds) was hit, as opposed to reaching a fixpoint. -/
   exhausted : Bool := false
 
@@ -203,6 +208,7 @@ def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := 
   let mut seen : Std.HashSet Expr := {}
   let mut generated := 0
   let mut instantiated : Std.HashSet String := {}
+  let mut rejected : Array String := #[]
   let mut exhausted := false
   for _round in [0:cfg.monoRounds] do
     let mut newThisRound := 0
@@ -217,6 +223,27 @@ def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := 
         let t ← instantiateMVars t
         if seen.contains t then continue
         seen := seen.insert t
+        -- **Optionally certify the instance before trusting it** (`crush.mono.certify`,
+        -- off by default). `p` is `proof` applied to the chosen type/instance arguments
+        -- and `t` is the corresponding instantiated proposition, so `p : t` holds by
+        -- construction — but only if `specializations` built the two in lock-step.
+        -- Nothing downstream re-checks this cheaply: `buildScript` translates `t` and
+        -- never looks at `p` (the proof is consumed only during reconstruction). So
+        -- under `trust`/`reconstructOrTrust` a defect here would translate a proposition
+        -- with no valid Lean witness — an unsoundness the solver could not catch.
+        -- Verifying `inferType p` is defeq `t` makes "every asserted instance is
+        -- entailed by its stated proof" checked rather than argued. It is off by default
+        -- because the default `reconstruct` policy already re-checks each proof through
+        -- the kernel during replay, making the `isDefEq` redundant there; it earns its
+        -- cost only under the trusting policies. A mismatch is a bug in this pass, so
+        -- the instance is dropped and named loudly, never emitted.
+        if cfg.monoCertify then
+          let ok ←
+            try isDefEq (← inferType p) t
+            catch _ => pure false
+          unless ok do
+            rejected := rejected.push s!"{f.descr}@inst"
+            continue
         generated := generated + 1
         newThisRound := newThisRound + 1
         instantiated := instantiated.insert f.descr
@@ -238,6 +265,6 @@ def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := 
     unless instantiated.contains f.descr do
       out := out.push f
       dropped := dropped.push f.descr
-  return { facts := out, generated, dropped, exhausted }
+  return { facts := out, generated, dropped, rejected, exhausted }
 
 end Crush

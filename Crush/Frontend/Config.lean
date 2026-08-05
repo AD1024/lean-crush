@@ -118,6 +118,15 @@ register_option crush.mono.rounds : Nat := {
   descr := "Maximum saturation rounds for the monomorphization E-matching loop."
 }
 
+register_option crush.mono.certify : Bool := {
+  defValue := false
+  descr := "Type-check each generated monomorphization instance (its proof term must \
+            have its proposition) and drop any that fail. Off by default: under the \
+            `reconstruct` policy the kernel re-checks the proof during replay anyway, \
+            so this only adds value under `trust`/`reconstructOrTrust`, where it turns \
+            the pass's soundness from argued into checked at each call."
+}
+
 register_option crush.save : String := {
   defValue := ""
   descr := "If nonempty, write the generated SMT-LIB script to this path before solving."
@@ -154,6 +163,7 @@ structure Config where
   hoMode         : HOMode    := .defunctionalize
   monoFuel       : Nat       := 512
   monoRounds     : Nat       := 8
+  monoCertify    : Bool      := false
   savePath       : String    := ""
   additionalArgs : Array String := #[]
   logic          : Option String := none
@@ -174,6 +184,7 @@ def Config.ofOptions (opts : Options) : Config :=
     hoMode         := crush.ho.mode.get opts
     monoFuel       := crush.mono.fuel.get opts
     monoRounds     := crush.mono.rounds.get opts
+    monoCertify    := crush.mono.certify.get opts
     savePath       := crush.save.get opts
     additionalArgs := split (crush.additionalArgs.get opts)
     logic          := if logicStr.isEmpty then none else some logicStr

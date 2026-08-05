@@ -126,7 +126,8 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
   let mono ← monomorphizeFacts cfg facts
   let facts := mono.facts
   trace[crush.mono] "generated {mono.generated} instance(s); \
-                     dropped: {mono.dropped}; exhausted: {mono.exhausted}"
+                     dropped: {mono.dropped}; rejected: {mono.rejected}; \
+                     exhausted: {mono.exhausted}"
   -- Truncation is never silent: a hit bound is a completeness loss the user can act
   -- on by raising `crush.mono.fuel`/`rounds`.
   if mono.exhausted then
@@ -134,6 +135,15 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
                   instance(s) (`crush.mono.fuel` = {cfg.monoFuel}, \
                   `crush.mono.rounds` = {cfg.monoRounds}); the fact set may be \
                   incomplete. Raise the bound if the goal is not provable."
+  -- A certification failure (only possible with `crush.mono.certify`) means the pass
+  -- built an instance whose proof did not match its proposition — a bug in
+  -- monomorphization, not the user's goal. Loud, since it would otherwise be a silent
+  -- soundness hole under a trusting policy.
+  unless mono.rejected.isEmpty do
+    logWarning m!"crush: monomorphization produced {mono.rejected.size} \
+                  instance(s) that failed certification and were dropped \
+                  ({mono.rejected}); this indicates an internal bug in the \
+                  monomorphizer. The affected facts were not asserted."
   let (script, st) ← buildScript cfg facts
   if cfg.traceScript then
     logInfo m!"crush SMT script:{indentD (scriptToString script)}"

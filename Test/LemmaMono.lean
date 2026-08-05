@@ -151,3 +151,36 @@ set_option crush.mono.fuel 0 in
 /-- error: crush -/
 #guard_msgs(error, substring := true) in
 theorem disabled_no_mono (y : List Int) : M.app [] y = y := by crush
+
+/-! ## `crush.mono.certify` — the instance-certification guard
+
+Each generated instance carries a proof term (`proof` applied to the chosen type
+arguments) alongside its proposition, and by construction the proof has that type.
+`crush.mono.certify` re-checks that with `isDefEq` at generation time and drops any
+instance that fails — turning the pass's soundness from argued into checked, which
+matters under `trust`/`reconstructOrTrust` where nothing else re-checks the proof
+(the default `reconstruct` policy already re-checks via the kernel during replay, so
+the guard is redundant there and off by default).
+
+Since a certification failure only fires on an *internal* bug in the monomorphizer,
+there is nothing to trigger it here; what these pin is that turning the guard on is
+harmless — the same polymorphic goals still close, and no spurious rejection warning
+appears — and that it composes with the trusting policy it is meant for. -/
+
+section Certify
+set_option crush.mono.certify true
+
+theorem certify_app_ground (y : List Int) : M.app [] y = y := by crush
+
+theorem certify_poly_hyp (h : ∀ (α : Type) (x : α), x = x) (a : Int) : a = a := by
+  crush [h]
+
+-- With the guard on *and* a trusting policy, the certification is the only thing
+-- standing between a mis-built instance and the solver. This closes cleanly, so the
+-- guard passes every real instance through.
+set_option crush.trust "trust" in
+theorem certify_under_trust (f : ∀ (α : Type), List α → Nat)
+    (h : ∀ (α : Type) (l : List α), f α l = 0) (l : List Int) : f Int l = 0 := by
+  crush [h]
+
+end Certify

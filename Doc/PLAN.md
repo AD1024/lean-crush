@@ -387,6 +387,17 @@ completeness. Exhausting the budget is therefore a completeness matter, reported
 warning, not a soundness one. Tested in `Test/LemmaMono.lean`, including that false
 goals are still rejected.
 
+More than "weakens", the pass is *certifying* when asked to be: each instance is not
+a bare proposition but `proof` applied to the chosen type/instance arguments, so it
+ships a Lean proof term of exactly that proposition. Under the default `reconstruct`
+policy this is re-checked by the kernel during replay for free. Under a trusting
+policy (`trust`/`reconstructOrTrust`) nothing else re-checks it — `buildScript`
+translates the proposition and never inspects the proof — so `crush.mono.certify`
+(off by default) re-verifies `inferType proof ≡ proposition` at generation time and
+drops any instance that fails, with a loud warning. A failure indicates a bug in the
+pass, not a user error; the option turns "sound by construction" into "checked at
+each call" for the modes where the kernel is not already doing it.
+
 A close reading of lean-auto's pass surfaced four concrete traps, which shaped the
 implementation:
 
@@ -566,6 +577,7 @@ at entry, so this layers on without changing the pipeline.
 | `crush.ho.mode` | `defunctionalize\|combinators\|native` | `defunctionalize` | HO elimination strategy |
 | `crush.mono.fuel` | `Nat` | `512` | max monomorphization instances |
 | `crush.mono.rounds` | `Nat` | `8` | max saturation rounds |
+| `crush.mono.certify` | `Bool` | `false` | type-check each mono instance's proof against its proposition (only useful under a trusting policy; the kernel does this on the `reconstruct` path) |
 | `crush.logic` | `String` | auto | override SMT-LIB logic |
 | `crush.additionalArgs` | `String` | `""` | extra solver flags |
 | `crush.save` | `String` | `""` | write script to path |
