@@ -873,26 +873,18 @@ mutual
     -- Numeric literals: `@OfNat.ofNat _ n _` and negation.
     match_expr e with
     | OfNat.ofNat _ _ _ =>
-      -- `OfNat.ofNat` is the literal syntax of the *arithmetic theory*, which crush
-      -- models only over the SMT numeric sorts `Nat`/`Int`. There it is a literal:
-      -- emit the number. For any other carrier `@OfNat.ofNat T k inst` is just sugar
-      -- for a `T`-value — `(0 : SignType)` is the constructor `SignType.zero`, `(0 :
-      -- Real)` the opaque `Real.zero` — so it is *not* a theory term at all. Emitting
-      -- `0` there would place an `Int`-sorted literal where a `T`-sorted term is
-      -- needed (z3: "Sorts … incompatible"). Reduce to expose the underlying value and
-      -- re-emit; the datatype / uninterpreted paths then give it the correct sort.
-      --
-      -- The gate cannot be dropped in favour of "always `whnf`": `Nat`/`Int` are
-      -- theory sorts, not datatypes (`isSupportedDatatypeApp` rejects them), so their
-      -- whnf forms (`Int.ofNat k`, a raw `Nat.lit`) have no first-order translation
-      -- and would degrade to an uninterpreted symbol, silently dropping the literal.
+      -- A numeral is an SMT literal only at the arithmetic sorts `Nat`/`Int`. At any
+      -- other carrier `@OfNat.ofNat T k inst` is sugar for a `T`-value — `(0 :
+      -- SignType)` is the constructor `SignType.zero` — so emitting `0` would clash
+      -- sorts (z3: "Sorts … incompatible"). Reduce and re-emit through the datatype/
+      -- uninterpreted path instead. (Can't just `whnf` unconditionally: `Nat`/`Int`
+      -- are theory sorts whose whnf forms have no first-order translation.)
       let ty ← whnf (← inferType e)
       if ty.isConstOf ``Nat || ty.isConstOf ``Int then
         return (← getNatLit? e).map (.lit <| .num ·)
       else
         let e' ← whnf e
-        -- A symbolic instance that will not reduce (`e' == e`) has no value to expose;
-        -- leave it to the uninterpreted path rather than re-entering `emitTerm` on it.
+        -- A symbolic instance that won't reduce has no value to expose; leave it.
         if e' == e then return none else return some (← emitTerm e')
     | Neg.neg _ _ a =>
       return some (.symbApp "-" #[← emitTerm a])
