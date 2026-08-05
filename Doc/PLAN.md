@@ -721,8 +721,20 @@ discards linear arithmetic. The guard's cost is also narrower than it looks — 
 Its real cost is recursive datatypes with guarded fields, where the `wf` axiom
 becomes recursive and can send the solver into an instantiation loop
 (`must_not_close_nl_field` times out even at 30s). That is sound — `unknown` never
-closes a goal — but it is a genuine completeness loss. Suppressing the guard when
-the query never touches the guarded field would recover most of it.
+closes a goal.
+
+An earlier revision proposed suppressing the guard when a query never touches the
+guarded field, to recover completeness. **Probing showed there is little to recover,
+so this was not built.** Eight *true* goals over the recursive guarded `NList` — five
+purely structural (quantified constructor discrimination, tail injectivity, deep
+`cons` chains) and three that reference the guarded `Nat` field (including
+`t.len ≥ 0`) — all close today; none diverge. The only divergence is
+`must_not_close_nl_field`, which is a *false* goal we *want* rejected, and whose
+`unknown` is sound. So the queries that would benefit from suppression already
+succeed, and the guard is free when unexercised (constantly-`true` `wf`).
+Suppression would trade the obligation-3 unsoundness risk (a false-`unsat` bug this
+guard exists to prevent) for a completeness gain the evidence does not show exists —
+a bad trade. Left as-is deliberately.
 
 **Methodology.** Every item was settled by evaluating the operator in Lean (`#eval`)
 *and* in the solver and comparing, not from memory of either specification. Three
