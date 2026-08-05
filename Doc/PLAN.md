@@ -685,14 +685,18 @@ closes `x*x=4 ∧ x>0 → x=2`, and the tactic that would (`nlinarith`) lives in
 which is not a dependency and is far too heavy to add for one edge case. So the only
 route to the nonlinear case is the full Alethe checker.
 
-Given all this, **M4 is deprioritized on the evidence**, not merely unstarted: it is
-weeks of work (large rule set, each rule needing a proven-sound Lean replay), covers
-one of the two motivating pinned cases (not `pigeonhole`), needs
+Given all this, **phase 1 (the parser) is done; phases 2–3 are backlogged**, not
+merely unstarted: they are weeks of work (phase 3b's rule set is large, each rule
+needing a proven-sound Lean replay; phase 3a is a new Alethe-`Sexp`→Lean-`Expr`
+reverse map, since translation is one-directional today), the result covers one of the
+two motivating pinned cases (not `pigeonhole`), needs
 `--proof-granularity=dsl-rewrite`, and — because the default `reconstruct` policy
 already makes both cases fail *soundly* as an error rather than a false close — it is
-a **completeness** upgrade, not a soundness fix. Worth doing if nonlinear goals become
-a common workload; not the best next investment otherwise. See `Test/Reconstruct.lean`
-for the pinned cases and this section for the probe findings.
+a **completeness** upgrade, not a soundness fix. Worth resuming if nonlinear goals
+become a common workload; not the best next investment otherwise. The remaining phases
+in order: (2) request the proof from cvc5 behind an option and capture it into
+`Result` (small); (3a) the term-reflection reverse map; (3b) the per-rule checker. See
+`Test/Reconstruct.lean` for the pinned cases and this section for the probe findings.
 
 **M5 — Ergonomics & scale. partial.** In rough priority order:
 1. The hint grammar (§7): `crush [h₁, …, *] (u[…]) (d[…])`. **done** — a user can now
