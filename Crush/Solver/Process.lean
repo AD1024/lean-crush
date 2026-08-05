@@ -50,8 +50,14 @@ def backendSpec (b : Backend) : Option BackendSpec :=
       logic := id }
   | .cvc5 => some {
       exe := "cvc5"
+      -- `--proof-format-mode=alethe` is what makes `(get-proof)` emit the format
+      -- `Crush.Alethe` parses; cvc5's native format is a different language.
+      -- `--proof-granularity=dsl-rewrite` expands the coarse `hole` steps ("untranslated
+      -- rewrite") into checkable ones — measured 4 holes → 0 on a small linear goal — and
+      -- a `hole` is a gap the replay must reject, so this is what makes proofs usable.
       args := fun t => #[s!"--tlimit={t * 1000}", "--produce-models",
-                          "--produce-unsat-cores", "--enum-inst", "--incremental"]
+                          "--produce-unsat-cores", "--enum-inst", "--incremental",
+                          "--proof-format-mode=alethe", "--proof-granularity=dsl-rewrite"]
       logic := id }
   | .bitwuzla => some {
       exe := "bitwuzla"

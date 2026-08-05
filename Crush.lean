@@ -13,6 +13,7 @@ import Crush.Translation.Monomorphize
 import Crush.Translation.Translate
 import Crush.Solver.Process
 import Crush.Solver.Alethe
+import Crush.Solver.ProofGuide
 import Crush.Solver.Reconstruct
 import Crush.Frontend.Tactic
 

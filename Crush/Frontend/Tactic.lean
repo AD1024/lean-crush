@@ -6,6 +6,7 @@ import Crush.Translation.Translate
 import Crush.Util.Profile
 import Crush.Solver.Process
 import Crush.Solver.Reconstruct
+import Crush.Solver.ProofGuide
 import Crush.SMT.Print
 import Crush.SMT.Result
 open Lean Elab Tactic Meta
@@ -163,9 +164,16 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
   let (result, prof') ← prof.time "solve" (Solver.runQuery cfg script)
   prof := prof'
   match result with
-  | .unsat coreText _ =>
+  | .unsat coreText proofText =>
     let coreIds := parseUnsatCore coreText
     trace[crush.result] "unsat; core facts: {coreIds}"
+    -- A cvc5 Alethe proof is read as a *guide*, never as a licence to trust: it can
+    -- only add finisher attempts (see `Crush/Solver/ProofGuide.lean`). `none` covers
+    -- z3, an `(error …)` reply, and a proof containing a `hole`.
+    let guide? := Alethe.guideOf? proofText
+    if let some g := guide? then
+      trace[crush.result] "alethe proof: {g.steps} step(s), rules {g.rules}, \
+                           needsEval={g.needsEval}"
     match cfg.trust with
     | .trust =>
       let goalType ← goal.getType
@@ -177,7 +185,13 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
       -- leaves the trusted computing base — it was only a search heuristic.
       let coreProofs := coreHypotheses st coreIds
       trace[crush.result] "reconstructing from core: {coreDescriptions st coreIds}"
-      let (ok, prof') ← prof.time "reconstruct" (tryReconstruct goal coreProofs (← finisherTactics))
+      -- When the proof says the refutation turns on evaluating a ground term, append
+      -- the evaluating finishers; the default ladder reasons but does not compute.
+      let finishers ←
+        if guide?.any (·.needsEval) then
+          pure ((← finisherTactics) ++ (← evalFinisherTactics))
+        else finisherTactics
+      let (ok, prof') ← prof.time "reconstruct" (tryReconstruct goal coreProofs finishers)
       prof := prof'
       if ok then
         trace[crush.result] "reconstruction succeeded; no axiom used"

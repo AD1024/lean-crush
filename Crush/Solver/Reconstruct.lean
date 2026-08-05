@@ -92,6 +92,23 @@ def finisherTactics : CoreM (Array (TSyntax `tactic)) := do
     (← `(tactic| (intros; funext _ _; simp_all))),
     (← `(tactic| (intros; ext; grind)))]
 
+/-- Extra finishers for a verdict whose proof turns on **ground evaluation**.
+
+cvc5 closes such goals with the Alethe `evaluate` rule — `str.len "ab" = 2` — and the
+default ladder cannot: `grind`/`omega`/`simp_all` reason, they do not compute. The
+missing move is to substitute the ground equations and then *evaluate*, which is
+`decide` (decidable propositions) or `rfl`/`simp_arith` (definitional computation).
+
+Kept off the default ladder because they are useless on the common case and `decide`
+on a large term is slow; `Crush.Alethe.Guide.needsEval` says when to pay for them. -/
+def evalFinisherTactics : CoreM (Array (TSyntax `tactic)) := do
+  return #[
+    (← `(tactic| (intros; subst_vars; decide))),
+    (← `(tactic| (intros; subst_vars; rfl))),
+    (← `(tactic| (intros; subst_vars; simp_all))),
+    (← `(tactic| (intros; simp_all; decide))),
+    (← `(tactic| (intros; simp_arith)))]
+
 /-- `t₁ → … → tₙ → concl`. The binders are non-dependent — each hypothesis is a
 closed `Prop` — so a plain `mkForall` chain suffices. -/
 def mkArrowChain (tys : Array Expr) (concl : Expr) : Expr := Id.run do

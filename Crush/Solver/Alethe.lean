@@ -9,17 +9,20 @@ the empty clause. This module turns that text into a structured `AletheProof` so
 replay pass can walk it. It does **not** check the proof — parsing decides nothing, so
 this layer is sound on its own; a checker is a separate, later phase.
 
-## Why only a parser, for now
+## Why a parser, and what consumes it
 
 A sound Lean *checker* for Alethe is a large undertaking: even a single small
 nonlinear goal produces ~200 steps across ~30 distinct rules (`resolution`, `cong`,
 `la_generic`, `rare_rewrite`, …), nested subproofs, and requires mapping the proof's
 SMT terms back to Lean `Expr`s (our translation is one-directional). Each rule needs a
 soundness argument. So M4 is staged: this parser is the foundation, checked against
-real cvc5 output; replaying rules onto Lean goals is built on top incrementally, under
-the invariant that **any rule the replay cannot discharge is a hard failure, never a
-trusted gap** — so partial rule coverage stays sound, it just falls back to the
-core-directed finisher (or errors under `reconstruct`).
+real cvc5 output; anything built on it holds the invariant that **any step the replay
+cannot discharge is a hard failure, never a trusted gap** — so partial coverage stays
+sound, it just falls back to the core-directed finisher (or errors under `reconstruct`).
+
+The current consumer is `Crush/Solver/ProofGuide.lean`, which reads the proof as a
+*guide* for choosing reconstruction finishers rather than replaying it rule by rule.
+That is where the `hole`-means-unusable policy lives.
 
 ## The Alethe surface we parse
 
