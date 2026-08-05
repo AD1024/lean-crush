@@ -534,38 +534,64 @@ mutual
     let key := s!"__datatype__{n}{argKey}"
     if let some name := (← get).atomToName.get? key then
       return name
-    let sortName ← TranslateM.symbolFor key (nameHint n)
-    -- Register the sort name *before* translating field sorts: a recursive
-    -- datatype's fields mention the type (at this same instantiation), and must
-    -- resolve to this symbol rather than recursing forever. `declareDatatype` is
-    -- idempotent on the key, so a recursive occurrence returns `sortName` directly.
-    markSortDeclared sortName
+    -- Gather the whole mutual block. SMT-LIB requires mutually-recursive datatypes
+    -- to be declared *together* in one `declare-datatypes` (`tree`'s selector range
+    -- `treelist` must be in scope when `tree` is declared), and each member's `wf`
+    -- axiom may reference a sibling's `wf` predicate. `iv.all` is the whole block —
+    -- a singleton for an ordinary inductive, so the non-mutual path is unchanged.
+    -- A mutual block shares its parameters, so the same `typeArgs`/`argKey` keys
+    -- every member (matching how `emitSort` would reach a sibling field).
     let iv ← getConstInfoInduct n
-    let mut ctorDecls : Array CtorDecl := #[]
-    -- Field descriptors for the wf axiom: per ctor, the selectors needing a guard.
-    let mut wfParts : Array (String × Array (String × Expr)) := #[]
-    for ctorName in iv.ctors do
-      let ctorInfo ← getConstInfoCtor ctorName
-      -- Instantiate the constructor's type at the datatype's parameters, so each
-      -- field type is ground (`Option.some : α → Option α` becomes `Int → Option Int`
-      -- at `typeArgs = #[Int]`).
-      let ctorTy ← instantiateForall ctorInfo.type typeArgs
-      let (selDecls, guards) ← forallTelescopeReducing ctorTy fun args _ => do
-        let mut sels : Array (String × SSort) := #[]
-        let mut gs : Array (String × Expr) := #[]
-        for i in [0:args.size] do
-          let fieldTy ← inferType args[i]!
-          let s ← emitSort fieldTy
-          let selName := selSymbol sortName ctorName i
-          sels := sels.push (selName, s)
-          if (← needsWFGuard fieldTy) then
-            gs := gs.push (selName, fieldTy)
-        return (sels, gs)
-      ctorDecls := ctorDecls.push { name := ctorSymbol sortName ctorName, selDecls }
-      wfParts := wfParts.push (ctorSymbol sortName ctorName, guards)
-    TranslateM.emitCommand (.declDatatypes #[(sortName, 0, { ctors := ctorDecls })])
-    emitDatatypeWF sortName wfParts
-    return sortName
+    -- Reserve a sort name for every member *first*, so a field mentioning a sibling
+    -- resolves to its reserved name via the idempotent early-return above rather
+    -- than recursing.
+    let mut memberSorts : Array (Name × String) := #[]
+    for m in iv.all do
+      let mSort ← TranslateM.symbolFor s!"__datatype__{m}{argKey}" (nameHint m)
+      markSortDeclared mSort
+      memberSorts := memberSorts.push (m, mSort)
+    -- Build the constructor declarations for every member, collecting the wf field
+    -- descriptors per member for the guard axioms emitted afterward.
+    let mut dtInfos : Array (String × Nat × DatatypeDecl) := #[]
+    let mut memberWF : Array (String × Array (String × Array (String × Expr))) := #[]
+    for (m, mSort) in memberSorts do
+      let miv ← getConstInfoInduct m
+      let mut ctorDecls : Array CtorDecl := #[]
+      -- Field descriptors for the wf axiom: per ctor, the selectors needing a guard.
+      let mut wfParts : Array (String × Array (String × Expr)) := #[]
+      for ctorName in miv.ctors do
+        let ctorInfo ← getConstInfoCtor ctorName
+        -- Instantiate the constructor's type at the datatype's parameters, so each
+        -- field type is ground (`Option.some : α → Option α` becomes `Int → Option Int`
+        -- at `typeArgs = #[Int]`).
+        let ctorTy ← instantiateForall ctorInfo.type typeArgs
+        let (selDecls, guards) ← forallTelescopeReducing ctorTy fun args _ => do
+          let mut sels : Array (String × SSort) := #[]
+          let mut gs : Array (String × Expr) := #[]
+          for i in [0:args.size] do
+            let fieldTy ← inferType args[i]!
+            let s ← emitSort fieldTy
+            let selName := selSymbol mSort ctorName i
+            sels := sels.push (selName, s)
+            if (← needsWFGuard fieldTy) then
+              gs := gs.push (selName, fieldTy)
+          return (sels, gs)
+        ctorDecls := ctorDecls.push { name := ctorSymbol mSort ctorName, selDecls }
+        wfParts := wfParts.push (ctorSymbol mSort ctorName, guards)
+      dtInfos := dtInfos.push (mSort, 0, { ctors := ctorDecls })
+      memberWF := memberWF.push (mSort, wfParts)
+    TranslateM.emitCommand (.declDatatypes dtInfos)
+    -- Declare *all* wf predicates before emitting *any* axiom, so a member's axiom
+    -- can reference a sibling's `wf` (they are mutually recursive too).
+    let mut needAxiom : Array (String × Array (String × Array (String × Expr))) := #[]
+    for (mSort, wfParts) in memberWF do
+      if ← declDatatypeWF mSort then
+        needAxiom := needAxiom.push (mSort, wfParts)
+    for (mSort, wfParts) in needAxiom do
+      emitDatatypeWFAxiom mSort wfParts
+    let some (_, nSort) := memberSorts.find? (·.1 == n)
+      | throwError "crush: internal — `{n}` missing from its own mutual block"
+    return nSort
 
   /-- Whether values of `ty` occupy a *proper subset* of their SMT sort, so a
   quantifier over them needs a guard. True for `Nat` (encoded as `Int`) and for any
@@ -600,14 +626,27 @@ mutual
 
   which z3 handles far better than the constructor-applied form. When no field
   needs a guard the predicate is defined as constantly `true`, so the guard added
-  at each quantifier is trivially discharged and costs nothing. -/
-  partial def emitDatatypeWF (sortName : String)
-      (parts : Array (String × Array (String × Expr))) : TranslateM Unit := do
+  at each quantifier is trivially discharged and costs nothing.
+
+  Split into declaration (`declDatatypeWF`) and defining axiom
+  (`emitDatatypeWFAxiom`) so a mutual block can declare *all* members' `wf`
+  predicates before emitting any axiom — a member's axiom may reference a sibling's
+  `wf`. `declareDatatype` drives the two in that order across the whole block. -/
+  partial def declDatatypeWF (sortName : String) : TranslateM Bool := do
     let wf := wfSymbol sortName
-    if ← declaredFun wf then return
+    if ← declaredFun wf then return false
     markFunDeclared wf
     let sort := SSort.app (.symb sortName) #[]
     TranslateM.emitCommand (.declFun wf #[sort] (.app (.symb "Bool") #[]))
+    return true
+
+  /-- Emit `wf_T`'s defining axiom. `wf_T` must already be declared
+  (`declDatatypeWF`); this is separated so sibling `wf` predicates in a mutual
+  block are all in scope before any axiom references them. -/
+  partial def emitDatatypeWFAxiom (sortName : String)
+      (parts : Array (String × Array (String × Expr))) : TranslateM Unit := do
+    let wf := wfSymbol sortName
+    let sort := SSort.app (.symb sortName) #[]
     let v ← TranslateM.freshSymbol "d"
     let x := SMT.Term.const v
     let mut conjuncts : Array SMT.Term := #[]

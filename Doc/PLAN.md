@@ -770,7 +770,10 @@ External validation of obligation 1: porting lean-auto's `SmtTranslation` suite
 encoding its own source flags as unsound ("SMT-LIB assume that all types are
 inhabited, while in DTT it's not"), whereas `crush` declines it — the inhabitation
 guard doing exactly its job. The same port also drove two BitVec translation gaps to
-ground (`zeroExtend`, `extractLsb hi lo`), now fixed.
+ground (`zeroExtend`, `extractLsb hi lo`), now fixed. The deeper case studies (§11b)
+drove three more fixes — mutually-recursive datatype emission, polymorphic-hint
+re-abstraction, and the monomorphization candidate filter — each found by porting a
+goal and diagnosing the emitted SMT.
 
 | # | Obligation | Resolution |
 |---|---|---|
@@ -935,6 +938,8 @@ a passing test; the build must be clean and produce **no `sorry`**.
 | `Cvc5.lean` | the **cvc5 backend** and **`native` HO mode** (`HO_ALL`, `(-> σ τ)` sorts, `lambda`), which the default `z3`/`defunctionalize` suite never exercises; plus the z3-vs-cvc5 `sat`/`unknown` difference on false HO goals |
 | `Alethe.lean` | the Alethe proof **parser** (M4 phase 1) against verbatim cvc5 output: command/clause/`:named` structure, premise reading, the empty-clause conclusion, and that an `(error …)` reply parses to `none` |
 | `LeanAutoPort.lean` | goals ported from lean-auto's `SmtTranslation/` suite (BoolNatInt, BitVec, String, inductive/enum, recursive-with-unfold): demonstrates the same corpus translates and solves, and pins the `Empty`-type cases where we are deliberately *sound* and lean-auto documents itself unsound |
+| `CaseStudies/LeanAuto.lean` | the *harder* lean-auto corpus (§11b): mutually-recursive and single-ctor datatypes, HO Church numerals, polymorphic lemmas, leading-∀ matching, `Function.comp_def`, and the Paxos consensus goal — each filed as handled / sound-refusal / known-gap |
+| `CaseStudies/Loom.lean` | representative Loom verification conditions (§11b): GCD/MaxElem/IsSorted/SumOfDigits/sqrt/cbrt/binary-search arithmetic, quantified array invariants, an array-update VC, and Cashmere balance invariants — with the Mathlib-bound `Multiset`/`Finset` VCs recorded as gaps |
 
 **Negative tests use `#guard_msgs`, not `sorry`.** A goal that is *false* must be
 rejected, and the guard pins the rejection message, so a regression that let `crush`
@@ -984,3 +989,71 @@ yet built: on `unknown`, `(get-model)` output is currently discarded, but it oft
 holds a *candidate* counterexample that could be surfaced as a tentative,
 explicitly-uncertified hint. `vampire`/`zipperposition` are optional TPTP backends
 for a later phase.
+
+## 11b. Case studies (`Test/CaseStudies/`)
+
+Two downstream projects that use lean-auto were taken as external validation:
+lean-auto's own harder test corpus, and [Loom](https://github.com/AD1024/loom) (a
+framework for building program verifiers, which dispatches its verification
+conditions through lean-auto). Neither can literally `require` lean-crush — the three
+projects are on incompatible Lean toolchains (Loom on v4.24.0 + Mathlib, lean-auto on
+v4.32.0-rc1, lean-crush on v4.32.2) and a Lean `require` forces one shared toolchain,
+and Loom's Velvet examples have moved to a separate repo — so each case study instead
+**ports representative goals** to `crush` and maps coverage into three honest buckets:
+*handled* (a real closed theorem), *sound refusal* (a true goal `crush` declines
+rather than close unsoundly, pinned with `#guard_msgs`), and *known gap* (out of reach
+today, with the emitted-SMT diagnosis).
+
+**What the case studies confirmed works.** Mutually-recursive and single-constructor
+datatypes; HO goals over a *ground* function space; polymorphic `List` lemmas and
+leading-∀ matching; `Function.comp_def` composition (under the default `reconstruct`
+policy, so kernel-checked); and — for Loom — the full arithmetic spine of the Velvet
+examples (GCD termination via `Nat.mod_lt`, MaxElem/IsSorted quantified array
+invariants, the nonlinear sqrt/cbrt/binary-search postconditions, insertion-sort's
+array-update invariant expressed as the pointwise equation a WP generator emits) and
+Cashmere's balance invariants. Most Loom VCs are core-Lean arithmetic + quantified
+`Array`/`List` goals with no Mathlib in the *goal*, so a `loom_solver` → `crush` swap
+(a one-`macro_rules` change, the seam Cashmere already uses for `aesop`) would target
+them directly.
+
+**Three `crush` improvements the case studies drove**, each surfaced by probing a
+ported goal, diagnosed from the emitted SMT, and fixed with a regression:
+
+1. *Mutually-recursive datatypes* (`Translate.lean`, `declareDatatype`). Each member
+   of a mutual block used to be emitted as its own `declare-datatypes`, so `tree`'s
+   selector referenced `treelist` before it was declared and z3 rejected the script
+   (`unknown sort 'treelist'`). Now the whole `iv.all` block is emitted as one grouped
+   `declare-datatypes` with every sort in scope, and all `wf_T` predicates are declared
+   before any axiom references a sibling's. The `declDatatypes` command already took an
+   array; the non-mutual path (a singleton `all`) is unchanged.
+
+2. *Polymorphic hints connect to the goal* (`Collect.lean`). Elaborating a bare library
+   lemma (`crush [List.append_assoc]`) auto-binds its implicit `{α}` into a
+   metavariable, so the fact arrived as `∀ (as … : List ?m), …` — the leading *type*
+   binder gone, reading as monomorphic over an abstract sort disconnected from the
+   goal, so monomorphization never fired and the lemma could not discharge anything.
+   Term hints are now re-abstracted with `abstractMVars (levels := false)`, restoring
+   the `∀ α`-binder monomorphization specializes at the query's types. `levels :=
+   false` is load-bearing: a rigid universe parameter would not unify `Type u` with the
+   candidate's `Type 0`. This is what lets `crush [List.append_assoc]` prove list-append
+   associativity at all — previously only a hand-written monomorphic `append` worked.
+
+3. *Monomorphization candidates must be data sorts* (`Monomorphize.lean`,
+   `isGroundType`). Exposed by fix 2: a universe-polymorphic lemma binds `{γ : Sort
+   u}`, and `Sort u` unifies with `Sort 0`, so a predicate application `P x : Prop` in
+   the goal was collected as a candidate and `Function.comp_def`'s type binders
+   instantiated at it — emitting a proposition where a sort was expected (`(... False)`
+   as a sort) and cross-producting into ≈500 junk instances across its three binders.
+   Candidates are now restricted to genuine data types (in `Type _`, not `Prop`/`Sort`,
+   not arrows). Purely a completeness restriction — it only shrinks the instance set,
+   so it cannot cause a false `unsat`.
+
+**Known gaps the case studies map** (roadmap, not regressions): the abstract-function-
+space Church numerals (a partial application of the flattened `app`, needing the
+combinator or `native` HO mode); the Paxos consensus goal (translates cleanly but has
+≈60 ∀ / 14 ∃ in deep alternation — z3 spins past 60 s, cvc5 returns `unknown`; lean-auto
+closes it via SMT `trigger` annotations `crush` does not yet emit); `Option.orElse`
+without its unfold hint (an uninterpreted function with no defining axiom); and Loom's
+Mathlib-bound VCs (`Array.toMultiset` permutation equality, `Finset.range`/`∑` big
+operators), which have no first-order SMT theory and are where a `crush` swap would
+fall back to `grind`/`aesop`.

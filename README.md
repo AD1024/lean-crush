@@ -35,11 +35,18 @@ HO on cvc5) all translate and are tested.
 Also done: the hint grammar (`crush [lemmas] u[…] d[…]`), the `@[crush_unfold]`
 auto-unfold attributes, and monomorphization — both of datatypes (a fully-applied
 `Option Int` becomes a real SMT datatype) and of polymorphic *lemmas*, which are
-specialized to the types a query mentions. The latter is what lets the TIP list
-theorems, `rev (rev x) = x` included, be proved over an arbitrary element type. In
-progress: Alethe proof replay and the combinator HO mode. See
-**[`Doc/PLAN.md`](Doc/PLAN.md)** §9 for the milestone status, and [`Test/`](Test/)
-for runnable examples across every supported theory.
+specialized to the types a query mentions. The latter is what lets a bare library
+lemma such as `List.append_assoc`, and the TIP list theorems (`rev (rev x) = x`
+included), be proved over an arbitrary element type. In progress: Alethe proof replay
+and the combinator HO mode.
+
+**Case studies** ([`Test/CaseStudies/`](Test/CaseStudies/)) port lean-auto's harder
+test corpus and representative [Loom](https://github.com/AD1024/loom) verification
+conditions to `crush`, mapping coverage into handled / sound-refusal / known-gap and
+driving three translation fixes (mutually-recursive datatypes, polymorphic-hint
+connection, and the monomorphization candidate filter). See
+**[`Doc/PLAN.md`](Doc/PLAN.md)** §11b for the coverage map, §9 for the milestone
+status, and [`Test/`](Test/) for runnable examples across every supported theory.
 
 ## Requirements
 

@@ -62,18 +62,49 @@ the nested position is a documented gap rather than a silent one.
 
 namespace Crush
 
-/-- A candidate type to instantiate at: a subterm whose own type is a `Sort`.
+/-- A candidate type to instantiate a lemma's leading type binder at: a subterm
+whose own type is a `Sort`, and which itself becomes a genuine first-order SMT
+*data sort*.
 
 "Ground" here means free of metavariables and loose bound variables; a local
 *free* variable is allowed. An `α : Type` in the local context is a perfectly good
 instantiation target — the datatype encoding already gives `List α` a real SMT
 datatype over an opaque element sort — so admitting fvars is what lets a
-*polymorphic* lemma be proved, not just a ground one. -/
+*polymorphic* lemma be proved, not just a ground one.
+
+Two kinds of "type" are *excluded* as candidates, because instantiating a `{α :
+Type}` binder at them is degenerate and yields malformed SMT:
+
+* **`Prop`/`Sort` itself.** A proposition maps to `Bool`, not a data sort, so
+  instantiating a data lemma's type parameter at `Prop` (e.g. `Function.comp_def`'s
+  `{γ}` at the `Prop` a predicate returns) emits a proposition where a sort is
+  expected — the solver rejects `(... False)` as a sort. Semantically `Prop` is not
+  a data type; it is never a useful instantiation of a data lemma.
+* **Function types.** A type parameter instantiated at an arrow is the higher-order
+  case the flattened `app` encoding cannot render (a `Type`-binder-over-arrows lemma
+  is exactly the partial-application shape SMT forbids), and it is the main driver of
+  the instance cross-product blow-up. Arrows are handled by defunctionalization at
+  *use*, not by monomorphizing a type binder at them.
+
+Both exclusions only *shrink* the instance set, so they cost completeness, never
+soundness (see the module's soundness note). -/
 private def isGroundType (e : Expr) : MetaM Bool := do
   if e.hasExprMVar || e.hasLooseBVars then return false
-  -- `isType` would reject `Prop`-valued and higher-universe binders we still want.
+  let ew ← whnf e
+  -- Not `Prop`/`Type`/`Sort` itself, and not a function type.
+  if ew.isSort || ew.isArrow then return false
+  -- `e` must be a genuine *data* type: something living in `Type _`, i.e. whose own
+  -- type is `Sort (n+1)`. A proposition or proof (`P x : Prop`, i.e. `Sort 0`) must
+  -- be rejected. This matters because a universe-polymorphic lemma binds `{γ : Sort
+  -- u}`, and `Sort u` unifies with *any* level including `Sort 0` — so without this a
+  -- predicate application `P x : Prop` in the goal would be collected and a data lemma
+  -- (e.g. `Function.comp_def`'s `{γ}`) instantiated at it, emitting a proposition where
+  -- a sort is expected (the solver rejects `(... False)` as a sort) and cross-
+  -- producting into a blow-up across the lemma's several type binders.
   let ty ← whnf (← inferType e)
-  return ty.isSort
+  match ty with
+  | .sort l => return !l.isZero
+  | _ => return false
 
 /-- Collect instantiation candidates from `e`: every ground subterm that is a type.
 
