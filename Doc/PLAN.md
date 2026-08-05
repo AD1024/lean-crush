@@ -657,6 +657,21 @@ instead of depending on a Lean tactic to re-find the argument.
     type to a theory sort (e.g. a map to SMT `(Array K V)`); `Test/ArrayTheory.lean`.
 5. Premise selection on Lean core `LibrarySuggestions`.
 6. Portfolio backend, per-call config syntax, richer model printing, docs.
+7. **Minimized counterexample models** (`crush.model.minimize`, backlog — wanted by
+    downstream users who consume the `sat` model, e.g. PLean). On `sat`, iteratively
+    shrink the model to minimal cardinality before printing, so a counterexample is
+    the *smallest* witness rather than whatever the solver happened to pick. The
+    algorithm (as in Veil's `z3model.py`): after the goal is known `sat`, for each
+    uninterpreted sort and relation, assert a cardinality constraint `|S| ≤ n` from
+    `n = 1` upward under a push/pop frame, incrementing until `sat` returns, then keep
+    that constraint and move to the next sort; `unknown` mid-search aborts to the
+    un-minimized model. This needs (a) per-sort cardinality-constraint synthesis
+    (`∃ x₁…xₙ, ∀ y, y = x₁ ∨ … ∨ y = xₙ`), (b) an incremental push/pop driver in
+    `Crush/Solver/Process.lean` (we already pass `--incremental` to cvc5), and (c)
+    feeding the minimized `get-model` back through the existing `parseModel` /
+    `formatCounterexample` path. Orthogonal to reconstruction; a printing/diagnostics
+    feature, not a soundness one. See also the `unknown`-model note in §11 (cvc5
+    withholds a model it computed): both are counterexample-surfacing improvements.
 
 **M6 — Verified soundness. not started (out of scope for now).** An earlier
 `Crush/Proofs/` tree stated per-pass equivalence/equisatisfiability obligations, but
