@@ -830,8 +830,26 @@ Should a verified ledger be revived, the prerequisites — in dependency order �
 With (1)–(4) the end-to-end argument mirrors lean-auto's `LamThmValid.getFalse`. This
 is essentially rebuilding the verified-checker infrastructure §1 deliberately dropped,
 so the higher-leverage investment is instead **Alethe proof replay** (M4), which makes
-the *default* discharge path kernel-checked end-to-end. Both are out of scope for the
-current feature-completion work.
+the *default* discharge path kernel-checked end-to-end.
+
+**Why there is no cheap per-call closure certification** (the analogue of
+`crush.mono.certify` for defunctionalization). Monomorphization can be certified per
+call because each instance is a genuine pair of *Lean* objects — a proof term and a
+proposition — so `isDefEq (inferType proof) prop` is a real kernel-checkable
+property. A closure axiom `∀ ȳ x̄, app(clo ȳ, x̄) = ⟦body⟧` has no such pair: `app`,
+`clo`, and `⟦body⟧` are SMT artifacts with no Lean counterpart. Its only failure mode
+is `⟦body⟧` mistranslating the λ body — i.e. translation faithfulness — which is
+exactly prerequisite (1)/(4) above, not a `rfl`. A "closure certify" that emitted a
+Lean lemma `∀ x, L x = body` and closed it by `rfl` would check only Lean's own
+β-reduction, comparing the translator to itself; it was considered and rejected as
+vacuous. Note this is not a gap on the default path: under `reconstruct`, closure
+axioms are never consumed by the Lean replay (`coreHypotheses` reads only real
+`Fact` proofs; `grind` does its own β-reduction), so defunctionalization is already
+outside the trusted base there. The reliance exists only under `trust` /
+`reconstructOrTrust`, and closing *that* needs the full interpretation layer.
+
+Both the ledger and closure certification are out of scope for the current
+feature-completion work.
 
 ## 10c. Totality and termination
 
