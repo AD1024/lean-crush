@@ -26,13 +26,11 @@ negation is provable in Lean.
 
 open Crush
 
--- These higher-order goals close under the **default `reconstruct` policy** — a
--- kernel-checked Lean proof, not a trusted solver verdict. The reconstruction
--- finishers include `funext`-prefixed variants, so a function-equality `unsat`
--- (`ho_funext`, and every β-through-a-closure result here) is replayed via
--- `funext`+`simp_all` rather than the `crushSorry` axiom. `ho_reconstructed_no_axiom`
--- at the end of the positive cases pins this with `#print axioms`. This file used to
--- run under `crush.trust "trust"`; the finishers now make that unnecessary.
+-- These higher-order goals close under the **default `reconstruct` policy** —
+-- kernel-checked, not trusted. The `funext`-prefixed reconstruction finishers replay a
+-- function-equality `unsat` via `funext`+`simp_all` rather than the `crushSorry` axiom
+-- (`#print axioms ho_funext` below pins this). The file used to need `crush.trust
+-- "trust"`; the finishers made that unnecessary.
 set_option crush.trust "reconstruct"
 set_option crush.timeout 10
 
@@ -101,11 +99,9 @@ theorem ho_partial (f : Int → Int → Int) (g : (Int → Int) → Int)
 
 /-! ## The higher-order proofs are kernel-checked, not trusted
 
-`ho_funext` is a function equality — the shape that needs `funext` to reconstruct.
-Its axiom set is exactly the standard-library trio (`propext`, `Classical.choice`,
-`Quot.sound`) with **no `crushSorry`**, so under the default policy the solver and the
-defunctionalization encoding are outside the trusted base: the kernel re-checked the
-whole proof. -/
+`ho_funext` is the function-equality shape that needs `funext` to reconstruct. Its
+axiom set is the standard-library trio, with **no `crushSorry`** — so the solver and
+the encoding are outside the trusted base; the kernel re-checked the proof. -/
 
 /-- info: 'ho_funext' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in

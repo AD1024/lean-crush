@@ -126,7 +126,7 @@ example {α : Type} (x y : α) : List.myGet? [x, y] 1 = .some y := by
 
 example {α : Type} (x : α) : List.head? [x] = .some x := by crush u[List.head?]
 
-/-! ## `Empty` — where we are deliberately SOUND and lean-auto is not
+/-! ## `Empty`
 
 `∀ x y : Empty, x = y` is *true* in Lean (vacuously — `Empty` has no values), and
 lean-auto **proves** it. But its encoding maps `Empty` to a non-empty SMT sort, which

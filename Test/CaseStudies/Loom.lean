@@ -11,33 +11,21 @@ then dispatches each resulting VC to a **swappable** `loom_solver` backend — a
 SMT-shaped VCs through lean-auto's translation library (`loom_smt`) and trusts the
 solver's verdict.
 
-This case study asks: *if that seam were pointed at `crush`, which VCs would it
-discharge?* Loom cannot literally `require` lean-crush — Loom is pinned to Lean
-v4.24.0 + Mathlib and lean-crush to v4.32.2, and a Lean `require` forces one shared
-toolchain — so the study instead **ports representative VC goals** to `crush` and
-maps the coverage, exactly as `LeanAuto.lean` does for the lean-auto corpus.
+If that seam were pointed at `crush`, which VCs would it discharge? Loom cannot
+literally `require` lean-crush (incompatible toolchains: Loom on v4.24.0 + Mathlib,
+lean-crush on v4.32.2), so this **ports representative VC goals** and maps coverage, as
+`LeanAuto.lean` does. The goals are reconstructed from Velvet (GCD, MaxElem, IsSorted,
+SumOfDigits, sqrt/cbrt/binary search, insertion sort) and Cashmere; most are core-Lean
+arithmetic and quantified array invariants (no Mathlib in the *goal*).
 
-The VCs are reconstructed from Loom's Velvet examples (GCD, MaxElem, IsSorted,
-SumOfDigits, the sqrt/cbrt/binary-search methods in `Examples_Total.lean`, insertion
-sort) and Cashmere (`withdraw`/`withdrawSession`). Most are core-Lean arithmetic and
-quantified array invariants — no Mathlib in the *goal* — so they are stateable and
-solvable here. The two genuinely Mathlib-bound VC classes (`Array.toMultiset`
-permutation equality and `Finset.range`/`∑` big-operator sums) keep the *type* with
-`grind`/`aesop`, but the arithmetic residual they reduce to comes to `crush`, shown
-at the end (the hammer-in-the-loop split).
+Arrays are rendered two ways, both being what the solver sees after Loom's
+`loomAbstractionSimp`: a read-only array as a total function `Nat → Int` (`arr[i]!` →
+`select`), and an update as the pointwise equation a WP generator emits (`∀ k, arr' k =
+if k = i then v else arr k`). `Test/ArrayTheory.lean` shows the alternative of mapping
+a user array type onto SMT's native `(Array K V)`.
 
-Arrays: Loom VCs index with `arr[i]!` and mutate with `arr[i] := v`. In SMT terms
-that is `select`/`store` over the theory of arrays. Two faithful renderings are used
-here — an array as a total function `Nat → Int` (a `select`-only view, ideal for
-read-only invariants), and array *update* as the pointwise hypothesis a WP generator
-actually emits (`∀ k, arr' k = if k = i then v else arr k`). Both are what the solver
-sees after Loom's `loomAbstractionSimp` normalization; `Test/ArrayTheory.lean` shows
-the alternative of mapping a user array type onto SMT's native `(Array K V)` via the
-`@[crush_translate]` extension API.
-
-Discharged under the default `reconstruct` policy unless noted, so each closed VC is
-a kernel-checked Lean proof — stronger than Loom's default, which trusts the solver.
--/
+Discharged under the default `reconstruct` policy unless noted — each closed VC is a
+kernel-checked proof, stronger than Loom's default, which trusts the solver. -/
 
 open Crush
 
@@ -45,13 +33,10 @@ set_option crush.timeout 15
 
 /-! ## GCD (`GCD.lean`): `require a > 0`, `ensures res > 0`, decreasing `b`
 
-The termination VC `a % b < b` needs `Nat.mod_lt`, which Velvet supplies via
-`attribute [solverHint] Nat.mod_lt`; the `crush` equivalent is naming it in the hint
-list. It is load-bearing here in a way worth calling out: the solver *proves* `a % b
-< b` from its own axiomatization of `mod`, but under the default `reconstruct` policy
-no finisher (`omega`/`grind`) can replay `a % b < b` for a *symbolic* divisor `b`
-without that lemma — so the hint is what makes the closed goal a checked proof rather
-than a trusted verdict. The postcondition is linear. -/
+The termination VC `a % b < b` needs `Nat.mod_lt` (Velvet's `attribute [solverHint]`;
+here, a hint). It is load-bearing under `reconstruct`: the solver proves it from its
+own `mod` axioms, but no finisher (`omega`/`grind`) replays `a % b < b` for a *symbolic*
+`b` without the lemma — so the hint is what makes it a checked proof. -/
 
 example (b : Nat) (hb : 0 < b) (a : Nat) : a % b < b := by crush [Nat.mod_lt a hb, *]
 
@@ -96,10 +81,9 @@ example (arr : Nat → Int) (sz : Nat)
 
 /-! ## Examples_Total (`Examples_Total.lean`): sqrt / cbrt / binary search
 
-The sqrt and cbrt postconditions are *nonlinear* (`res * res ≤ x`, `res^3 ≤ x`).
-Velvet notes cbrt "fails SMT and needs manual proof"; `crush` discharges the
-postcondition-preservation shapes (the multiply is bounded once the invariants pin
-`res`), which is the part a solver can do. -/
+Nonlinear postconditions (`res * res ≤ x`, `res^3 ≤ x`). Velvet notes cbrt needs a
+manual proof; `crush` discharges the postcondition-preservation shapes, the part a
+solver can do. -/
 
 -- sqrt postcondition, given the invariant that established it
 example (x res : Nat) (h1 : res * res ≤ x) : res * res ≤ x := by crush [*]
@@ -113,10 +97,8 @@ example (l r x : Nat) (hl : l * l ≤ x) (hr : x < r * r) (h : l < r) :
 
 /-! ## Insertion sort (`Examples.lean`): inner-loop invariant under an array update
 
-The inner loop shifts elements; the WP generator emits the update as a pointwise
-equation `∀ k, arr' k = if k = i then v else arr k` (this is what survives Loom's
-`loomAbstractionSimp`, before it becomes a raw λ). `crush` propagates the ≤-invariant
-across the update. -/
+The update arrives as the pointwise equation `∀ k, arr' k = if k = i then v else arr
+k`; `crush` propagates the ≤-invariant across it. -/
 
 example (arr arr' : Nat → Int) (i : Nat) (key : Int)
     (hupd : ∀ k, arr' k = (if k = i then key else arr k))
@@ -125,10 +107,8 @@ example (arr arr' : Nat → Int) (i : Nat) (key : Int)
 
 /-! ## Cashmere (`Cashmere.lean`): balance-tracking invariants over `Int`
 
-`withdraw`: `ensures balance + amount = balanceOld`. `withdrawSession`: the running
-invariant `balance + amounts.sum = balancePrev + tmp.sum`, which at exit
-(`amounts.sum = tmp.sum`) gives `balance = balancePrev`. Cashmere discharges these
-with `aesop`; the arithmetic core is squarely `crush`'s. -/
+`withdraw` (`balance + amount = balanceOld`) and `withdrawSession`'s running invariant.
+Cashmere discharges these with `aesop`; the arithmetic core is `crush`'s. -/
 
 example (balance amount balanceOld : Int) (h : balance + amount = balanceOld) :
     balance = balanceOld - amount := by crush [*]
@@ -144,43 +124,24 @@ example (balance s : Int) (h1 : balance ≥ s) (h2 : balance < s) : False := by 
 
 /-! ## Mathlib-bound VCs: the type is a gap, the arithmetic residual is handled
 
-Two VC classes in Velvet depend on Mathlib types in the *goal*. `crush` has no
-first-order SMT theory for either type itself:
-
-* **Multiset permutation** — insertion sort's correctness includes `arr.toMultiset =
-  arrOld.toMultiset`. `Multiset` is a quotient of `List` by permutation, so the
-  quotient equality has no SMT counterpart and `crush` keeps the type opaque.
-
-* **`Finset.range` + `∑`** — the sparse mat-vec example sums `∑ i ∈ Finset.range b,
-  spv[i] * v[spv.ind[i]]`, keyed on `Finset.sum_range_succ`. A big operator is a
-  higher-order fold with no SMT counterpart.
-
-But this is not where the proof stops — it is where the *split* happens, and the
-split is exactly the hammer-in-the-loop pattern `Test/TIP.lean` uses. Loom's own
-verifiers apply the Mathlib structural lemma (`Finset.sum_range_succ`, the swap-
-preserves-multiset lemma) in Lean via `grind`/`aesop`/`simp`, which reduces the VC to
-an *arithmetic residual* — and that residual is squarely `crush`'s. The two examples
-below are those residuals, stated in core Lean (no Mathlib dependency), with the
+Two Velvet VC classes depend on a Mathlib type in the *goal* that has no first-order
+SMT theory: `Array.toMultiset` permutation equality (`Multiset` is a `List` quotient)
+and `Finset.range`/`∑` (a big operator is a higher-order fold). `crush` keeps such a
+type opaque — but that is the *split*, not a dead end. As in `Test/TIP.lean`, Loom's
+verifier applies the structural lemma (`Finset.sum_range_succ`, the swap-preserves-
+multiset lemma) in Lean via `grind`/`aesop`, reducing the VC to an arithmetic residual
+that is `crush`'s. The two examples are those residuals in core Lean, with the
 structural equation supplied as the hypothesis the outer tactic would have rewritten
-with. So the boundary is: the `Multiset`/`Finset` *type* stays with `grind`/`aesop`;
-the arithmetic it reduces to comes to `crush`. -/
+with. -/
 
--- `Finset.sum` residual: the `sum_range_succ` unfolding step of the SpMSpV sum, then
--- the arithmetic. `sumUpTo (n+1) = sumUpTo n + S n` is what `Finset.sum_range_succ`
--- supplies; `crush` closes the resulting equation.
+-- `Finset.sum` residual: `sumUpTo (n+1) = sumUpTo n + S n` is the `sum_range_succ` step.
 example (sumUpTo : Nat → Int) (S : Nat → Int) (n : Nat)
     (sum_succ : ∀ m, sumUpTo (m + 1) = sumUpTo m + S m)
     (out : Int) (hout : out = sumUpTo n) :
     out + S n = sumUpTo (n + 1) := by crush [*]
 
--- `Multiset` permutation residual: swapping two adjacent elements preserves the sum
--- (the invariant behind `toMultiset` equality for a sort that only swaps). The cons-
--- sum equation stands in for what `simp [List.sum_cons]` / the multiset lemma gives.
+-- `Multiset` permutation residual: an adjacent swap preserves the sum; `hsum` stands in
+-- for `simp [List.sum_cons]`.
 example (l : List Int) (a b : Int)
     (hsum : ∀ (x : Int) (xs : List Int), (x :: xs).sum = x + xs.sum) :
     (a :: b :: l).sum = (b :: a :: l).sum := by crush [hsum]
-
-/-! The whole-VC versions (with the Mathlib types live) mark where a `loom_solver` →
-`crush` swap hands off to `grind`/`aesop`, which is the honest division of labour in an
-SMT hammer: the solver does not reason about quotient types or big-operator folds; it
-finishes the arithmetic they unfold to. See `Doc/PLAN.md` §10. -/

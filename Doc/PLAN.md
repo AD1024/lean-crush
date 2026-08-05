@@ -661,8 +661,10 @@ workload that actually blows up to tune against.
 **M4 — Reconstruction. partial.** Core-directed replay is done; Alethe replay is in
 progress (the parser is built). `Crush/Solver/Reconstruct.lean` uses the unsat core to
 select the relevant hypotheses, rebuilds the goal as `h₁ → … → hₙ → goal` over only
-those, and hands it to `grind`/`omega`/`simp_all`. On success the solver leaves the
-trusted computing base — it was only a search heuristic. This is the default policy
+those, and hands it to `grind`/`omega`/`simp_all` — plus `funext`-prefixed variants
+for a function-equality verdict, which is what makes higher-order `unsat`s (Church
+numerals, funext) kernel-checked rather than trusted (§6). On success the solver leaves
+the trusted computing base — it was only a search heuristic. This is the default policy
 (`reconstruct`), which errors rather than falling back to the axiom when the finishers
 cannot replay.
 
@@ -954,15 +956,15 @@ a passing test; the build must be clean and produce **no `sorry`**.
 | `Monomorphize.lean` | parametric datatypes: distinct instantiations, nesting, `Nat`-through-parameter guard, selectors/η |
 | `LemmaMono.lean` | lemma-instantiation: polymorphic facts specialized at the query's types, saturation, the polymorphic TIP list theorems, `crush.mono.fuel` gating, and that false goals are still rejected |
 | `MonoStress.lean` | recursive parametric `Tree`, two-parameter `Map`, nested `FSet`, and all of these combined with higher-order functions |
-| `HigherOrder.lean` | λ-arguments, captures, η-expansion, extensionality, partial application |
+| `HigherOrder.lean` | λ-arguments, captures, η-expansion, extensionality, partial application; all reconstruct under the default policy (kernel-checked, `#print axioms` pins no `crushSorry`), thanks to the `funext` finishers |
 | `Regression.lean` | an independent corpus migrated from another Lean SMT bridge, plus cases derived from bugs reported against it |
 | `Reconstruct.lean` | `#print axioms` assertions — reconstructed theorems must not name `crushSorry` — and the replay boundary |
 | `TIP.lean` | inductive theorems from the TIP `prod` benchmarks over a *polymorphic* element type, proved hammer-in-the-loop (manual `induction`, `crush` per case, `@[crush_unfold]` definitions) |
 | `Cvc5.lean` | the **cvc5 backend** and **`native` HO mode** (`HO_ALL`, `(-> σ τ)` sorts, `lambda`), which the default `z3`/`defunctionalize` suite never exercises; plus the z3-vs-cvc5 `sat`/`unknown` difference on false HO goals |
 | `Alethe.lean` | the Alethe proof **parser** (M4 phase 1) against verbatim cvc5 output: command/clause/`:named` structure, premise reading, the empty-clause conclusion, and that an `(error …)` reply parses to `none` |
 | `LeanAutoPort.lean` | goals ported from lean-auto's `SmtTranslation/` suite (BoolNatInt, BitVec, String, inductive/enum, recursive-with-unfold): demonstrates the same corpus translates and solves, and pins the `Empty`-type cases where we are deliberately *sound* and lean-auto documents itself unsound |
-| `CaseStudies/LeanAuto.lean` | the *harder* lean-auto corpus (§11b): mutually-recursive and single-ctor datatypes, HO Church numerals, polymorphic lemmas, leading-∀ matching, `Function.comp_def`, and the Paxos consensus goal — each filed as handled / sound-refusal / known-gap |
-| `CaseStudies/Loom.lean` | representative Loom verification conditions (§11b): GCD/MaxElem/IsSorted/SumOfDigits/sqrt/cbrt/binary-search arithmetic, quantified array invariants, an array-update VC, and Cashmere balance invariants — with the Mathlib-bound `Multiset`/`Finset` VCs recorded as gaps |
+| `CaseStudies/LeanAuto.lean` | the *harder* lean-auto corpus (§11b): mutually-recursive and single-ctor datatypes, HO Church numerals (kernel-reconstructed), polymorphic lemmas, leading-∀ matching, `Function.comp_def`, and the Paxos consensus goal — each filed as handled / sound-refusal / known-gap; drove four translation fixes and closed three of four gaps |
+| `CaseStudies/Loom.lean` | representative Loom verification conditions (§11b): GCD/MaxElem/IsSorted/SumOfDigits/sqrt/cbrt/binary-search arithmetic, quantified array invariants, an array-update VC, and Cashmere balance invariants; the Mathlib-bound `Multiset`/`Finset` VCs reduce (hammer-in-the-loop) to arithmetic residuals `crush` closes |
 
 **Negative tests use `#guard_msgs`, not `sorry`.** A goal that is *false* must be
 rejected, and the guard pins the rejection message, so a regression that let `crush`
