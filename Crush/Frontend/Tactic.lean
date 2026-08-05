@@ -1,6 +1,7 @@
 import Lean
 import Crush.Frontend.Config
 import Crush.Reify.Collect
+import Crush.Translation.Monomorphize
 import Crush.Translation.Translate
 import Crush.Solver.Process
 import Crush.Solver.Reconstruct
@@ -47,6 +48,7 @@ axiom crushSorry (P : Prop) : P
 initialize registerTraceClass `crush
 initialize registerTraceClass `crush.script
 initialize registerTraceClass `crush.result
+initialize registerTraceClass `crush.mono
 
 open SMT
 
@@ -117,6 +119,21 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
     logWarning "crush: `crush.ho.mode combinators` is not implemented yet \
                 (`defunctionalize` and `native` are); using `defunctionalize`."
   let facts ← collectFacts goal hints cfg.autoUnfold
+  -- Specialize polymorphic facts at the types the query mentions. Without this a
+  -- polymorphic lemma is emitted at an abstract instantiation, giving SMT symbols
+  -- disjoint from the goal's, so it cannot discharge anything — even for a ground
+  -- goal (see `Crush.monomorphizeFacts`).
+  let mono ← monomorphizeFacts cfg facts
+  let facts := mono.facts
+  trace[crush.mono] "generated {mono.generated} instance(s); \
+                     dropped: {mono.dropped}; exhausted: {mono.exhausted}"
+  -- Truncation is never silent: a hit bound is a completeness loss the user can act
+  -- on by raising `crush.mono.fuel`/`rounds`.
+  if mono.exhausted then
+    logWarning m!"crush: monomorphization hit its bound after {mono.generated} \
+                  instance(s) (`crush.mono.fuel` = {cfg.monoFuel}, \
+                  `crush.mono.rounds` = {cfg.monoRounds}); the fact set may be \
+                  incomplete. Raise the bound if the goal is not provable."
   let (script, st) ← buildScript cfg facts
   if cfg.traceScript then
     logInfo m!"crush SMT script:{indentD (scriptToString script)}"

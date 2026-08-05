@@ -6,9 +6,10 @@ metaprogrammed, user-extensible translation layer.**
 Status: milestones 0–2 complete; 3, 4, and 5 partial (see §9). The `crush` tactic
 works end-to-end and, by default, produces kernel-checked proofs rather than
 trusting the solver. The extension layer covers term handlers, sort handlers, and
-`@[crush_unfold]` auto-unfolding; the hint grammar and datatype monomorphization are
-in. This document is the architecture and roadmap; §9 is the current status and
-remaining work.
+`@[crush_unfold]` auto-unfolding; the hint grammar is in, as is monomorphization —
+both of datatypes and of polymorphic *lemmas*, which is what lets the TIP list
+theorems be proved over an arbitrary element type. This document is the architecture
+and roadmap; §9 is the current status and remaining work.
 
 ---
 
@@ -208,7 +209,7 @@ Module map (⟢ = built & tested, ▷ = designed, □ = todo):
 | `Crush/Reify/Collect.lean` | hypothesis & goal collection | ⟢ |
 | `Crush/Reify/Reify.lean` | `Expr → CTerm`, atom allocation, `DTr` provenance | □ |
 | `Crush/Translation/Preprocess.lean` | reduction, skolem prep | □ |
-| `Crush/Translation/Monomorphize.lean` | poly *lemma* → HOL saturation (datatype mono is in `Translate.lean`, done) | □ |
+| `Crush/Translation/Monomorphize.lean` | poly *lemma* → ground instances, saturating (datatype mono is in `Translate.lean`) | ⟢ |
 | `Crush/Translation/HOEncoding.lean` | HO encoding helpers (defunc ⟢, native ⟢, combinators □) | ⟢ |
 | `Crush/Translation/Translate.lean` | driver: `Expr → SMT.Term` via handlers | ⟢ |
 | `Crush/Solver/Reconstruct.lean` | unsat-core → Lean proof replay | ⟢ core-directed; □ Alethe |
@@ -353,46 +354,80 @@ parameters, so `Option Nat` is not freely generated over negative `Int`s. Type-c
 inductives and function/proof-typed fields stay opaque. Tested in
 `Test/Monomorphize.lean`.
 
-**Lemma-instantiation saturation — *design, not built*.** The rest of this section
-is the plan for the harder loop: instantiating a *polymorphic hypothesis*
-(`∀ α, ∀ x : α, P α x`) at the ground types a query mentions, à la lean-auto's
-`Monomorphization.lean`. This is what a goal needing a polymorphic lemma specialized
-to `Int` requires, and it is not yet implemented (`crush.mono.fuel`/`rounds` are
-registered but inert). A close reading of lean-auto's pass surfaced four concrete
-traps to design around from the start rather than patch later:
+**Lemma-instantiation saturation — *built* (`Crush/Translation/Monomorphize.lean`).**
+A *polymorphic fact* (`∀ α, ∀ x : α, P α x`) is specialized at the types the query
+mentions, so it talks about the same SMT symbols as the goal.
+
+Why this is needed is not the obvious "the goal is polymorphic" story, and the real
+reason is worth recording. Each SMT symbol is keyed on a constant *together with its
+type arguments* — necessarily, since `@f Int` and `@f Bool` have different SMT sorts.
+So a polymorphic fact emitted at an abstract instantiation produced symbols
+**disjoint from the goal's**, and could not discharge it **even when the goal was
+fully ground**:
+
+```smtlib
+(assert (forall ((q_1 s_0)) (= (app2_6 List_2_nil q_5) q_5)))  ; the lemma, abstract
+(assert (not (= (app2_19 List_20_nil y_24) y_24)))             ; the goal, at Int
+```
+
+Two unrelated symbols over two unrelated datatypes. That is why `Test/TIP.lean`'s
+list theorems originally had to be stated over a hand-written monomorphic
+`append : List Int → List Int → List Int`; they now go through over a polymorphic
+`List α`, including `prop_10` (`rev (rev x) = x`), with kernel-checked
+reconstruction. `monomorphizeFacts` splits the fact set, collects ground type
+candidates (fvars included — an `α : Type` in the local context is a fine
+instantiation target, since `List α` is already a real datatype over an opaque
+element sort), instantiates leading type binders, discharges any instance-implicit
+binders that become determined, and saturates until fixpoint or a bound.
+
+**Soundness direction.** Instantiation only ever *weakens* the asserted set: `P Int`
+follows from `∀ α, P α`. Asserting weaker facts can make `unsat` harder to reach,
+never easier, so the pass cannot cause a false `unsat` — it can only cost
+completeness. Exhausting the budget is therefore a completeness matter, reported as a
+warning, not a soundness one. Tested in `Test/LemmaMono.lean`, including that false
+goals are still rejected.
+
+A close reading of lean-auto's pass surfaced four concrete traps, which shaped the
+implementation:
 
 1. **Instantiation reach must not be structurally capped at the first
    hypothesis.** lean-auto's `LemmaInst.ofLemmaHOL` only makes the *leading*
    non-`Prop` binder prefix instantiable, so in `∀ α, P α → ∀ β, Q β` the `β` is
-   forever un-instantiable. We track instantiable positions through the whole
-   telescope, not just the prefix.
+   forever un-instantiable. **Not yet addressed:** our pass also instantiates only
+   the leading telescope, so it shares this boundary. Every equation lemma and
+   essentially every real polymorphic lemma leads with its type binders, so this
+   covers the payload case; reaching a `β` under a `Prop` binder needs going under
+   that binder and re-abstracting. Documented in the module rather than silent.
 2. **Fuel must be a meaningful quantity with a loud failure.** lean-auto's
    `saturationThreshold = 1024` counts a *bag of unrelated events* (queue pops +
-   group visits + match calls), corresponds to no clean quantity, has no depth or
-   term-size bound, and **silently returns** a truncated set on exhaustion (its
-   own TODO: "Report errors when monomorphization fails"). We separate
-   `crush.mono.fuel` (a real instance-count budget) from `crush.mono.rounds` (a
-   saturation-round bound), add a term-depth guard, and on exhaustion emit a
-   diagnostic naming what was dropped — never a silent truncation.
+   group visits + match calls), corresponds to no clean quantity, and **silently
+   returns** a truncated set on exhaustion (its own TODO: "Report errors when
+   monomorphization fails"). *Done:* `crush.mono.fuel` is a real instance-count
+   budget and `crush.mono.rounds` a saturation-round bound, tracked separately;
+   hitting either surfaces a **warning** naming the counts, and `MonoReport.dropped`
+   names every polymorphic fact left un-instantiated. Never a silent truncation.
+   Either option at `0` disables the pass.
 3. **Matching needs an index; dedup needs a normal form.** lean-auto has *no*
    term index and *no* congruence closure — matching is a full `Expr` walk with
    `Meta.isDefEq` at every candidate node, and dedup is a linear `isDefEq` scan in
-   four separate places, i.e. O(n²) `isDefEq` calls throughout. We index candidate
-   heads with a `DiscrTree` and canonicalize instances by a hashed fingerprint
-   before falling back to `isDefEq`, so the common case is not quadratic.
+   four separate places, i.e. O(n²) `isDefEq` calls throughout. **Partially
+   addressed:** instance dedup is by `Expr` hashing through a `HashSet` rather than
+   a linear `isDefEq` scan, so it is not quadratic; candidate *matching* is still a
+   linear scan per binder (bounded by the fuel budget). A `DiscrTree` index is the
+   remaining refinement, and matters once fact sets get large.
 4. **Definitional-equality transparency must be consistent across layers.**
    lean-auto mixes `default` (for `ConstInst`/type-canonicalization) and
    `reducible` (for reduction/reification); its `Test/SetMembershipDefEq.lean`
    documents a concrete crash from exactly that mismatch, "fixed" by silently
-   dropping facts. We fix one transparency policy per phase and record it in
-   `Config`, so the reifier and the monomorphizer never disagree about whether
-   `MySet α ≡ α → Prop`.
+   dropping facts. Our pass uses `whnf`/`isDefEq` at the ambient (default)
+   transparency throughout, matching the structural translator it feeds, so the two
+   layers cannot disagree about whether `MySet α ≡ α → Prop`.
 
-Also adopted: the `Nonempty`/`Inhabited` → witness conversion for inhabitation
-(via `Classical.choice`/`Inhabited.default`), since SMT-LIB assumes every sort is
-non-empty (see §10, obligation 1); and `DTr`-style provenance on every generated
-instance so a
-dropped or unprovable fact can be named.
+*Not yet:* the `Nonempty`/`Inhabited` → witness conversion for inhabitation (via
+`Classical.choice`/`Inhabited.default`), which SMT-LIB's non-empty-sort assumption
+wants (see §10, obligation 1); and `DTr`-style provenance is only a `descr` suffix
+(`@inst`) rather than a structured derivation, so an instance can be named but not
+traced back through its chain.
 
 ## 5. Higher-order handling (the key capability)
 
@@ -492,10 +527,10 @@ crush [h₁, …, hₙ, *] (u[c₁,…]) (d[c₁,…])
 - Parsing/collection lives in `Crush/Frontend/Tactic.lean` (`parseHintList`,
   `parseUOrDs`) and `Crush/Reify/Collect.lean` (`Hints`, `collectFacts`); tested in
   `Test/Hints.lean`.
-- The tactic pipeline: collect → HO-encode → translate (handlers) → solve →
-  discharge, with `trace.*` classes at each boundary and the full script available
-  via `crush.trace.script` / `crush.save`. (Preprocess/monomorphize are not yet in
-  the chain — see §9 M5.)
+- The tactic pipeline: collect → monomorphize → HO-encode → translate (handlers) →
+  solve → discharge, with `trace.*` classes at each boundary (including
+  `crush.mono`) and the full script available via `crush.trace.script` /
+  `crush.save`. (A separate preprocessing pass is not yet in the chain — see §9 M5.)
 
 *Not yet in the grammar:* a `* db` named lemma database (there is no `LemDB` yet) and
 premise selection.
@@ -539,9 +574,9 @@ at entry, so this layers on without changing the pipeline.
 
 Two notes. Enum-valued options take a **string literal**
 (`set_option crush.trust "trust"`), since that is how `KVMap.Value` round-trips
-them. And `crush.mono.*` are registered but inert: datatype monomorphization (§4b) is
-type-directed and needs no fuel, and the lemma-instantiation loop those knobs bound is
-not built yet (§9 M5).
+them. And `crush.mono.*` bound the lemma-instantiation loop (§4b) — `fuel` is an
+instance-count budget, `rounds` a saturation-round bound, and either at `0` disables
+the pass; datatype monomorphization is type-directed and needs no fuel.
 
 ---
 
@@ -603,12 +638,17 @@ instead of depending on a Lean tactic to re-find the argument.
 1. The hint grammar (§7): `crush [h₁, …, *] (u[…]) (d[…])`. **done** — a user can now
     point `crush` at a lemma that is not in context, restrict to an explicit fact
     list, and unfold definitions. Tested in `Test/Hints.lean`.
-2. Monomorphization (§4b). **Datatype monomorphization done** — fully-applied
-    parametric types are emitted as real SMT datatypes, unlocking M2's parametric
-    datatypes. The *lemma*-instantiation saturation loop (instantiating a polymorphic
-    hypothesis `∀ α, …` at the ground types a query mentions) is **not** built; a
-    polymorphic fact still translates as-is, so a goal needing an instantiated
-    polymorphic lemma is not yet reached. See §4b.
+2. Monomorphization (§4b). **done, with two named gaps.** *Datatype* monomorphization
+    emits fully-applied parametric types as real SMT datatypes, unlocking M2's
+    parametric datatypes. *Lemma-instantiation* monomorphization
+    (`Crush/Translation/Monomorphize.lean`) specializes a polymorphic fact at the types
+    a query mentions and saturates to a fixpoint under `crush.mono.fuel`/`rounds`,
+    reporting rather than silently truncating. This is what let `Test/TIP.lean`'s list
+    theorems — `prop_10` (`rev (rev x) = x`) among them — be restated over a
+    *polymorphic* `List α`; they previously had to be pinned to `List Int`. Tested in
+    `Test/LemmaMono.lean`. Remaining: instantiation reaches only the leading binder
+    telescope (a `β` under a `Prop` binder is not reached), and candidate matching is
+    still a linear scan rather than a `DiscrTree` index. Both detailed in §4b.
 3. Auto-unfold attributes (§4). **done** — `@[crush_unfold]`/`@[crush_defeq]` fold a
     marked definition's equations into every relevant query, so recursive functions in
     a hammer-in-the-loop proof need no per-call `u[…]` hint. Relevance-filtered to avoid
@@ -769,11 +809,12 @@ a passing test; the build must be clean and produce **no `sorry`**.
 | `AutoUnfold.lean` | `@[crush_unfold]`/`@[crush_defeq]`: the attribute fires without a hint, relevance filtering, transitive reach, `crush.autoUnfold` gating, misuse errors |
 | `Theories.lean` | `Nat`/`Int`, datatypes (incl. recursive), bit-vectors, strings, and the §10 soundness regressions |
 | `Monomorphize.lean` | parametric datatypes: distinct instantiations, nesting, `Nat`-through-parameter guard, selectors/η |
+| `LemmaMono.lean` | lemma-instantiation: polymorphic facts specialized at the query's types, saturation, the polymorphic TIP list theorems, `crush.mono.fuel` gating, and that false goals are still rejected |
 | `MonoStress.lean` | recursive parametric `Tree`, two-parameter `Map`, nested `FSet`, and all of these combined with higher-order functions |
 | `HigherOrder.lean` | λ-arguments, captures, η-expansion, extensionality, partial application |
 | `Regression.lean` | an independent corpus migrated from another Lean SMT bridge, plus cases derived from bugs reported against it |
 | `Reconstruct.lean` | `#print axioms` assertions — reconstructed theorems must not name `crushSorry` — and the replay boundary |
-| `TIP.lean` | inductive theorems from the TIP `prod` benchmarks, proved hammer-in-the-loop (manual `induction`, `crush` per case, `@[crush_unfold]` definitions) |
+| `TIP.lean` | inductive theorems from the TIP `prod` benchmarks over a *polymorphic* element type, proved hammer-in-the-loop (manual `induction`, `crush` per case, `@[crush_unfold]` definitions) |
 
 **Negative tests use `#guard_msgs`, not `sorry`.** A goal that is *false* must be
 rejected, and the guard pins the rejection message, so a regression that let `crush`

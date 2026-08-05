@@ -33,10 +33,11 @@ non-parametric datatypes, and higher-order goals (via defunctionalization, or na
 HO on cvc5) all translate and are tested.
 
 Also done: the hint grammar (`crush [lemmas] u[…] d[…]`), the `@[crush_unfold]`
-auto-unfold attributes, and datatype monomorphization — a fully-applied parametric
-type like `Option Int` or `List Int` becomes a real SMT datatype. In progress:
-lemma-instantiation monomorphization (specializing polymorphic *lemmas* to the
-ground types a query mentions), Alethe proof replay, and the combinator HO mode. See
+auto-unfold attributes, and monomorphization — both of datatypes (a fully-applied
+`Option Int` becomes a real SMT datatype) and of polymorphic *lemmas*, which are
+specialized to the types a query mentions. The latter is what lets the TIP list
+theorems, `rev (rev x) = x` included, be proved over an arbitrary element type. In
+progress: Alethe proof replay and the combinator HO mode. See
 **[`Doc/PLAN.md`](Doc/PLAN.md)** §9 for the milestone status, and [`Test/`](Test/)
 for runnable examples across every supported theory.
 

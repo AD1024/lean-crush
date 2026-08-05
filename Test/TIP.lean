@@ -79,47 +79,48 @@ theorem prop_01_peano (x : N) : N.double x = N.add x x := by
   | Z => crush
   | S x ih => crush [ih, add_succ x x]
 
-/-! ## List benchmarks: `++` and `rev` — over a *ground* element type
+/-! ## List benchmarks: `++` and `rev` — over an *arbitrary* element type
 
-The classic list lemmas, each by induction with `crush` finishing every case.
+The classic list lemmas, each by induction with `crush` finishing every case, stated
+over a polymorphic `List α`.
 
-**Important finding about the element type.** `crush`'s datatype monomorphization fires
-only on *ground* types: `List Int` becomes a real SMT datatype (injective, distinct,
-exhaustive constructors — exactly what an inductive-step residual needs), but a
-*polymorphic* `List α` with opaque `α` stays an uninterpreted sort, and then even a
-trivial step case like `(a::as).append [] = a::as` cannot be discharged — the solver has
-no `cons`-injectivity to work with and times out. So these are stated over `List Int`.
-Generalizing over an arbitrary element type would need lemma-instantiation
-monomorphization — specializing a polymorphic lemma to the ground types a query
-mentions — which is not yet built; a real boundary. The proof *structure* is
-identical to the polymorphic version; only the element type is pinned. -/
+**These used to require a ground element type.** Each SMT symbol is keyed on a
+constant together with its type arguments (it must be — `@append Int` and
+`@append Bool` have different SMT sorts), so a polymorphic `append`'s equation lemmas
+were emitted at an *abstract* instantiation and produced symbols disjoint from the
+goal's. The lemma could not discharge the goal even when the goal was ground, which is
+why these were originally written against a monomorphic
+`append : List Int → List Int → List Int`. Lemma-instantiation monomorphization now
+specializes those equations at the element type in play, so the polymorphic statements
+go through — `List α` with an fvar `α` is already a real SMT datatype over an opaque
+element sort, which is all the `cons`-injectivity an inductive step needs. -/
 
 namespace L
 
 @[crush_unfold]
-def append : List Int → List Int → List Int
+def append {α : Type} : List α → List α → List α
   | [], y => y
   | x :: xs, y => x :: append xs y
 
 @[crush_unfold]
-def rev : List Int → List Int
+def rev {α : Type} : List α → List α
   | [] => []
   | x :: xs => append (rev xs) [x]
 
 end L
 
-theorem append_nil (x : List Int) : L.append x [] = x := by
+theorem append_nil {α : Type} (x : List α) : L.append x [] = x := by
   induction x with
   | nil => crush
   | cons a as ih => crush [ih]
 
-theorem append_assoc (x y z : List Int) :
+theorem append_assoc {α : Type} (x y z : List α) :
     L.append (L.append x y) z = L.append x (L.append y z) := by
   induction x with
   | nil => crush
   | cons a as ih => crush [ih]
 
-theorem rev_append (x y : List Int) :
+theorem rev_append {α : Type} (x y : List α) :
     L.rev (L.append x y) = L.append (L.rev y) (L.rev x) := by
   induction x with
   | nil => crush [append_nil (L.rev y)]
@@ -129,7 +130,7 @@ theorem rev_append (x y : List Int) :
 /-- **prop_10**: `rev (rev x) = x`, the reverse-involution theorem, by induction with
 `crush` per case (the step uses `rev_append`). Note there are **no** `u[…]` hints: `rev`
 and `append` are `@[crush_unfold]`, so their equations arrive automatically. -/
-theorem prop_10_rev_rev (x : List Int) : L.rev (L.rev x) = x := by
+theorem prop_10_rev_rev {α : Type} (x : List α) : L.rev (L.rev x) = x := by
   induction x with
   | nil => crush
   | cons a as ih => crush [ih, rev_append (L.rev as) [a]]
@@ -144,25 +145,25 @@ by induction), and `rev` preserves `length` — both towers finished by `crush`.
 namespace L
 
 @[crush_unfold]
-def length : List Int → Nat
+def length {α : Type} : List α → Nat
   | [] => 0
   | _ :: xs => length xs + 1
 
 end L
 
-theorem length_append (x y : List Int) :
+theorem length_append {α : Type} (x y : List α) :
     L.length (L.append x y) = L.length x + L.length y := by
   induction x with
   | nil => crush
   | cons a as ih => crush [ih]
 
-theorem length_rev (x : List Int) : L.length (L.rev x) = L.length x := by
+theorem length_rev {α : Type} (x : List α) : L.length (L.rev x) = L.length x := by
   induction x with
   | nil => crush
   | cons a as ih =>
     crush [ih, length_append (L.rev as) [a]]
 
-theorem prop_06 (x y : List Int) :
+theorem prop_06 {α : Type} (x y : List α) :
     L.length (L.rev (L.append x y)) = L.length x + L.length y := by
   -- `rev` preserves length, `length` distributes over `++`; both are lemmas above,
   -- and `crush` combines them (a pure arithmetic/UF step, no further induction).
