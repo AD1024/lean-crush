@@ -28,16 +28,17 @@ The end-to-end path:
 
 Three discharge policies, selected by `crush.trust`:
 
-* `trust` — close with the `crushSorry` axiom. Fast; the solver and its translation
-  are in the trusted computing base.
-* `reconstruct` (default) — replay the verdict as a checked Lean proof using the
-  unsat core (`Crush.tryReconstruct`); error if that fails, so the axiom is never
-  used. Making this the default means a translation bug that yields a false `unsat`
-  cannot silently close a false goal: it fails reconstruction and errors instead.
-* `reconstructOrTrust` — replay if possible, else fall back to the axiom with a
-  warning, so the fallback is visible rather than silent. Opt in when a goal is
-  genuinely beyond the finishers (nonlinear arithmetic, finite-domain
-  exhaustiveness) and trusting the solver is acceptable.
+* `trust` (default) — close with the `crushSorry` axiom. Fast, and what every deployed
+  hammer does; the solver and its translation are in the trusted computing base. The
+  axiom is auditable, so `#print axioms` names it on any theorem closed this way.
+* `reconstruct` — replay the verdict as a checked Lean proof, from the solver's proof
+  certificate when there is one (`tryProofReplay`) and otherwise from the unsat core
+  (`Crush.tryReconstruct`); error if both fail, so the axiom is never used. A
+  translation bug yielding a false `unsat` cannot close a false goal here: it fails
+  reconstruction and errors instead.
+* `reconstructOrTrust` — reconstruct if possible, else fall back to the axiom with a
+  warning, so the fallback is visible rather than silent. The middle ground when a goal
+  is genuinely beyond the finishers (nonlinear arithmetic, finite-domain exhaustiveness).
 -/
 
 namespace Crush
@@ -95,20 +96,19 @@ def formatCounterexample (modelText : String) (st : TranslateState) : MessageDat
     lines := lines.push m!"  {origin} := {e.value}"
   return m!"counterexample:{indentD (MessageData.joinSep lines.toList "\n")}"
 
-/-- Try to close `goal` by replaying the solver's proof certificate.
+/-- Try to close `goal` by replaying the solver's proof certificate
+(`Crush/Solver/AletheReplay.lean`).
 
 The certificate refutes the *negated* goal, so the shape is a proof by contradiction:
-`Classical.byContradiction` turns the goal `G` into `¬G ⊢ False`, the fresh `¬G` hypothesis
-is bound to the certificate's assumption for the negated goal (which has no Lean proof of
-its own — it is the thing being refuted), and replay produces the `False`.
+`Classical.byContradiction` turns `G` into `¬G ⊢ False`, the fresh `¬G` hypothesis is bound
+to the certificate's assumption for the negated goal (the thing being refuted, so it has no
+Lean proof of its own), and replay produces the `False`.
 
-Returns `false` — leaving `goal` untouched — whenever anything is missing or a step cannot
-be replayed, so the caller falls back to the finisher ladder. Every replayed step is a
-kernel-checked term, so declining is the only failure mode; a certificate is never taken
-on faith. -/
+Returns `false`, leaving `goal` untouched, whenever anything is missing or a step cannot be
+replayed — so the caller falls back to the finisher ladder. -/
 def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState) (proofText : String) :
     TacticM Bool := do
-  unless cfg.proofReplay do return false
+  if cfg.reconstruct == .core then return false
   if proofText.trimAscii.isEmpty then return false
   let some proof := Alethe.parseProof proofText | return false
   goal.withContext do
@@ -138,13 +138,10 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState) (proofTe
         let pf ← mkAppOptM ``Classical.byContradiction #[some goalType, some lam]
         let ty ← inferType pf
         unless ← isDefEq ty goalType do return false
-        -- Check the assembled term **before** assigning it. `inferType` above uses the
-        -- elaborator's checker, which is more permissive than the kernel: a tactic can
-        -- produce a term it accepts and the kernel later rejects (`decide` on `Int`
-        -- literals emits an `eagerReduce` the kernel will not replay). Without this,
-        -- such a term is assigned and surfaces as an opaque "(kernel) application type
-        -- mismatch" *after* the tactic reported success, with no fallback. Checking here
-        -- turns it into a clean decline, so the finisher ladder still gets its turn.
+        -- Check before assigning: `inferType` above uses the elaborator's checker, which is
+        -- more permissive than the kernel, so a term accepted there can still be rejected at
+        -- the end with an opaque "(kernel) application type mismatch" — after the tactic
+        -- reported success, with no fallback. Checking here makes it a clean decline.
         check pf
         goal.assign pf
         return true
@@ -233,16 +230,23 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
       -- leaves the trusted computing base — it was only a search heuristic.
       let coreProofs := coreHypotheses st coreIds
       trace[crush.result] "reconstructing from core: {coreDescriptions st coreIds}"
-      -- Proof replay first, when the solver gave us a certificate. It closes goals the
-      -- single-shot ladder cannot (long chains of trivial steps: Boolean pigeonhole, deep
-      -- EUF conflicts) because the chain is already found. Declining is free — every step
-      -- is kernel-checked, so a step we cannot replay just falls through to the ladder.
+      -- Certificate replay first (unless `crush.reconstruct core` opts out): it closes
+      -- goals the single-shot ladder cannot (long chains of trivial steps — Boolean
+      -- pigeonhole, deep EUF conflicts) because the chain is already found. A step it
+      -- cannot replay falls through to the ladder below.
       let (replayed, prof') ← prof.time "replay" (tryProofReplay goal cfg st proofText)
       prof := prof'
       if replayed then
         trace[crush.result] "proof replay succeeded; no axiom used"
         if cfg.profile then logInfo prof.report
         return
+      -- `alethe` mode deliberately has no fallback: it is for working on replay itself,
+      -- where the ladder silently closing the goal would hide whether replay worked.
+      if cfg.reconstruct == .alethe then
+        throwError m!"crush: `crush.reconstruct alethe` is set and the solver's Alethe \
+                      certificate could not be replayed. Set `crush.reconstruct` to \
+                      \"auto\" to fall back to the core-directed finishers, or enable \
+                      `trace.crush.result` to see which step declined."
       let (ok, prof') ← prof.time "reconstruct" (tryReconstruct goal coreProofs (← finisherTactics))
       prof := prof'
       if ok then

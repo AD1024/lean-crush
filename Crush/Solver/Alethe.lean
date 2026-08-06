@@ -5,21 +5,10 @@ import Crush.SMT.Sexp
 
 cvc5, run with `--dump-proofs --proof-format-mode=alethe`, emits its refutation as an
 **Alethe** proof: a list of `assume`/`step`/`anchor` commands over clauses, ending in
-the empty clause. This module turns that text into a structured `AletheProof` so a
-replay pass can walk it. It does **not** check the proof — parsing decides nothing, so
-this layer is sound on its own; a checker is a separate, later phase.
-
-## Why only a parser, for now
-
-A sound Lean *checker* for Alethe is a large undertaking: even a single small
-nonlinear goal produces ~200 steps across ~30 distinct rules (`resolution`, `cong`,
-`la_generic`, `rare_rewrite`, …), nested subproofs, and requires mapping the proof's
-SMT terms back to Lean `Expr`s (our translation is one-directional). Each rule needs a
-soundness argument. So M4 is staged: this parser is the foundation, checked against
-real cvc5 output; replaying rules onto Lean goals is built on top incrementally, under
-the invariant that **any rule the replay cannot discharge is a hard failure, never a
-trusted gap** — so partial rule coverage stays sound, it just falls back to the
-core-directed finisher (or errors under `reconstruct`).
+the empty clause. This module turns that text into a structured `AletheProof`, and stops
+there: parsing decides nothing, so this layer is sound on its own. Checking a proof is
+`Crush/Solver/AletheReplay.lean`'s job — it turns a parsed proof into a kernel-checked
+Lean term.
 
 ## The Alethe surface we parse
 

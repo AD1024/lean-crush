@@ -6,21 +6,18 @@ open Lean Meta
 /-!
 # Alethe terms → Lean `Expr`
 
-Proof replay (`Crush/Solver/AletheReplay.lean`) has to restate each Alethe step as a Lean
-proposition, so it needs the *inverse* of translation: an Alethe S-expression back to the
-Lean term it denotes. Translation is one-directional, so this module reconstructs the
-inverse from two sources:
+Proof replay (`Crush/Solver/AletheReplay.lean`) restates each Alethe step as a Lean
+proposition, so it needs the *inverse* of translation. Translation is one-directional, so
+this module reconstructs the inverse from two sources:
 
 * `TranslateState.nameToExpr` — the emitted-symbol → Lean-head map recorded during
   translation, for uninterpreted symbols (`f`, `a`, `b`);
 * a fixed table for the theory operators and literals crush emits (`=`, `not`, `or`,
-  arithmetic, …), which have no entry in that map because they are structural.
+  arithmetic, …), which are structural and so have no entry in that map.
 
-Everything here is **partial by design**: `toExpr?` returns `none` for any construct it
-cannot map faithfully, and the caller (replay) then declines the step. That keeps the
-module sound on its own — failing to translate can only *lose* a replay, never fabricate
-one, because a returned `Expr` is only ever used as a goal statement that Lean must then
-actually prove.
+`toExpr?` is **partial by design**: `none` for anything it cannot map faithfully, which
+makes the caller decline the step. A returned `Expr` is only ever used as a goal statement
+Lean must then prove, so a bad translation loses a replay rather than fabricating one.
 
 ## `:named` sharing
 
@@ -35,11 +32,11 @@ namespace Crush.Alethe
 
 open Crush.SMT
 
-/-- The `(! t :named @p_k)` bindings in a proof, mapped `@p_k ↦ t` (with nested
-annotations kept, so a definition may itself mention earlier names).
+/-- The `(! t :named @p_k)` bindings in a proof, mapped `@p_k ↦ t` (nested annotations
+kept, so a definition may itself mention earlier names).
 
-Collected over the *unstripped* S-expressions, since the parser's `stripAnnot` removes
-exactly the information this needs. -/
+Must run on the *unstripped* S-expressions: the parser's `stripAnnot` removes exactly the
+information this collects. -/
 partial def collectNamed (s : Sexp) (acc : Std.HashMap String Sexp := {}) :
     Std.HashMap String Sexp :=
   match s with
@@ -80,18 +77,16 @@ private def natLit? (s : String) : Option Nat := s.toNat?
 
 /-- Coerce a term into a `Prop`, for a position where SMT expects a formula.
 
-SMT-LIB has one `Bool` sort where Lean distinguishes `Bool` from `Prop`, so a translated
-operand that came back `Bool`-sorted has to be lifted (`b` ↦ `b = true`) before it can sit
-under `Not`/`Or`/`And`. Skipping this produced ill-typed terms that the *kernel* caught
-(`¬q` with `q : Bool`) — sound, but a lost replay. -/
+SMT-LIB has one `Bool` sort where Lean distinguishes `Bool` from `Prop`, so a `Bool`-sorted
+operand must be lifted (`b` ↦ `b = true`) before it can sit under `Not`/`Or`/`And`.
+Without this the kernel rejects `¬q` for `q : Bool` — sound, but a lost replay. -/
 private def toProp (e : Expr) : MetaM Expr := do
   let ty ← whnf (← inferType e)
   if ty.isProp then return e
   else if ty.isConstOf ``Bool then mkEq e (mkConst ``Bool.true)
   else return e
 
-/-- Binary SMT-LIB theory operators, mapped to the Lean constant to apply. Built with the
-standard instances, matching what the translator consumed on the way out. `=` and `=>` are
+/-- Binary SMT-LIB theory operators, mapped to the Lean constant to apply. `=` and `=>` are
 handled separately (`=` is `Iff` on `Prop`-sorted operands; `=>` is a Lean arrow). -/
 private def binOp? : String → Option Name
   | "+"  => some ``HAdd.hAdd
@@ -103,11 +98,9 @@ private def binOp? : String → Option Name
   | ">=" => some ``GE.ge
   | _    => none
 
-/-- The Lean type an SMT sort denotes, for a quantifier binder.
-
-The theory sorts are fixed; an *opaque* sort (`declare-sort`) is looked up in the same
-symbol map, since the translator records the Lean type it came from. `none` for anything
-else, which declines the enclosing quantifier rather than guessing a type. -/
+/-- The Lean type an SMT sort denotes, for a quantifier binder. Theory sorts are fixed; an
+opaque sort (`declare-sort`) is looked up in the symbol map, where the translator recorded
+the Lean type it came from. `none` declines the enclosing quantifier rather than guessing. -/
 def sortToType? (ctx : TermCtx) : Sexp → MetaM (Option Expr)
   | .atom "Int"  => return some (mkConst ``Int)
   | .atom "Bool" => return some (mkConst ``Bool)
@@ -116,11 +109,9 @@ def sortToType? (ctx : TermCtx) : Sexp → MetaM (Option Expr)
   | _ => return none
 
 /-- Translate an Alethe term to the Lean term it denotes, or `none` if any part of it
-cannot be mapped. `fuel` bounds the recursion through `:named` indirection (a malformed
-proof could otherwise cycle).
-
-The theory operators are matched by their SMT-LIB names, which is what crush emits; the
-Lean side is built with the standard instances, matching what the translator consumed. -/
+cannot be mapped. Operators are matched by their SMT-LIB names and rebuilt with the
+standard instances, matching what the translator consumed on the way out. `fuel` bounds
+recursion through `:named` indirection, which a malformed proof could otherwise cycle. -/
 partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr) := do
   if fuel == 0 then return none
   match s with

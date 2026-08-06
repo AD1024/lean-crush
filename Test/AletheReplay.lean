@@ -1,22 +1,15 @@
 import Crush
 
 /-!
-Tests for Alethe **proof replay** (`Crush/Solver/AletheReplay.lean`) — M4 phase 3.
+Tests for Alethe proof replay (`Crush/Solver/AletheReplay.lean`), whose module comment has
+the design; these tests pin its two observable properties.
 
-The core-directed finisher hands the whole goal to one tactic. That fails when the argument
-is a long chain of small inferences no tactic re-finds in one shot. cvc5's Alethe proof
-*is* that chain, already found, so replay walks it: each step's clause is restated as a
-Lean proposition, proved from its premises' proofs, and carried forward; the final empty
-clause is `False`, discharged against the negated goal by `Classical.byContradiction`.
-
-**Soundness does not depend on rule coverage.** Every step is proved by a Lean tactic and
-checked by the kernel; the Alethe rule name only picks which tactic to try first. A step
-that cannot be replayed makes replay *decline*, and the finisher ladder runs instead — no
-path lets an unreplayed certificate close a goal. The negative tests below pin that.
-
-The goals here were measured (2026-08-06) to be exactly the payoff class: cvc5 returns a
-hole-free proof, and the finisher ladder **fails** to reconstruct them. Before replay they
-errored under the default policy.
+1. **Payoff.** The goals below were measured (2026-08-06) to be exactly the class replay is
+   for: cvc5 returns a hole-free proof and the finisher ladder *fails*, so before replay
+   they errored under the default policy.
+2. **Declining rather than trusting.** Soundness is independent of rule coverage: a step
+   replay cannot handle makes it decline, and the ladder runs instead. The negative tests
+   pin that every path to a closed goal runs through the kernel.
 -/
 
 open Crush
@@ -24,10 +17,14 @@ open Crush
 section Payoff
 set_option crush.backend "cvc5"
 set_option crush.timeout 20
+-- Replay only runs under a reconstructing policy, and the shipped default is `trust`
+-- (which closes on the solver's word without consulting a certificate). Every section
+-- below therefore asks for `reconstruct` explicitly.
+set_option crush.trust "reconstruct"
 
 /-! ## Goals the finisher ladder cannot reconstruct, but replay can
 
-Both are kernel-checked: `#print axioms` shows the standard-library trio and **no**
+Both are kernel-checked: `#print axioms` shows the standard-library trio and no
 `crushSorry`, so the solver is outside the trusted base. -/
 
 /-- Boolean pigeonhole: four `Bool`s, so two must agree. cvc5's proof is ~62 steps across
@@ -52,20 +49,21 @@ end Payoff
 
 /-! ## Replay declines rather than trusting
 
-Each case below is one where replay cannot produce a proof. The goal must **error**, not
-close — pinned with `#guard_msgs`, so a regression that let a certificate be taken on faith
-fails the build. -/
+Each case below is one replay cannot prove, so the goal must *error* rather than close.
+Pinned with `#guard_msgs`, so a regression that took a certificate on faith fails the
+build. -/
 
 section Declines
 set_option crush.backend "cvc5"
 set_option crush.timeout 20
+set_option crush.trust "reconstruct"
 
 inductive Three where | a | b | c
 
 -- Finite-domain exhaustiveness over a *datatype*. cvc5 answers `unsat` but cannot express
--- the argument in Alethe — it replies `(error "… DUMMY_SKOLEM")`, so there is no
--- certificate at all. Replay declines and the ladder cannot replay it either, so this
--- errors: the case a checker fundamentally *cannot* reach, not a coverage gap.
+-- the argument in Alethe — it replies `(error "… DUMMY_SKOLEM")`, so there is no certificate
+-- at all, and the ladder cannot close it either. A case no checker can reach, rather than
+-- a coverage gap.
 /-- error: crush: solver reported `unsat`, but reconstruction failed -/
 #guard_msgs(error, substring := true) in
 example (w x y z : Three) : w = x ∨ w = y ∨ w = z ∨ x = y ∨ x = z ∨ y = z := by crush
@@ -76,8 +74,8 @@ example (w x y z : Three) : w = x ∨ w = y ∨ w = z ∨ x = y ∨ x = z ∨ y 
 #guard_msgs(error, substring := true) in
 example (x : Int) (h : x * x = 4) (h2 : x > 0) : x = 2 := by crush
 
--- A goal that is simply **false**: the solver returns `sat`, so replay never runs. Pins
--- that the machinery cannot manufacture a proof of a non-theorem.
+-- A goal that is simply false: the solver returns `sat`, so replay never runs. Pins that the
+-- machinery cannot manufacture a proof of a non-theorem.
 /-- error: crush: the goal is not provable -/
 #guard_msgs(error, substring := true) in
 example (p q : Bool) : p = q := by crush
@@ -85,10 +83,8 @@ example (p q : Bool) : p = q := by crush
 /-! ### Declining a `forall_inst` step still closes the goal
 
 Quantifier instantiation is a `subproof` block whose inner `forall_inst` step is justified by
-its `:args` witness, not its premises. Replay declines it (a tactic handed that step cannot
-close it honestly — an earlier revision let one "succeed" with a term only the final *kernel*
-rejected, after replay had reported success). The finisher ladder then closes the goal, so
-the decline is invisible except in the trace, and the result is still kernel-checked. -/
+its `:args` witness, not its premises, so replay declines it. The ladder then closes the
+goal: the decline is invisible except in the trace, and the result is still kernel-checked. -/
 theorem forall_inst_falls_back (f : Int → Int) (h : ∀ x, f x = 0) : f 5 = 0 := by crush
 
 /-- info: 'forall_inst_falls_back' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -97,14 +93,16 @@ theorem forall_inst_falls_back (f : Int → Int) (h : ∀ x, f x = 0) : f 5 = 0 
 
 end Declines
 
-/-! ## Replay is off by default for z3, and can be disabled
+/-! ## Choosing a path with `crush.reconstruct`
 
-z3 emits no Alethe proof, so replay is a no-op there and the ladder does the work — the
-same goals close either way. `crush.proofReplay false` turns replay off explicitly; a goal
-the ladder can handle is unaffected. -/
+z3 emits no Alethe proof, so the ladder does the work there and the same goals close either
+way. `crush.reconstruct core` selects the ladder explicitly, and `alethe` selects
+certificate replay with no fallback — so a goal only the ladder can close *fails* under it,
+which is what makes the two paths independently testable. -/
 
 section Toggle
 set_option crush.timeout 20
+set_option crush.trust "reconstruct"
 
 -- z3 (default backend): no certificate, ladder reconstructs as before.
 theorem z3_unaffected (x y : Int) (h1 : x = y) (h2 : y = 3) : x = 3 := by crush
@@ -112,12 +110,31 @@ theorem z3_unaffected (x y : Int) (h1 : x = y) (h2 : y = 3) : x = 3 := by crush
 #guard_msgs in
 #print axioms z3_unaffected
 
--- With replay explicitly disabled, cvc5 falls back to the ladder.
+-- `core`: the ladder only, certificate ignored.
 set_option crush.backend "cvc5" in
-set_option crush.proofReplay false in
-theorem replay_disabled (x y : Int) (h1 : x = y) (h2 : y = 3) : x = 3 := by crush
-/-- info: 'replay_disabled' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+set_option crush.reconstruct "core" in
+theorem core_only (x y : Int) (h1 : x = y) (h2 : y = 3) : x = 3 := by crush
+/-- info: 'core_only' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms replay_disabled
+#print axioms core_only
+
+-- `alethe`: certificate only. The pigeonhole needs replay, so it still closes here — and
+-- being kernel-checked under `alethe` proves replay itself did the work, with no ladder to
+-- fall back on.
+set_option crush.backend "cvc5" in
+set_option crush.reconstruct "alethe" in
+theorem alethe_only (p q r s : Bool) :
+    p = q ∨ p = r ∨ p = s ∨ q = r ∨ q = s ∨ r = s := by crush
+/-- info: 'alethe_only' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms alethe_only
+
+-- The converse: `forall_inst` declines, and under `alethe` there is no ladder to rescue it,
+-- so it errors rather than silently closing. Pins that `alethe` really excludes the ladder.
+/-- error: crush: `crush.reconstruct alethe` is set and the solver's Alethe certificate -/
+#guard_msgs(error, substring := true) in
+set_option crush.backend "cvc5" in
+set_option crush.reconstruct "alethe" in
+example (f : Int → Int) (h : ∀ x, f x = 0) : f 5 = 0 := by crush
 
 end Toggle

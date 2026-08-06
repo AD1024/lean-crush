@@ -7,62 +7,60 @@ open Lean Meta Elab Tactic
 # Replaying an Alethe proof as a Lean proof
 
 The core-directed finisher (`Crush/Solver/Reconstruct.lean`) hands the *whole* goal to one
-Lean tactic. That works surprisingly often, but it fails when the argument needs a long
-chain of small inferences the tactic cannot re-find in one shot — a Boolean pigeonhole, an
-EUF conflict several congruences deep.
+Lean tactic. That works surprisingly often, but fails when the argument needs a long chain
+of small inferences no tactic re-finds in one shot — a Boolean pigeonhole, an EUF conflict
+several congruences deep.
 
 An Alethe proof is exactly that chain, already found: cvc5 reports ~20–60 steps, each a
 *trivial* clause following from one or two earlier ones. So instead of re-searching, we
-replay: for each step, restate its clause as a Lean proposition, prove it from the
-premises' proofs, and carry the result forward. The final step's clause is the empty
-clause (`False`), which contradicts the negated goal.
+replay: restate each step's clause as a Lean proposition, prove it from the premises'
+proofs, carry the result forward. The last clause is empty (`False`), contradicting the
+negated goal.
 
 ## Why this is sound regardless of rule coverage
 
-Each step is discharged by a Lean tactic and the result is a **real proof term the kernel
-checks**. The Alethe rule name is used only as a *hint* for which tactic to try first — a
-wrong guess makes the step fail, never succeed wrongly. Concretely, the trusted base is
-unchanged: the kernel plus the tactics we invoke. If any step cannot be replayed (rule we
-do not handle, term we cannot map back, tactic that fails), `replay?` returns `none` and
-the caller falls back to the finisher ladder. There is no path in which an unreplayed step
-closes a goal.
+Every step is discharged by a Lean tactic into a real proof term the kernel checks, so the
+trusted base is unchanged: the kernel plus the tactics we invoke. The rule name is only a
+*hint* for which tactic to try first — a wrong guess makes a step fail, never succeed
+wrongly. Any step that cannot be replayed (unhandled rule, unmappable term, failing tactic)
+makes `replay?` return `none`, and the caller falls back to the finisher ladder.
 
-This is the phase-3 "real reconstruction" of `Doc/PLAN.md` §9 M4, but done per *step*
-rather than per *rule*: we do not prove each Alethe rule sound once and for all (that is
-lean-auto's reflective-checker approach, ~12k lines); we let the kernel check each of the
-proof's concrete instances. That trades a soundness meta-theorem for per-call work, and
-needs no verified checker.
+So this is `Doc/PLAN.md` §9 M4 phase 3 done per *step* rather than per *rule*: we do not
+prove each Alethe rule sound once and for all (lean-auto's reflective checker, ~12k lines),
+we let the kernel check the proof's concrete instances. That trades a soundness
+meta-theorem for per-call work, and needs no verified checker.
 
 ## Subproof blocks
 
 `(anchor :step t) (assume t.a0 φ) … (step t … :rule subproof :discharge (t.a0))` proves the
-block's conclusion under a *local* assumption `φ` and then discharges it. Replay binds `φ`
-as a real Lean hypothesis (`withLocalDeclD`), replays the inner steps under it, abstracts it
-back out with `mkLambdaFVars`, and proves the closing clause from that implication — so the
-discharge itself is kernel-checked rather than assumed.
+block's conclusion under a *local* assumption `φ`, then discharges it. Replay binds `φ` as a
+real hypothesis (`withLocalDeclD`), replays the inner steps under it, abstracts it back out
+with `mkLambdaFVars`, and proves the closing clause from that implication — so the discharge
+is kernel-checked rather than assumed.
 
 ## Known limits
 
-* Rules whose justification is in their `:args` rather than their premises —
-  `forall_inst` (the quantifier-instantiation witness), `bind`, `sko_ex`, `sko_forall` — are
-  **declined**, since a tactic handed such a step has no honest way to close it. Consuming
-  the witness to instantiate directly is the next extension; until then a proof needing one
-  falls back to the finisher ladder (which handles the common instantiation shapes anyway).
-* A `hole` step is cvc5 admitting an untranslated rewrite — declined.
-* Terms crush cannot map back (`ite`, anything not in `AletheTerm`'s table) decline.
-* Nested anchors are declined.
+Each of these declines, falling back to the ladder:
+
+* Rules justified by their `:args` rather than their premises — `forall_inst` (the
+  quantifier-instantiation witness), `bind`, `sko_ex`, `sko_forall`. Consuming the witness
+  to instantiate directly is the next extension; the ladder handles the common
+  instantiation shapes anyway.
+* `hole` steps, where cvc5 itself admits an untranslated rewrite.
+* Terms outside `AletheTerm`'s table, notably `ite`.
+* Nested anchors.
 -/
 
 namespace Crush.Alethe
 
 open Crush.SMT
 
-/-- Tactics tried on a step, in order. The rule name selects which to try *first*; all are
-tried, so an unrecognized rule still gets a chance.
+/-- Tactics tried on a step, in order. The rule name only selects which goes *first*; all
+are tried, so an unrecognized rule still gets a chance.
 
-These are deliberately cheap and local: a step is a trivial consequence of its premises
-(that is what makes an Alethe proof long), so anything needing real search means we mapped
-the step wrong and should decline rather than grind. -/
+Deliberately cheap and local: a step is a trivial consequence of its premises (that is what
+makes an Alethe proof long), so a step needing real search is one we mapped wrong, and
+declining beats grinding. -/
 private def stepTactics : CoreM (Array (TSyntax `tactic)) := do
   return #[
     (← `(tactic| simp_all)),
@@ -71,8 +69,8 @@ private def stepTactics : CoreM (Array (TSyntax `tactic)) := do
     (← `(tactic| rfl)),
     (← `(tactic| decide))]
 
-/-- Tactic tried first for a given Alethe rule, when we have a good guess. Purely a
-performance hint — see the module comment on soundness. -/
+/-- Tactic to try first for a given rule, where we have a good guess. Purely a performance
+hint — see the module comment on soundness. -/
 private def ruleHint? (rule : String) : CoreM (Option (TSyntax `tactic)) := do
   match rule with
   | "refl" | "evaluate" | "false" => return some (← `(tactic| decide))
@@ -84,16 +82,15 @@ private def ruleHint? (rule : String) : CoreM (Option (TSyntax `tactic)) := do
 /-- Prove `target` from the proofs in `premises`, trying the rule's hinted tactic first.
 
 Builds the closed implication `p₁ → … → pₙ → target`, proves *that*, then applies it to the
-premise proofs — the same technique as `tryReconstruct`, so the tactic cannot reach for
-ambient context that the step does not license. -/
+premise proofs — the same technique as `tryReconstruct`, so a tactic cannot reach for
+ambient context the step does not license. -/
 private def proveStep (target : Expr) (premises : Array Expr) (rule : String) :
     TacticM (Option Expr) := do
-  -- Rules whose conclusion does **not** follow from their premises alone: the
-  -- justification lives in the rule's `:args` (the instantiation witness for
-  -- `forall_inst`), which we do not yet consume. A tactic handed such a step has no
-  -- honest way to close it, and empirically one "succeeds" with a term the *kernel* later
-  -- rejects — a failure that surfaces after replay reports success, with no fallback. So
-  -- decline them up front and let the finisher ladder handle the goal.
+  -- Rules whose conclusion does not follow from their premises alone: the justification is
+  -- in `:args` (for `forall_inst`, the instantiation witness), which we do not yet consume.
+  -- A tactic handed such a step cannot close it honestly, and empirically one "succeeds"
+  -- with a term the *kernel* later rejects — surfacing after replay reported success, with
+  -- no fallback left. Decline up front so the ladder gets the goal.
   if rule == "forall_inst" || rule == "bind" || rule == "sko_ex" || rule == "sko_forall" then
     return none
   let hypTypes ← premises.mapM fun p => do instantiateMVars (← inferType p)
@@ -108,12 +105,11 @@ private def proveStep (target : Expr) (premises : Array Expr) (rule : String) :
       if gs.isEmpty then
         let assigned ← instantiateMVars mv
         unless assigned.hasSorry || assigned.hasExprMVar do
-          -- Type-check the step's term *here*, before it is built into the final proof.
-          -- A tactic can produce a term the elaborator accepts but the kernel rejects —
-          -- `decide` on `Int` literals emits an `eagerReduce` the kernel will not replay —
-          -- and without this check that term poisons the assembled proof, surfacing as an
-          -- opaque "(kernel) application type mismatch" at the *end*. Checking per step
-          -- turns it into a clean decline that the next tactic (or the ladder) handles.
+          -- Check the step's term here, before it enters the final proof. A tactic can
+          -- produce a term the elaborator accepts but the kernel rejects (`decide` on `Int`
+          -- literals emits an `eagerReduce` the kernel will not replay), which would poison
+          -- the assembled proof and surface as an opaque "(kernel) application type
+          -- mismatch" at the very end. Per-step checking makes it a clean decline instead.
           check assigned
           return some (mkAppN assigned premises)
       restoreState saved
@@ -124,20 +120,20 @@ private def proveStep (target : Expr) (premises : Array Expr) (rule : String) :
 /-- Replay a parsed Alethe proof into a Lean proof of `False`.
 
 `facts` maps a `crush_fact_<n>` assumption id to the Lean proof of that hypothesis (from
-`TranslateState.facts`); `symbols` is the emitted-symbol → Lean-term map. Returns `none`
-the moment any step cannot be replayed. -/
+`TranslateState.facts`); `symbols` is the emitted-symbol → Lean-term map. `none` the moment
+any step cannot be replayed. -/
 partial def replay? (proof : AletheProof) (rawSexps : Array Sexp)
     (facts : Std.HashMap String Expr) (symbols : Std.HashMap String Expr) :
     TacticM (Option Expr) := do
-  -- `:named` bindings must be collected from the *unstripped* text: the parser drops the
-  -- annotations, which is exactly the information `@p_k` references need.
+  -- Collected from the *unstripped* text: the parser drops the annotations, which is
+  -- exactly what `@p_k` references need.
   let named := rawSexps.foldl (fun acc s => collectNamed s acc) {}
   let ctx : TermCtx := { symbols, named }
   go ctx facts proof.commands 0 {}
 where
-  /-- Replay `cmds` from index `i` under proof environment `env`, returning the proof of
-  the first empty clause reached (or `none`). Written as an explicit index walk so a
-  subproof block can hand back the index just past its closing step. -/
+  /-- Replay `cmds` from index `i` under proof environment `env`, returning the proof of the
+  first empty clause reached. An explicit index walk, so a subproof block can hand back the
+  index just past its closing step. -/
   go (ctx : TermCtx) (facts : Std.HashMap String Expr) (cmds : Array Command)
       (i : Nat) (env : Std.HashMap String Expr) : TacticM (Option Expr) := do
     let fuel := 64
@@ -146,18 +142,16 @@ where
     while h : i < cmds.size do
       match cmds[i] with
       | .assume id _ =>
-        -- An assumption at top level is one of our asserted facts, so its Lean proof is
-        -- already in hand. (A *local* assumption inside a block is bound by `anchor`
-        -- below, never reached here.)
+        -- A top-level assumption is one of our asserted facts, so its Lean proof is already
+        -- in hand. (A block-local assumption is bound by `anchor` below, never reached here.)
         let some p := facts.get? id
           | trace[crush.result] "alethe replay: declined (unknown assumption {id})"
             return none
         env := env.insert id p
         i := i + 1
       | .anchor stepId _ =>
-        -- A subproof block: `(anchor :step t) (assume t.a0 φ) … (step t … :rule subproof
-        -- :discharge (t.a0))`. Bind `φ` as a real local hypothesis, replay the block
-        -- under it, then abstract it back out so the conclusion is an implication.
+        -- A subproof block (see the module comment): bind `φ` as a real local hypothesis,
+        -- replay under it, abstract it back out so the conclusion is an implication.
         let some (.assume localId localTerm) := cmds[i + 1]?
           | trace[crush.result] "alethe replay: declined (anchor {stepId} without assume)"
             return none
@@ -176,10 +170,7 @@ where
           | trace[crush.result] "alethe replay: declined (untranslatable subproof \
                                  conclusion {stepId})"
             return none
-        -- Under `h : φ`, replay the inner steps to the block's conclusion, then
-        -- `fun h => …`. Discharging is what turns "concl under φ" into `φ → concl`; the
-        -- closing clause already states the discharged form (`¬φ ∨ …`), so the two are
-        -- reconciled by one final step proof.
+        -- Under `h : φ`, replay the inner steps and abstract to `φ → concl`.
         let inner ← (do
           withLocalDeclD (`hsub ++ localId.toName) hypTy fun h => do
             let innerEnv := env.insert localId h
@@ -190,8 +181,8 @@ where
         let some lam := inner
           | trace[crush.result] "alethe replay: declined (subproof {stepId} body)"
             return none
-        -- `lam : φ → innerConcl`. The closing clause is the discharged statement; prove it
-        -- from `lam` with the step tactics, so the kernel checks the discharge.
+        -- The closing clause states the discharged form (`¬φ ∨ …`), which is `lam`'s
+        -- implication rearranged; proving it from `lam` is what kernel-checks the discharge.
         let some pf ← (proveStep concl #[lam] "subproof" : TacticM (Option Expr))
           | trace[crush.result] "alethe replay: declined (subproof {stepId} discharge)"
             return none
@@ -226,8 +217,8 @@ where
     trace[crush.result] "alethe replay: declined (no empty-clause step)"
     return none
 
-  /-- Replay the steps of a subproof block, `[from, upto)`, returning the proof of the
-  step just before `upto` (the block's last inner conclusion). -/
+  /-- Replay a subproof block's steps, `[from, upto)`, returning the proof of the last one
+  (the block's inner conclusion). -/
   goInner (ctx : TermCtx) (facts : Std.HashMap String Expr) (cmds : Array Command)
       («from» upto : Nat) (env : Std.HashMap String Expr) : TacticM (Option Expr) := do
     let fuel := 64
@@ -246,7 +237,7 @@ where
         let some pf ← (proveStep target prems rule : TacticM (Option Expr)) | return none
         env := env.insert id pf
         last := some pf
-      -- Nested anchors and stray assumes inside a block are not handled.
+      -- Nested anchors and stray assumes in a block are not handled.
       | _ => return none
       i := i + 1
     return last

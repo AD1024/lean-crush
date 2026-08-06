@@ -4,8 +4,10 @@
 metaprogrammed, user-extensible translation layer.**
 
 Status: milestones 0–2 complete; 3, 4, and 5 partial (see §9). The `crush` tactic
-works end-to-end and, by default, produces kernel-checked proofs rather than
-trusting the solver. The extension layer covers term handlers, sort handlers, and
+works end-to-end; it closes goals on the solver's verdict by default, and on request
+produces kernel-checked proofs by replaying cvc5's Alethe certificate or via the
+core-directed finishers (`crush.trust`, `crush.reconstruct`).
+The extension layer covers term handlers, sort handlers, and
 `@[crush_unfold]` auto-unfolding; the hint grammar is in, as is monomorphization —
 both of datatypes and of polymorphic *lemmas*, which is what lets the TIP list
 theorems be proved over an arbitrary element type. This document is the architecture
@@ -604,11 +606,12 @@ at entry, so this layers on without changing the pipeline.
 |---|---|---|---|
 | `crush.backend` | `z3\|cvc5\|bitwuzla\|none` | `z3` | solver process / translation profile |
 | `crush.timeout` | `Nat` (s) | `10` | hard wall-clock limit (enforced by us) |
-| `crush.trust` | `trust\|reconstruct\|reconstructOrTrust` | `reconstruct` | how `unsat` discharges the goal (default never uses the axiom) |
+| `crush.trust` | `trust\|reconstruct\|reconstructOrTrust` | `trust` | how `unsat` discharges the goal (the default closes via the auditable `crushSorry` axiom) |
+| `crush.reconstruct` | `auto\|alethe\|core` | `auto` | which reconstruction path runs when `crush.trust` asks for one: Alethe certificate replay, the core-directed finisher ladder, or both in order |
 | `crush.ho.mode` | `defunctionalize\|combinators\|native` | `defunctionalize` | HO elimination strategy |
 | `crush.mono.fuel` | `Nat` | `512` | max monomorphization instances |
 | `crush.mono.rounds` | `Nat` | `8` | max saturation rounds |
-| `crush.mono.certify` | `Bool` | `false` | type-check each mono instance's proof against its proposition (only useful under a trusting policy; the kernel does this on the `reconstruct` path) |
+| `crush.mono.certify` | `Bool` | `false` | type-check each mono instance's proof against its proposition (matters under the default trusting policy; the kernel does this on the `reconstruct` path) |
 | `crush.logic` | `String` | auto | override SMT-LIB logic |
 | `crush.additionalArgs` | `String` | `""` | extra solver flags |
 | `crush.save` | `String` | `""` | write script to path |
@@ -695,18 +698,14 @@ whole-context `grind` would not:
   the proof added nothing over just trying the rungs, so the ladder tries them
   unconditionally — a mis-fitting rung fails fast.)
 
-*Alethe checker — staged, phase 1 (the parser) done.* A sound Lean *checker* for Alethe
-is a large undertaking (see the scope findings below), so it is built in phases under one
-invariant: **any step a replay cannot discharge is a hard failure, never a trusted
-gap**, so partial coverage stays sound and merely falls back to the core-directed
-finisher. Phase 1 — a structured parser (`Crush/Solver/Alethe.lean`) turning cvc5's
-`--dump-proofs --proof-format-mode=alethe` output into an `AletheProof` of
-`assume`/`step`/`anchor` commands over clauses — is built and tested against verbatim
-cvc5 output (`Test/Alethe.lean`), including that an `(error …)` reply parses to `none`
-so the caller falls back rather than mis-reading. Parsing decides nothing, so this
-phase is sound on its own. Remaining phases: request the proof from the solver behind
-an option; map Alethe terms back to Lean `Expr`s (our translation is one-directional
-today, so this is new); and a per-rule replay checker.
+*Alethe replay — staged, all three phases done.* Built under one invariant: **any step a
+replay cannot discharge is a hard failure, never a trusted gap**, so partial coverage stays
+sound and merely falls back to the core-directed finisher. Phase 1, the parser
+(`Crush/Solver/Alethe.lean`), turns cvc5's `--dump-proofs --proof-format-mode=alethe` output
+into an `AletheProof` of `assume`/`step`/`anchor` commands over clauses; it is tested against
+verbatim cvc5 output (`Test/Alethe.lean`), including that an `(error …)` reply parses to
+`none` so the caller falls back rather than mis-reading. Phase 2 requests the proof behind
+`crush.reconstruct`. Phase 3 — the reverse term map and the replay engine — is below.
 
 *Scope findings.* The intent was to cover the two shapes the
 finishers cannot replay — nonlinear arithmetic and finite-domain exhaustiveness, both
@@ -755,7 +754,8 @@ flag. Two cheaper alternatives to a full checker were probed:
 
 `Crush/Solver/AletheReplay.lean` replays a cvc5 Alethe certificate into a Lean proof, and
 it is tried **before** the finisher ladder under a reconstructing policy
-(`crush.proofReplay`, default on). The insight that made this tractable: an Alethe proof
+(`crush.reconstruct auto`, the default; `alethe` runs it with no ladder fallback and `core`
+skips it). The insight that made this tractable: an Alethe proof
 *decomposes* one hard goal into 20–60 **trivial** steps, so we do not need to re-search —
 we restate each step's clause as a Lean proposition, prove it from its premises' proofs
 with a small tactic, and carry the result forward. The final empty clause is `False`, which
@@ -1057,7 +1057,7 @@ a passing test; the build must be clean and produce **no `sorry`**.
 | `TIP.lean` | inductive theorems from the TIP `prod` benchmarks over a *polymorphic* element type, proved hammer-in-the-loop (manual `induction`, `crush` per case, `@[crush_unfold]` definitions) |
 | `Cvc5.lean` | the **cvc5 backend** and **`native` HO mode** (`HO_ALL`, `(-> σ τ)` sorts, `lambda`), which the default `z3`/`defunctionalize` suite never exercises; plus the z3-vs-cvc5 `sat`/`unknown` difference on false HO goals |
 | `Alethe.lean` | the Alethe proof **parser** (M4 phase 1) against verbatim cvc5 output: command/clause/`:named` structure, premise reading, the empty-clause conclusion, and that an `(error …)` reply parses to `none` |
-| `AletheReplay.lean` | Alethe **proof replay** (M4 phase 3): the measured payoff class — Boolean pigeonhole and EUF conflict, which the finisher ladder cannot reconstruct — closes kernel-checked (`#print axioms`, no `crushSorry`); plus the decline cases (no certificate, unprovable, false goal) pinned so a certificate is never taken on faith, and the z3 / `crush.proofReplay false` fallbacks |
+| `AletheReplay.lean` | Alethe **proof replay** (M4 phase 3): the measured payoff class — Boolean pigeonhole and EUF conflict, which the finisher ladder cannot reconstruct — closes kernel-checked (`#print axioms`, no `crushSorry`); plus the decline cases (no certificate, unprovable, false goal) pinned so a certificate is never taken on faith, and the path-selection cases (`crush.reconstruct core`/`alethe`, plus z3, which emits no certificate) |
 | `LeanAutoPort.lean` | goals ported from lean-auto's `SmtTranslation/` suite (BoolNatInt, BitVec, String, inductive/enum, recursive-with-unfold): demonstrates the same corpus translates and solves, and pins the `Empty`-type cases where we are deliberately *sound* and lean-auto documents itself unsound |
 | `CaseStudies/LeanAuto.lean` | the *harder* lean-auto corpus (§11b): mutually-recursive and single-ctor datatypes, HO Church numerals (kernel-reconstructed), polymorphic lemmas, leading-∀ matching, `Function.comp_def`, and the Paxos consensus goal — each filed as handled / sound-refusal / known-gap; drove four translation fixes and closed three of four gaps |
 | `CaseStudies/Loom.lean` | representative Loom verification conditions (§11b): GCD/MaxElem/IsSorted/SumOfDigits/sqrt/cbrt/binary-search arithmetic, quantified array invariants, an array-update VC, and Cashmere balance invariants; the Mathlib-bound `Multiset`/`Finset` VCs reduce (hammer-in-the-loop) to arithmetic residuals `crush` closes |

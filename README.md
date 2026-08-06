@@ -16,35 +16,36 @@ of its core limitations:
   metaprogram with `@[crush_translate]` (or use the `crush_map` sugar); it is
   evaluated at elaboration time to produce SMT. The built-in theory mappings are
   written against the *same* API.
-- **The SMT verdict is checked, not trusted, by default.** lean-auto's SMT backend
-  does not reconstruct a proof yet (its `auto.smt.rconsProof` path reports "not
-  implemented"); it either produces no proof or, with `auto.smt.trust`, closes the goal
-  with the `autoSMTSorry` axiom — its verified checker serves a separate native backend,
-  not the SMT path. lean-crush never trusts the verdict by default. It **replays cvc5's
-  Alethe certificate** step by step into a Lean proof, and otherwise uses the unsat core
-  to *select* the relevant hypotheses and re-prove the goal with a Lean tactic — either
-  way the kernel checks the result, so a false `unsat` from a translation bug fails to
-  reconstruct and errors rather than silently closing the goal. Trusting the solver is
-  available, but opt-in and `#print axioms`-visible (`crush.trust`).
+- **The SMT verdict can be checked.** lean-auto's SMT backend has no proof
+  reconstruction yet: it either produces no proof or, with `auto.smt.trust`, closes the
+  goal with the `autoSMTSorry` axiom. lean-crush turns an `unsat` into a kernel-checked
+  Lean proof by either of two routes:
+  - **Alethe certificate replay** — walks cvc5's proof step by step, restating each
+    inference as a Lean proposition and proving it.
+  - **Unsat-core reconstruction** — takes the hypotheses the core names and re-proves the
+    goal from just those with a Lean finisher. Needs no certificate, so it works with any
+    backend.
+
+  Under `crush.trust "reconstruct"` a goal that neither route closes is an error.
 
 ## How it works
 
-The `crush` tactic collects the hypotheses and negated goal, translates them to SMT,
-runs the backend under a hard wall-clock timeout, and — by default — **reconstructs a
-kernel-checked Lean proof** from the unsat core rather than trusting the solver. The
-default `crush.trust` policy is `reconstruct`, which never uses a trust axiom: a goal
-the finishers cannot replay is an error, so a translation bug that yielded a false
-`unsat` cannot silently close a false goal.
+The `crush` tactic collects the hypotheses and negated goal, translates them to SMT, and
+runs the backend under a hard wall-clock timeout. `crush.trust` then decides how the goal
+closes: the default `"trust"` takes the solver's word and records it as the `crushSorry`
+axiom, which `#print axioms` reports; `"reconstruct"` demands a kernel-checked proof and
+errors if it cannot build one. `crush.reconstruct` selects the route — `alethe`, `core`, or
+`auto` (the default), which tries the certificate then the finishers.
 
-It covers first-order logic; the `Nat`/`Int`/`BitVec`/`String` theories; datatypes,
+The tactic covers first-order logic; the `Nat`/`Int`/`BitVec`/`String` theories; datatypes,
 including fully-applied parametric ones (`Option Int` becomes a real SMT datatype); and
 higher-order goals via defunctionalization or native HO on cvc5. A hint grammar
 (`crush [lemmas] u[…] d[…]`) points the tactic at lemmas outside the local context,
 `@[crush_unfold]` folds a definition's equations into every query, and monomorphization
 specializes a polymorphic lemma to the types a query mentions — what lets a bare
 `List.append_assoc`, or the TIP list theorems (`rev (rev x) = x` among them), be proved
-over an arbitrary element type. The backend, hard timeout, trust policy, and HO strategy
-are `set_option`s (`crush.backend`, `crush.timeout`, `crush.trust`, `crush.ho.mode`).
+over an arbitrary element type. Everything is a `set_option`: `crush.backend`,
+`crush.timeout`, `crush.trust`, `crush.reconstruct`, `crush.ho.mode`.
 
 **Case studies** ([`Test/CaseStudies/`](Test/CaseStudies/)) run `crush` on external
 corpora: lean-auto's harder test suite, representative Loom/Velvet/Cashmere verification
@@ -55,7 +56,8 @@ conditions, and mathlib-scale goals (nonlinear arithmetic, real mathlib datatype
 ## Requirements
 
 - Lean toolchain as pinned in [`lean-toolchain`](lean-toolchain).
-- At least one SMT solver on `PATH`: `z3` (≥ 4.12.2), `cvc5`, or `bitwuzla`.
+- At least one SMT solver on `PATH`: `z3` (≥ 4.12.2), `cvc5` (≥ 1.3, older versions
+  gate Alethe proof output behind an experimental flag), or `bitwuzla`.
 
 ## Quick taste
 

@@ -30,6 +30,9 @@ false goals are still rejected.
 open Crush
 
 set_option crush.timeout 10
+-- Ask for reconstruction rather than the shipped `trust` default, so the `#print axioms`
+-- pins below actually witness kernel-checked proofs.
+set_option crush.trust "reconstruct"
 
 /-! ## A polymorphic function, at a ground goal
 
@@ -112,7 +115,10 @@ theorem prop_10_rev_rev {α : Type} (x : List α) : M.rev (M.rev x) = x := by
   | nil => crush
   | cons a as ih => crush [ih, rev_append (M.rev as) [a]]
 
--- Genuinely kernel-checked: no `crushSorry`, over a polymorphic element type.
+-- Genuinely kernel-checked over a polymorphic element type. The shipped default is
+-- `crush.trust "trust"`, which would close these on the solver's word, so the
+-- reconstructing policy is requested for the section above (see the `set_option` at the
+-- top) to make this pin meaningful.
 /-- info: 'prop_10_rev_rev' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms prop_10_rev_rev

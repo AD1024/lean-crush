@@ -30,11 +30,10 @@ automated tactics degrade badly as the hypothesis count grows, and irrelevant
 arithmetic facts are exactly what makes them time out. Core-directed selection
 turns a 40-hypothesis goal into a 3-hypothesis goal.
 
-The alternative — parsing the solver's own proof object (Alethe for cvc5, the
-`(proof …)` term z3 emits) and replaying it inference by inference — gives a
-stronger guarantee, since it does not depend on a Lean tactic being able to
-re-find the argument. It is also far more work and is solver-specific. This is the
-cheaper 80% and is a strict improvement on trusting.
+This is the general path, tried for every backend. It does depend on a Lean tactic
+re-finding the argument, which fails for long inference chains; when cvc5 supplies an
+Alethe certificate, `Crush/Solver/AletheReplay.lean` runs first and replays the chain
+step by step instead. Both end in a kernel-checked term, so they differ only in reach.
 -/
 
 namespace Crush

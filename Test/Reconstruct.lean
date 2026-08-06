@@ -178,31 +178,39 @@ theorem trusted (x y : Int) (h1 : x = y) (h2 : y = 3) : x = 3 := by crush
 
 end Trust
 
-/-! ## The default policy is `reconstruct`
+/-! ## The default policy is `trust`
 
-No `set_option crush.trust` in scope here: `crush` runs under its shipped default.
-That default is `reconstruct`, **not** `reconstructOrTrust` — so a goal the finishers
-cannot replay is an *error*, and the `crushSorry` axiom is never reached on the
-default path. This is the soundness stance: a translation bug that produced a false
-`unsat` would fail reconstruction and surface as an error, rather than silently
-closing a false goal with the axiom.
+No `set_option crush.trust` in scope here: `crush` runs under its shipped default, which
+is `trust`. The goal closes on the solver's word, and `#print axioms` names `crushSorry` —
+the point of routing trust through an auditable axiom rather than `sorry` is that this is
+always visible. Reconstruction is opt-in, per the sections above.
 
-A reconstructable goal still closes with a kernel-checked, axiom-free proof under the
-default; the non-reconstructable one errors. -/
+Pinned both ways: a goal the finishers *could* have reconstructed still closes via the
+axiom under the default (no reconstruction is attempted), and so does one they could
+not. -/
 
 section DefaultPolicy
 
--- Closes with a real proof under the default — no `crushSorry`.
-theorem default_reconstructs (x y : Int) (h1 : x = y) (h2 : y = 3) : x = 3 := by crush
-/-- info: 'default_reconstructs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+-- Reconstructable, but not reconstructed: the default does not try.
+theorem default_trusts (x y : Int) (h1 : x = y) (h2 : y = 3) : x = 3 := by crush
+/-- info: 'default_trusts' depends on axioms: [crushSorry] -/
 #guard_msgs in
-#print axioms default_reconstructs
+#print axioms default_trusts
 
--- The nonlinear goal that `reconstructOrTrust` closes with the axiom is, under the
--- default, an error instead. Pins that the default does not fall back to trust.
+-- The nonlinear goal no finisher can replay: under `reconstruct` this is an error, under
+-- the default it closes on trust.
+theorem default_trusts_nonlinear (x : Int) (h : x * x = 4) (h2 : x > 0) : x = 2 := by
+  crush
+/-- info: 'default_trusts_nonlinear' depends on axioms: [crushSorry] -/
+#guard_msgs in
+#print axioms default_trusts_nonlinear
+
+-- Asking for `reconstruct` on that same goal errors rather than falling back, so the
+-- stricter policy is still available and still strict.
 /-- error: crush: solver reported `unsat`, but reconstruction failed -/
 #guard_msgs(error, substring := true) in
-theorem default_errors_not_trusts (x : Int) (h : x * x = 4) (h2 : x > 0) : x = 2 := by
+set_option crush.trust "reconstruct" in
+theorem reconstruct_errors_not_trusts (x : Int) (h : x * x = 4) (h2 : x > 0) : x = 2 := by
   crush
 
 end DefaultPolicy

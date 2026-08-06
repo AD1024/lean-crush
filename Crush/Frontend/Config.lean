@@ -36,10 +36,10 @@ instance : KVMap.Value Backend where
 
 /-- How to treat a solver `unsat` result. -/
 inductive TrustMode where
-  /-- Close the goal with the `crushSorry` axiom (fast, unsound-by-trust). -/
+  /-- Close the goal with the `crushSorry` axiom (fast, unsound-by-trust). The default. -/
   | trust
   /-- Attempt to reconstruct a checkable Lean proof; error if reconstruction fails,
-  so the `crushSorry` axiom is never used. The default. -/
+  so the `crushSorry` axiom is never used. -/
   | reconstruct
   /-- Reconstruct if possible, else fall back to trust with a warning. -/
   | reconstructOrTrust
@@ -55,6 +55,37 @@ instance : KVMap.Value TrustMode where
   ofDataValue?
     | "trust" => some .trust | "reconstruct" => some .reconstruct
     | "reconstructOrTrust" => some .reconstructOrTrust
+    | _ => none
+
+/-- Which reconstruction path(s) to use under a reconstructing `TrustMode`.
+
+There are two independent ways to turn an `unsat` into a Lean proof, with different
+reach, so this selects between them:
+
+* replaying the solver's proof certificate step by step (`Crush/Solver/AletheReplay.lean`),
+  which needs cvc5 and handles long inference chains;
+* the core-directed finisher ladder (`Crush/Solver/Reconstruct.lean`), which works with any
+  backend but needs one Lean tactic to re-find the whole argument. -/
+inductive ReconstructMode where
+  /-- Try Alethe certificate replay first, then the finisher ladder. The default: replay
+  reaches goals the ladder cannot, and declining is cheap, so trying both closes the most. -/
+  | auto
+  /-- Alethe certificate replay only; do not fall back to the ladder. For working on replay
+  itself, where a silent fallback would mask whether replay actually succeeded. -/
+  | alethe
+  /-- Core-directed finisher ladder only; ignore any certificate. Also what a backend
+  that emits no Alethe proof (z3) effectively gets. -/
+  | core
+  deriving BEq, Hashable, Inhabited, Repr
+
+instance : ToString ReconstructMode where
+  toString
+    | .auto => "auto" | .alethe => "alethe" | .core => "core"
+
+instance : KVMap.Value ReconstructMode where
+  toDataValue m := toString m
+  ofDataValue?
+    | "auto" => some .auto | "alethe" => some .alethe | "core" => some .core
     | _ => none
 
 /-- Strategy for eliminating higher-order features before hitting first-order SMT. -/
@@ -95,12 +126,14 @@ register_option crush.timeout : Nat := {
 }
 
 register_option crush.trust : TrustMode := {
-  defValue := TrustMode.reconstruct
-  descr := "How to discharge the goal on `unsat`: trust, reconstruct (default), or \
-            reconstructOrTrust. The default never uses the `crushSorry` axiom — a goal \
-            the finishers cannot replay is an error, so a translation bug that yields a \
-            false `unsat` cannot silently close a false goal. Opt into the axiom fallback \
-            with `reconstructOrTrust`, or skip reconstruction entirely with `trust`."
+  defValue := TrustMode.trust
+  descr := "How to discharge the goal on `unsat`: trust (default), reconstruct, or \
+            reconstructOrTrust. The default closes the goal with the `crushSorry` axiom, \
+            trusting the solver and the translation, which is what every deployed hammer \
+            does and is the fastest path. Set `reconstruct` to demand a kernel-checked \
+            proof and error if none is found (so no axiom is ever used), or \
+            `reconstructOrTrust` to try that first and fall back with a warning. Any \
+            theorem closed under `trust` names `crushSorry` in `#print axioms`."
 }
 
 register_option crush.ho.mode : HOMode := {
@@ -153,14 +186,18 @@ register_option crush.autoUnfold : Bool := {
             definitions reachable from the goal into each query (like always-on u[…]/d[…])."
 }
 
-register_option crush.proofReplay : Bool := {
-  defValue := true
-  descr := "Under a reconstructing policy, try replaying the solver's proof certificate \
-            (cvc5 Alethe) step by step before falling back to the core-directed finisher \
-            ladder. Each step is proved by a Lean tactic and checked by the kernel, so a \
-            step that cannot be replayed makes replay decline — it never closes a goal on \
-            the solver's word. Costs a parse plus one small tactic call per step when a \
-            proof is available; no effect on z3, which emits no Alethe proof."
+register_option crush.reconstruct : ReconstructMode := {
+  defValue := ReconstructMode.auto
+  descr := "Which reconstruction path to use when `crush.trust` asks for one: auto \
+            (default — try the Alethe certificate, then the finisher ladder), alethe \
+            (cvc5 Alethe certificate only, no ladder fallback), or core (finisher ladder \
+            only, ignoring any certificate). Both paths end in a kernel-checked term and \
+            neither can close a goal on the solver's word; they differ in reach. Alethe \
+            replay handles long chains of trivial inferences (Boolean pigeonhole, deep EUF \
+            conflicts) but needs cvc5 ≥ 1.3; the ladder needs one Lean tactic to re-find \
+            the whole argument but works with any backend. Under `alethe`, a goal whose \
+            certificate cannot be replayed fails rather than falling back — useful when \
+            working on replay itself, where a silent fallback hides whether it worked."
 }
 
 register_option crush.profile : Bool := {
@@ -175,7 +212,7 @@ namespace Crush
 structure Config where
   backend        : Backend   := .z3
   timeout        : Nat       := 10
-  trust          : TrustMode := .reconstruct
+  trust          : TrustMode := .trust
   hoMode         : HOMode    := .defunctionalize
   monoFuel       : Nat       := 512
   monoRounds     : Nat       := 8
@@ -185,7 +222,7 @@ structure Config where
   logic          : Option String := none
   traceScript    : Bool      := false
   autoUnfold     : Bool      := true
-  proofReplay    : Bool      := true
+  reconstruct    : ReconstructMode := .auto
   profile        : Bool      := false
   deriving Inhabited
 
@@ -208,7 +245,7 @@ def Config.ofOptions (opts : Options) : Config :=
     logic          := if logicStr.isEmpty then none else some logicStr
     traceScript    := crush.trace.script.get opts
     autoUnfold     := crush.autoUnfold.get opts
-    proofReplay    := crush.proofReplay.get opts
+    reconstruct    := crush.reconstruct.get opts
     profile        := crush.profile.get opts }
 
 end Crush

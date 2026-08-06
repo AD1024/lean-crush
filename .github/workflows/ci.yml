@@ -41,11 +41,15 @@ jobs:
           z3 --version
 
       # cvc5 is needed for the `native` higher-order mode, which gates on it (z3
-      # ignores the `HO_` logic prefix and then fails on the function sorts).
+      # ignores the `HO_` logic prefix and then fails on the function sorts), and for
+      # Alethe proof replay. The version floor is 1.3.x: 1.2.0 rejects
+      # `--proof-format-mode=alethe` as experimental, and forcing it through with
+      # `--proof-alethe-experimental` emits malformed Alethe (clauses printed as bare
+      # integers), so replay must decline. See `Crush/Solver/Process.lean`.
       - name: Install cvc5
         run: |
           set -euo pipefail
-          CVC5_VERSION=1.2.0
+          CVC5_VERSION=1.3.4
           curl -sSfL -o cvc5.zip \
             "https://github.com/cvc5/cvc5/releases/download/cvc5-${CVC5_VERSION}/cvc5-Linux-x86_64-static.zip"
           unzip -q cvc5.zip

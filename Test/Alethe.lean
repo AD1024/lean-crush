@@ -1,10 +1,10 @@
 import Crush.Solver.Alethe
 
 /-!
-Tests for the Alethe proof parser (`Crush/Solver/Alethe.lean`), the foundation of M4
-(cvc5 proof replay). The parser turns cvc5's `--dump-proofs --proof-format-mode=alethe`
-output into a structured `AletheProof`; it decides nothing, so it is sound on its own,
-and these tests pin that it reads real cvc5 output correctly.
+Tests for the Alethe proof parser (`Crush/Solver/Alethe.lean`), which feeds the replay
+pass in `Test/AletheReplay.lean`. The parser turns cvc5's `--dump-proofs
+--proof-format-mode=alethe` output into a structured `AletheProof`; it decides nothing,
+so it is sound on its own, and these tests pin that it reads real cvc5 output correctly.
 
 The fixtures are **verbatim cvc5 1.x output** (from `--proof-granularity=dsl-rewrite`),
 not hand-written, so they exercise the exact surface syntax we must handle: `:named`
