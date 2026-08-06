@@ -61,13 +61,32 @@ jobs:
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
       # Keyed on the toolchain and manifest: a toolchain bump or dependency change
-      # must not silently reuse stale artifacts.
+      # must not silently reuse stale artifacts. Mathlib's own oleans (~6.6 GB) are
+      # deliberately *excluded* — they come from `lake exe cache get` below, which is a
+      # fast CDN download, and caching them here would blow the 10 GB Actions cache cap
+      # and thrash. We cache only our build products and the lighter deps.
       - name: Cache build artifacts
         uses: actions/cache@v4
         with:
-          path: .lake
+          path: |
+            .lake/build
+            .lake/packages/batteries
+            .lake/packages/aesop
+            .lake/packages/Qq
+            .lake/packages/importGraph
+            .lake/packages/proofwidgets
+            .lake/packages/LeanSearchClient
+            .lake/packages/plausible
+            .lake/packages/Cli
           key: lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lake-manifest.json') }}
           restore-keys: lake-${{ runner.os }}-
+
+      # `Test/CaseStudies/Mathlib.lean` depends on Mathlib (pinned at our toolchain's
+      # tag). Without this, `lake build Test` would compile all ~2500 Mathlib modules
+      # from source and blow past the job timeout. `cache get` clones the dependencies
+      # (per the committed manifest) and downloads Mathlib's prebuilt oleans instead.
+      - name: Download Mathlib cache
+        run: lake exe cache get
 
       - name: Build library
         run: lake build
