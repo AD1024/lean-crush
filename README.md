@@ -158,6 +158,23 @@ def mySuccHandler : Crush.TranslationHandler := fun ctx => do
   | _    => return none
 ```
 
+## Limitations
+
+- **No induction.** A goal needing a hypothesis about all smaller values times out. Drive the
+  `induction` yourself and let `crush` close each case — that is the intended workflow.
+- **Not every function translates.** Arithmetic, `Bool`, `String`, `BitVec`, and your own
+  inductive types do; many library operations (`|·|`, `_ ∣ _`, `Finset.card`, bundled
+  `Monotone`) do not, and an untranslated one becomes uninterpreted — so the solver reports a
+  *counterexample*, not an error. Unbundling or a custom handler (above) works around it.
+- **A goal is only as strong as its premises.** A missing premise makes the query unprovable,
+  which surfaces as a *timeout* — so check the goal actually follows before blaming the solver.
+- **Reconstruction is narrower than solving.** Under `crush.trust "reconstruct"`, some goals
+  the solver proves cannot be replayed as a Lean proof (nonlinear arithmetic, datatype
+  pigeonhole) and `crush` fails; `"reconstructOrTrust"` falls back to the axiom with a warning.
+- **Rough edges.** Indirectly recursive datatypes (`Rose` with a `List Rose` field) become an
+  opaque sort; `crush.ho.mode combinators` is unimplemented and warns; Alethe replay needs
+  cvc5 ≥ 1.3.
+
 ## Relation to lean-auto
 
 lean-crush is a from-scratch redesign in the spirit of

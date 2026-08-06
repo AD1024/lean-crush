@@ -108,23 +108,18 @@ def finisherTactics : CoreM (Array (TSyntax `tactic)) := do
 
 /-! ## The case-split pre-pass
 
-Some `unsat` verdicts turn on a *constructor case analysis* of a variable: datatype
-exhaustiveness (`t = .leaf ∨ ∃ l v r, t = .node l v r`) and recovering a structure equality
-from its fields (`p.x = q.x → p.y = q.y → p = q`, which is eta for structures). The solver
-gets these from the `declare-datatypes` constructor set; no rung of the ladder does, because
-each rung is a *fixed* tactic string and the split it needs is `cases t` — naming a variable
-the string cannot know.
+Some verdicts turn on a *constructor case analysis*: datatype exhaustiveness
+(`t = .leaf ∨ ∃ l v r, t = .node l v r`) and structure eta
+(`p.x = q.x → p.y = q.y → p = q`). No rung reaches these, because the step they need is
+`cases t` — naming a variable a *fixed* tactic string cannot know.
 
-Hence a programmatic pass: find the goal's datatype variables, `cases` them, and run the
-ordinary ladder on each branch. This is a pure extension — it runs only after every rung has
-already failed, so it can add closures but never take one away. -/
+Hence a programmatic pass: split the goal's datatype variables, then run the ordinary ladder
+per branch. It runs only after every rung has failed, so it can add closures but never take
+one away. -/
 
-/-- A local hypothesis worth case-splitting: its type is a datatype with constructors, and
-it actually occurs in the goal.
-
-Theory sorts are excluded: `Nat`'s constructors would trigger an induction-shaped split that
-`omega` already handles better, and `Int`/`Bool`/`String` are handled by the solver's
-theories rather than structurally. -/
+/-- A local hypothesis worth case-splitting: a datatype with constructors, occurring in the
+goal. Theory sorts are excluded — `Nat`'s constructors would trigger an induction-shaped
+split `omega` handles better, and `Int`/`Bool`/`String` are the solver's theories. -/
 private def firstSplittable (g : MVarId) : MetaM (Option FVarId) := g.withContext do
   let target ← instantiateMVars (← g.getType)
   for d in ← getLCtx do
@@ -141,13 +136,13 @@ private def firstSplittable (g : MVarId) : MetaM (Option FVarId) := g.withContex
 
 /-- Case-split every goal's datatype variables, up to `fuel` rounds.
 
-`fuel` is what bounds this: splitting a *recursive* datatype exposes fields of the same type
-(`cases t` on a `Tree` leaves `l r : Tree`), so an unbounded loop would descend forever.
-Two rounds reach the shapes we are after — one for exhaustiveness, two for a structure
-equality with a variable on each side — while keeping the branch count small. -/
+`fuel` is the termination argument: splitting a *recursive* datatype exposes fields of the
+same type (`cases` on a `Tree` leaves `l r : Tree`), so an unbounded loop would descend
+forever. Two rounds cover the target shapes — one for exhaustiveness, two for a structure
+equality with a variable on each side. -/
 private partial def splitRounds (gs : List MVarId) (fuel : Nat) : MetaM (List MVarId) := do
   if fuel == 0 then return gs
-  -- A cap on total branches, so a context with many datatype variables cannot explode.
+  -- Branch cap, so a context with many datatype variables cannot explode.
   if gs.length > 16 then return gs
   let mut out : List MVarId := []
   let mut progress := false
@@ -162,8 +157,8 @@ private partial def splitRounds (gs : List MVarId) (fuel : Nat) : MetaM (List MV
       catch _ => out := out ++ [g]
   if progress then splitRounds out (fuel - 1) else return out
 
-/-- Close every goal in `gs`, each with the first finisher that works on it. All must
-close, else the whole attempt is abandoned. -/
+/-- Close every goal in `gs` with the first finisher that works on it. All must close, else
+the attempt is abandoned. -/
 private def finishAll (gs : List MVarId) (finishers : Array (TSyntax `tactic)) :
     TacticM Bool := do
   for g in gs do
@@ -218,9 +213,8 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
         restoreState saved
       catch _ =>
         restoreState saved
-    -- Last resort: introduce the hypotheses, case-split the datatype variables, and try the
-    -- ladder on each branch. Runs only here, once every rung has failed on the goal as
-    -- given, so it strictly adds reach. See "The case-split pre-pass" above.
+    -- Last resort: intro the hypotheses, case-split the datatype variables, run the ladder
+    -- per branch. Only reached once every rung has failed, so it strictly adds reach.
     let saved ← saveState
     try
       let mv ← mkFreshExprMVar target

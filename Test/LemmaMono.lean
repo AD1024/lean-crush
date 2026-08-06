@@ -123,6 +123,22 @@ theorem prop_10_rev_rev {α : Type} (x : List α) : M.rev (M.rev x) = x := by
 #guard_msgs in
 #print axioms prop_10_rev_rev
 
+/-- `rev³ = rev`, proved **without** the involution `rev (rev x) = x` — the same
+`rev_append` hint suffices, since the `cons` step is the same shape of rewrite:
+`rev (app (rev as) [a])` becomes `a :: rev (rev as)`, unfolding `rev` gives
+`app (rev³ as) [a]`, and the hypothesis finishes it.
+
+The hint is *required*: `crush [ih]` alone times out, having no way to distribute `rev`
+over `app`. -/
+theorem rev_three {α : Type} (x : List α) : M.rev (M.rev (M.rev x)) = M.rev x := by
+  induction x with
+  | nil => crush
+  | cons a as ih => crush [ih, rev_append (M.rev as) [a]]
+
+/-- info: 'rev_three' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms rev_three
+
 /-! ## Soundness: instantiation must not prove anything false
 
 Instantiation weakens, so these must all still be rejected. `unknown` is also a
