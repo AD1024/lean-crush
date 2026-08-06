@@ -292,6 +292,47 @@ def isNonCanonicalOverload (e : Expr) : TranslateM Bool := do
   let some i := instIdx | return false
   return !(← hasCanonicalInstance e i)
 
+/-- The carrier type parameters of an overloaded operation that the structural
+translator maps to the SMT integer theory.
+
+Keeping this list in one place is deliberate: recognizing an operator head and a
+canonical instance is not enough to select a theory. A canonical `LT α` for an
+opaque `α`, for example, is still an uninterpreted relation rather than SMT's
+integer `<`. -/
+def integerOverloadCarriers? (e : Expr) : Option (Array Expr) :=
+  match e.getAppFn with
+  | .const fname _ =>
+    let args := e.getAppArgs
+    if fname == ``HAdd.hAdd || fname == ``HMul.hMul || fname == ``HSub.hSub
+        || fname == ``HDiv.hDiv || fname == ``HMod.hMod then
+      if args.size >= 3 then some (args.extract 0 3) else none
+    else if fname == ``LE.le || fname == ``LT.lt || fname == ``GE.ge
+        || fname == ``GT.gt || fname == ``Neg.neg || fname == ``Max.max
+        || fname == ``Min.min then
+      match args[0]? with
+      | some carrier => some #[carrier]
+      | none => none
+    else
+      none
+  | _ => none
+
+/-- Whether every carrier in an overloaded operation is the same supported SMT
+integer carrier (`Nat` or `Int`).
+
+Heterogeneous classes expose three carrier parameters. Requiring all three to
+agree prevents a canonical mixed-carrier instance from being silently encoded as
+ordinary integer arithmetic without an explicit coercion semantics. -/
+def isHomogeneousIntegerCarrier (carriers : Array Expr) : TranslateM Bool := do
+  let some first := carriers[0]? | return false
+  let first ← whnf first
+  unless first.isConstOf ``Nat || first.isConstOf ``Int do return false
+  let firstIsNat := first.isConstOf ``Nat
+  for carrier in carriers.extract 1 carriers.size do
+    let carrier ← whnf carrier
+    unless (if firstIsNat then carrier.isConstOf ``Nat else carrier.isConstOf ``Int) do
+      return false
+  return true
+
 /-- The `declare` callback exposed to handlers: emit commands from a thunk once
 per key, returning a stable symbol. -/
 partial def declareViaThunk (key hint : String)
@@ -795,9 +836,10 @@ mutual
       -- Default: uninterpreted function/atom applied to translated args.
       defaultApp fn args
 
-  /-- Higher-order forms: λ-abstractions, applications of function-*valued* terms,
-  and equations between function-typed terms. Returns `none` for anything the
-  first-order path should handle.
+  /-- Higher-order forms: λ-abstractions, partial applications, applications whose
+  head is a function *value*, and equations between function-typed terms. Returns
+  `none` for fully-applied first-order constants and free function symbols, which
+  the ordinary declaration path handles directly.
 
   This is the entry point for the encoding described in `HOEncoding.lean`, and the
   fix for the false-`unsat` that arose when a function-typed bound variable was
@@ -809,7 +851,12 @@ mutual
       if mode == .native then
         return some (← emitNativeLambda e)
       return some (← emitClosure e)
-    -- (2) An application whose head is a function-typed *bound variable* must route
+    -- (2) Any expression whose result is still a function is a function *value*.
+    -- Materialize it now so a later use cannot declare the partial application as
+    -- an unrelated first-order symbol.
+    if (← whnf (← inferType e)).isArrow then
+      return some (← emitFunValue e)
+    -- (3) An application whose head is a function-typed *bound variable* must route
     -- through that arrow sort's `app` symbol. Emitting `(f x)` directly would
     -- declare `f` as a fresh function unrelated to the quantified variable.
     let fn := e.getAppFn
@@ -836,7 +883,23 @@ mutual
         if mode == .native then
           return some (.app (.symb vname) sargs)
         return some (.app (.symb appSym) (#[.const vname] ++ sargs))
-    -- (3) An equation between function-typed terms needs extensionality to be
+    -- (4) A non-symbol head (`(if c then f else g) x`, a projection, a let, ...)
+    -- is itself a value of an arrow sort. Apply that value through the arrow sort's
+    -- `app` symbol rather than inventing a first-order declaration for its syntax.
+    unless args.isEmpty do
+      unless fn.isConst || fn.isFVar do
+        if let some shape ← arrowShape? (← inferType fn) then
+          if args.size == shape.args.size then
+            let sfn ← emitFunValue fn
+            let sargs ← args.mapM emitTerm
+            if mode == .native then
+              -- SMT-LIB application syntax requires an identifier in head position.
+              -- A local `let` gives an arbitrary function value such a name.
+              let name ← TranslateM.freshSymbol "hof"
+              return some (.letE #[(name, sfn)] (.app (.symb name) sargs))
+            let (_, appSym) ← declareArrowSort (← inferType fn)
+            return some (.app (.symb appSym) (#[sfn] ++ sargs))
+    -- (5) An equation between function-typed terms needs extensionality to be
     -- provable, and needs both sides encoded as `Fn` values rather than symbols.
     match_expr e with
     | Eq ty a b =>
@@ -868,6 +931,26 @@ mutual
     if let .fvar fid := e then
       if let some vname ← TranslateM.boundVar? fid then
         return .const vname
+    -- Function-valued conditionals are values in the arrow sort just like scalar
+    -- conditionals. Handling them directly is what makes
+    -- `(if c then f else g) x` terminate instead of recursively η-expanding the
+    -- same head while constructing its closure axiom.
+    match_expr e with
+    | ite _ c _ a b =>
+      return (smt| (ite $(← emitTerm c) $(← emitFunValue a) $(← emitFunValue b)))
+    | cond _ c a b =>
+      return (smt| (ite $(← emitTerm c) $(← emitFunValue a) $(← emitFunValue b)))
+    | _ => pure ()
+    -- Let-bound function expressions reduce without losing semantics. Do this
+    -- narrowly for a syntactic let rather than unfolding arbitrary definitions.
+    if e.isLet then
+      let reduced ← whnf e
+      if reduced != e then return ← emitFunValue reduced
+    -- A function-valued projection/atom can directly inhabit the arrow sort.
+    -- Applications of the same expression will route through `app`, preserving
+    -- identity without pretending the value is a first-order function symbol.
+    if e.isProj then
+      return ← defaultApp e #[]
     -- A function constant/fvar used as a value: η-expand it so it inhabits the
     -- function sort. `f` becomes `fun x => f x` — a closure (encoded modes) or a
     -- native `lambda`.
@@ -947,6 +1030,12 @@ mutual
     match ← stringTerm? e with
     | some t => return some t
     | none =>
+    -- Only `Nat` and `Int` inhabit the SMT integer theory. Canonical overloaded
+    -- instances on every other carrier remain ordinary Lean functions and must
+    -- fall through to `defaultApp`; emitting `+`, `<`, `max`, etc. for an opaque
+    -- sort produces an ill-sorted SMT script.
+    if let some carriers := integerOverloadCarriers? e then
+      unless ← isHomogeneousIntegerCarrier carriers do return none
     -- Numeric literals: `@OfNat.ofNat _ n _` and negation.
     match_expr e with
     | OfNat.ofNat _ _ _ =>
@@ -1339,19 +1428,22 @@ mutual
       -- Drop the argument when it *is* a type (`α : Type`) or a proof (`h : p`).
       if (← isProp ty) then return false
       return !(← whnf ty).isSort
-    -- The symbol is keyed on the head *together with its dropped arguments*, so
-    -- distinct instantiations of a polymorphic constant get distinct symbols
-    -- rather than being conflated into one ill-sorted declaration.
-    let dropped := args.size - valueArgs.size
-    let key ←
-      if dropped == 0 then
-        pure s!"{toString (← ppExpr fn)}"
-      else
-        let tyKeys ← args.filterMapM fun a => do
-          let ty ← inferType a
-          if (← isProp ty) then return none
-          if (← whnf ty).isSort then return some (toString (← ppExpr a)) else return none
-        pure s!"{toString (← ppExpr fn)}@{String.intercalate "," tyKeys.toList}"
+    let appExpr := mkAppN fn args
+    let resTy ← whnf (← inferType appExpr)
+    -- Key declarations by the complete instantiated signature, not just dropped
+    -- type arguments. A polymorphic projection such as `Bind.toBind` may have no
+    -- ordinary type argument while still being instantiated at different
+    -- function-valued carriers. Reusing its first declaration then emits calls
+    -- with incompatible `Fn` sorts (`unknown constant ... (Fn ...)` in z3).
+    let droppedKeys ← args.filterMapM fun a => do
+      let ty ← inferType a
+      if (← isProp ty) then return none
+      if (← whnf ty).isSort then return some (toString (← ppExpr a)) else return none
+    let argTypeKeys ← valueArgs.mapM fun a => do
+      pure (toString (← ppExpr (← whnf (← inferType a))))
+    let resultTypeKey := toString (← ppExpr resTy)
+    let key := s!"{toString (← ppExpr fn)}@types[{String.intercalate "," droppedKeys.toList}]\
+      :({String.intercalate "," argTypeKeys.toList})->{resultTypeKey}"
     let hint ← headHint fn
     let name ← TranslateM.symbolFor key hint
     -- Record the symbol → Lean-head correspondence for proof replay. Applications are
@@ -1360,8 +1452,6 @@ mutual
     TranslateM.recordSymbolExpr name fn
     if !(← declaredFun name) then
       let argSorts ← valueArgs.mapM (fun a => do emitSort (← inferType a))
-      let appExpr := mkAppN fn args
-      let resTy ← whnf (← inferType appExpr)
       let resSort ← emitSort resTy
       TranslateM.emitCommand (.declFun name argSorts resSort)
       markFunDeclared name

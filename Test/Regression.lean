@@ -138,6 +138,49 @@ theorem nat_lit_eq : nat_lit 2 = 2 := by crush
 theorem nat_maxmin : max 3 4 = 4 ∧ min 1 2 = 1 := by crush
 theorem int_maxmin : max (-3 : Int) 4 = 4 ∧ min 1 (-2 : Int) = -2 := by crush
 
+/-! ### Type-directed overloaded operators
+
+A canonical typeclass instance does not imply an SMT theory carrier. Every
+operation below is canonical for `OpaqueArithmetic`, but must remain an
+uninterpreted function/relation over that datatype rather than being emitted as
+integer syntax. Equality congruence proves the goal without knowing the
+operations' definitions. -/
+
+private structure OpaqueArithmetic where
+  value : Int
+
+private instance : Add OpaqueArithmetic := ⟨fun a b => ⟨a.value + b.value⟩⟩
+private instance : Sub OpaqueArithmetic := ⟨fun a b => ⟨a.value - b.value⟩⟩
+private instance : Mul OpaqueArithmetic := ⟨fun a b => ⟨a.value * b.value⟩⟩
+private instance : Div OpaqueArithmetic := ⟨fun a _ => a⟩
+private instance : Mod OpaqueArithmetic := ⟨fun _ b => b⟩
+private instance : Neg OpaqueArithmetic := ⟨fun a => ⟨-a.value⟩⟩
+private instance : LT OpaqueArithmetic := ⟨fun a b => a.value < b.value⟩
+private instance : LE OpaqueArithmetic := ⟨fun a b => a.value ≤ b.value⟩
+private instance : Max OpaqueArithmetic := ⟨fun a _ => a⟩
+private instance : Min OpaqueArithmetic := ⟨fun _ b => b⟩
+
+set_option crush.trust "reconstruct" in
+theorem generic_lt_substitution {alpha} [LT alpha] {x y : alpha}
+    (hxy : x < y) (heq : x = y) (hirr : ¬y < y) : False := by
+  crush
+
+set_option crush.trust "reconstruct" in
+theorem opaque_overloads_are_uninterpreted (a b c : OpaqueArithmetic) (h : a = b) :
+    a + c = b + c ∧
+    a - c = b - c ∧
+    a * c = b * c ∧
+    a / c = b / c ∧
+    a % c = b % c ∧
+    -a = -b ∧
+    (a < c ↔ b < c) ∧
+    (a ≤ c ↔ b ≤ c) ∧
+    (a > c ↔ b > c) ∧
+    (a ≥ c ↔ b ≥ c) ∧
+    max a c = max b c ∧
+    min a c = min b c := by
+  crush
+
 -- The `Nat → Int` coercion is the identity here, since `Nat` is already an `Int`
 -- restricted to be non-negative.
 theorem nat_cast_int : (2 : Int) = ((nat_lit 2 : Nat) : Int) := by crush

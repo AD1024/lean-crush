@@ -97,6 +97,61 @@ theorem ho_partial (f : Int → Int → Int) (g : (Int → Int) → Int)
     (h : ∀ (u : Int → Int), g u = u 0) (hf : ∀ x y, f x y = x + y) :
     g (f 1) = 1 := by crush
 
+/-! ## Non-symbol function heads
+
+The selected function is an `ite` term, not a constant or free variable. It must
+be emitted as an arrow-sort value and invoked through `app`; declaring the whole
+head syntax as a fresh first-order function disconnects it from `f` and `g`. -/
+
+theorem ho_conditional_head (p : Prop) [Decidable p] (f g : Int → Int)
+    (x y : Int) (h : x = y) :
+    (if p then f else g) x = (if p then f else g) y := by
+  crush
+
+/-! ## Parametric `Except.bind` translation
+
+This is Cedar's `bind_ne_error` shape. The supplied polymorphic equations produce
+several `Bind.toBind` instantiations with different function-valued carriers.
+Query-directed monomorphization keeps that set finite, so the default
+defunctionalized backend now solves the theorem directly under reconstruction. -/
+
+universe u w
+
+private theorem except_bind_ok {alpha beta : Type u} {epsilon : Type w}
+    (a : alpha) (f : alpha → Except epsilon beta) :
+    (Except.ok a >>= f) = f a := by rfl
+
+private theorem except_bind_err {alpha beta : Type u} {epsilon : Type w}
+    (e : epsilon) (f : alpha → Except epsilon beta) :
+    (Except.error e >>= f) = Except.error e := by rfl
+
+theorem ho_except_bind {alpha beta epsilon}
+    {r : Except epsilon alpha}
+    {f : alpha → Except epsilon beta}
+    {e : epsilon}
+    (hr : r ≠ .error e)
+    (hf : ∀ a, r = .ok a → f a ≠ .error e) :
+    (r >>= f) ≠ .error e := by
+  crush [except_bind_ok, except_bind_err, *]
+
+-- Keep a backend-independent check of the native-HO script as well. The normal
+-- cvc5/native integration tests live in `Test/Cvc5.lean`.
+set_option crush.backend "none" in
+set_option crush.ho.mode "native" in
+theorem native_ho_except_bind_translation {alpha beta epsilon}
+    {r : Except epsilon alpha}
+    {f : alpha → Except epsilon beta}
+    {e : epsilon}
+    (hr : r ≠ .error e)
+    (hf : ∀ a, r = .ok a → f a ≠ .error e) :
+    (r >>= f) ≠ .error e := by
+  crush [except_bind_ok, except_bind_err, *]
+  cases r with
+  | error error =>
+    simpa only [except_bind_err, ne_eq, Except.error.injEq] using hr
+  | ok value =>
+    simpa only [except_bind_ok] using hf value rfl
+
 /-! ## The higher-order proofs are kernel-checked, not trusted
 
 `ho_funext` is the function-equality shape that needs `funext` to reconstruct. Its

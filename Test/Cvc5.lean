@@ -66,6 +66,12 @@ theorem cvc5_ho_id (g : (Int → Int) → Int) (h : ∀ (f : Int → Int), g f =
 theorem cvc5_ho_quant (g : (Int → Int) → Int) (h : ∀ (f : Int → Int), g f = f 0)
     (k : Int → Int) (hk : k 0 = 7) : g k = 7 := by crush
 
+-- Native mode names the arbitrary function-valued `ite` with a local SMT `let`
+-- before applying it.
+theorem cvc5_ho_conditional_head (p : Prop) [Decidable p] (f g : Int → Int)
+    (x y : Int) (h : x = y) :
+    (if p then f else g) x = (if p then f else g) y := by crush
+
 end Native
 
 /-! ## Native HO still rejects false goals

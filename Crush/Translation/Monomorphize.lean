@@ -115,56 +115,300 @@ private def hasInstantiableBinder (ty : Expr) : MetaM Bool := do
   let .forallE _ dom _ _ := ty | return false
   return (← whnf dom).isSort
 
-/-- All specializations of the fact `(proof : ty)` obtained by instantiating its
-leading type binders at `cands`, together with the instance binders that follow.
+private structure AppPattern where
+  head     : Expr
+  argIndex : Nat
+  pattern  : Expr
 
-Peels the leading telescope: a `Sort`-typed binder is instantiated at every
-type-correct candidate (branching), an instance-implicit binder is discharged by
-synthesis, and the first ordinary value binder stops the walk. Returns
-`(proof, type)` pairs; `budget` bounds the number produced so a wide cross product
-cannot run away. -/
-private partial def specializations (proof ty : Expr) (cands : Array Expr)
-    (budget : Nat) : MetaM (Array (Expr × Expr)) := do
+private structure TypeOccurrence where
+  expr    : Expr
+  origins : Array Nat := #[]
+  deriving Inhabited
+
+private structure AppOccurrence where
+  head    : Expr
+  args    : Array Expr
+  origins : Array Nat := #[]
+  deriving Inhabited
+
+private structure PartialSubstitution where
+  values  : Array (Option Expr)
+  origins : Array Nat := #[]
+  deriving Inhabited
+
+private structure DerivedSubstitution where
+  values  : Array Expr
+  origins : Array Nat := #[]
+  deriving Inhabited
+
+/-- Whether `e` contains one of the opened leading type-binder fvars. -/
+private partial def containsBinder (e : Expr) (binders : Array Expr) : Bool :=
+  match e with
+  | .fvar id => binders.any fun binder => binder.fvarId! == id
+  | .app f a => containsBinder f binders || containsBinder a binders
+  | .lam _ ty body _ | .forallE _ ty body _ =>
+    containsBinder ty binders || containsBinder body binders
+  | .letE _ ty value body _ =>
+    containsBinder ty binders || containsBinder value binders
+      || containsBinder body binders
+  | .mdata _ body | .proj _ _ body => containsBinder body binders
+  | _ => false
+
+private def sameHead (a b : Expr) : Bool :=
+  match a, b with
+  | .const an _, .const bn _ => an == bn
+  | .fvar aid, .fvar bid => aid == bid
+  | _, _ => false
+
+/-- Collect informative type patterns and explicit type arguments of applications.
+
+For `Except ε α`, the whole constructor application is retained and its children
+are not added as independent candidates. For `f α x`, the explicit type argument
+is also indexed by `(f, argument-position)`, allowing a query occurrence `f Int a`
+to derive `α := Int` directly. Bare binder patterns are retained only as a fallback
+when no structured/application match constrains that binder. -/
+private partial def collectPatterns (e : Expr) (binders : Array Expr) :
+    MetaM (Array Expr × Array AppPattern) := do
+  let typePatterns ← IO.mkRef (#[] : Array Expr)
+  let appPatterns ← IO.mkRef (#[] : Array AppPattern)
+  let rec go (e : Expr) (typePosition : Bool := false) : MetaM Unit := do
+    -- Binder domains and declared result types are known type positions. Avoid
+    -- asking `inferType`/`whnf` about arbitrary open terms: Lean treats a loose
+    -- value bvar there as a panic rather than a recoverable error.
+    if typePosition && !e.hasLooseBVars && containsBinder e binders && !e.isForall then
+      let patterns ← typePatterns.get
+      unless patterns.contains e do typePatterns.set (patterns.push e)
+      return
+    let fn := e.getAppFn
+    let args := e.getAppArgs
+    unless args.isEmpty do
+      if fn.isConst || fn.isFVar then
+        for i in [0:args.size] do
+          let arg := args[i]!
+          -- Explicit type arguments contain the opened type fvars syntactically.
+          -- Ordinary value arguments do not; `matchPattern` additionally requires
+          -- any binder target to be a ground type before accepting the evidence.
+          if !arg.hasLooseBVars && containsBinder arg binders then
+            let patterns ← appPatterns.get
+            unless patterns.any (fun p =>
+                sameHead p.head fn && p.argIndex == i && p.pattern == arg) do
+              appPatterns.set (patterns.push { head := fn, argIndex := i, pattern := arg })
+    match e with
+    | .app f a => go f; go a
+    | .lam _ ty body _ | .forallE _ ty body _ => go ty true; go body
+    | .letE _ ty value body _ => go ty true; go value; go body
+    | .mdata _ body | .proj _ _ body => go body typePosition
+    | _ => pure ()
+  go e
+  return (← typePatterns.get, ← appPatterns.get)
+
+/-- Collect first-order application spines from a query proposition. -/
+private partial def collectApplications (e : Expr) : Array AppOccurrence :=
+  Id.run do
+    let mut out : Array AppOccurrence := #[]
+    let rec go (e : Expr) : StateM (Array AppOccurrence) Unit := do
+      let fn := e.getAppFn
+      let args := e.getAppArgs
+      unless args.isEmpty do
+        if fn.isConst || fn.isFVar then
+          unless (← get).any (fun occurrence =>
+              sameHead occurrence.head fn && occurrence.args == args) do
+            modify (·.push { head := fn, args })
+      match e with
+      | .app f a => go f; go a
+      | .lam _ ty body _ | .forallE _ ty body _ => go ty; go body
+      | .letE _ ty value body _ => go ty; go value; go body
+      | .mdata _ body | .proj _ _ body => go body
+      | _ => pure ()
+    let (_, result) := (go e).run out
+    return result
+
+/-- Index of an opened type-binder fvar. -/
+private def binderIndex? (binders : Array Expr) (id : FVarId) : Option Nat := Id.run do
+  for i in [0:binders.size] do
+    if binders[i]!.fvarId! == id then return some i
+  return none
+
+/-- Match a type/application pattern against a query expression, deriving a partial
+substitution for the opened leading type binders. Fixed pieces must be definitionally
+equal; repeated binder occurrences must receive definitionally equal targets. -/
+private partial def matchPattern (pattern target : Expr) (binders : Array Expr)
+    (initial : Array (Option Expr)) : MetaM (Option (Array (Option Expr))) := do
+  let rec go (pattern target : Expr) (subst : Array (Option Expr)) :
+      MetaM (Option (Array (Option Expr))) := do
+    if pattern.hasLooseBVars || target.hasLooseBVars then return none
+    if let .fvar id := pattern then
+      if let some index := binderIndex? binders id then
+        unless ← isGroundType target do return none
+        unless ← isDefEq (← inferType target) (← id.getType) do return none
+        match subst[index]! with
+        | none => return some (subst.set! index (some target))
+        | some previous =>
+          return if ← isDefEq previous target then some subst else none
+    unless containsBinder pattern binders do
+      return if ← isDefEq pattern target then some subst else none
+    match pattern, target with
+    | .app pf pa, .app tf ta =>
+      let some subst ← go pf tf subst | return none
+      go pa ta subst
+    | .mdata _ body, _ => go body target subst
+    | _, .mdata _ body => go pattern body subst
+    | _, _ => return none
+  go pattern target initial
+
+private def isBareBinderPattern (pattern : Expr) (binders : Array Expr) : Option Nat :=
+  match pattern with
+  | .fvar id => binderIndex? binders id
+  | _ => none
+
+private def originsSubset (left right : Array Nat) : Bool :=
+  left.all right.contains
+
+private def mergeOrigins (left right : Array Nat) : Array Nat := Id.run do
+  let mut out := left
+  for origin in right do
+    unless out.contains origin do out := out.push origin
+  return out
+
+/-- Merge compatible partial substitutions. -/
+private def mergeSubstitutions (a b : Array (Option Expr)) :
+    MetaM (Option (Array (Option Expr))) := do
+  if a.size != b.size then return none
+  let mut merged := a
+  for i in [0:a.size] do
+    match a[i]!, b[i]! with
+    | none, some value => merged := merged.set! i (some value)
+    | some left, some right =>
+      unless ← isDefEq left right do return none
+    | _, _ => pure ()
+  return some merged
+
+/-- Derive relevant leading-type substitutions for `ty` from query type shapes and
+applications.
+
+Structured matches have priority. A bare `α` fallback is used only when no
+structured type or same-head application occurrence constrained `α`; this preserves
+cross-fact saturation (`Int` can seed a fact that introduces `List Int`) without
+letting `Except ε α` independently cross-product every generated type into both
+binders. -/
+private partial def deriveSubstitutions (ty : Expr) (queryTypes : Array TypeOccurrence)
+    (queryApps : Array AppOccurrence) (budget : Nat) :
+    MetaM (Array DerivedSubstitution) := do
   if budget == 0 then return #[]
-  match ty with
-  | .forallE _ dom body bi => do
+  let derive (openedTy : Expr) (binders : Array Expr) :
+      MetaM (Array DerivedSubstitution) := do
+    if binders.isEmpty then return #[]
+    let empty := Array.replicate binders.size none
+    let (typePatterns, appPatterns) ← collectPatterns openedTy binders
+    let mut evidence : Array PartialSubstitution := #[]
+    let evidenceLimit := max budget (binders.size * budget)
+    let addEvidence (evidence : Array PartialSubstitution)
+        (values : Array (Option Expr)) (origins : Array Nat) :
+        Array PartialSubstitution := Id.run do
+      unless evidence.size < evidenceLimit && values.any Option.isSome do
+        return evidence
+      for i in [0:evidence.size] do
+        let existing := evidence[i]!
+        if existing.values == values then
+          -- Keep the least restrictive provenance. Fixed-query evidence has no
+          -- origins and therefore dominates every generated route to the same
+          -- substitution.
+          if originsSubset existing.origins origins then return evidence
+          if originsSubset origins existing.origins then
+            return evidence.set! i { values, origins }
+      return evidence.push { values, origins }
+    -- Same-head explicit type arguments are the strongest relevance signal.
+    for pattern in appPatterns do
+      for occurrence in queryApps do
+        if sameHead pattern.head occurrence.head then
+          if let some target := occurrence.args[pattern.argIndex]? then
+            if let some subst ← matchPattern pattern.pattern target binders empty then
+              evidence := addEvidence evidence subst occurrence.origins
+    -- Match structured data shapes such as `Except ε α` and `List α`.
+    for pattern in typePatterns do
+      if (isBareBinderPattern pattern binders).isSome then continue
+      for target in queryTypes do
+        if let some subst ← matchPattern pattern target.expr binders empty then
+          evidence := addEvidence evidence subst target.origins
+    -- Fall back to all query types only for a binder not constrained above.
+    let mut covered := Array.replicate binders.size false
+    for candidate in evidence do
+      for i in [0:binders.size] do
+        if candidate.values[i]!.isSome then covered := covered.set! i true
+    for pattern in typePatterns do
+      let some index := isBareBinderPattern pattern binders | continue
+      if covered[index]! then continue
+      for target in queryTypes do
+        if let some subst ← matchPattern pattern target.expr binders empty then
+          evidence := addEvidence evidence subst target.origins
+    -- Close compatible partial substitutions under merge. At most `n` merge
+    -- rounds are needed to fill `n` binders.
+    for _ in [0:binders.size] do
+      let before := evidence.size
+      let snapshot := evidence
+      for left in snapshot do
+        for right in snapshot do
+          if evidence.size >= evidenceLimit then break
+          if let some merged ← mergeSubstitutions left.values right.values then
+            evidence := addEvidence evidence merged
+              (mergeOrigins left.origins right.origins)
+      if evidence.size == before then break
+    let mut out : Array DerivedSubstitution := #[]
+    for candidate in evidence do
+      if out.size >= budget then break
+      let mut full : Array Expr := #[]
+      let mut complete := true
+      for value in candidate.values do
+        match value with
+        | some value => full := full.push value
+        | none => complete := false
+      if complete then
+        let mut retained := false
+        for i in [0:out.size] do
+          let existing := out[i]!
+          if existing.values == full then
+            retained := true
+            if originsSubset candidate.origins existing.origins then
+              out := out.set! i { values := full, origins := candidate.origins }
+            break
+        unless retained do
+          out := out.push { values := full, origins := candidate.origins }
+    return out
+  let rec openBinders (ty : Expr) (binders : Array Expr) :
+      MetaM (Array DerivedSubstitution) := do
+    match ty with
+    | .forallE name dom body _ =>
+      let domW ← whnf dom
+      if domW.isSort then
+        withLocalDeclD name dom fun binder =>
+          openBinders (body.instantiate1 binder) (binders.push binder)
+      else
+        derive ty binders
+    | _ => derive ty binders
+  openBinders ty #[]
+
+/-- Instantiate all leading type binders according to one query-derived
+substitution, then synthesize the instance-implicit binders that follow. -/
+private partial def specializationAt (proof ty : Expr) (subst : Array Expr) :
+    MetaM (Option (Expr × Expr)) := do
+  let mut proof := proof
+  let mut ty := ty
+  for candidate in subst do
+    let .forallE _ dom body _ := ty | return none
     let domW ← whnf dom
-    if domW.isSort then
-      -- A type binder: branch over every candidate that fits this universe.
-      let mut out : Array (Expr × Expr) := #[]
-      for c in cands do
-        if out.size >= budget then break
-        -- The candidate must actually inhabit this binder's sort (`Type` vs `Prop`
-        -- vs `Type 1`), else the application is ill-typed.
-        unless ← isDefEq (← inferType c) domW do continue
-        let proof' := mkApp proof c
-        let ty' := body.instantiate1 c
-        if ← hasInstantiableBinder ty' then
-          -- More type binders to go: recurse, splitting the remaining budget.
-          out := out ++ (← specializations proof' ty' cands (budget - out.size))
-        else
-          -- Discharge any instance binders now exposed, then take this instance.
-          if let some inst ← dischargeInstances proof' ty' then
-            out := out.push inst
-      return out
-    else if bi == .instImplicit then
-      -- Not reachable from the top (a fact starts with its type binders), but keeps
-      -- the walk total if a lemma leads with an instance argument.
-      match ← trySynthInstance domW with
-      | .some val => specializations (mkApp proof val) (body.instantiate1 val) cands budget
-      | _ => return #[]
-    else
-      return #[]
-  | _ => return #[]
+    unless domW.isSort do return none
+    unless ← isDefEq (← inferType candidate) domW do return none
+    proof := mkApp proof candidate
+    ty := body.instantiate1 candidate
+  dischargeInstances proof ty
 where
   /-- Fill instance-implicit binders left after the type arguments are fixed, e.g.
-  the `[DecidableEq α]` of a lemma once `α := Int`. A failure to synthesize means
-  this instantiation is not usable, which is a dropped instance, not an error. -/
+  the `[DecidableEq α]` of a lemma once `α := Int`. -/
   dischargeInstances (proof ty : Expr) : MetaM (Option (Expr × Expr)) := do
     match ty with
     | .forallE _ dom body .instImplicit =>
       match ← trySynthInstance (← whnf dom) with
-      | .some val => dischargeInstances (mkApp proof val) (body.instantiate1 val)
+      | .some value => dischargeInstances (mkApp proof value) (body.instantiate1 value)
       | _ => return none
     | _ => return some (proof, ty)
 
@@ -210,28 +454,48 @@ def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := 
       fixed := fixed.push f
   if poly.isEmpty then
     return { facts }
-  -- Seed candidates from the monomorphic facts (above all the negated goal): those
-  -- are the types the query is actually about.
-  let mut cands : Array Expr := #[]
+  -- Seed type shapes and same-head application occurrences from the fixed query
+  -- (above all the negated goal). Generated instances may extend these indices,
+  -- but only pattern matches against them can produce another substitution.
+  let mut queryTypes : Array TypeOccurrence := #[]
+  let mut queryApps : Array AppOccurrence := #[]
   for f in fixed do
     for c in ← collectCandidates (← instantiateMVars f.prop) do
-      unless cands.contains c do cands := cands.push c
+      unless queryTypes.any (fun occurrence =>
+          occurrence.expr == c && occurrence.origins.isEmpty) do
+        queryTypes := queryTypes.push { expr := c }
+    for occurrence in collectApplications (← instantiateMVars f.prop) do
+      unless queryApps.any (fun existing =>
+          sameHead existing.head occurrence.head && existing.args == occurrence.args
+            && existing.origins.isEmpty) do
+        queryApps := queryApps.push occurrence
   let mut out := fixed
   let mut seen : Std.HashSet Expr := {}
   let mut generated := 0
-  let mut instantiated : Std.HashSet String := {}
+  let mut instantiated := Array.replicate poly.size false
   let mut rejected : Array String := #[]
   let mut exhausted := false
   for _round in [0:cfg.monoRounds] do
     let mut newThisRound := 0
-    for f in poly do
+    for factIndex in [0:poly.size] do
+      let f := poly[factIndex]!
       if generated >= cfg.monoFuel then
         exhausted := true
         break
       let some proof := f.proof | continue
       let ty ← instantiateMVars f.prop
-      let insts ← specializations proof ty cands (cfg.monoFuel - generated)
-      for (p, t) in insts do
+      -- A generated shape may activate another fact, but never a fact already in
+      -- its provenance. This preserves useful cross-fact saturation while ruling
+      -- out self- and mutual-recursive type growth such as
+      -- `List Int`, `List (List Int)`, ...
+      let eligibleTypes := queryTypes.filter fun occurrence =>
+        !occurrence.origins.contains factIndex
+      let eligibleApps := queryApps.filter fun occurrence =>
+        !occurrence.origins.contains factIndex
+      let substitutions ← deriveSubstitutions ty eligibleTypes eligibleApps
+        (cfg.monoFuel - generated)
+      for substitution in substitutions do
+        let some (p, t) ← specializationAt proof ty substitution.values | continue
         let t ← instantiateMVars t
         if seen.contains t then continue
         seen := seen.insert t
@@ -258,11 +522,21 @@ def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := 
             continue
         generated := generated + 1
         newThisRound := newThisRound + 1
-        instantiated := instantiated.insert f.descr
+        instantiated := instantiated.set! factIndex true
         out := out.push { f with prop := t, proof := some p, descr := s!"{f.descr}@inst" }
-        -- Saturation: the new instance may mention types nothing else did.
+        let origins := mergeOrigins substitution.origins #[factIndex]
+        -- Pattern-directed saturation: the new instance may expose a type shape or
+        -- same-head application another fact requires. Its provenance prevents a
+        -- dependency cycle from feeding the shape back into any producer.
         for c in ← collectCandidates t do
-          unless cands.contains c do cands := cands.push c
+          unless queryTypes.any (fun occurrence =>
+              occurrence.expr == c && occurrence.origins == origins) do
+            queryTypes := queryTypes.push { expr := c, origins }
+        for occurrence in collectApplications t do
+          unless queryApps.any (fun existing =>
+              sameHead existing.head occurrence.head && existing.args == occurrence.args
+                && existing.origins == origins) do
+            queryApps := queryApps.push { occurrence with origins }
       if generated >= cfg.monoFuel then
         exhausted := true
         break
@@ -273,8 +547,9 @@ def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := 
   -- A polymorphic fact that produced no instance is kept verbatim: it is useless to
   -- the solver but harmless, and dropping it silently would hide the gap.
   let mut dropped : Array String := #[]
-  for f in poly do
-    unless instantiated.contains f.descr do
+  for i in [0:poly.size] do
+    let f := poly[i]!
+    unless instantiated[i]! do
       out := out.push f
       dropped := dropped.push f.descr
   return { facts := out, generated, dropped, rejected, exhausted }

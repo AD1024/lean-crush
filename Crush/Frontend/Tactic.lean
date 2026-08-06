@@ -8,6 +8,7 @@ import Crush.Util.Profile
 import Crush.Solver.Process
 import Crush.Solver.Reconstruct
 import Crush.Solver.AletheReplay
+import Crush.SMT.Check
 import Crush.SMT.Print
 import Crush.SMT.Result
 open Lean Elab Tactic Meta
@@ -67,7 +68,10 @@ def resolveLogic (cfg : Config) : String :=
     -- Only cvc5 understands the prefix — z3 warns "ignoring unsupported logic" and
     -- carries on, then fails on the function sorts — so we emit it solely when it
     -- will actually be honoured.
-    if cfg.hoMode == .native && cfg.backend == .cvc5 then "HO_ALL" else "ALL"
+    if cfg.hoMode == .native && (cfg.backend == .cvc5 || cfg.backend == .none) then
+      "HO_ALL"
+    else
+      "ALL"
 
 /-- Translate all facts into assertion commands, each `:named` for unsat-core
 provenance, prepended by the declarations they induce. Returns the full script
@@ -76,14 +80,38 @@ def buildScript (cfg : Config) (facts : Array Fact) :
     MetaM (Array SMT.Command × TranslateState) := do
   let (_, st) ← TranslateM.run cfg do
     for fact in facts do
-      let id ← TranslateM.recordFact fact.descr fact.proof
+      let id ← TranslateM.recordFact fact.descr fact.proof (some fact.prop)
       let body ← emitTerm fact.prop
       let named := Term.annot body #[.named s!"{factNamePrefix}{id}"]
       TranslateM.emitCommand (.assert named)
   -- Prepend set-logic. Declarations are emitted eagerly on first use (before the
   -- assertion that references them), so command order already satisfies SMT-LIB's
   -- declare-before-reference rule.
-  return (#[Command.setLogic (resolveLogic cfg)] ++ st.commands, st)
+  let script := #[Command.setLogic (resolveLogic cfg)] ++ st.commands
+  match checkScript script with
+  | .ok () => return (script, st)
+  | .error err =>
+    let command := script[err.commandIndex]?.map commandToString |>.getD "<missing command>"
+    let factId? :=
+      match script[err.commandIndex]? with
+      | some (.assert (.annot _ attrs)) =>
+        attrs.findSome? fun
+          | SMT.Attr.named name =>
+            if name.startsWith factNamePrefix then
+              (name.drop factNamePrefix.length).toNat?
+            else none
+          | _ => none
+      | _ => none
+    let fact? : Option FactSource := factId?.bind fun id => st.facts[id]?
+    let source ←
+      match fact? with
+      | some fact =>
+        match fact.prop with
+        | some prop => pure s!"`{toString (← ppExpr prop)}` ({fact.descr})"
+        | none => pure fact.descr
+      | none => pure s!"generated command {err.commandIndex}"
+    throwError "crush: internal SMT sort error while translating {source}: \
+      {err.message}\nSMT command: {command}"
 
 /-- Render a `sat` model into a short counterexample message. -/
 def formatCounterexample (modelText : String) (st : TranslateState) : MessageData := Id.run do
@@ -151,9 +179,9 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState) (proofTe
 /-- The core driver, given a resolved goal, config, and collected hints. -/
 def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit :=
   goal.withContext do
-  -- `native` HO mode needs a backend that honours the `HO_` logic prefix. z3 prints
-  -- "ignoring unsupported logic" and then chokes on the function sorts, so fall
-  -- back to the portable encoding rather than emitting a script it cannot read.
+  -- `native` HO mode needs cvc5, or `none` when the script is only being emitted.
+  -- z3 prints "ignoring unsupported logic" and then chokes on the function sorts,
+  -- so fall back to the portable encoding rather than sending it an invalid query.
   let cfg :=
     if cfg.hoMode == .native && !nativeSupported cfg.backend then
       { cfg with hoMode := .defunctionalize }

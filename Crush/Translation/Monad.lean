@@ -43,6 +43,9 @@ structure FactSource where
   id       : Nat
   /-- The Lean proof term whose type this assertion encodes (if any). -/
   proof    : Option Expr := none
+  /-- The source proposition translated into the named assertion. Retained so an
+      internal SMT sort error can report the exact Lean expression. -/
+  prop     : Option Expr := none
   /-- Human-readable origin for diagnostics. -/
   descr    : String
   deriving Inhabited
@@ -146,9 +149,10 @@ def recordSymbolExpr (name : String) (e : Expr) : TranslateM Unit := do
 
 /-- Register an emitted assertion's provenance, returning the fact id to embed in
 its `:named` attribute. -/
-def recordFact (descr : String) (proof : Option Expr := none) : TranslateM Nat := do
+def recordFact (descr : String) (proof : Option Expr := none) (prop : Option Expr := none) :
+    TranslateM Nat := do
   let id := (← get).facts.size
-  modify fun s => { s with facts := s.facts.push { id, proof, descr } }
+  modify fun s => { s with facts := s.facts.push { id, proof, prop, descr } }
   return id
 
 /-- Bind `fvar` to SMT variable name `name` for the duration of `k` (a quantifier

@@ -1,6 +1,7 @@
 import Crush.SMT.Syntax
 import Crush.SMT.Quote
 import Crush.SMT.Print
+import Crush.SMT.Check
 import Crush.SMT.Sexp
 import Crush.SMT.Result
 import Crush.Frontend.Config

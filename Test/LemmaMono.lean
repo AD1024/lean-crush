@@ -27,6 +27,7 @@ so the pass cannot cause a false `unsat` — the negative tests at the end pin t
 false goals are still rejected.
 -/
 
+open Lean Meta
 open Crush
 
 set_option crush.timeout 10
@@ -77,6 +78,69 @@ theorem saturates (len : ∀ (α : Type), List α → Nat)
     (hwrap : ∀ (α : Type) (x : α), len α (wrap α x) = 1)
     (a : Int) : len Int (wrap Int a) = 1 := by
   crush [hwrap]
+
+/-! ## Query-directed growth bounds
+
+These call the monomorphization pass directly so scalability regressions fail on
+the generated instance count, independently of solver heuristics or timing. -/
+
+private def monomorphizationReport (polyNames : Array Name) (queryName : Name) :
+    MetaM MonoReport := do
+  let mut facts : Array Fact := #[]
+  for polyName in polyNames do
+    let proof ← mkConstWithFreshMVarLevels polyName
+    facts := facts.push {
+      prop := ← inferType proof
+      proof := some proof
+      descr := polyName.toString }
+  let queryProof ← mkConstWithFreshMVarLevels queryName
+  facts := facts.push {
+    prop := mkNot (← inferType queryProof)
+    proof := none
+    descr := "negated query"
+    negated := true }
+  monomorphizeFacts ({ monoFuel := 64, monoRounds := 8 } : Crush.Config) facts
+
+private theorem exceptShapeFact {ε α : Type} (x : Except ε α) : x = x := rfl
+private theorem exceptShapeQuery (x : Except String Int) : x = x := rfl
+
+run_meta do
+  let report ← monomorphizationReport #[``exceptShapeFact] ``exceptShapeQuery
+  unless report.generated == 1 && report.dropped.isEmpty && !report.exhausted do
+    throwError "expected one query-required Except instance, got \
+      {report.generated} (dropped: {report.dropped}, exhausted: {report.exhausted})"
+
+-- The Cedar reproduction generates three retained equation instances. A small
+-- fuel limit turns the historical nested-`Except` expansion into a deterministic
+-- failure while leaving enough matching budget to find the relevant equations.
+set_option crush.mono.fuel 8 in
+theorem except_isOk_bounded {ε α : Type} {x : Except ε α} :
+    Except.isOk x ↔ ∃ a, x = .ok a := by
+  crush u[Except.isOk, Except.toBool]
+
+private theorem subsetTransQuery (xs ys zs : List Int)
+    (hxy : xs.Subset ys) (hyz : ys.Subset zs) : xs.Subset zs :=
+  List.Subset.trans hxy hyz
+
+run_meta do
+  let report ← monomorphizationReport #[``List.Subset.trans] ``subsetTransQuery
+  unless report.generated == 1 && report.dropped.isEmpty && !report.exhausted do
+    throwError "expected List.Subset.trans only at Int, got \
+      {report.generated} instance(s) (dropped: {report.dropped}, \
+      exhausted: {report.exhausted})"
+
+private theorem consumesListShape {α : Type} (xs : List α) : xs = xs := rfl
+private theorem introducesListShape {α : Type} (x : α) (_xs : List α) : x = x := rfl
+private theorem intShapeQuery (x : Int) : x = x := rfl
+
+-- `consumesListShape` is deliberately first: it cannot match the initial `Int`
+-- query. `introducesListShape @Int` exposes `List Int`, enabling it next round.
+run_meta do
+  let report ← monomorphizationReport
+    #[``consumesListShape, ``introducesListShape] ``intShapeQuery
+  unless report.generated == 2 && report.dropped.isEmpty && !report.exhausted do
+    throwError "expected two cross-fact saturation instances, got \
+      {report.generated} (dropped: {report.dropped}, exhausted: {report.exhausted})"
 
 /-! ## The polymorphic TIP list theorems
 
@@ -141,9 +205,7 @@ theorem rev_three {α : Type} (x : List α) : M.rev (M.rev (M.rev x)) = M.rev x 
 
 /-! ## Soundness: instantiation must not prove anything false
 
-Instantiation weakens, so these must all still be rejected. `unknown` is also a
-sound rejection — it never closes a goal — so one expectation below pins that
-instead of a counterexample. -/
+Instantiation weakens, so these must all still be rejected. -/
 
 /-- error: crush: the goal is not provable -/
 #guard_msgs(error, substring := true) in
@@ -157,7 +219,7 @@ theorem must_reject_cross_type (f : ∀ (α : Type), α → Nat)
     (h : ∀ (x : Int), f Int x = 0) (b : Bool) : f Bool b = 0 := by crush [h]
 
 -- An instance must not become *stronger* than the polymorphic fact it came from.
-/-- error: crush: solver returned `unknown` -/
+/-- error: crush: the goal is not provable -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_stronger (g : ∀ (α : Type), List α → Nat)
     (h : ∀ (α : Type) (l : List α), g α l = 0) (l : List Int) : g Int l = 1 := by

@@ -132,8 +132,9 @@ Two hard constraints, both verified against the solvers:
 * cvc5 enables HO only when the logic string is **`HO_`-prefixed** (`HO_ALL`, not
   `ALL`). Emitting plain `ALL` leaves cvc5's higher-order solver switched off.
 * z3 does **not** support it: it prints "ignoring unsupported logic HO_ALL" and then
-  fails on the HO sorts. So `native` must be gated to cvc5 and fall back with a
-  diagnostic elsewhere.
+  fails on the HO sorts. So solver execution in `native` mode must be gated to
+  cvc5 and fall back with a diagnostic elsewhere. The `none` backend may still
+  emit a native script for inspection and validation.
 
 Note the encoding is *sound but weaker in practice* on hard queries: cvc5 answered
 `unknown` (rather than `sat`) on a satisfiable HO query in testing, which loses
@@ -143,8 +144,10 @@ counterexamples but never produces a wrong `unsat`. -/
 def nativeArrowSort (argSorts : Array SMT.SSort) (resSort : SMT.SSort) : SMT.SSort :=
   .app (.symb "->") (argSorts.push resSort)
 
-/-- Whether `native` mode is usable with this backend, i.e. the backend actually
-honours the `HO_` logic prefix. Only cvc5 does today. -/
+/-- Whether `native` mode is usable with this backend. cvc5 honours the `HO_`
+logic prefix; `none` is also accepted because it only emits the script and is
+useful for inspecting or validating native-HO translation. -/
 def nativeSupported (b : Backend) : Bool := b == .cvc5
+  || b == .none
 
 end Crush
