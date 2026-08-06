@@ -1034,6 +1034,35 @@ That is not a soundness gap under the `reconstruct` policy: these are metaprogra
 *construct* SMT terms, and a closed goal is re-proved from the unsat core by a Lean
 tactic, so the translator never enters the trusted base.
 
+## 10d. Two bugs the recursive-datatype suite surfaced
+
+Writing `Test/Recursive.lean` uncovered a pair of defects, both triggered by *indirect*
+recursion — a datatype reaching itself through another type, as `Rose ⊃ List Rose ⊃ Rose`.
+Direct self-recursion (`Tree ⊃ Tree`) and Lean mutual blocks (`Tree`/`TreeList`) were already
+handled, which is why this shape had gone unnoticed.
+
+1. **`needsWFGuard` recursed until the stack overflowed.** Its cycle check skipped only
+   *direct* self-reference (`fty.getAppFn.isConstOf n`), and an indirect cycle never repeats
+   two heads in a row, so the walk went `Rose → List Rose → Rose → …` forever. The symptom
+   was maximally unhelpful: `Stack overflow detected. Aborting.` with **no source position**,
+   and only under `lake build` (the `precompileModules` native path has a smaller stack) —
+   `lake env lean` on the same file passed. Fixed by carrying a visited set.
+
+2. **The emitted script was invalid.** SMT-LIB requires mutually recursive datatypes to
+   share one `declare-datatypes` block. `declareDatatype` emits exactly Lean's mutual block
+   (`iv.all`), which is correct for `Tree`/`TreeList` — but `Rose` and `List` are *not* one
+   Lean block, so `List_1` was emitted as its own earlier block with a field of sort
+   `Rose_0`, which did not exist yet. z3 rejected the whole query: `invalid datatype
+   declaration, unknown sort 'Rose_0'`. `isSupportedDatatypeApp` now rejects recursion that
+   leaves the block and returns, so such a type stays an *opaque sort* — less precise, but a
+   valid query, and the loss is pinned as expected failures in `Test/Recursive.lean`.
+
+The first fix is unambiguous. The second is a deliberate trade: emitting one combined block
+for a dependency-closed group would be strictly better and is the natural follow-up. Note the
+guard must key on Lean's mutual block rather than on the head name alone — an earlier revision
+compared against `n` only, which rejected the genuine `Tree`/`TreeList` block and broke
+`Test/CaseStudies/LeanAuto.lean`.
+
 ## 11. Testing strategy
 
 The suite is `Test/`, built by `lake build Test`. Every `theorem` that elaborates is
@@ -1057,7 +1086,9 @@ a passing test; the build must be clean and produce **no `sorry`**.
 | `TIP.lean` | inductive theorems from the TIP `prod` benchmarks over a *polymorphic* element type, proved hammer-in-the-loop (manual `induction`, `crush` per case, `@[crush_unfold]` definitions) |
 | `Cvc5.lean` | the **cvc5 backend** and **`native` HO mode** (`HO_ALL`, `(-> σ τ)` sorts, `lambda`), which the default `z3`/`defunctionalize` suite never exercises; plus the z3-vs-cvc5 `sat`/`unknown` difference on false HO goals |
 | `Alethe.lean` | the Alethe proof **parser** (M4 phase 1) against verbatim cvc5 output: command/clause/`:named` structure, premise reading, the empty-clause conclusion, and that an `(error …)` reply parses to `none` |
-| `AletheReplay.lean` | Alethe **proof replay** (M4 phase 3): the measured payoff class — Boolean pigeonhole and EUF conflict, which the finisher ladder cannot reconstruct — closes kernel-checked (`#print axioms`, no `crushSorry`); plus the decline cases (no certificate, unprovable, false goal) pinned so a certificate is never taken on faith, and the path-selection cases (`crush.reconstruct core`/`alethe`, plus z3, which emits no certificate) |
+| `AletheReplay.lean` | Alethe **proof replay** (M4 phase 3): the measured payoff class — Boolean pigeonhole and EUF conflict, which the finisher ladder cannot reconstruct — closes kernel-checked (`#print axioms`, no `crushSorry`); a `Harder` section running under `crush.reconstruct alethe` (no ladder fallback, so a pass *is* a replayed certificate) covering a 5-variable/10-disjunct pigeonhole, a 4-step EUF chain, binary-function congruence, disequality-driven conflict, and boolean implication chaining; plus the decline cases (no certificate, unprovable, false goal) pinned so a certificate is never taken on faith, and the path-selection cases (`crush.reconstruct core`/`alethe`, plus z3, which emits no certificate) |
+| `Recursive.lean` | recursive functions and recursive/nested datatypes: a 5-constructor expression language with `size`/`depth`/`eval`, binary trees under structural `induction` (mirror/sum/height preservation), a `Nat` accumulator's closed form, and structures nested inside datatypes. Records three measured boundaries: datatype exhaustiveness and structure-eta are solver-reachable but *not* reconstructible, and `height ≤ size` is out of reach for the solver itself |
+| `ReconstructHard.lean` | core-directed reconstruction with the ladder isolated (`crush.reconstruct core`): selection under 10–24 irrelevant hypotheses (incl. nonlinear distractors), congruence depth 3, quantifier instantiation at non-syntactic points, read-over-write both branches, and goals crossing `Bool`/`Int`/`String` |
 | `LeanAutoPort.lean` | goals ported from lean-auto's `SmtTranslation/` suite (BoolNatInt, BitVec, String, inductive/enum, recursive-with-unfold): demonstrates the same corpus translates and solves, and pins the `Empty`-type cases where we are deliberately *sound* and lean-auto documents itself unsound |
 | `CaseStudies/LeanAuto.lean` | the *harder* lean-auto corpus (§11b): mutually-recursive and single-ctor datatypes, HO Church numerals (kernel-reconstructed), polymorphic lemmas, leading-∀ matching, `Function.comp_def`, and the Paxos consensus goal — each filed as handled / sound-refusal / known-gap; drove four translation fixes and closed three of four gaps |
 | `CaseStudies/Loom.lean` | representative Loom verification conditions (§11b): GCD/MaxElem/IsSorted/SumOfDigits/sqrt/cbrt/binary-search arithmetic, quantified array invariants, an array-update VC, and Cashmere balance invariants; the Mathlib-bound `Multiset`/`Finset` VCs reduce (hammer-in-the-loop) to arithmetic residuals `crush` closes |

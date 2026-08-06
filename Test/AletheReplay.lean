@@ -47,6 +47,78 @@ theorem euf_conflict (f : Int → Int) (a b c : Int)
 
 end Payoff
 
+/-! ## Harder cases, with the ladder switched off
+
+Everything below runs under `crush.reconstruct "alethe"`, which removes the finisher-ladder
+fallback. That matters for a test: under the default `auto` a goal can pass because the
+ladder quietly rescued it, so these would not actually be exercising replay. Here a passing
+theorem *is* a replayed certificate, and each is kernel-checked.
+
+Scaled up along the two axes that make a certificate long — chain depth and boolean
+branching — since replay's whole claim is that step count is not the obstacle. -/
+
+section Harder
+set_option crush.backend "cvc5"
+set_option crush.timeout 30
+set_option crush.trust "reconstruct"
+set_option crush.reconstruct "alethe"
+
+/-- A five-variable pigeonhole: ten disjuncts, so the case analysis is substantially wider
+than `bool_pigeonhole`'s six. -/
+theorem bool_pigeonhole5 (p q r s t : Bool) :
+    p = q ∨ p = r ∨ p = s ∨ p = t ∨ q = r ∨ q = s ∨ q = t ∨ r = s ∨ r = t ∨ s = t := by crush
+
+/-- info: 'bool_pigeonhole5' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms bool_pigeonhole5
+
+/-- A four-step equality chain before the congruence: `a = b = c = d = e`, so `f a` and `f e`
+must agree, contradicting the two literals. Deeper than `euf_conflict`'s single step. -/
+theorem euf_chain4 (f : Int → Int) (a b c d e : Int)
+    (h1 : a = b) (h2 : b = c) (h3 : c = d) (h4 : d = e)
+    (h5 : f a = 1) (h6 : f e = 2) : False := by crush
+
+/-- info: 'euf_chain4' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms euf_chain4
+
+/-- Congruence on a *binary* function, with both arguments rewritten at once. -/
+theorem euf_binary (f : Int → Int → Int) (a b c d : Int) (h1 : a = b) (h2 : c = d) :
+    f a c = f b d := by crush
+
+/-- Disequality-driven: the conflict is `f a ≠ f c` against a transitive chain, so the
+refutation has to derive the congruence and then resolve it against a negated literal. -/
+theorem euf_diseq (f : Int → Int) (a b c : Int)
+    (h1 : a = b) (h2 : b = c) (h3 : f a ≠ f c) : False := by crush
+
+/-- Boolean implication chaining through a conjunction — propositional structure rather than
+equality reasoning, exercising `resolution`/`and`/`implies` rules. -/
+theorem bool_chain (p q r s : Bool) (h1 : p = true) (h2 : q = true)
+    (h3 : (p && q) = true → r = true) (h4 : r = true → s = true) : s = true := by crush
+
+/-- info: 'bool_chain' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms bool_chain
+
+/-- A `Bool` disequality forced into its two concrete cases. -/
+theorem bool_diseq (p q : Bool) (h : p ≠ q) :
+    (p = true ∧ q = false) ∨ (p = false ∧ q = true) := by crush
+
+/-- info: 'bool_diseq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms bool_diseq
+
+-- Three-way transitivity between *uninterpreted functions* at the same point declines
+-- (measured 2026-08-06). `f a = g a`, `g a = h a`, `h a = 7 ⊢ f a = 7` is provable and the
+-- ladder closes it under `auto`; what replay cannot do is map some step of cvc5's chosen
+-- certificate back. Pinned so that extending term translation shows up here.
+/-- error: crush: `crush.reconstruct alethe` is set and the solver's Alethe certificate -/
+#guard_msgs(error, substring := true) in
+example (f g h : Int → Int) (a : Int)
+    (h1 : f a = g a) (h2 : g a = h a) (h3 : h a = 7) : f a = 7 := by crush
+
+end Harder
+
 /-! ## Replay declines rather than trusting
 
 Each case below is one replay cannot prove, so the goal must *error* rather than close.

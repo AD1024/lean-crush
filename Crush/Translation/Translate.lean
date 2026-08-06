@@ -162,7 +162,7 @@ def isSupportedDatatypeApp (n : Name) (typeArgs : Array Expr) : MetaM Bool := do
   -- direct way (`T ā` itself) is fine; a *function-typed* field cannot be a datatype
   -- selector's range (SMT datatypes are first-order), so such a type stays opaque.
   -- Fields must also be data, not proofs (a `Prop` field has no SMT sort).
-  iv.ctors.allM fun ctorName => do
+  let fieldsOk ← iv.ctors.allM fun ctorName => do
     let ci ← getConstInfoCtor ctorName
     let ctorTy ← instantiateForall ci.type typeArgs
     forallTelescopeReducing ctorTy fun args _ =>
@@ -171,6 +171,56 @@ def isSupportedDatatypeApp (n : Name) (typeArgs : Array Expr) : MetaM Bool := do
         if ty.isForall then return false
         if ← isProp ty then return false
         return true
+  unless fieldsOk do return false
+  -- Reject recursion that leaves `n`'s own mutual block and comes back
+  -- (`Rose ⊃ List Rose ⊃ Rose`). SMT-LIB requires mutually recursive datatypes to share one
+  -- `declare-datatypes` block. `declareDatatype` emits exactly `iv.all` — Lean's mutual
+  -- block — together, so `Tree`/`TreeList` are fine; but `Rose` and `List` are *not* one
+  -- Lean block, so `List` would be emitted as its own earlier block whose field
+  -- forward-references a sort that does not exist yet, and the solver rejects the whole
+  -- script ("unknown sort 'Rose_0'"). Keeping these opaque yields an uninterpreted sort:
+  -- less precise, but a *valid* query.
+  return !(← escapesBlock n iv.all.toArray typeArgs)
+where
+  /-- Whether some constructor field reaches back into `block` through a datatype *outside*
+  `block`. `block` is `n`'s Lean mutual block, which is emitted as a unit. -/
+  escapesBlock (n : Name) (block : Array Name) (typeArgs : Array Expr) : MetaM Bool := do
+    let inBlock : Std.HashSet Name := block.foldl (·.insert ·) {}
+    let some (.inductInfo iv) := (← getEnv).find? n | return false
+    iv.ctors.anyM fun ctorName => do
+      let ci ← getConstInfoCtor ctorName
+      let ctorTy ← instantiateForall ci.type typeArgs
+      forallTelescopeReducing ctorTy fun args _ =>
+        args.anyM fun a => do
+          let fty ← whnf (← inferType a)
+          -- A field in the same mutual block is emitted alongside `n`, so it is safe and
+          -- must not be descended into (that is the legitimate recursion).
+          match fty.getAppFn with
+          | .const m _ => if inBlock.contains m then return false
+          | _ => pure ()
+          reaches inBlock fty 8 inBlock
+
+  /-- Whether `ty`'s constructor-field closure mentions any member of `targets`. -/
+  reaches (targets : Std.HashSet Name) (ty : Expr) (fuel : Nat)
+      (visiting : Std.HashSet Name) : MetaM Bool := do
+    match fuel with
+    | 0 => return false
+    | fuel + 1 =>
+      let ty ← whnf ty
+      let .const m _ := ty.getAppFn | return false
+      if targets.contains m then return true
+      if visiting.contains m then return false
+      let some (.inductInfo miv) := (← getEnv).find? m | return false
+      if miv.numIndices != 0 then return false
+      let margs := ty.getAppArgs
+      if margs.size != miv.numParams then return false
+      let visiting := visiting.insert m
+      miv.ctors.anyM fun c => do
+        let ci ← getConstInfoCtor c
+        let some cty ← (try pure (some (← instantiateForall ci.type margs))
+                        catch _ => pure none) | pure false
+        forallTelescopeReducing cty fun args _ =>
+          args.anyM fun a => do reaches targets (← inferType a) fuel visiting
 
 /-- `isSupportedDatatypeApp` for a fully-applied type expression. -/
 def supportedDatatypeType? (e : Expr) : MetaM (Option (Name × Array Expr)) := do
@@ -593,24 +643,30 @@ mutual
 
   /-- Whether values of `ty` occupy a *proper subset* of their SMT sort, so a
   quantifier over them needs a guard. True for `Nat` (encoded as `Int`) and for any
-  datatype that transitively contains such a field. -/
-  partial def needsWFGuard (ty : Expr) : TranslateM Bool := do
+  datatype that transitively contains such a field.
+
+  `visiting` holds the datatype heads already on the stack. A recursive datatype needs a
+  guard iff some field does, so re-entering one contributes nothing new and returns
+  `false` — which is also what makes this terminate. Tracking a *set* rather than just
+  comparing against the current head is essential: recursion through another type
+  (`Rose` ⊃ `List Rose` ⊃ `Rose`) never repeats two heads in a row, so a
+  self-reference-only check recurses forever and overflows the stack. -/
+  partial def needsWFGuard (ty : Expr) (visiting : Std.HashSet Name := {}) :
+      TranslateM Bool := do
     let ty ← whnf ty
     if ty.isConstOf ``Nat then return true
     let some (n, typeArgs) ← supportedDatatypeType? ty | return false
-    -- Guard against cycles: a recursive datatype needs a guard iff some field does,
-    -- and self-reference alone contributes nothing new. Fields are examined at this
-    -- instantiation, so a `Nat` reached only through the type parameter (`Option Nat`)
-    -- is caught, while `Option Int` is not.
+    if visiting.contains n then return false
+    let visiting := visiting.insert n
+    -- Fields are examined at this instantiation, so a `Nat` reached only through the type
+    -- parameter (`Option Nat`) is caught, while `Option Int` is not.
     let iv ← getConstInfoInduct n
     iv.ctors.anyM fun ctorName => do
       let ci ← getConstInfoCtor ctorName
       let ctorTy ← instantiateForall ci.type typeArgs
       forallTelescopeReducing ctorTy fun args _ =>
         args.anyM fun a => do
-          let fty ← whnf (← inferType a)
-          if fty.getAppFn.isConstOf n then return false  -- self-reference
-          needsWFGuard fty
+          needsWFGuard (← inferType a) visiting
 
   /-- Declare `wf_T` (returns whether it was newly declared, i.e. still needs its
   axiom). The `wf` predicate carves the Lean type's image out of its freely-generated

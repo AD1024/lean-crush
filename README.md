@@ -170,10 +170,17 @@ proof or closing the goal with the `autoSMTSorry` axiom.
 
 ## Examples and case studies
 
-[`Test/`](Test/) has runnable examples across every supported theory.
+[`Test/`](Test/) has runnable examples across every supported theory, including recursive
+functions and nested datatypes ([`Test/Recursive.lean`](Test/Recursive.lean)) and the harder
+reconstruction cases for both routes
+([`Test/AletheReplay.lean`](Test/AletheReplay.lean),
+[`Test/ReconstructHard.lean`](Test/ReconstructHard.lean)).
+
 [`Test/CaseStudies/`](Test/CaseStudies/) runs `crush` against external corpora: lean-auto's
-harder test suite, Loom/Velvet/Cashmere verification conditions, and mathlib-scale goals
-including nonlinear arithmetic and real mathlib datatypes.
+test suite, Loom/Velvet/Cashmere verification conditions, and mathlib lemma statements
+restated at `Int` ([`Test/CaseStudies/Mathlib.lean`](Test/CaseStudies/Mathlib.lean)) — with
+the mathlib operations that have *no* first-order translation pinned as expected failures, so
+the boundary is recorded rather than implied.
 
 ## Acknowledgements
 
