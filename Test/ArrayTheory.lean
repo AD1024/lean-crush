@@ -48,7 +48,8 @@ def amapGet : TranslationHandler := fun ctx => do
   let .const ``AMap.get _ := ctx.fn | return none
   -- `@AMap.get κ ν m k` — the two leading type args are dropped by the encoding.
   match ctx.args with
-  | #[_, _, m, k] => return some (.symbApp "select" #[← ctx.emitTerm m, ← ctx.emitTerm k])
+  | #[_, _, m, k] =>
+    return some (smt| (select $(← ctx.emitTerm m) $(← ctx.emitTerm k)))
   | _ => return none
 
 @[crush_translate]
@@ -57,7 +58,7 @@ def amapSet : TranslationHandler := fun ctx => do
   -- `@AMap.set κ ν inst m k v` — drop the two type args and the `DecidableEq` instance.
   match ctx.args with
   | #[_, _, _, m, k, v] =>
-    return some (.symbApp "store" #[← ctx.emitTerm m, ← ctx.emitTerm k, ← ctx.emitTerm v])
+    return some (smt| (store $(← ctx.emitTerm m) $(← ctx.emitTerm k) $(← ctx.emitTerm v)))
   | _ => return none
 
 set_option crush.trust "trust"

@@ -1,5 +1,6 @@
 import Lean
 import Crush.SMT.Syntax
+import Crush.SMT.Quote
 import Crush.Translation.Monad
 import Crush.Translation.Attr
 import Crush.Translation.Theories
@@ -416,10 +417,12 @@ mutual
       argRefs := argRefs.push (.const v)
     let appA := SMT.Term.app (.symb appName) (#[SMT.Term.const a] ++ argRefs)
     let appB := SMT.Term.app (.symb appName) (#[SMT.Term.const b] ++ argRefs)
-    let premise := SMT.Term.forallE binders (.symbApp "=" #[appA, appB])
+    let premise := SMT.Term.forallE binders (smt| (= $appA $appB))
+    let aRef := SMT.Term.const a
+    let bRef := SMT.Term.const b
     TranslateM.emitCommand (.assert
       (.forallE #[(a, sort), (b, sort)]
-        (.symbApp "=>" #[premise, .symbApp "=" #[.const a, .const b]])))
+        (smt| (=> $premise (= $aRef $bRef)))))
 
   /-- Translate a λ-abstraction into a *closure*.
 
@@ -469,7 +472,7 @@ mutual
     let (paramBinders, bodyTerm) ← emitLambdaBody lam shape
     let lhs := SMT.Term.app (.symb appName)
       (#[cloApp] ++ paramBinders.map (fun (n, _) => SMT.Term.const n))
-    let axiomBody := SMT.Term.symbApp "=" #[lhs, bodyTerm]
+    let axiomBody := (smt| (= $lhs $bodyTerm))
     let allBinders := binders ++ paramBinders
     TranslateM.emitCommand (.assert
       (if allBinders.isEmpty then axiomBody else .forallE allBinders axiomBody))
@@ -711,21 +714,23 @@ mutual
           fieldConds := fieldConds.push c
       if fieldConds.isEmpty then continue
       let body := if fieldConds.size == 1 then fieldConds[0]!
-                  else .symbApp "and" fieldConds
-      conjuncts := conjuncts.push (.symbApp "=>" #[testerApp ctorSym x, body])
+                  else SMT.Term.symbApp "and" fieldConds
+      let tester := testerApp ctorSym x
+      conjuncts := conjuncts.push (smt| (=> $tester $body))
     let rhs :=
-      if conjuncts.isEmpty then SMT.Term.lit (.bool true)
+      if conjuncts.isEmpty then (smt| true)
       else if conjuncts.size == 1 then conjuncts[0]!
-      else .symbApp "and" conjuncts
+      else SMT.Term.symbApp "and" conjuncts
+    let wfApp := SMT.Term.app (.symb wf) #[x]
     TranslateM.emitCommand
-      (.assert (.forallE #[(v, sort)] (.symbApp "=" #[.app (.symb wf) #[x], rhs])))
+      (.assert (.forallE #[(v, sort)] (smt| (= $wfApp $rhs))))
 
   /-- The well-formedness condition on an SMT term of Lean type `ty`: `≥ 0` for
   `Nat`, `wf_T` for a guarded datatype, `none` when nothing is needed. -/
   partial def wfCondition (ty : Expr) (t : SMT.Term) : TranslateM (Option SMT.Term) := do
     let ty ← whnf ty
     if ty.isConstOf ``Nat then
-      return some (.symbApp ">=" #[t, .lit (.num 0)])
+      return some (smt| (>= $t 0))
     let some (n, typeArgs) ← supportedDatatypeType? ty | return none
     if !(← needsWFGuard ty) then return none
     let sortName ← declareDatatype n typeArgs
@@ -760,6 +765,20 @@ mutual
       for h in (← getTranslationHandlers) do
         if let some t ← h ctx then
           return t
+    -- Head-indexed lowerings are the efficient extension path for one specific
+    -- constant. General handlers above retain first refusal so existing user
+    -- overrides continue to supersede built-in lowerings.
+    let (fn, args) := getAppFnArgs' e
+    if let .const head _ := fn then
+      if ← hasLoweringsFor head then
+        let ctx : TranslationCtx := {
+          fn, args
+          emitTerm := emitTerm
+          emitSort := emitSort
+          declare  := declareViaThunk }
+        for lowering in (← getLoweringsFor head) do
+          if let some t ← lowering ctx then
+            return t
     -- Higher-order forms, before the first-order structural path.
     if let some t ← hoTerm? e then
       return t
@@ -767,7 +786,6 @@ mutual
     match ← structural? e with
     | some t => return t
     | none =>
-      let (fn, args) := getAppFnArgs' e
       -- A constructor of a supported datatype → the SMT constructor symbol.
       if let some t ← ctorApp? fn args then
         return t
@@ -827,7 +845,7 @@ mutual
         -- need it asserted explicitly (verified load-bearing).
         if mode != .native then
           emitExtensionality ty
-        return some (.symbApp "=" #[← emitFunValue a, ← emitFunValue b])
+        return some (smt| (= $(← emitFunValue a) $(← emitFunValue b)))
       return none
     | _ => return none
 
@@ -907,10 +925,10 @@ mutual
   handlers / the default path take over. -/
   partial def structural? (e : Expr) : TranslateM (Option SMT.Term) := do
     match e with
-    | .const ``True _  => return some (.lit (.bool true))
-    | .const ``False _ => return some (.lit (.bool false))
-    | .const ``Bool.true _  => return some (.lit (.bool true))
-    | .const ``Bool.false _ => return some (.lit (.bool false))
+    | .const ``True _  => return some (smt| true)
+    | .const ``False _ => return some (smt| false)
+    | .const ``Bool.true _  => return some (smt| true)
+    | .const ``Bool.false _ => return some (smt| false)
     | .lit (.strVal s) => return some (.lit (.str s))
     | _ =>
     -- Every recognizer below that matches an overloaded operator
@@ -946,7 +964,7 @@ mutual
         -- A symbolic instance that won't reduce has no value to expose; leave it.
         if e' == e then return none else return some (← emitTerm e')
     | Neg.neg _ _ a =>
-      return some (.symbApp "-" #[← emitTerm a])
+      return some (smt| (- $(← emitTerm a)))
     | HDiv.hDiv _ _ _ _ a b =>
       -- SMT-LIB leaves `(div x 0)` to the model while Lean pins it to `0`; pin it
       -- too so the encoding is exact (see `intDivGuard`).
@@ -955,45 +973,44 @@ mutual
       return some (intDivGuard "mod" (← emitTerm a) (← emitTerm b))
     | _ =>
     match_expr e with
-    | And a b => return some (.symbApp "and" #[← emitTerm a, ← emitTerm b])
-    | Or a b  => return some (.symbApp "or" #[← emitTerm a, ← emitTerm b])
-    | Not a   => return some (.symbApp "not" #[← emitTerm a])
+    | And a b => return some (smt| (and $(← emitTerm a) $(← emitTerm b)))
+    | Or a b  => return some (smt| (or $(← emitTerm a) $(← emitTerm b)))
+    | Not a   => return some (smt| (not $(← emitTerm a)))
     -- The `Bool`-valued connectives, which are ordinary functions (`not`/`and`/…)
     -- rather than the `Prop` classes above. Since `Prop` and `Bool` share the SMT
     -- `Bool` sort, they map to the same operators — but they are distinct `Expr`s
     -- and must each be recognized, or they become uninterpreted symbols.
-    | not a   => return some (.symbApp "not" #[← emitTerm a])
-    | and a b => return some (.symbApp "and" #[← emitTerm a, ← emitTerm b])
-    | or a b  => return some (.symbApp "or" #[← emitTerm a, ← emitTerm b])
-    | xor a b => return some (.symbApp "xor" #[← emitTerm a, ← emitTerm b])
-    | bne _ _ a b => return some (.symbApp "not" #[.symbApp "=" #[← emitTerm a, ← emitTerm b]])
-    | BEq.beq _ _ a b => return some (.symbApp "=" #[← emitTerm a, ← emitTerm b])
-    | Iff a b => return some (.symbApp "=" #[← emitTerm a, ← emitTerm b])
-    | Eq _ a b => return some (.symbApp "=" #[← emitTerm a, ← emitTerm b])
-    | Ne _ a b => return some (.symbApp "not" #[.symbApp "=" #[← emitTerm a, ← emitTerm b]])
-    | HAdd.hAdd _ _ _ _ a b => return some (.symbApp "+" #[← emitTerm a, ← emitTerm b])
-    | HMul.hMul _ _ _ _ a b => return some (.symbApp "*" #[← emitTerm a, ← emitTerm b])
+    | not a   => return some (smt| (not $(← emitTerm a)))
+    | and a b => return some (smt| (and $(← emitTerm a) $(← emitTerm b)))
+    | or a b  => return some (smt| (or $(← emitTerm a) $(← emitTerm b)))
+    | xor a b => return some (smt| (xor $(← emitTerm a) $(← emitTerm b)))
+    | bne _ _ a b => return some (smt| (not (= $(← emitTerm a) $(← emitTerm b))))
+    | BEq.beq _ _ a b => return some (smt| (= $(← emitTerm a) $(← emitTerm b)))
+    | Iff a b => return some (smt| (= $(← emitTerm a) $(← emitTerm b)))
+    | Eq _ a b => return some (smt| (= $(← emitTerm a) $(← emitTerm b)))
+    | Ne _ a b => return some (smt| (not (= $(← emitTerm a) $(← emitTerm b))))
+    | HAdd.hAdd _ _ _ _ a b => return some (smt| (+ $(← emitTerm a) $(← emitTerm b)))
+    | HMul.hMul _ _ _ _ a b => return some (smt| (* $(← emitTerm a) $(← emitTerm b)))
     | HSub.hSub _ _ _ _ a b =>
       -- `Nat` subtraction truncates at 0: `a - b = if a >= b then a - b else 0`.
       -- Encoding it as plain SMT `-` (which can go negative) is unsound.
       let sa ← emitTerm a
       let sb ← emitTerm b
       if (← isNatTyped e) then
-        return some (.symbApp "ite"
-          #[.symbApp ">=" #[sa, sb], .symbApp "-" #[sa, sb], .lit (.num 0)])
+        return some (smt| (ite (>= $sa $sb) (- $sa $sb) 0))
       else
-        return some (.symbApp "-" #[sa, sb])
+        return some (smt| (- $sa $sb))
     -- SMT-LIB has no `max`/`min`, so they expand to an `ite`. Both are translated
     -- for whatever ordered sort the arguments have, so the `Nat` guard and the
     -- `BitVec` dispatch above still apply to the operands.
     | max _ _ a b =>
       let sa ← emitTerm a; let sb ← emitTerm b
-      return some (.symbApp "ite" #[.symbApp ">=" #[sa, sb], sa, sb])
+      return some (smt| (ite (>= $sa $sb) $sa $sb))
     | min _ _ a b =>
       let sa ← emitTerm a; let sb ← emitTerm b
-      return some (.symbApp "ite" #[.symbApp "<=" #[sa, sb], sa, sb])
+      return some (smt| (ite (<= $sa $sb) $sa $sb))
     -- `Nat.succ n` is `n + 1`; it appears from literals and from recursors.
-    | Nat.succ a => return some (.symbApp "+" #[← emitTerm a, .lit (.num 1)])
+    | Nat.succ a => return some (smt| (+ $(← emitTerm a) 1))
     -- `decide p` is `p` itself once `Prop` is encoded as `Bool`.
     | decide p _ => return some (← emitTerm p)
     -- `Nat.cast` is the identity in this encoding *only* when the target is `Int`
@@ -1009,16 +1026,16 @@ mutual
         return some (← emitTerm a)
       else
         return none
-    | LE.le _ _ a b => return some (.symbApp "<=" #[← emitTerm a, ← emitTerm b])
-    | LT.lt _ _ a b => return some (.symbApp "<" #[← emitTerm a, ← emitTerm b])
-    | GE.ge _ _ a b => return some (.symbApp ">=" #[← emitTerm a, ← emitTerm b])
-    | GT.gt _ _ a b => return some (.symbApp ">" #[← emitTerm a, ← emitTerm b])
+    | LE.le _ _ a b => return some (smt| (<= $(← emitTerm a) $(← emitTerm b)))
+    | LT.lt _ _ a b => return some (smt| (< $(← emitTerm a) $(← emitTerm b)))
+    | GE.ge _ _ a b => return some (smt| (>= $(← emitTerm a) $(← emitTerm b)))
+    | GT.gt _ _ a b => return some (smt| (> $(← emitTerm a) $(← emitTerm b)))
     | ite _ c _ a b =>
       -- `if c then a else b`; the condition `c : Prop` becomes an SMT Bool term.
-      return some (.symbApp "ite" #[← emitTerm c, ← emitTerm a, ← emitTerm b])
+      return some (smt| (ite $(← emitTerm c) $(← emitTerm a) $(← emitTerm b)))
     | cond _ b t e =>
       -- `Bool.cond`/`cond` with a `Bool` scrutinee.
-      return some (.symbApp "ite" #[← emitTerm b, ← emitTerm t, ← emitTerm e])
+      return some (smt| (ite $(← emitTerm b) $(← emitTerm t) $(← emitTerm e)))
     | _ =>
       -- Implication and quantifiers need binder handling.
       if e.isArrow then
@@ -1037,9 +1054,9 @@ mutual
           let a ← emitTerm ty
           if body.hasLooseBVar 0 then
             let b ← withLocalDeclD `hp ty fun hp => emitTerm (body.instantiate1 hp)
-            return some (.symbApp "=>" #[a, b])
+            return some (smt| (=> $a $b))
           let b ← emitTerm body
-          return some (.symbApp "=>" #[a, b])
+          return some (smt| (=> $a $b))
         else
           quantifier true ty body
       | .app (.app (.const ``Exists _) _) (.lam _ ty body _) =>
@@ -1094,8 +1111,8 @@ mutual
     | HAnd.hAnd _ _ _ _ a b => bin "bvand" a b
     | HOr.hOr _ _ _ _ a b   => bin "bvor" a b
     | HXor.hXor _ _ _ _ a b => bin "bvxor" a b
-    | Complement.complement _ _ a => return some (.symbApp "bvnot" #[← emitTerm a])
-    | Neg.neg _ _ a => return some (.symbApp "bvneg" #[← emitTerm a])
+    | Complement.complement _ _ a => return some (smt| (bvnot $(← emitTerm a)))
+    | Neg.neg _ _ a => return some (smt| (bvneg $(← emitTerm a)))
     -- `/` and `%` on `BitVec` are the *unsigned* operations, and Lean returns `0`
     -- at a zero divisor where SMT's `bvudiv` returns all-ones — hence the guard.
     -- `bvurem` already agrees with Lean (both return the dividend), so it is raw.
@@ -1108,8 +1125,8 @@ mutual
     | BitVec.add _ a b => bin "bvadd" a b
     | BitVec.sub _ a b => bin "bvsub" a b
     | BitVec.mul _ a b => bin "bvmul" a b
-    | BitVec.neg _ a => return some (.symbApp "bvneg" #[← emitTerm a])
-    | BitVec.not _ a => return some (.symbApp "bvnot" #[← emitTerm a])
+    | BitVec.neg _ a => return some (smt| (bvneg $(← emitTerm a)))
+    | BitVec.not _ a => return some (smt| (bvnot $(← emitTerm a)))
     | BitVec.and _ a b => bin "bvand" a b
     | BitVec.or _ a b  => bin "bvor" a b
     | BitVec.xor _ a b => bin "bvxor" a b
@@ -1188,12 +1205,12 @@ mutual
     | HAppend.hAppend _ _ _ _ a b =>
       -- `a ++ b` puts `a` in the high bits, matching SMT `concat` (verified:
       -- `(4 : BitVec 8) ++ (5 : BitVec 4) = 0x045#12`).
-      return some (.symbApp "concat" #[← emitTerm a, ← emitTerm b])
+      return some (smt| (concat $(← emitTerm a) $(← emitTerm b)))
     -- Bridges between bit-vectors and the integers. `toNat` is unsigned
     -- (`bv2nat`), `toInt` two's-complement signed (`sbv_to_int`); `ofInt` wraps.
     -- Both operators are supported by z3 and cvc5 (checked).
-    | BitVec.toNat _ a => return some (.symbApp "bv2nat" #[← emitTerm a])
-    | BitVec.toInt _ a => return some (.symbApp "sbv_to_int" #[← emitTerm a])
+    | BitVec.toNat _ a => return some (smt| (bv2nat $(← emitTerm a)))
+    | BitVec.toInt _ a => return some (smt| (sbv_to_int $(← emitTerm a)))
     | BitVec.ofInt width i =>
       let some wv ← natValue? width | return none
       return some (.app (.indexed "int2bv" #[.inr wv]) #[← emitTerm i])
@@ -1224,15 +1241,15 @@ mutual
   partial def stringTerm? (e : Expr) : TranslateM (Option SMT.Term) := do
     match_expr e with
     | String.length s =>
-      return some (.symbApp "str.len" #[← emitTerm s])
+      return some (smt| (str.len $(← emitTerm s)))
     | String.append a b =>
-      return some (.symbApp "str.++" #[← emitTerm a, ← emitTerm b])
+      return some (smt| (str.++ $(← emitTerm a) $(← emitTerm b)))
     | String.isPrefixOf a b =>
-      return some (.symbApp "str.prefixof" #[← emitTerm a, ← emitTerm b])
+      return some (smt| (str.prefixof $(← emitTerm a) $(← emitTerm b)))
     | HAppend.hAppend _ _ _ _ a b =>
       -- Only claim `++` when it really is string append.
       if (← isStringType (← inferType a)) then
-        return some (.symbApp "str.++" #[← emitTerm a, ← emitTerm b])
+        return some (smt| (str.++ $(← emitTerm a) $(← emitTerm b)))
       else return none
     | _ => return none
 
@@ -1248,7 +1265,7 @@ mutual
     | .forallE _ ty body _ =>
       if body.hasLooseBVar 0 then return none
       unless (← isProp ty) do return none
-      return some (.symbApp "=>" #[← emitTerm ty, ← emitTerm body])
+      return some (smt| (=> $(← emitTerm ty) $(← emitTerm body)))
     | _ => return none
 
   /-- Translate `∀ (x : ty), body` / `∃ (x : ty), body` over a non-Prop sort.
@@ -1301,8 +1318,8 @@ mutual
     match ← wfCondition ty (.const vname) with
     | none => return body
     | some cond =>
-      if isForall then return .symbApp "=>" #[cond, body]
-      else return .symbApp "and" #[cond, body]
+      if isForall then return (smt| (=> $cond $body))
+      else return (smt| (and $cond $body))
 
   /-- Uninterpreted-function fallback: declare the head, translate the args.
 

@@ -256,6 +256,28 @@ theorem int_div0 (x : Int) : x / 0 = 0 := by crush
 theorem int_mod0 (x : Int) : x % 0 = x := by crush
 theorem nat_div0 (n : Nat) : n / 0 = 0 := by crush
 
+/-! ## Head-indexed library lowerings -/
+
+theorem int_natAbs_nonneg (x : Int) : 0 ≤ x.natAbs := by crush
+theorem int_natAbs_neg (x : Int) : (-x).natAbs = x.natAbs := by crush
+theorem int_sign_cases (x : Int) : x.sign = -1 ∨ x.sign = 0 ∨ x.sign = 1 := by crush
+theorem int_sign_pos (x : Int) (h : 0 < x) : x.sign = 1 := by crush
+
+theorem int_dvd_iff_mod (a b : Int) : a ∣ b ↔ b % a = 0 := by crush
+theorem nat_dvd_iff_mod (a b : Nat) : a ∣ b ↔ b % a = 0 := by crush
+theorem int_zero_dvd (b : Int) : 0 ∣ b ↔ b = 0 := by crush
+theorem nat_zero_dvd (b : Nat) : 0 ∣ b ↔ b = 0 := by crush
+theorem int_one_dvd (b : Int) : 1 ∣ b := by crush
+theorem nat_one_dvd (b : Nat) : 1 ∣ b := by crush
+
+-- Assigning canonical arithmetic semantics to this deliberately false instance
+-- would let crush prove the false goal `1 ∣ 1`.
+@[reducible] def noIntDvd : Dvd Int := ⟨fun _ _ => False⟩
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_custom_dvd : @Dvd.dvd Int noIntDvd 1 1 := by crush
+
 /-! ## Strings
 
 `str.len` counts codepoints, matching `String.length`. Note that `\` is *not* an

@@ -20,6 +20,41 @@ open Crush
 
 set_option crush.trust "trust"
 
+/-! ## SMT-LIB term quotations
+
+The `(smt| ...)` quotation expands nested SMT-LIB syntax into the typed SMT term IR.
+`$t` splices an existing `SMT.Term`; literals and symbols need no constructors. -/
+
+open Crush.SMT
+
+def quotationExample (x : SMT.Term) : SMT.Term :=
+  (smt| (ite (> $x 0) 1 (ite (= $x 0) 0 (- 1))))
+
+#guard toString (quotationExample (.const "x")) =
+  "(ite (> x 0) 1 (ite (= x 0) 0 (- 1)))"
+
+#guard toString (smt| (and true (= "a" "a"))) = "(and true (= \"a\" \"a\"))"
+
+#guard toString (smt| (str.++ "a" "b")) = "(str.++ \"a\" \"b\")"
+
+#guard toString (smt| (= $(quotationExample (.const "x")) false)) =
+  "(= (ite (> x 0) 1 (ite (= x 0) 0 (- 1))) false)"
+
+/-! ## A head-indexed lowering fires
+
+Unlike a general translation handler, this callback is considered only for
+applications of `loweredMystery`; it does not need to inspect `ctx.fn`. -/
+
+opaque loweredMystery : Int → Int
+
+@[crush_lower loweredMystery]
+def loweredMysteryHandler : LoweringHandler := fun ctx => do
+  let #[x] := ctx.args | return none
+  let sx ← ctx.emitTerm x
+  return some (smt| (+ $sx 3))
+
+theorem targeted_lowering_fires (x : Int) : loweredMystery x = x + 3 := by crush
+
 /-! ## A handler fires on an otherwise-uninterpreted constant
 
 `mystery` has no built-in mapping, so without a handler `crush` treats it as an
@@ -32,7 +67,9 @@ opaque mystery : Int → Int
 def mysteryHandler : TranslationHandler := fun ctx => do
   let .const ``mystery _ := ctx.fn | return none
   match ctx.args with
-  | #[n] => return some (.symbApp "+" #[← ctx.emitTerm n, .lit (.num 1)])
+  | #[n] =>
+    let sn ← ctx.emitTerm n
+    return some (smt| (+ $sn 1))
   | _ => return none
 
 -- Provable only because the handler ran (an uninterpreted `mystery` could be
@@ -50,7 +87,9 @@ handler took precedence over the built-in. -/
 def succOverride : TranslationHandler := fun ctx => do
   let .const ``Nat.succ _ := ctx.fn | return none
   match ctx.args with
-  | #[n] => return some (.symbApp "+" #[← ctx.emitTerm n, .lit (.num 2)])
+  | #[n] =>
+    let sn ← ctx.emitTerm n
+    return some (smt| (+ $sn 2))
   | _ => return none
 
 theorem handler_overrides_builtin (n : Nat) (h : Nat.succ n = 5) : n = 3 := by crush

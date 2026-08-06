@@ -94,16 +94,15 @@ the differentiator. What is:
 1. **A declarative term-level tier is the clear open gap.** lean-smt has a
    programmatic tier (`@[smt_translate]`) and a Lean→Lean simp tier
    (`@[smt_normalize]`), but *no* declarative "this constant ↦ this SMT term"
-   surface. Our `crush_map` / `crush_map_sort` sugar (desugaring to a handler) is
-   precisely that missing tier — most users want `Nat.succ ↦ (+ _ 1)`, not a
-   `MetaM` function.
+   surface. Our `crush_map` / `crush_map_sort` sugar and `(smt| ...)` typed term
+   quotations cover that tier; most users want `Nat.succ ↦ (+ _ 1)`, not raw IR
+   constructors throughout a `MetaM` function.
 2. **Handler dispatch indexed by head symbol.** lean-smt tries every translator on
    every subterm in arbitrary order — its source literally carries
-   `-- TODO: Use DiscrTree ... instead of naively looping`. We index handlers by
-   head constant in a `DiscrTree` with explicit priorities, so dispatch is
-   `O(matching)` and override semantics are predictable. (Our current skeleton
-   uses a priority-sorted linear scan; the `DiscrTree` index is a planned
-   refinement.)
+   `-- TODO: Use DiscrTree ... instead of naively looping`. General
+   `@[crush_translate]` handlers remain a priority-sorted linear scan because they
+   may match dynamically; `@[crush_lower target]` uses a persistent `NameMap`
+   indexed by the target head, with priorities among handlers for that head.
 3. **Higher-order actually survives.** lean-smt throws
    `"SMT-LIB does not support lambdas"` — its only HO answer is monomorphization.
    We add the encoding layer (§5). Notably even Isabelle's Sledgehammer, after
@@ -179,7 +178,7 @@ the differentiator. What is:
               │  first-order facts (or HO-native for cvc5)
    ┌──────────▼───────────┐
    │ 5. Translation        │  Expr → Crush.SMT.Term
-   │    - user handlers     │  ← @[crush_translate] tried first, by priority
+   │    - user handlers     │  ← general handlers, then head-indexed lowerings
    │    - default structural│
    └──────────┬───────────┘
               │  Array SMT.Command
@@ -197,13 +196,15 @@ Module map (⟢ = built & tested, ▷ = designed, □ = todo):
 | Module | Layer | Status |
 |---|---|---|
 | `Crush/SMT/Syntax.lean` | typed SMT-LIB IR | ⟢ |
+| `Crush/SMT/Quote.lean` | `(smt\| ...)` typed SMT-LIB term quotations | ⟢ |
 | `Crush/SMT/Print.lean` | IR → SMT-LIB text | ⟢ |
 | `Crush/Frontend/Config.lean` | options + `Config` | ⟢ |
 | `Crush/Translation/Monad.lean` | `TranslateM`, name map, provenance | ⟢ |
-| `Crush/Translation/Attr.lean` | `@[crush_translate]` (term) + `@[crush_translate_sort]` (sort) extensions | ⟢ |
+| `Crush/Translation/Attr.lean` | general, sort, and head-indexed lowering extensions | ⟢ |
 | `Crush/Translation/Unfold.lean` | `@[crush_unfold]`/`@[crush_defeq]` auto-unfold + relevance filter | ⟢ |
 | `Crush/Translation/Builtins.lean` | `crush_map`/`crush_map_sort` sugar | ⟢ |
 | `Crush/Translation/Theories.lean` | BV/String helpers + div-by-zero guards | ⟢ |
+| `Crush/Translation/DefaultLowerings.lean` | public-API lowerings for library constants | ⟢ |
 | `Crush/Solver/Process.lean` | process mgmt, hard timeout, `unknown` | ⟢ |
 | `Crush/SMT/Sexp.lean` | s-expression parser | ⟢ |
 | `Crush/SMT/Result.lean` | unsat-core + model parsing | ⟢ |
@@ -246,9 +247,23 @@ Registration is by attribute, with `simp`-style priorities:
 def succHandler : TranslationHandler := fun ctx => do
   let .const ``Nat.succ _ := ctx.fn | return none
   match ctx.args with
-  | #[n] => return some (.app (.symb "+") #[← ctx.emitTerm n, .lit (.num 1)])
+  | #[n] => return some (smt| (+ $(← ctx.emitTerm n) 1))
   | _ => return none
 ```
+
+For the common case where one known Lean constant needs a custom SMT encoding,
+`@[crush_lower target]` indexes the same callback type by that head constant:
+
+```lean
+@[crush_lower Int.sign]
+def lowerSign : LoweringHandler := fun ctx => do
+  let #[x] := ctx.args | return none
+  let sx ← ctx.emitTerm x
+  return some (smt| (ite (> $sx 0) 1 (ite (= $sx 0) 0 (- 1))))
+```
+
+The `(smt| ...)` quotation expands at compile time to the typed `SMT.Term` IR;
+`$term` splices an existing term. It is not a runtime string parser.
 
 For the common "map this constant to this symbol/sort" case there is sugar that
 desugars to a handler:
@@ -331,14 +346,12 @@ type-directed dispatch (`bitvecTerm?`, `stringTerm?`) that the head-constant han
 shape does not express, and inlining them is simpler and faster than routing every
 built-in through `evalConst`.
 
-What matters for extensibility is the *dispatch order*, and it delivers the same
-guarantee a dogfooded design would: `emitTerm` tries registered `@[crush_translate]`
-handlers (highest priority first) **before** the structural translator, so a user
-handler for any constant — including one the built-ins already handle — takes
-precedence. There is no privileged built-in path in the sense that matters: anything
-a built-in maps, a user can remap. (The earlier plan to register built-ins *as*
-handlers, "dogfooding" the API, was dropped; it bought nothing over the ordering
-guarantee and cost a `evalConst` indirection per built-in.)
+What matters for extensibility is the *dispatch order*: `emitTerm` tries general
+`@[crush_translate]` handlers, then matching `@[crush_lower]` handlers, then the
+structural translator. General handlers can therefore override both targeted
+lowerings and core mappings. Library-level defaults such as `Int.sign`,
+`Int.natAbs`, and canonical divisibility dogfood `@[crush_lower]`; the hot
+structural theory core avoids an `evalConst` indirection.
 
 ---
 
@@ -844,9 +857,12 @@ independent tactic call per step on bare `MetaM`, which is the thing `SymM` woul
     flooding the solver. Tested in `Test/AutoUnfold.lean`, exercised in `Test/TIP.lean`.
 4. Sort handlers (§4.1). **done** — `@[crush_translate_sort]` lets a user retarget a
     type to a theory sort (e.g. a map to SMT `(Array K V)`); `Test/ArrayTheory.lean`.
-5. Premise selection on Lean core `LibrarySuggestions`.
-6. Portfolio backend, per-call config syntax, richer model printing, docs.
-7. **Minimized counterexample models** (`crush.model.minimize`, backlog — wanted by
+5. Head-indexed lowerings and SMT quotations (§4.1). **done** —
+    `@[crush_lower target]` uses keyed dispatch and `(smt| ...)` removes raw IR
+    constructor noise; `Test/Extension.lean` and `Test/Theories.lean`.
+6. Premise selection on Lean core `LibrarySuggestions`.
+7. Portfolio backend, per-call config syntax, richer model printing, docs.
+8. **Minimized counterexample models** (`crush.model.minimize`, backlog — wanted by
     downstream users who consume the `sat` model, e.g. PLean). On `sat`, iteratively
     shrink the model to minimal cardinality before printing, so a counterexample is
     the *smallest* witness rather than whatever the solver happened to pick. The
@@ -1115,11 +1131,11 @@ a passing test; the build must be clean and produce **no `sorry`**.
 |---|---|
 | `Smoke.lean` | IR printing, handler registration via both surfaces, config parse, a live `z3` round-trip |
 | `FirstOrder.lean` | the basic end-to-end path: arithmetic, propositional logic, UF congruence |
-| `Extension.lean` | user `@[crush_translate]` handlers *fire* and *override* built-ins (the §4.3 contract), plus the `crush_map` sugar |
+| `Extension.lean` | general and head-indexed handlers, override order, `(smt\| ...)` quotations, and `crush_map` |
 | `ArrayTheory.lean` | `@[crush_translate_sort]` + term handlers retargeting a user map type to SMT's `(Array K V)` theory (`select`/`store`); the array axioms then hold |
 | `Hints.lean` | the hint grammar (§7): explicit lemma hints, `*`, list-as-restriction, `u[…]`/`d[…]` unfolding, and the malformed-hint diagnostics |
 | `AutoUnfold.lean` | `@[crush_unfold]`/`@[crush_defeq]`: the attribute fires without a hint, relevance filtering, transitive reach, `crush.autoUnfold` gating, misuse errors |
-| `Theories.lean` | `Nat`/`Int`, datatypes (incl. recursive), bit-vectors, strings, and the §10 soundness regressions |
+| `Theories.lean` | `Nat`/`Int`, default library lowerings, custom-instance rejection, datatypes, bit-vectors, strings, and §10 soundness regressions |
 | `Monomorphize.lean` | parametric datatypes: distinct instantiations, nesting, `Nat`-through-parameter guard, selectors/η |
 | `LemmaMono.lean` | lemma-instantiation: polymorphic facts specialized at the query's types, saturation, the polymorphic TIP list theorems, `crush.mono.fuel` gating, and that false goals are still rejected |
 | `MonoStress.lean` | recursive parametric `Tree`, two-parameter `Map`, nested `FSet`, and all of these combined with higher-order functions |

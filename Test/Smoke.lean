@@ -15,9 +15,9 @@ def demoScript : Array Command := #[
   .declSort "U" 0,
   .declFun "f" #[.app (.symb "U") #[]] (.app (.symb "U") #[]),
   .declFun "a" #[] (.app (.symb "U") #[]),
-  .assert (.app (.symb "=") #[.symbApp "f" #[.const "a"], .const "a"]),
+  .assert (smt| (= (f a) a)),
   .assert (.forallE #[("x", .app (.symb "U") #[])]
-            (.annot (.app (.symb "=") #[.symbApp "f" #[.bvar 0], .bvar 0]) #[.named "ax"])),
+            (.annot (smt| (= (f $(.bvar 0)) $(.bvar 0))) #[.named "ax"])),
   .checkSat
 ]
 
@@ -36,7 +36,7 @@ def demoScript : Array Command := #[
 def succHandler : TranslationHandler := fun ctx => do
   let .const ``Nat.succ _ := ctx.fn | return none
   match ctx.args with
-  | #[n] => return some (.app (.symb "+") #[← ctx.emitTerm n, .lit (.num 1)])
+  | #[n] => return some (smt| (+ $(← ctx.emitTerm n) 1))
   | _ => return none
 
 -- Sugar handlers.
@@ -62,8 +62,7 @@ crush_map_sort Nat => "Int"
       let r ← Solver.runQuery cfg #[
         .declSort "U" 0,
         .declFun "a" #[] (.app (.symb "U") #[]),
-        .assert (.app (.symb "not")
-          #[.app (.symb "=") #[.const "a", .const "a"]])]
+        .assert (smt| (not (= a a)))]
       pure (some r)) with
   | none => IO.println "z3: no backend spec"
   | some (.unsat ..) => IO.println "z3 round-trip: unsat ✓"

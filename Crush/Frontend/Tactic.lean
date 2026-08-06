@@ -3,6 +3,7 @@ import Crush.Frontend.Config
 import Crush.Reify.Collect
 import Crush.Translation.Monomorphize
 import Crush.Translation.Translate
+import Crush.Translation.DefaultLowerings
 import Crush.Util.Profile
 import Crush.Solver.Process
 import Crush.Solver.Reconstruct

@@ -82,6 +82,18 @@ def myFn : Nat → Nat
   | n + 1 => myFn n + 2
 ```
 
+You can also enable automatic unfolding for definitions from Lean or another library:
+
+```lean
+attribute [local crush_unfold] List.length
+
+example (l : List Int) : l.length = 0 ↔ l = [] := by crush
+```
+
+Use `local` to keep the setting in the current section or file. Omit it when the setting
+should be exported to modules that import yours. The same approach works for definitions
+such as `Monotone` and `Function.Injective`.
+
 `crush` proves goals, not inductions — so drive the induction yourself and let it close the
 cases:
 
@@ -150,22 +162,28 @@ crush_map_sort Nat => "Int"
 For full control, register a metaprogram that runs at elaboration time:
 
 ```lean
-@[crush_translate high]
-def mySuccHandler : Crush.TranslationHandler := fun ctx => do
-  let .const ``Nat.succ _ := ctx.fn | return none
-  match ctx.args with
-  | #[n] => return some (.app (.symb "+") #[← ctx.emitTerm n, .lit (.num 1)])
-  | _    => return none
+@[crush_lower Int.sign]
+def lowerSign : Crush.LoweringHandler := fun ctx => do
+  let #[x] := ctx.args | return none
+  let sx ← ctx.emitTerm x
+  return some (smt| (ite (> $sx 0) 1 (ite (= $sx 0) 0 (- 1))))
 ```
+
+The `(smt| ...)` quotation is a shallow embedding of SMT-LIB terms. Symbols,
+applications, numerals, Booleans, and strings use SMT-LIB syntax; `$term` splices an
+existing `Crush.SMT.Term`. The result is still the typed SMT term representation, not
+an unchecked string.
 
 ## Limitations
 
 - **No induction.** A goal needing a hypothesis about all smaller values times out. Drive the
   `induction` yourself and let `crush` close each case — that is the intended workflow.
-- **Not every function translates.** Arithmetic, `Bool`, `String`, `BitVec`, and your own
-  inductive types do; many library operations (`|·|`, `_ ∣ _`, `Finset.card`, bundled
-  `Monotone`) do not, and an untranslated one becomes uninterpreted — so the solver reports a
-  *counterexample*, not an error. Unbundling or a custom handler (above) works around it.
+- **Not every function translates.** Arithmetic, canonical divisibility, `Bool`, `String`,
+  `BitVec`, and your own inductive types do; some library operations such as `Finset.card`
+  do not, and an untranslated one becomes uninterpreted — so the solver reports a
+  *counterexample*, not an error. Definitions such as `|·|`, `List.length`, and `Monotone`
+  work after enabling `crush_unfold` as shown above. Otherwise, provide a suitable lemma,
+  state the needed property directly, or add a custom lowering.
 - **A goal is only as strong as its premises.** A missing premise makes the query unprovable,
   which surfaces as a *timeout* — so check the goal actually follows before blaming the solver.
 - **Reconstruction is narrower than solving.** Under `crush.trust "reconstruct"`, some goals

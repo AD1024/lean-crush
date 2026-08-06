@@ -15,12 +15,11 @@ Two honest limits on how far this reaches, both measured rather than assumed:
   `LinearOrder`/`AddCommSemigroup`, and crush is first-order, so the polymorphic form is out
   of scope — monomorphization specializes lemmas *into* a query, it does not let a goal be
   proved for all types at once.
-* Many mathlib primitives have no first-order translation and simply produce a
-  counterexample rather than an error. Measured on 2026-08-06: `|·|`, `Int.natAbs`,
-  `Int.sign`, `_ ∣ _`, `Finset.card`, `List.length`, and the bundled predicates (`Monotone`,
-  `Function.Injective`) all fail to translate. The `Untranslated` section at the end pins a
-  representative sample, so a future translation improvement shows up as a *test break*
-  rather than going unnoticed.
+* Some mathlib primitives have no first-order translation and simply produce a
+  counterexample rather than an error. `Int.natAbs`, `Int.sign`, and canonical
+  divisibility have dedicated lowerings. Measured on 2026-08-06, `|·|`, `Finset.card`,
+  `List.length`, and bundled predicates such as `Monotone` still require unfolding or
+  another encoding. The final sections pin both sides of this boundary.
 -/
 
 open Crush
@@ -208,6 +207,24 @@ theorem sum_exhaust (s : Int ⊕ Int) : (∃ a, s = .inl a) ∨ ∃ b, s = .inr 
 
 end Datatypes
 
+/-! ## Lowered mathlib primitives
+
+These operations are encoded by public `@[crush_lower]` handlers rather than the
+structural translator. -/
+
+section Lowered
+
+/-- `Int.natAbs_mul`. -/
+theorem natAbs_mul' (a b : Int) : (a * b).natAbs = a.natAbs * b.natAbs := by crush
+
+/-- `Int.sign_mul`. -/
+theorem sign_mul' (a b : Int) : (a * b).sign = a.sign * b.sign := by crush
+
+/-- `Int.dvd_iff_emod_eq_zero`. -/
+theorem dvd_iff_emod_eq_zero' (a b : Int) : a ∣ b ↔ b % a = 0 := by crush
+
+end Lowered
+
 /-! ## Untranslated mathlib primitives
 
 These pin the *boundary*. Each goal below is **true** in mathlib, but the operation has no
@@ -224,21 +241,6 @@ section Untranslated
 /-- error: crush: the goal is not provable -/
 #guard_msgs(error, substring := true) in
 example (a : Int) : 0 ≤ |a| := by crush
-
--- `Int.natAbs_mul`.
-/-- error: crush: the goal is not provable -/
-#guard_msgs(error, substring := true) in
-example (a b : Int) : (a * b).natAbs = a.natAbs * b.natAbs := by crush
-
--- `Int.sign_mul`.
-/-- error: crush: the goal is not provable -/
-#guard_msgs(error, substring := true) in
-example (a b : Int) : (a * b).sign = a.sign * b.sign := by crush
-
--- `Dvd.dvd`: divisibility is an existential crush does not unfold.
-/-- error: crush: the goal is not provable -/
-#guard_msgs(error, substring := true) in
-example (a b k : Int) (h : a ∣ b) : a ∣ b * k := by crush
 
 -- `Finset.card_eq_zero`.
 /-- error: crush: the goal is not provable -/

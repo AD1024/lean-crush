@@ -1,5 +1,6 @@
 import Lean
 import Crush.SMT.Syntax
+import Crush.SMT.Quote
 import Crush.Translation.Monad
 open Lean Meta
 
@@ -97,7 +98,9 @@ Concretely, Lean returns `0` for `x / 0`, `BitVec.udiv x 0`, and `BitVec.sdiv x 
 whereas SMT-LIB fixes `bvudiv x 0 = ~0` and `bvsdiv x 0 = ±1`. Emitting the raw
 operator would let the solver prove goals that are false in Lean. -/
 def bvDivGuard (op : String) (w : Nat) (a b : SMT.Term) : SMT.Term :=
-  .symbApp "ite" #[.symbApp "=" #[b, bvLit w 0], bvLit w 0, .symbApp op #[a, b]]
+  let zero := bvLit w 0
+  let application := SMT.Term.symbApp op #[a, b]
+  (smt| (ite (= $b $zero) $zero $application))
 
 /-- Guard an `Int`/`Nat` division-like operator, which SMT-LIB leaves
 *underspecified* at a zero divisor. Lean pins `x / 0 = 0` and `x % 0 = x`, so we
@@ -107,7 +110,8 @@ Unlike `bvDivGuard` this is a *completeness* fix rather than a soundness one: an
 underspecified SMT operator admits Lean's interpretation, so an `unsat` was
 already trustworthy — we merely stop losing provable goals. -/
 def intDivGuard (op : String) (a b : SMT.Term) : SMT.Term :=
-  let zeroVal := if op == "mod" then a else SMT.Term.lit (.num 0)
-  .symbApp "ite" #[.symbApp "=" #[b, .lit (.num 0)], zeroVal, .symbApp op #[a, b]]
+  let zeroVal := if op == "mod" then a else (smt| 0)
+  let application := SMT.Term.symbApp op #[a, b]
+  (smt| (ite (= $b 0) $zeroVal $application))
 
 end Crush

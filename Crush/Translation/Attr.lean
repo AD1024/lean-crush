@@ -4,7 +4,7 @@ import Crush.Translation.Monad
 open Lean Elab Meta
 
 /-!
-# User-extensible translation: the `@[crush_translate]` framework
+# User-extensible translation: handlers and head-indexed lowerings
 
 This is lean-crush's central new capability. A user annotates a Lean declaration
 with a metaprogram describing how to translate a matched `Expr` into SMT. Handlers
@@ -18,7 +18,12 @@ Two registration surfaces are provided:
 1. `@[crush_translate]` on a `def h : TranslationHandler` — the general form. `h`
    inspects the head `Expr` and either returns `some smtTerm` or defers (`none`).
 
-2. `crush_map`/`crush_map_sort` macros (see `Crush/Translation/Builtins.lean`) —
+2. `@[crush_lower Target.constant]` on a `def h : LoweringHandler` — the targeted
+   form. The registry dispatches `h` only for applications of `Target.constant`,
+   so the handler can focus on argument validation and SMT construction without
+   matching every term itself. Multiple lowerings for one head use priorities.
+
+3. `crush_map`/`crush_map_sort` macros (see `Crush/Translation/Builtins.lean`) —
    sugar for the common cases of "map this constant to this SMT symbol/sort", which
    desugar to a `TranslationHandler`.
 
@@ -54,6 +59,30 @@ structure TranslationCtx where
 defer to the next handler / the default translator. Runs in `TranslateM`, so it
 may emit declarations, allocate symbols, and inspect the environment. -/
 abbrev TranslationHandler := TranslationCtx → TranslateM (Option SMT.Term)
+
+/-- A lowering registered for one specific Lean head constant.
+
+This is definitionally the same callback as `TranslationHandler`; the separate name
+documents that head matching is performed by the `@[crush_lower target]` registry.
+A lowering may still return `none` when the application shape, type, or typeclass
+instance is not one it can encode soundly. -/
+abbrev LoweringHandler := TranslationHandler
+
+/-- Whether argument `i` is the canonical instance selected by typeclass synthesis.
+
+Custom lowerings for overloaded operations must check this before assigning the
+standard SMT meaning. A user can explicitly pass a different legal instance, in which
+case the operation denotes different Lean code and must be declined rather than
+mistranslated. -/
+def TranslationCtx.hasCanonicalInstance (ctx : TranslationCtx) (i : Nat) :
+    TranslateM Bool := do
+  let some inst := ctx.args[i]? | return false
+  let instTy ← inferType inst
+  try
+    let canonical ← synthInstance instTy
+    isDefEq inst canonical
+  catch _ =>
+    return false
 
 /-- A user **sort** handler: claims a Lean *type* and maps it to an SMT sort. The
 `fn`/`args` of the `TranslationCtx` are the type's head constant and its arguments
@@ -130,6 +159,86 @@ the persistent extension, with no `evalConst` — so the common case of no user
 handlers skips handler resolution entirely on the hot path of `emitTerm`. -/
 def hasTranslationHandlers : TranslateM Bool := do
   return !(crushTranslateExt.getState (← getEnv)).isEmpty
+
+/-! ## Head-indexed lowerings (`@[crush_lower target]`)
+
+The general handler extension above intentionally permits dynamic matching, but it
+requires every handler to inspect every translated term. Lowerings cover the common
+case where one Lean constant has a custom SMT encoding: the persistent extension is
+indexed by the head constant, so only relevant callbacks are evaluated.
+
+General handlers run before targeted lowerings in `emitTerm`, preserving the original
+contract that `@[crush_translate]` can override every built-in mapping. Within the
+targeted registry, higher priority runs first, so applications can override a default
+lowering with `@[crush_lower Target high]`.
+-/
+
+/-- Serializable entry for one head-indexed lowering. -/
+structure LoweringEntry where
+  head     : Name
+  declName : Name
+  priority : Nat
+  deriving Inhabited
+
+private def addLoweringEntry
+    (state : NameMap (Array HandlerEntry)) (entry : LoweringEntry) :
+    NameMap (Array HandlerEntry) :=
+  state.alter entry.head fun entries =>
+    (entries.getD #[]).push { declName := entry.declName, priority := entry.priority }
+
+initialize crushLoweringExt :
+    SimplePersistentEnvExtension LoweringEntry (NameMap (Array HandlerEntry)) ←
+  registerSimplePersistentEnvExtension {
+    addEntryFn := addLoweringEntry
+    addImportedFn := mkStateFromImportedEntries addLoweringEntry {}
+  }
+
+/-- Register a `LoweringHandler` for applications of one Lean constant.
+
+Example:
+```
+@[crush_lower Int.natAbs]
+def lowerNatAbs : LoweringHandler := fun ctx => ...
+```
+As with `simp`, an optional priority (`low`, `high`, or a number) controls ordering
+when several lowerings target the same constant. -/
+syntax (name := crushLowerAttr) "crush_lower " ident (ppSpace prio)? : attr
+
+initialize registerBuiltinAttribute {
+  name := `crushLowerAttr
+  descr := "Register a head-indexed lean-crush SMT lowering (LoweringHandler)."
+  applicationTime := .afterCompilation
+  add := fun declName stx _ => do
+    let headStx := stx[1]
+    let head ← Elab.realizeGlobalConstNoOverloadWithInfo headStx
+    let prio ← getAttrParamOptPrio stx[2]
+    let env ← getEnv
+    let some info := env.find? declName
+      | throwError "unknown declaration {declName}"
+    let expectedTy := mkConst ``Crush.LoweringHandler
+    unless (← MetaM.run' (Meta.isDefEq info.type expectedTy)) do
+      throwError "@[crush_lower] expects a declaration of type `LoweringHandler`, \
+                  but {declName} has type{indentExpr info.type}"
+    modifyEnv fun env =>
+      crushLoweringExt.addEntry env { head, declName, priority := prio }
+}
+
+/-- Whether `head` has any targeted lowerings, without evaluating their declarations. -/
+def hasLoweringsFor (head : Name) : TranslateM Bool := do
+  return (crushLoweringExt.getState (← getEnv)).contains head
+
+unsafe def getLoweringsForUnsafe (head : Name) : TranslateM (Array LoweringHandler) := do
+  let env ← getEnv
+  let opts ← getOptions
+  let entries := (crushLoweringExt.getState env).getD head #[]
+  let sorted := entries.qsort (fun a b => a.priority > b.priority)
+  sorted.filterMapM fun entry => do
+    match env.evalConst LoweringHandler opts entry.declName with
+    | .ok handler => return some handler
+    | .error _ => return none
+
+@[implemented_by getLoweringsForUnsafe]
+opaque getLoweringsFor (head : Name) : TranslateM (Array LoweringHandler)
 
 /-! ## Sort handlers (`@[crush_translate_sort]`)
 
