@@ -16,9 +16,15 @@ of its core limitations:
   metaprogram with `@[crush_translate]` (or use the `crush_map` sugar); it is
   evaluated at elaboration time to produce SMT. The built-in theory mappings are
   written against the *same* API.
-- **Backends and limits are yours to choose.** `set_option crush.backend`,
-  `crush.timeout` (hard wall-clock, enforced by lean-crush), `crush.trust`,
-  `crush.ho.mode`, and more.
+- **The SMT verdict is checked, not trusted, by default.** lean-auto's SMT backend
+  does not reconstruct a proof yet (its `auto.smt.rconsProof` path reports "not
+  implemented"); it either produces no proof or, with `auto.smt.trust`, closes the goal
+  with the `autoSMTSorry` axiom — its verified checker serves a separate native backend,
+  not the SMT path. lean-crush's default `reconstruct` policy uses the solver's unsat
+  core only to *select* the relevant hypotheses, then re-proves the goal from them with
+  a Lean tactic the kernel checks — so a false `unsat` from a translation bug fails to
+  reconstruct and errors, rather than silently closing the goal. Trusting the solver is
+  available, but opt-in and `#print axioms`-visible (`crush.trust`).
 
 ## How it works
 
@@ -36,7 +42,8 @@ higher-order goals via defunctionalization or native HO on cvc5. A hint grammar
 `@[crush_unfold]` folds a definition's equations into every query, and monomorphization
 specializes a polymorphic lemma to the types a query mentions — what lets a bare
 `List.append_assoc`, or the TIP list theorems (`rev (rev x) = x` among them), be proved
-over an arbitrary element type.
+over an arbitrary element type. The backend, hard timeout, trust policy, and HO strategy
+are `set_option`s (`crush.backend`, `crush.timeout`, `crush.trust`, `crush.ho.mode`).
 
 **Case studies** ([`Test/CaseStudies/`](Test/CaseStudies/)) run `crush` on external
 corpora: lean-auto's harder test suite, representative Loom/Velvet/Cashmere verification
