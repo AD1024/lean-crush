@@ -6,6 +6,7 @@ import Crush.Translation.Translate
 import Crush.Util.Profile
 import Crush.Solver.Process
 import Crush.Solver.Reconstruct
+import Crush.Solver.AletheReplay
 import Crush.SMT.Print
 import Crush.SMT.Result
 open Lean Elab Tactic Meta
@@ -94,6 +95,54 @@ def formatCounterexample (modelText : String) (st : TranslateState) : MessageDat
     lines := lines.push m!"  {origin} := {e.value}"
   return m!"counterexample:{indentD (MessageData.joinSep lines.toList "\n")}"
 
+/-- Try to close `goal` by replaying the solver's proof certificate.
+
+The certificate refutes the *negated* goal, so the shape is a proof by contradiction:
+`Classical.byContradiction` turns the goal `G` into `¬G ⊢ False`, the fresh `¬G` hypothesis
+is bound to the certificate's assumption for the negated goal (which has no Lean proof of
+its own — it is the thing being refuted), and replay produces the `False`.
+
+Returns `false` — leaving `goal` untouched — whenever anything is missing or a step cannot
+be replayed, so the caller falls back to the finisher ladder. Every replayed step is a
+kernel-checked term, so declining is the only failure mode; a certificate is never taken
+on faith. -/
+def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState) (proofText : String) :
+    TacticM Bool := do
+  unless cfg.proofReplay do return false
+  if proofText.trimAscii.isEmpty then return false
+  let some proof := Alethe.parseProof proofText | return false
+  goal.withContext do
+    -- `byContradiction` gives us `¬G` as a hypothesis and `False` as the goal.
+    let goalType ← goal.getType
+    let negGoal ← mkAppM ``Not #[goalType]
+    let mv ← mkFreshExprMVar (← mkArrow negGoal (mkConst ``False))
+    let (fvarId, inner) ← mv.mvarId!.intro `hneg
+    let res ← inner.withContext do
+      -- Map each `crush_fact_<n>` assumption to a Lean proof: a real hypothesis for an
+      -- asserted fact, and the freshly-introduced `¬G` for the negated goal.
+      let mut facts : Std.HashMap String Expr := {}
+      for src in st.facts do
+        let name := s!"{factNamePrefix}{src.id}"
+        match src.proof with
+        | some p => facts := facts.insert name p
+        | none => facts := facts.insert name (mkFVar fvarId)
+      Alethe.replay? proof (SMT.parseSexps proofText) facts st.nameToExpr
+    match res with
+    | none => return false
+    | some falseProof =>
+      -- Assemble `byContradiction (fun hneg => falseProof)` and hand it to the kernel.
+      inner.assign falseProof
+      let lam ← instantiateMVars mv
+      if lam.hasSorry || lam.hasExprMVar then return false
+      try
+        let pf ← mkAppOptM ``Classical.byContradiction #[some goalType, some lam]
+        -- Type-check before assigning: a mis-assembled term must fail here, not later.
+        let ty ← inferType pf
+        unless ← isDefEq ty goalType do return false
+        goal.assign pf
+        return true
+      catch _ => return false
+
 /-- The core driver, given a resolved goal, config, and collected hints. -/
 def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit :=
   goal.withContext do
@@ -163,7 +212,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
   let (result, prof') ← prof.time "solve" (Solver.runQuery cfg script)
   prof := prof'
   match result with
-  | .unsat coreText _ =>
+  | .unsat coreText proofText =>
     let coreIds := parseUnsatCore coreText
     trace[crush.result] "unsat; core facts: {coreIds}"
     match cfg.trust with
@@ -177,6 +226,16 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
       -- leaves the trusted computing base — it was only a search heuristic.
       let coreProofs := coreHypotheses st coreIds
       trace[crush.result] "reconstructing from core: {coreDescriptions st coreIds}"
+      -- Proof replay first, when the solver gave us a certificate. It closes goals the
+      -- single-shot ladder cannot (long chains of trivial steps: Boolean pigeonhole, deep
+      -- EUF conflicts) because the chain is already found. Declining is free — every step
+      -- is kernel-checked, so a step we cannot replay just falls through to the ladder.
+      let (replayed, prof') ← prof.time "replay" (tryProofReplay goal cfg st proofText)
+      prof := prof'
+      if replayed then
+        trace[crush.result] "proof replay succeeded; no axiom used"
+        if cfg.profile then logInfo prof.report
+        return
       let (ok, prof') ← prof.time "reconstruct" (tryReconstruct goal coreProofs (← finisherTactics))
       prof := prof'
       if ok then

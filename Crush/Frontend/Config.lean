@@ -153,6 +153,16 @@ register_option crush.autoUnfold : Bool := {
             definitions reachable from the goal into each query (like always-on u[…]/d[…])."
 }
 
+register_option crush.proofReplay : Bool := {
+  defValue := true
+  descr := "Under a reconstructing policy, try replaying the solver's proof certificate \
+            (cvc5 Alethe) step by step before falling back to the core-directed finisher \
+            ladder. Each step is proved by a Lean tactic and checked by the kernel, so a \
+            step that cannot be replayed makes replay decline — it never closes a goal on \
+            the solver's word. Costs a parse plus one small tactic call per step when a \
+            proof is available; no effect on z3, which emits no Alethe proof."
+}
+
 register_option crush.profile : Bool := {
   defValue := false
   descr := "Log a per-phase wall-clock breakdown of the tactic (collect, monomorphize, \
@@ -175,6 +185,7 @@ structure Config where
   logic          : Option String := none
   traceScript    : Bool      := false
   autoUnfold     : Bool      := true
+  proofReplay    : Bool      := true
   profile        : Bool      := false
   deriving Inhabited
 
@@ -197,6 +208,7 @@ def Config.ofOptions (opts : Options) : Config :=
     logic          := if logicStr.isEmpty then none else some logicStr
     traceScript    := crush.trace.script.get opts
     autoUnfold     := crush.autoUnfold.get opts
+    proofReplay    := crush.proofReplay.get opts
     profile        := crush.profile.get opts }
 
 end Crush

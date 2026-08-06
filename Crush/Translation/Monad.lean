@@ -53,6 +53,16 @@ structure TranslateState where
   /-- Bijection between high-level atoms and emitted SMT symbols. -/
   atomToName : Std.HashMap String String := {}
   nameToAtom : Std.HashMap String String := {}
+  /-- Emitted SMT symbol → the Lean term it stands for.
+
+      `nameToAtom` records only a *string* key (a pretty-printed form), which is enough
+      for diagnostics but cannot be turned back into an `Expr`. Proof replay
+      (`Crush/Solver/AletheReplay.lean`) needs the real term: an Alethe proof mentions
+      the emitted symbols, and each step has to be restated as a Lean proposition. This
+      map is the inverse direction, populated where a symbol is allocated for a Lean
+      head (`defaultApp`). Absence is not an error — a symbol with no recorded term
+      simply makes replay decline that step. -/
+  nameToExpr : Std.HashMap String Expr := {}
   /-- Name-collision counter: how many times each sanitized base name is taken. -/
   usedNames  : Std.HashMap String Nat := {}
   /-- Emitted commands, in order. -/
@@ -126,6 +136,13 @@ def symbolFor (key : String) (hint : String) : TranslateM String := do
       atomToName := s.atomToName.insert key name
       nameToAtom := s.nameToAtom.insert name key }
     return name
+
+/-- Record that SMT symbol `name` stands for the Lean term `e`, for proof replay.
+Idempotent; the first recording wins, so a symbol reused across occurrences keeps its
+original term. -/
+def recordSymbolExpr (name : String) (e : Expr) : TranslateM Unit := do
+  unless (← get).nameToExpr.contains name do
+    modify fun s => { s with nameToExpr := s.nameToExpr.insert name e }
 
 /-- Register an emitted assertion's provenance, returning the fact id to embed in
 its `:named` attribute. -/

@@ -1278,6 +1278,10 @@ mutual
         pure s!"{toString (← ppExpr fn)}@{String.intercalate "," tyKeys.toList}"
     let hint ← headHint fn
     let name ← TranslateM.symbolFor key hint
+    -- Record the symbol → Lean-head correspondence for proof replay. Applications are
+    -- rebuilt from the head plus replayed arguments, so the *head* is what must be
+    -- remembered; for a nullary symbol the head is the whole term.
+    TranslateM.recordSymbolExpr name fn
     if !(← declaredFun name) then
       let argSorts ← valueArgs.mapM (fun a => do emitSort (← inferType a))
       let appExpr := mkAppN fn args

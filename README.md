@@ -20,10 +20,11 @@ of its core limitations:
   does not reconstruct a proof yet (its `auto.smt.rconsProof` path reports "not
   implemented"); it either produces no proof or, with `auto.smt.trust`, closes the goal
   with the `autoSMTSorry` axiom — its verified checker serves a separate native backend,
-  not the SMT path. lean-crush's default `reconstruct` policy uses the solver's unsat
-  core only to *select* the relevant hypotheses, then re-proves the goal from them with
-  a Lean tactic the kernel checks — so a false `unsat` from a translation bug fails to
-  reconstruct and errors, rather than silently closing the goal. Trusting the solver is
+  not the SMT path. lean-crush never trusts the verdict by default. It **replays cvc5's
+  Alethe certificate** step by step into a Lean proof, and otherwise uses the unsat core
+  to *select* the relevant hypotheses and re-prove the goal with a Lean tactic — either
+  way the kernel checks the result, so a false `unsat` from a translation bug fails to
+  reconstruct and errors rather than silently closing the goal. Trusting the solver is
   available, but opt-in and `#print axioms`-visible (`crush.trust`).
 
 ## How it works

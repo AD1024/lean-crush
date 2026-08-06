@@ -213,7 +213,9 @@ Module map (⟢ = built & tested, ▷ = designed, □ = todo):
 | `Crush/Translation/HOEncoding.lean` | HO encoding helpers (defunc ⟢, native ⟢, combinators □) | ⟢ |
 | `Crush/Translation/Translate.lean` | driver: `Expr → SMT.Term` via handlers | ⟢ |
 | `Crush/Solver/Reconstruct.lean` | unsat-core → Lean proof replay (finisher ladder) | ⟢ core-directed |
-| `Crush/Solver/Alethe.lean` | cvc5 Alethe proof parser (checker backlogged) | ⟢ parser only |
+| `Crush/Solver/Alethe.lean` | cvc5 Alethe proof parser | ⟢ |
+| `Crush/Solver/AletheTerm.lean` | Alethe `Sexp` → Lean `Expr` (`:named` sharing, `Bool`→`Prop`) | ⟢ |
+| `Crush/Solver/AletheReplay.lean` | per-step certificate replay; declines rather than trusts | ⟢ |
 | `Crush/Frontend/Tactic.lean` | the `crush` tactic + hint grammar (`[…] u[…] d[…]`) | ⟢ |
 
 ---
@@ -533,8 +535,13 @@ holds the shared naming and shape helpers.
     (`Test/Reconstruct.lean`), and needs no solver proof, so it works under z3 as well as
     cvc5. The rungs are placed last (`decide` is the most expensive) and fail fast when
     the goal is not a computation.
-  - A full per-rule Alethe *checker* remains the backlogged follow-up for shapes a Lean
-    tactic cannot re-find at all — a checked certificate rather than a re-search (§9 M4).
+  - *Certificate replay comes first, when cvc5 supplies one.* Some verdicts are a long
+    chain of trivial inferences that no single tactic re-finds (a Boolean pigeonhole, a deep
+    EUF conflict). cvc5's Alethe proof *is* that chain, so `Crush/Solver/AletheReplay.lean`
+    walks it step by step ahead of the ladder, proving each step from its premises and
+    letting the kernel check every one. The rule name is only a tactic *hint*, so soundness
+    does not depend on rule coverage: an unreplayable step makes replay **decline** and the
+    ladder runs (§9 M4 phase 3).
 
 ---
 
@@ -667,8 +674,8 @@ Tested in `Test/Theories.lean`, `Test/Regression.lean`, `Test/Monomorphize.lean`
 value is as an escape hatch when defunctionalization blows up, so it wants a
 workload that actually blows up to tune against.
 
-**M4 — Reconstruction. partial.** Core-directed replay is done; the Alethe *checker* is
-backlogged (only its parser exists). `Crush/Solver/Reconstruct.lean` uses the unsat core
+**M4 — Reconstruction. partial.** Core-directed replay is done, and Alethe **proof replay**
+is now real (phase 3, below). `Crush/Solver/Reconstruct.lean` uses the unsat core
 to select the relevant hypotheses, rebuilds the goal as `h₁ → … → hₙ → goal` over only
 those, and runs a ladder of finishers on it, taking the first that closes it (§6 maps
 each rung to the goal shape it targets). On success the solver leaves the trusted
@@ -744,15 +751,59 @@ flag. Two cheaper alternatives to a full checker were probed:
   win from the default backend and added nothing, so the ladder tries them
   unconditionally.
 
-**The full per-rule checker stays backlogged**: weeks of work (3b's rule set is
-large, each rule needing a proven-sound Lean replay; 3a is a new
-Alethe-`Sexp`→Lean-`Expr` reverse map, since translation is one-directional today), it
-covers one of the two motivating pinned cases (not `pigeonhole`), and — because the
-default `reconstruct` policy already makes both fail *soundly* as an error rather than a
-false close — it is a **completeness** upgrade, not a soundness fix. Also note cvc5
-cannot prove the nonlinear cases at all (it times out where z3's nlsat succeeds in
-~40 ms), so the nonlinear shape is not reachable by *any* cvc5 proof work. See
-`Test/Reconstruct.lean` for the pinned cases and this section for the probe findings.
+### Phase 3 — proof replay. done (per-step, not per-rule)
+
+`Crush/Solver/AletheReplay.lean` replays a cvc5 Alethe certificate into a Lean proof, and
+it is tried **before** the finisher ladder under a reconstructing policy
+(`crush.proofReplay`, default on). The insight that made this tractable: an Alethe proof
+*decomposes* one hard goal into 20–60 **trivial** steps, so we do not need to re-search —
+we restate each step's clause as a Lean proposition, prove it from its premises' proofs
+with a small tactic, and carry the result forward. The final empty clause is `False`, which
+discharges the negated goal via `Classical.byContradiction`.
+
+**Per-step, not per-rule, is the key design choice.** We do *not* prove each Alethe rule
+sound once and for all (lean-auto's reflective-checker approach, ~12k lines). The rule name
+is only a *hint* for which tactic to try first; the kernel checks every step's concrete
+proof term. So soundness does not depend on rule coverage — a rule we have never heard of
+either gets discharged by the generic tactic ladder or makes replay **decline**, and the
+finisher ladder runs instead. There is no path in which an unreplayed certificate closes a
+goal. (Verified: sabotaging the internal checks does not let a false goal through, because
+the solver must first say `unsat` and the kernel must accept the assembled term.)
+
+Supporting pieces: `TranslateState.nameToExpr` (phase 3a — the emitted-symbol → Lean-term
+reverse map, since translation is otherwise one-directional) and
+`Crush/Solver/AletheTerm.lean` (Alethe `Sexp` → Lean `Expr`, including the `:named`
+sharing pre-pass and the `Bool`→`Prop` lifting SMT's single `Bool` sort forces).
+
+*Measured payoff* (2026-08-06). The class replay buys is goals with a hole-free certificate
+that the single-shot ladder **cannot** reconstruct: a **Boolean pigeonhole** (four `Bool`s,
+~62 steps) and an **EUF conflict** (congruence + literal evaluation, 22 steps). Both were
+errors under the default policy before; both are now kernel-checked, `#print axioms` showing
+no `crushSorry` (`Test/AletheReplay.lean`). A sweep over quantifier, arithmetic, datatype,
+bitvector, and string goals found everything else already reconstructed by the ladder.
+
+*Two shapes remain unreachable, and not for want of coverage:*
+
+- *Finite-domain exhaustiveness over a datatype* (the `pigeonhole` case): cvc5 answers
+  `unsat` but cannot express the argument in Alethe, replying `(error "… DUMMY_SKOLEM")` —
+  **there is no certificate at all**, so no checker can reach it.
+- *Nonlinear arithmetic*: cvc5 cannot prove it (times out where z3's nlsat succeeds in
+  ~40 ms), so again no certificate exists. It stays a documented `trust`-mode win.
+
+*Remaining work.* Steps inside an `anchor`/`subproof` block (quantifier instantiation) are
+declined pending local-assumption scoping — that is the main coverage gap. `ite` terms are
+declined (needs the `Decidable` instance rebuilt).
+
+*Scaling: `SymM`.* If replay becomes a bottleneck on large certificates, the engine should
+move to Lean's `Lean.Meta.Sym` (`SymM`) monad — de Moura's symbolic-computation monad
+(the engine under `grind`/`cbv`): O(1) metavariable-assignment checks, syntactic matching
+with proofs and instances ignored (proof-irrelevance + instance-diamond handling we already
+do by hand in `defaultApp`/the canonical-instance check), skipped type-checks on ground
+terms, and — most relevant — carrying `GrindM` state across many goals so shared hypotheses
+are processed once. An Alethe proof is exactly "many small goals over large, similar ground
+contexts", the workload `SymM` exists to make fast; lean-auto's own checker is "slow on
+large input", the failure mode `SymM` avoids. Our per-step engine currently spawns an
+independent tactic call per step on bare `MetaM`, which is the thing `SymM` would amortize.
 
 **M5 — Ergonomics & scale. partial.** In rough priority order:
 1. The hint grammar (§7): `crush [h₁, …, *] (u[…]) (d[…])`. **done** — a user can now
@@ -992,6 +1043,7 @@ a passing test; the build must be clean and produce **no `sorry`**.
 | `TIP.lean` | inductive theorems from the TIP `prod` benchmarks over a *polymorphic* element type, proved hammer-in-the-loop (manual `induction`, `crush` per case, `@[crush_unfold]` definitions) |
 | `Cvc5.lean` | the **cvc5 backend** and **`native` HO mode** (`HO_ALL`, `(-> σ τ)` sorts, `lambda`), which the default `z3`/`defunctionalize` suite never exercises; plus the z3-vs-cvc5 `sat`/`unknown` difference on false HO goals |
 | `Alethe.lean` | the Alethe proof **parser** (M4 phase 1) against verbatim cvc5 output: command/clause/`:named` structure, premise reading, the empty-clause conclusion, and that an `(error …)` reply parses to `none` |
+| `AletheReplay.lean` | Alethe **proof replay** (M4 phase 3): the measured payoff class — Boolean pigeonhole and EUF conflict, which the finisher ladder cannot reconstruct — closes kernel-checked (`#print axioms`, no `crushSorry`); plus the decline cases (no certificate, unprovable, false goal) pinned so a certificate is never taken on faith, and the z3 / `crush.proofReplay false` fallbacks |
 | `LeanAutoPort.lean` | goals ported from lean-auto's `SmtTranslation/` suite (BoolNatInt, BitVec, String, inductive/enum, recursive-with-unfold): demonstrates the same corpus translates and solves, and pins the `Empty`-type cases where we are deliberately *sound* and lean-auto documents itself unsound |
 | `CaseStudies/LeanAuto.lean` | the *harder* lean-auto corpus (§11b): mutually-recursive and single-ctor datatypes, HO Church numerals (kernel-reconstructed), polymorphic lemmas, leading-∀ matching, `Function.comp_def`, and the Paxos consensus goal — each filed as handled / sound-refusal / known-gap; drove four translation fixes and closed three of four gaps |
 | `CaseStudies/Loom.lean` | representative Loom verification conditions (§11b): GCD/MaxElem/IsSorted/SumOfDigits/sqrt/cbrt/binary-search arithmetic, quantified array invariants, an array-update VC, and Cashmere balance invariants; the Mathlib-bound `Multiset`/`Finset` VCs reduce (hammer-in-the-loop) to arithmetic residuals `crush` closes |
