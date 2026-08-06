@@ -790,9 +790,23 @@ bitvector, and string goals found everything else already reconstructed by the l
 - *Nonlinear arithmetic*: cvc5 cannot prove it (times out where z3's nlsat succeeds in
   ~40 ms), so again no certificate exists. It stays a documented `trust`-mode win.
 
-*Remaining work.* Steps inside an `anchor`/`subproof` block (quantifier instantiation) are
-declined pending local-assumption scoping — that is the main coverage gap. `ite` terms are
-declined (needs the `Decidable` instance rebuilt).
+*Subproof blocks are handled.* `(anchor :step t) (assume t.a0 φ) … (step t … :rule subproof
+:discharge (t.a0))` binds `φ` as a real Lean hypothesis, replays the block under it,
+abstracts it out with `mkLambdaFVars`, and proves the closing clause from the resulting
+implication — so the discharge is kernel-checked, not assumed. This needed the parser to stop
+dropping `:discharge` (an ignored discharge would silently lose the antecedent) and
+`AletheTerm` to gain quantifier and sort translation.
+
+*Remaining work.* Rules justified by their `:args` rather than their premises —
+`forall_inst` (the instantiation witness), `bind`, `sko_ex`, `sko_forall` — are declined.
+This is a **soundness-motivated** decline, and it cost a real bug to learn: letting a tactic
+guess at `forall_inst` produced a term the elaborator accepted and only the *final kernel*
+rejected, surfacing as an opaque "(kernel) application type mismatch" *after* replay had
+reported success, with no fallback left. (Neither `Meta.check` nor `inferType` catches it —
+they are more permissive than the kernel.) Consuming the witness to instantiate directly is
+the next extension; meanwhile such proofs fall back to the ladder, which closes the common
+instantiation shapes anyway (`Test/AletheReplay.lean` pins one). `ite` terms and nested
+anchors are also declined.
 
 *Scaling: `SymM`.* If replay becomes a bottleneck on large certificates, the engine should
 move to Lean's `Lean.Meta.Sym` (`SymM`) monad — de Moura's symbolic-computation monad

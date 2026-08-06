@@ -103,6 +103,18 @@ private def binOp? : String → Option Name
   | ">=" => some ``GE.ge
   | _    => none
 
+/-- The Lean type an SMT sort denotes, for a quantifier binder.
+
+The theory sorts are fixed; an *opaque* sort (`declare-sort`) is looked up in the same
+symbol map, since the translator records the Lean type it came from. `none` for anything
+else, which declines the enclosing quantifier rather than guessing a type. -/
+def sortToType? (ctx : TermCtx) : Sexp → MetaM (Option Expr)
+  | .atom "Int"  => return some (mkConst ``Int)
+  | .atom "Bool" => return some (mkConst ``Bool)
+  | .atom "String" => return some (mkConst ``String)
+  | .atom s => return ctx.symbols.get? s
+  | _ => return none
+
 /-- Translate an Alethe term to the Lean term it denotes, or `none` if any part of it
 cannot be mapped. `fuel` bounds the recursion through `:named` indirection (a malformed
 proof could otherwise cycle).
@@ -130,6 +142,33 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
   | .list xs =>
     let some (Sexp.atom head) := xs[0]? | return none
     let args := xs.extract 1 xs.size
+    -- Quantifiers bind variables, so they are handled before the argument pass (which
+    -- would translate the binder list as a term). `(forall ((x S) …) body)`.
+    if head == "forall" || head == "exists" then
+      let some (Sexp.list binders) := args[0]? | return none
+      let some body := args[1]? | return none
+      -- Introduce one Lean fvar per binder, then rebuild the quantifier over them.
+      let rec goBinders (i : Nat) (ctx : TermCtx) (fvars : Array Expr) :
+          MetaM (Option Expr) := do
+        if i ≥ binders.size then
+          let some b ← toExpr? ctx (fuel - 1) body | return none
+          let b ← toProp b
+          if head == "forall" then return some (← mkForallFVars fvars b)
+          else
+            -- `∃` is not a binder former in `Expr`; build it with `Exists`.
+            let mut e := b
+            for v in fvars.reverse do
+              e ← mkAppM ``Exists #[← mkLambdaFVars #[v] e]
+            return some e
+        else
+          let some (Sexp.list bind) := binders[i]? | return none
+          let some (Sexp.atom vname) := bind[0]? | return none
+          let some sortSexp := bind[1]? | return none
+          let some ty ← sortToType? ctx sortSexp | return none
+          withLocalDeclD (Name.mkSimple vname) ty fun v =>
+            goBinders (i + 1) { ctx with locals := ctx.locals.insert vname v }
+              (fvars.push v)
+      return ← goBinders 0 ctx #[]
     -- Translate all arguments; any untranslatable argument fails the whole term.
     let mkArgs : MetaM (Option (Array Expr)) := do
       let mut out := #[]

@@ -82,6 +82,19 @@ example (x : Int) (h : x * x = 4) (h2 : x > 0) : x = 2 := by crush
 #guard_msgs(error, substring := true) in
 example (p q : Bool) : p = q := by crush
 
+/-! ### Declining a `forall_inst` step still closes the goal
+
+Quantifier instantiation is a `subproof` block whose inner `forall_inst` step is justified by
+its `:args` witness, not its premises. Replay declines it (a tactic handed that step cannot
+close it honestly — an earlier revision let one "succeed" with a term only the final *kernel*
+rejected, after replay had reported success). The finisher ladder then closes the goal, so
+the decline is invisible except in the trace, and the result is still kernel-checked. -/
+theorem forall_inst_falls_back (f : Int → Int) (h : ∀ x, f x = 0) : f 5 = 0 := by crush
+
+/-- info: 'forall_inst_falls_back' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms forall_inst_falls_back
+
 end Declines
 
 /-! ## Replay is off by default for z3, and can be disabled

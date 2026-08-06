@@ -501,6 +501,9 @@ mutual
     let key := toString (← ppExpr e)
     let hint := match e with | .const n _ => nameHint n | _ => "s"
     let name ← TranslateM.symbolFor key hint
+    -- Remember the Lean type behind the sort, so proof replay can give a quantifier
+    -- binder over this sort its Lean type back (`AletheTerm.sortToType?`).
+    TranslateM.recordSymbolExpr name e
     if !(← declaredSort name) then
       TranslateM.emitCommand (.declSort name 0)
       markSortDeclared name

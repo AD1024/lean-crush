@@ -47,10 +47,15 @@ the parser, is what eventually interprets them. -/
 inductive Command where
   /-- `(assume id term)`. -/
   | assume (id : String) (term : Sexp)
-  /-- `(step id (cl …) :rule R :premises (…) :args (…))`. `clause` is the list of
-  disjunct terms (empty ⇒ the empty clause, i.e. `false`). -/
+  /-- `(step id (cl …) :rule R :premises (…) :args (…) :discharge (…))`. `clause` is the
+  list of disjunct terms (empty ⇒ the empty clause, i.e. `false`).
+
+  `discharge` names the local assumptions a `subproof` step releases; it is what makes a
+  subproof's conclusion an implication rather than a claim under an open hypothesis, so
+  replay needs it (an ignored `:discharge` would silently drop the antecedent). -/
   | step (id : String) (clause : Array Sexp) (rule : String)
          (premises : Array String) (args : Array Sexp)
+         (discharge : Array String := #[])
   /-- `(anchor :step id …)` — opens a subproof closed by `step id … :rule subproof`. -/
   | anchor (id : String) (args : Array Sexp)
   deriving Inhabited, Repr
@@ -131,7 +136,9 @@ def parseCommand (s : Sexp) : Option Command :=
           | some p => atomList p | none => #[]
         let args := match (kw.find? (·.1 == "args")).map (·.2) with
           | some (.list a) => a.map stripAnnot | _ => #[]
-        some (.step id (parseClause clause) rule premises args)
+        let discharge := match (kw.find? (·.1 == "discharge")).map (·.2) with
+          | some d => atomList d | none => #[]
+        some (.step id (parseClause clause) rule premises args discharge)
       | _, _ => none
     | some (Sexp.atom "anchor") =>
       let kw := keywordArgs (xs.extract 1 xs.size)

@@ -136,9 +136,16 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState) (proofTe
       if lam.hasSorry || lam.hasExprMVar then return false
       try
         let pf ← mkAppOptM ``Classical.byContradiction #[some goalType, some lam]
-        -- Type-check before assigning: a mis-assembled term must fail here, not later.
         let ty ← inferType pf
         unless ← isDefEq ty goalType do return false
+        -- Check the assembled term **before** assigning it. `inferType` above uses the
+        -- elaborator's checker, which is more permissive than the kernel: a tactic can
+        -- produce a term it accepts and the kernel later rejects (`decide` on `Int`
+        -- literals emits an `eagerReduce` the kernel will not replay). Without this,
+        -- such a term is assigned and surfaces as an opaque "(kernel) application type
+        -- mismatch" *after* the tactic reported success, with no fallback. Checking here
+        -- turns it into a clean decline, so the finisher ladder still gets its turn.
+        check pf
         goal.assign pf
         return true
       catch _ => return false
