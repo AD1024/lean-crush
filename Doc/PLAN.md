@@ -684,8 +684,9 @@ those, and runs a ladder of finishers on it, taking the first that closes it (§
 each rung to the goal shape it targets). On success the solver leaves the trusted
 computing base — it was only a search heuristic. This is the default policy
 (`reconstruct`), which errors rather than falling back to the axiom when the ladder
-cannot replay. The ladder covers three shapes the finishers reach that a naive
-whole-context `grind` would not:
+cannot replay. This is no longer just a ladder: it also ends in the programmatic case-split
+pre-pass of §10c-bis, which handles the shapes no *fixed* tactic string can. The ladder covers
+three shapes the finishers reach that a naive whole-context `grind` would not:
 
 - *Function equalities* (`funext`-prefixed rungs) — a higher-order `unsat` (Church
   numerals, funext) reduces to a pointwise body a first-order closer finishes.
@@ -697,6 +698,9 @@ whole-context `grind` would not:
   a cvc5 Alethe proof "guide"; measurement showed the gate withheld the win from z3 and
   the proof added nothing over just trying the rungs, so the ladder tries them
   unconditionally — a mis-fitting rung fails fast.)
+- *Constructor case analysis* (the §10c-bis pre-pass, not a rung) — datatype exhaustiveness
+  and structure eta need `cases` on a specific variable, so they are unreachable from a fixed
+  tactic string and are handled programmatically after every rung has failed.
 
 *Alethe replay — staged, all three phases done.* Built under one invariant: **any step a
 replay cannot discharge is a hard failure, never a trusted gap**, so partial coverage stays
@@ -1034,6 +1038,45 @@ That is not a soundness gap under the `reconstruct` policy: these are metaprogra
 *construct* SMT terms, and a closed goal is re-proved from the unsat core by a Lean
 tactic, so the translator never enters the trusted base.
 
+## 10c-bis. The case-split pre-pass, and a misdiagnosis worth recording
+
+Three shapes were documented as reconstruction limits. Re-examining them found that **one was
+not a limitation at all** and the other two shared a single root cause with a single fix.
+
+*The misdiagnosis.* `height ≤ size` on a binary tree was recorded as "out of reach — times out
+at 40 s even under `trust`". It is provable in seconds. The goal handed to the solver was
+**underspecified**: the inductive step is `1 + max hl hr ≤ 1 + sl + sr` from `hl ≤ sl` and
+`hr ≤ sr`, which is false (`hl = sl = 0`, `hr = -10`, `sr = -5` satisfies both premises and
+refutes the conclusion — verified). Supplying `0 ≤ size`, which the theorem genuinely needs,
+makes it reconstruct. The lesson is diagnostic: a solver timeout on an *unprovable* goal is
+indistinguishable from a timeout on a hard one, so "timeout" must never be recorded as a
+capability wall without first checking that the goal follows from its premises.
+
+*The shared root cause.* Datatype exhaustiveness (`t = .leaf ∨ ∃ l v r, t = .node l v r`) and
+structure eta (`p.x = q.x → p.y = q.y → p = q`) both need a **constructor case split** on a
+variable. Every ladder rung is a fixed tactic string, and the required step is `cases t` —
+naming a variable the string cannot know. Note `intros; cases …` does *not* work: the
+variable is a fixed fvar in the outer context, not `∀`-bound, so `intros` has nothing to
+introduce. (This cost a wrong fix first: rungs of that form passed a hand-written test whose
+goal was `∀`-quantified, and failed on the real thing.)
+
+So `tryReconstruct` now has a programmatic last resort: introduce the hypotheses, `cases`
+the goal's datatype fvars, and run the ordinary ladder on each branch. It is a pure extension
+— reached only after every rung has already failed — so it can add closures but never remove
+one. Two bounds keep it cheap: at most 2 split rounds (splitting a *recursive* datatype
+exposes fresh fields of the same type, so an unbounded loop would not terminate) and at most
+16 branches. Theory sorts are skipped, since `Nat`'s constructors would trigger an
+induction-shaped split that `omega` handles better.
+
+This closed both limits, and upgraded `Test/CaseStudies/Mathlib.lean`'s datatype section from
+`trust` to `reconstruct`: `BinaryTree`/`SignType`/`Option`/`Prod`/`Sum` exhaustiveness are now
+kernel-checked.
+
+*What remains.* Finite-domain pigeonhole over a datatype (4 variables of a 3-constructor type)
+still fails: it needs 4 *simultaneous* splits, i.e. 81 branches, past the round bound. Raising
+the bound would trade a rare win for cost on every reconstruction, so the bound stays and the
+case keeps a trusting policy.
+
 ## 10d. Two bugs the recursive-datatype suite surfaced
 
 Writing `Test/Recursive.lean` uncovered a pair of defects, both triggered by *indirect*
@@ -1087,7 +1130,7 @@ a passing test; the build must be clean and produce **no `sorry`**.
 | `Cvc5.lean` | the **cvc5 backend** and **`native` HO mode** (`HO_ALL`, `(-> σ τ)` sorts, `lambda`), which the default `z3`/`defunctionalize` suite never exercises; plus the z3-vs-cvc5 `sat`/`unknown` difference on false HO goals |
 | `Alethe.lean` | the Alethe proof **parser** (M4 phase 1) against verbatim cvc5 output: command/clause/`:named` structure, premise reading, the empty-clause conclusion, and that an `(error …)` reply parses to `none` |
 | `AletheReplay.lean` | Alethe **proof replay** (M4 phase 3): the measured payoff class — Boolean pigeonhole and EUF conflict, which the finisher ladder cannot reconstruct — closes kernel-checked (`#print axioms`, no `crushSorry`); a `Harder` section running under `crush.reconstruct alethe` (no ladder fallback, so a pass *is* a replayed certificate) covering a 5-variable/10-disjunct pigeonhole, a 4-step EUF chain, binary-function congruence, disequality-driven conflict, and boolean implication chaining; plus the decline cases (no certificate, unprovable, false goal) pinned so a certificate is never taken on faith, and the path-selection cases (`crush.reconstruct core`/`alethe`, plus z3, which emits no certificate) |
-| `Recursive.lean` | recursive functions and recursive/nested datatypes: a 5-constructor expression language with `size`/`depth`/`eval`, binary trees under structural `induction` (mirror/sum/height preservation), a `Nat` accumulator's closed form, and structures nested inside datatypes. Records three measured boundaries: datatype exhaustiveness and structure-eta are solver-reachable but *not* reconstructible, and `height ≤ size` is out of reach for the solver itself |
+| `Recursive.lean` | recursive functions and recursive/nested datatypes: a 5-constructor expression language with `size`/`depth`/`eval`, binary trees under structural `induction` (mirror/sum/height preservation), a `Nat` accumulator's closed form, and structures nested inside datatypes. Drove the case-split pre-pass (§10c-bis), so datatype exhaustiveness and structure eta now reconstruct; pins the indirect-recursion boundary (`Rose ⊃ List Rose`) that stays an opaque sort |
 | `ReconstructHard.lean` | core-directed reconstruction with the ladder isolated (`crush.reconstruct core`): selection under 10–24 irrelevant hypotheses (incl. nonlinear distractors), congruence depth 3, quantifier instantiation at non-syntactic points, read-over-write both branches, and goals crossing `Bool`/`Int`/`String` |
 | `LeanAutoPort.lean` | goals ported from lean-auto's `SmtTranslation/` suite (BoolNatInt, BitVec, String, inductive/enum, recursive-with-unfold): demonstrates the same corpus translates and solves, and pins the `Empty`-type cases where we are deliberately *sound* and lean-auto documents itself unsound |
 | `CaseStudies/LeanAuto.lean` | the *harder* lean-auto corpus (§11b): mutually-recursive and single-ctor datatypes, HO Church numerals (kernel-reconstructed), polymorphic lemmas, leading-∀ matching, `Function.comp_def`, and the Paxos consensus goal — each filed as handled / sound-refusal / known-gap; drove four translation fixes and closed three of four gaps |

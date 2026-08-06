@@ -30,6 +30,10 @@ automated tactics degrade badly as the hypothesis count grows, and irrelevant
 arithmetic facts are exactly what makes them time out. Core-directed selection
 turns a 40-hypothesis goal into a 3-hypothesis goal.
 
+Some verdicts turn on a constructor case analysis instead, which no fixed tactic string can
+perform — the required step names a variable. Those are handled after the ladder by the
+programmatic pre-pass below.
+
 This is the general path, tried for every backend. It does depend on a Lean tactic
 re-finding the argument, which fails for long inference chains; when cvc5 supplies an
 Alethe certificate, `Crush/Solver/AletheReplay.lean` runs first and replays the chain
@@ -102,6 +106,80 @@ def finisherTactics : CoreM (Array (TSyntax `tactic)) := do
     (← `(tactic| (intros; subst_vars; rfl))),
     (← `(tactic| (intros; simp_all; decide)))]
 
+/-! ## The case-split pre-pass
+
+Some `unsat` verdicts turn on a *constructor case analysis* of a variable: datatype
+exhaustiveness (`t = .leaf ∨ ∃ l v r, t = .node l v r`) and recovering a structure equality
+from its fields (`p.x = q.x → p.y = q.y → p = q`, which is eta for structures). The solver
+gets these from the `declare-datatypes` constructor set; no rung of the ladder does, because
+each rung is a *fixed* tactic string and the split it needs is `cases t` — naming a variable
+the string cannot know.
+
+Hence a programmatic pass: find the goal's datatype variables, `cases` them, and run the
+ordinary ladder on each branch. This is a pure extension — it runs only after every rung has
+already failed, so it can add closures but never take one away. -/
+
+/-- A local hypothesis worth case-splitting: its type is a datatype with constructors, and
+it actually occurs in the goal.
+
+Theory sorts are excluded: `Nat`'s constructors would trigger an induction-shaped split that
+`omega` already handles better, and `Int`/`Bool`/`String` are handled by the solver's
+theories rather than structurally. -/
+private def firstSplittable (g : MVarId) : MetaM (Option FVarId) := g.withContext do
+  let target ← instantiateMVars (← g.getType)
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    unless target.containsFVar d.fvarId do continue
+    let ty ← whnf d.type
+    let .const n _ := ty.getAppFn | continue
+    if n == ``Nat || n == ``Int || n == ``Bool || n == ``String then continue
+    let some (.inductInfo iv) := (← getEnv).find? n | continue
+    if iv.ctors.isEmpty then continue
+    if iv.numIndices != 0 then continue
+    return some d.fvarId
+  return none
+
+/-- Case-split every goal's datatype variables, up to `fuel` rounds.
+
+`fuel` is what bounds this: splitting a *recursive* datatype exposes fields of the same type
+(`cases t` on a `Tree` leaves `l r : Tree`), so an unbounded loop would descend forever.
+Two rounds reach the shapes we are after — one for exhaustiveness, two for a structure
+equality with a variable on each side — while keeping the branch count small. -/
+private partial def splitRounds (gs : List MVarId) (fuel : Nat) : MetaM (List MVarId) := do
+  if fuel == 0 then return gs
+  -- A cap on total branches, so a context with many datatype variables cannot explode.
+  if gs.length > 16 then return gs
+  let mut out : List MVarId := []
+  let mut progress := false
+  for g in gs do
+    match ← firstSplittable g with
+    | none => out := out ++ [g]
+    | some fv =>
+      try
+        let subs ← g.cases fv
+        out := out ++ subs.toList.map (·.mvarId)
+        progress := true
+      catch _ => out := out ++ [g]
+  if progress then splitRounds out (fuel - 1) else return out
+
+/-- Close every goal in `gs`, each with the first finisher that works on it. All must
+close, else the whole attempt is abandoned. -/
+private def finishAll (gs : List MVarId) (finishers : Array (TSyntax `tactic)) :
+    TacticM Bool := do
+  for g in gs do
+    if ← g.isAssigned then continue
+    let mut closed := false
+    for tac in finishers do
+      let saved ← saveState
+      try
+        if (← Tactic.run g (evalTactic tac)).isEmpty then
+          closed := true
+          break
+        restoreState saved
+      catch _ => restoreState saved
+    unless closed do return false
+  return true
+
 /-- `t₁ → … → tₙ → concl`. The binders are non-dependent — each hypothesis is a
 closed `Prop` — so a plain `mkForall` chain suffices. -/
 def mkArrowChain (tys : Array Expr) (concl : Expr) : Expr := Id.run do
@@ -140,6 +218,25 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
         restoreState saved
       catch _ =>
         restoreState saved
+    -- Last resort: introduce the hypotheses, case-split the datatype variables, and try the
+    -- ladder on each branch. Runs only here, once every rung has failed on the goal as
+    -- given, so it strictly adds reach. See "The case-split pre-pass" above.
+    let saved ← saveState
+    try
+      let mv ← mkFreshExprMVar target
+      let (_, g) ← mv.mvarId!.intros
+      let branches ← splitRounds [g] 2
+      -- One branch means nothing was split, so the ladder has already seen this goal.
+      if branches.length > 1 || (branches.length == 1 && branches[0]! != g) then
+        if ← finishAll branches finishers then
+          let assigned ← instantiateMVars mv
+          unless assigned.hasSorry || assigned.hasExprMVar do
+            check assigned
+            goal.assign (mkAppN assigned coreProofs)
+            return true
+      restoreState saved
+    catch _ =>
+      restoreState saved
     return false
 
 end Crush

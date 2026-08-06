@@ -105,33 +105,21 @@ theorem depth_le_size_lit (n : Int) : (Expr.lit n).depth ≤ (Expr.lit n).size :
 #guard_msgs in
 #print axioms size_nested
 
-/-! ### Exhaustiveness is solver-reachable but not reconstructible
+/-- Five-way exhaustiveness with existential witnesses. The `∃` packaging puts this out of
+`grind`/`aesop`'s single-shot reach, and the solver gets it from the `declare-datatypes`
+constructor set.
 
-Five-way exhaustiveness with existential witnesses (`(∃ n, e = .lit n) ∨ …`) is a shape the
-`∃` packaging puts out of `grind`/`aesop`'s reach, and the solver *does* prove it from the
-`declare-datatypes` constructor set. Reconstruction is what fails: the unsat core is just the
-negated goal, so the finisher ladder is handed the original problem with no useful
-decomposition, and cvc5 cannot express the argument in Alethe either (it skolemizes over the
-datatype — see `Test/AletheReplay.lean`).
-
-So this shape needs a trusting policy, pinned here so that improving either reconstruction
-path shows up as a test break. -/
-
-set_option crush.trust "trust" in
+Reconstruction needs the case-split pre-pass in `Crush/Solver/Reconstruct.lean`: the unsat
+core here is just the negated goal, so the ladder is handed the whole problem, and no *fixed*
+tactic string can supply the missing step, which is `cases e` on a variable whose name the
+string cannot know. Splitting first and then running the ladder per branch closes it. -/
 theorem exhaust (e : Expr) :
     (∃ n, e = .lit n) ∨ (∃ s, e = .var s) ∨ (∃ a b, e = .add a b)
       ∨ (∃ a b, e = .mul a b) ∨ (∃ a, e = .neg a) := by crush
 
-/-- info: 'ExprLang.exhaust' depends on axioms: [crushSorry] -/
+/-- info: 'ExprLang.exhaust' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms exhaust
-
--- Under the reconstructing policy the same goal is an *error*, not a silent fallback.
-/-- error: crush: solver reported `unsat`, but reconstruction failed -/
-#guard_msgs(error, substring := true) in
-example (e : Expr) :
-    (∃ n, e = .lit n) ∨ (∃ s, e = .var s) ∨ (∃ a b, e = .add a b)
-      ∨ (∃ a b, e = .mul a b) ∨ (∃ a, e = .neg a) := by crush
 
 /-! ### Evaluation: a recursive function into a second recursive argument
 
@@ -248,12 +236,22 @@ theorem height_mirror (t : Tree) : t.mirror.height = t.height := by
   | leaf => crush
   | node l v r ihl ihr => crush [ihl, ihr]
 
--- `height ≤ size` is **out of reach**, measured on 2026-08-06: the `node` case times out at
--- both 25 s and 40 s, under `trust` as well, so this is the solver failing rather than
--- reconstruction. The step is `1 + max hl hr ≤ 1 + sl + sr` given `hl ≤ sl` and `hr ≤ sr`,
--- which pairs a `max` case split with two uninterpreted recursive terms — enough to push z3
--- past its budget. The two ingredients work separately: `height_mirror` above handles `max`
--- under induction, and `size_nonneg` handles the recursive bound.
+/-- Height bounds size. The inductive hypotheses alone are **not enough**, and the reason is
+worth stating because the symptom is misleading: the step would be `1 + max hl hr ≤
+1 + sl + sr` from `hl ≤ sl` and `hr ≤ sr`, which is simply false (`hl = sl = 0`, `hr = -10`,
+`sr = -5` satisfies both premises and refutes the conclusion). The solver was searching for a
+proof that does not exist, and reported a *timeout* — indistinguishable from a goal that is
+merely hard.
+
+Supplying the missing premise, `0 ≤ size`, is all it takes. -/
+theorem height_le_size (t : Tree) : t.height ≤ t.size := by
+  induction t with
+  | leaf => crush
+  | node l v r ihl ihr => crush [ihl, ihr, size_nonneg l, size_nonneg r]
+
+/-- info: 'Trees.height_le_size' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms height_le_size
 
 /-- A non-empty tree has positive size — the case split alone, no induction. -/
 theorem node_size_pos (l : Tree) (v : Int) (r : Tree) : 1 ≤ (Tree.node l v r).size := by
@@ -272,9 +270,15 @@ theorem size_zero_iff (l : Tree) (v : Int) (r : Tree) : (Tree.node l v r).size �
 theorem node_inj (l r l' r' : Tree) (v w : Int)
     (h : Tree.node l v r = Tree.node l' w r') : l = l' ∧ v = w ∧ r = r' := by crush
 
--- Exhaustiveness with witnesses — trusting, for the reason given in `ExprLang`.
-set_option crush.trust "trust" in
+/-- Exhaustiveness with witnesses, reconstructed via the case-split pre-pass (see
+`ExprLang.exhaust`). Note the split is on a *recursive* datatype, so `cases` exposes two more
+`Tree` fields — which is why the pre-pass bounds itself by rounds rather than splitting until
+nothing is left. -/
 theorem exhaust (t : Tree) : t = .leaf ∨ ∃ l v r, t = .node l v r := by crush
+
+/-- info: 'Trees.exhaust' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms exhaust
 
 /-- info: 'Trees.mirror_mirror' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
@@ -357,25 +361,23 @@ theorem shape_circle_inj (c d : Point) (r s : Int)
 /-- A structure equality reduces to its fields. -/
 theorem point_eta (p : Point) : p = ⟨p.x, p.y⟩ := by crush
 
-/-! ### Structure equality from its fields is solver-reachable but not reconstructible
-
-`p = q ↔ p.x = q.x ∧ p.y = q.y` is proved by the solver from the datatype's selector axioms,
-and reconstruction fails on it — measured, and the *forward* direction alone fails too, so
-this is not about the `↔`. The obstruction is that going from field equalities back to a
-structure equality is eta for structures, which none of the ladder's finishers perform, and
-the unsat core cannot decompose it into something they can. -/
-
-set_option crush.trust "trust" in
+/-- Field-wise characterization of structure equality. Going from field equalities *back* to
+a structure equality is eta for structures, which no finisher performs directly; the
+case-split pre-pass gets it by splitting both `p` and `q` into their constructor forms, after
+which the fields are syntactically equal. This is the case needing *two* split rounds — one
+per variable. -/
 theorem point_eq_iff (p q : Point) : p = q ↔ p.x = q.x ∧ p.y = q.y := by crush
 
-/-- info: 'Nested.point_eq_iff' depends on axioms: [crushSorry] -/
+/-- info: 'Nested.point_eq_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms point_eq_iff
 
--- Even one direction, with the fields supplied as hypotheses, is unreconstructible.
-/-- error: crush: solver reported `unsat`, but reconstruction failed -/
-#guard_msgs(error, substring := true) in
-example (p q : Point) (hx : p.x = q.x) (hy : p.y = q.y) : p = q := by crush
+/-- One direction alone, with the fields as hypotheses. -/
+theorem point_eq_of_fields (p q : Point) (hx : p.x = q.x) (hy : p.y = q.y) : p = q := by crush
+
+/-- info: 'Nested.point_eq_of_fields' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms point_eq_of_fields
 
 /-- Area of a unit square, computed through the nested projections. -/
 theorem rect_unit_area : (Shape.rect ⟨0, 0⟩ ⟨1, 1⟩).area2 = 1 := by crush

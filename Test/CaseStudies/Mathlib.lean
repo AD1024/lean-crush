@@ -151,9 +151,15 @@ end Quantifiers
 /-! ## mathlib datatypes
 
 Real inductives from mathlib, to check that `declare-datatypes` emission matches what the
-library actually defines. -/
+library actually defines.
+
+Under the reconstructing policy, so these are kernel-checked rather than taken on the
+solver's word. That is only possible because of the case-split pre-pass in
+`Crush/Solver/Reconstruct.lean` — an exhaustiveness goal's unsat core is just the negated
+goal, so the finisher ladder alone cannot decompose it. -/
 
 section Datatypes
+set_option crush.trust "reconstruct"
 
 /-- `Mathlib.Data.Tree.Basic`'s `BinaryTree`. Exhaustiveness with existential witnesses; the
 `∃ v l r` packaging defeats `grind`/`aesop`, while the solver reads it off the constructor
@@ -186,6 +192,19 @@ theorem prod_eta (p : Int × Int) : p = (p.1, p.2) := by crush
 
 /-- `Sum`, a two-constructor parametric datatype. -/
 theorem sum_exhaust (s : Int ⊕ Int) : (∃ a, s = .inl a) ∨ ∃ b, s = .inr b := by crush
+
+-- Kernel-checked, not trusted: these name the standard-library trio and no `crushSorry`.
+/-- info: 'bt_exhaust' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms bt_exhaust
+
+/-- info: 'sign_exhaust' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms sign_exhaust
+
+/-- info: 'prod_eta' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms prod_eta
 
 end Datatypes
 
