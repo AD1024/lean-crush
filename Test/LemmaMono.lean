@@ -120,7 +120,7 @@ theorem except_isOk_bounded {ε α : Type} {x : Except ε α} :
 
 private theorem subsetTransQuery (xs ys zs : List Int)
     (hxy : xs.Subset ys) (hyz : ys.Subset zs) : xs.Subset zs :=
-  List.Subset.trans hxy hyz
+  by crush u[List.Subset]
 
 run_meta do
   let report ← monomorphizationReport #[``List.Subset.trans] ``subsetTransQuery
@@ -227,14 +227,18 @@ theorem must_reject_stronger (g : ∀ (α : Type), List α → Nat)
 
 /-! ## `crush.mono.fuel 0` disables the pass
 
-With the pass off, the polymorphic equation lemmas are emitted at an abstract
-instantiation again and the ground goal is no longer provable — the negative test
-pins that the option really gates the behavior. -/
+With the pass off, a polymorphic hypothesis is emitted at an abstract
+instantiation again and the ground goal is no longer provable. Selected equation
+lemmas are not used here because preprocessing can now rewrite their exact calls
+without monomorphization. -/
 
 set_option crush.mono.fuel 0 in
 /-- error: crush -/
 #guard_msgs(error, substring := true) in
-theorem disabled_no_mono (y : List Int) : M.app [] y = y := by crush
+theorem disabled_no_mono (f : ∀ (α : Type), List α → Nat)
+    (h : ∀ (α : Type) (l : List α), f α l = 0) (l : List Int) :
+    f Int l = 0 := by
+  crush [h]
 
 /-! ## `crush.mono.certify` — the instance-certification guard
 

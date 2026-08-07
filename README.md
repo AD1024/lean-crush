@@ -68,10 +68,14 @@ lake build Test.Smoke   # smoke tests (needs z3 for the round-trip)
 further:
 
 ```lean
-crush [h, myLemma]   -- also use these facts (lemmas need not be in context)
+crush [h, myLemma]   -- use exactly these facts (lemmas need not be in context)
 crush [*, myLemma]   -- everything in context, plus a lemma
 crush u[myFn]        -- unfold `myFn` via its equation lemmas
 ```
+
+Selected definitions are rewritten in the actual hypotheses and goal before SMT
+translation; their equations also remain available as fallback solver facts. This
+makes `u[...]` useful without depending entirely on SMT quantifier instantiation.
 
 Mark a definition and its equations come along automatically, with no `u[…]` needed:
 
@@ -127,6 +131,17 @@ you tell the two apart at a glance.
 
 Other behaviour is controlled by `set_option`s (`crush.backend`, `crush.timeout`, and
 others); each carries its own documentation where it is declared.
+
+Library premise selection is opt-in and uses Lean's registered
+`LibrarySuggestions` engine:
+
+```lean
+set_option crush.premises true
+set_option crush.premises.max 32
+```
+
+It applies to bare `crush` calls. An explicit `[...]` list remains a strict
+restriction and disables automatic premise selection.
 
 ## How it works
 

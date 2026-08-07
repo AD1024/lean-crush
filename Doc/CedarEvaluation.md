@@ -267,6 +267,14 @@ Replace Cartesian candidate saturation with type-pattern matching:
 
 **Priority:** P1
 
+**Status:** Fixed after the evaluation. Selected equation lemmas now drive a
+proof-producing normalization pass before monomorphization. Exact applications in
+hypotheses and the negated goal are rewritten with Lean's simplifier, rewritten
+hypotheses carry transported proof terms, and Alethe replay receives a transformer
+from the original negated goal to its normalized assertion. Equation lemmas remain
+as fallback SMT facts; core-directed reconstruction receives the exact specialized
+simplifier equality rather than every raw polymorphic equation.
+
 For Cedar's `List.Equiv`, this form can produce a countermodel even when both
 subset directions are available:
 
@@ -287,7 +295,7 @@ crush [hac, hca]
 dependent on monomorphization, symbol identity, and quantifier instantiation.
 Direct unfolding instead rewrites the exact applications before translation.
 
-### Proposed fix
+### Implemented fix
 
 Add a selected-definition normalization phase before monomorphization:
 
@@ -295,8 +303,10 @@ Add a selected-definition normalization phase before monomorphization:
    `@[crush_unfold]`.
 2. Preserve proof provenance by constructing proofs of rewritten hypotheses with
    `Eq.mp`/`Iff.mp` or Lean's simplifier result.
-3. Rewrite the goal through an equivalent target before negating it.
-4. Keep equation facts only for applications that cannot be reduced syntactically.
+3. Retain a proof transformer from the original negated goal to the normalized
+   assertion for certificate replay.
+4. Keep equation facts as a conservative fallback for applications that cannot be
+   reduced syntactically.
 
 This makes `crush_unfold` behave like its name: expose definitions in the actual
 query rather than ask the SMT solver to discover every rewrite.

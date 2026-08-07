@@ -10,6 +10,7 @@ import Crush.Reify.Collect
 import Crush.Translation.Monad
 import Crush.Translation.Attr
 import Crush.Translation.Unfold
+import Crush.Translation.Preprocess
 import Crush.Translation.Builtins
 import Crush.Translation.Monomorphize
 import Crush.Translation.Translate

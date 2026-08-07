@@ -50,12 +50,24 @@ outside the table are ignored rather than fatal: a solver is free to name anythi
 in its core, and a malformed name should not crash the tactic. -/
 def coreHypotheses (st : TranslateState) (coreIds : Array Nat) : Array Expr := Id.run do
   let mut seen : Std.HashSet Nat := {}
+  let mut seenProofs : Std.HashSet Expr := {}
   let mut out : Array Expr := #[]
   for id in coreIds do
     if seen.contains id then continue
     seen := seen.insert id
     if let some src := st.facts[id]? then
       if let some proof := src.proof then
+        unless seenProofs.contains proof do
+          seenProofs := seenProofs.insert proof
+          out := out.push proof
+  -- Preprocessing can make the negated assertion independent of the equations
+  -- that produced it, so the solver omits them from the core. Supply the exact,
+  -- specialized equality between the original and normalized negated goals
+  -- rather than every raw polymorphic equation.
+  for src in st.facts do
+    if let some proof := src.reconstructionProof then
+      unless seenProofs.contains proof do
+        seenProofs := seenProofs.insert proof
         out := out.push proof
   return out
 

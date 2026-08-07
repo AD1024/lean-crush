@@ -1,4 +1,5 @@
 import Lean
+import Lean.LibrarySuggestions.Default
 import Crush.Translation.Monad
 import Crush.Translation.Unfold
 open Lean Meta
@@ -23,8 +24,8 @@ see `Crush/Frontend/Tactic.lean`):
 * `crush d[f]` adds `f`'s unfold equation (`f x = …`) as a definitional equality.
 
 Each collected fact carries a `descr` for provenance, so an unsat core or a failure
-message can name its source. Premise selection (Lean core `LibrarySuggestions`) is
-the remaining unwired source.
+message can name its source. Optional premise selection uses Lean core's
+`LibrarySuggestions` engine.
 -/
 
 namespace Crush
@@ -38,6 +39,17 @@ structure Fact where
   proof   : Option Expr
   descr   : String
   negated : Bool := false
+  /-- For a rewritten negated goal, a proof of `originalNegation → prop`.
+  Alethe replay applies it to the original `¬goal` hypothesis before replaying
+  the normalized assertion. Ordinary facts carry their rewritten proof directly. -/
+  negationTransform : Option Expr := none
+  /-- A specialized equality connecting the original negated goal to its
+  normalized assertion. Core-directed reconstruction always receives this bridge,
+  because the solver no longer needs to cite the equations after rewriting. -/
+  reconstructionProof : Option Expr := none
+  /-- Equation facts remain quantified SMT fallbacks but are not normalized by
+  their own rewrite rule. -/
+  isEquation : Bool := false
   deriving Inhabited
 
 /-- The resolved fact sources requested by the tactic's argument grammar. Produced
@@ -54,13 +66,25 @@ structure Hints where
   eqnLemmas : Array Name := #[]
   /-- Whether to sweep in every local `Prop` hypothesis. -/
   allHyps  : Bool := true
+  /-- Whether automatic library premise selection may add facts. An explicit
+  `[...]` list sets this to false so the list remains a strict restriction. -/
+  allowPremiseSelection : Bool := true
+  deriving Inhabited
+
+/-- Facts plus the selected equations that should normalize them before
+monomorphization. `collectFacts` remains as the compatibility wrapper returning
+only `facts`; the tactic driver uses this richer result. -/
+structure FactCollection where
+  facts            : Array Fact := #[]
+  rewriteLemmas    : Array Name := #[]
+  selectedPremises : Nat := 0
   deriving Inhabited
 
 /-- Collect assertable facts from `goal` under `hints`, plus the (negated) goal.
 Returns the facts and leaves the goal untouched (the tactic decides how to close
 it). Only `Prop` propositions are collected; the goal's type is negated. -/
-def collectFacts (goal : MVarId) (hints : Hints := {}) (autoUnfold : Bool := true) :
-    MetaM (Array Fact) :=
+def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
+    (autoUnfold : Bool := true) (premiseMax : Nat := 0) : MetaM FactCollection :=
   goal.withContext do
     let mut facts := #[]
     -- Constants seen across goal + hypotheses + hints, seeding auto-unfold relevance.
@@ -69,6 +93,7 @@ def collectFacts (goal : MVarId) (hints : Hints := {}) (autoUnfold : Bool := tru
     -- traverse, so without this a constant like the recursive function under proof is
     -- invisible to relevance and its `@[crush_unfold]` equations never get folded in.
     let mut seeds : Array Name := #[]
+    let mut seenPremises : Std.HashSet Name := {}
     let goalType ← instantiateMVars (← goal.getType)
     seeds := seeds ++ goalType.getUsedConstants
     -- Local hypotheses, unless an explicit `[…]` list without `*` restricts us.
@@ -99,11 +124,37 @@ def collectFacts (goal : MVarId) (hints : Hints := {}) (autoUnfold : Bool := tru
                   else pure proof
       let ty ← inferType proof
       if (← isProp ty) then
+        if let .const name _ := proof.getAppFn then
+          seenPremises := seenPremises.insert name
         seeds := seeds ++ ty.getUsedConstants
         facts := facts.push { prop := ty, proof := proof, descr }
       else
         throwError "crush: {descr} has type `{ty}`, which is not a `Prop`; \
                     only propositions can be asserted as facts."
+    -- Lean core's premise selector supplies relevant library theorems. Keep this
+    -- bounded and proposition-only; selected polymorphic theorems flow through
+    -- the same monomorphization path as explicit hints.
+    let mut selectedPremises := 0
+    if premiseMax > 0 && hints.allowPremiseSelection then
+      let suggestions ← Lean.LibrarySuggestions.select goal {
+        maxSuggestions := premiseMax
+        caller := some "crush"
+        filter := fun name => do
+          let some info := (← getEnv).find? name | return false
+          isProp info.type }
+      for suggestion in suggestions do
+        if selectedPremises >= premiseMax then break
+        if seenPremises.contains suggestion.name then continue
+        seenPremises := seenPremises.insert suggestion.name
+        let proof ← mkConstWithFreshMVarLevels suggestion.name
+        let ty ← inferType proof
+        unless ← isProp ty do continue
+        seeds := seeds ++ ty.getUsedConstants
+        facts := facts.push {
+          prop := ty
+          proof := some proof
+          descr := s!"premise {suggestion.name}" }
+        selectedPremises := selectedPremises + 1
     -- Equation lemmas from `u[…]`/`d[…]` hints. Fresh level metavariables so a
     -- universe-polymorphic equation lemma instantiates at use.
     let mut eqnLemmas := hints.eqnLemmas
@@ -120,13 +171,22 @@ def collectFacts (goal : MVarId) (hints : Hints := {}) (autoUnfold : Bool := tru
       let proof ← mkConstWithFreshMVarLevels lemName
       let ty ← inferType proof
       if (← isProp ty) then
-        facts := facts.push { prop := ty, proof := proof, descr := s!"eqn {lemName}" }
+        facts := facts.push {
+          prop := ty
+          proof := proof
+          descr := s!"eqn {lemName}"
+          isEquation := true }
     -- The negated goal.
     facts := facts.push {
       prop := mkNot goalType
       proof := none
       descr := "negated goal"
       negated := true }
-    return facts
+    return { facts, rewriteLemmas := eqnLemmas, selectedPremises }
+
+/-- Compatibility wrapper returning only the collected fact array. -/
+def collectFacts (goal : MVarId) (hints : Hints := {}) (autoUnfold : Bool := true) :
+    MetaM (Array Fact) := do
+  return (← collectFactsWithRewrite goal hints autoUnfold).facts
 
 end Crush

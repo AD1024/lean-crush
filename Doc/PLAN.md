@@ -211,7 +211,7 @@ Module map (⟢ = built & tested, ▷ = designed, □ = todo):
 | `Crush/Reify/Term.lean` | `CTerm`/`CSort` IR (STLC, no `LamWF`) | ⟢ |
 | `Crush/Reify/Collect.lean` | hypothesis & goal collection | ⟢ |
 | `Crush/Reify/Reify.lean` | `Expr → CTerm`, atom allocation, `DTr` provenance | □ |
-| `Crush/Translation/Preprocess.lean` | reduction, skolem prep | □ |
+| `Crush/Translation/Preprocess.lean` | proof-producing selected-definition normalization | ⟢ |
 | `Crush/Translation/Monomorphize.lean` | poly *lemma* → ground instances, saturating (datatype mono is in `Translate.lean`) | ⟢ |
 | `Crush/Translation/HOEncoding.lean` | HO encoding helpers (defunc ⟢, native ⟢, combinators □) | ⟢ |
 | `Crush/Translation/Translate.lean` | driver: `Expr → SMT.Term` via handlers | ⟢ |
@@ -584,13 +584,16 @@ crush [h₁, …, hₙ, *] (u[c₁,…]) (d[c₁,…])
 - Parsing/collection lives in `Crush/Frontend/Tactic.lean` (`parseHintList`,
   `parseUOrDs`) and `Crush/Reify/Collect.lean` (`Hints`, `collectFacts`); tested in
   `Test/Hints.lean`.
-- The tactic pipeline: collect → monomorphize → HO-encode → translate (handlers) →
+- The tactic pipeline: collect → selected-definition normalize → monomorphize →
+  HO-encode → translate (handlers) →
   solve → discharge, with `trace.*` classes at each boundary (including
   `crush.mono`) and the full script available via `crush.trace.script` /
-  `crush.save`. (A separate preprocessing pass is not yet in the chain — see §9 M5.)
+  `crush.save`.
 
-*Not yet in the grammar:* a `* db` named lemma database (there is no `LemDB` yet) and
-premise selection.
+*Not yet in the grammar:* a `* db` named lemma database (there is no `LemDB` yet).
+Premise selection is available through `crush.premises`; it uses Lean core's
+registered `LibrarySuggestions` selector with the `crush.premises.max` bound.
+Explicit `[...]` lists disable it and remain strict restrictions.
 
 **Two hard lessons from lean-auto's frontend that shape ours:**
 - **Report the pipeline, always.** A bare "failed to find proof" that never says
@@ -630,7 +633,9 @@ at entry, so this layers on without changing the pipeline.
 | `crush.save` | `String` | `""` | write script to path |
 | `crush.trace.script` | `Bool` | `false` | log generated script |
 | `crush.autoUnfold` | `Bool` | `true` | fold `@[crush_unfold]`/`@[crush_defeq]` equations of relevant defs into each query |
-| `crush.profile` | `Bool` | `false` | log a per-phase wall-clock breakdown (collect/monomorphize/translate/solve/reconstruct) |
+| `crush.profile` | `Bool` | `false` | log a per-phase wall-clock breakdown (collect/normalize/monomorphize/translate/solve/reconstruct) |
+| `crush.premises` | `Bool` | `false` | add bounded `LibrarySuggestions` premises to bare calls |
+| `crush.premises.max` | `Nat` | `32` | maximum selected library premises |
 
 Two notes. Enum-valued options take a **string literal**
 (`set_option crush.trust "trust"`), since that is how `KVMap.Value` round-trips
@@ -860,7 +865,9 @@ independent tactic call per step on bare `MetaM`, which is the thing `SymM` woul
 5. Head-indexed lowerings and SMT quotations (§4.1). **done** —
     `@[crush_lower target]` uses keyed dispatch and `(smt| ...)` removes raw IR
     constructor noise; `Test/Extension.lean` and `Test/Theories.lean`.
-6. Premise selection on Lean core `LibrarySuggestions`.
+6. Premise selection on Lean core `LibrarySuggestions`. **done** — opt-in via
+   `crush.premises`, proposition-filtered and bounded by `crush.premises.max`;
+   explicit hint lists remain strict restrictions. Tested in `Test/Premises.lean`.
 7. Portfolio backend, per-call config syntax, richer model printing, docs.
 8. **Minimized counterexample models** (`crush.model.minimize`, backlog — wanted by
     downstream users who consume the `sat` model, e.g. PLean). On `sat`, iteratively

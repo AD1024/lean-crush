@@ -1,6 +1,7 @@
 import Lean
 import Crush.Frontend.Config
 import Crush.Reify.Collect
+import Crush.Translation.Preprocess
 import Crush.Translation.Monomorphize
 import Crush.Translation.Translate
 import Crush.Translation.DefaultLowerings
@@ -19,13 +20,14 @@ open Lean Elab Tactic Meta
 The end-to-end path:
 
 1. read `Config` from the option environment;
-2. collect local `Prop` hypotheses and the negated goal (`Crush.collectFacts`);
-3. translate each fact to an `SMT.Term`, asserting it with a `:named crush_fact_N`
+2. collect local `Prop` hypotheses, selected premises, and the negated goal;
+3. normalize facts with selected definition equations, then monomorphize them;
+4. translate each fact to an `SMT.Term`, asserting it with a `:named crush_fact_N`
    attribute so an unsat core maps back to provenance (`Crush.emitTerm`);
-4. build the script (`set-logic`, declarations, assertions, `check-sat`), optionally
+5. build the script (`set-logic`, declarations, assertions, `check-sat`), optionally
    saving/tracing it;
-5. run the backend with a hard timeout (`Crush.Solver.runQuery`);
-6. discharge: on `unsat`, close the goal per `crush.trust`; on `sat`, report the
+6. run the backend with a hard timeout (`Crush.Solver.runQuery`);
+7. discharge: on `unsat`, close the goal per `crush.trust`; on `sat`, report the
    model as a counterexample; on `unknown`/timeout, say so.
 
 Three discharge policies, selected by `crush.trust`:
@@ -81,6 +83,7 @@ def buildScript (cfg : Config) (facts : Array Fact) :
   let (_, st) ← TranslateM.run cfg do
     for fact in facts do
       let id ← TranslateM.recordFact fact.descr fact.proof (some fact.prop)
+        fact.negationTransform fact.reconstructionProof
       let body ← emitTerm fact.prop
       let named := Term.annot body #[.named s!"{factNamePrefix}{id}"]
       TranslateM.emitCommand (.assert named)
@@ -154,7 +157,11 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState) (proofTe
         let name := s!"{factNamePrefix}{src.id}"
         match src.proof with
         | some p => facts := facts.insert name p
-        | none => facts := facts.insert name (mkFVar fvarId)
+        | none =>
+          let hneg := mkFVar fvarId
+          let proof := src.negationTransform.map (fun transform => mkApp transform hneg)
+            |>.getD hneg
+          facts := facts.insert name proof
       Alethe.replay? proof (SMT.parseSexps proofText) facts st.nameToExpr
     match res with
     | none => return false
@@ -204,8 +211,18 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
   -- Profiling: when `crush.profile` is on, each phase below is wall-clock timed and a
   -- breakdown is logged at the end. Off by default and costs only a branch per phase.
   let mut prof := if cfg.profile then Profiler.on else Profiler.off
-  let (facts, prof') ← prof.time "collect" (collectFacts goal hints cfg.autoUnfold)
+  let premiseMax :=
+    if cfg.premises && hints.allowPremiseSelection then cfg.premiseMax else 0
+  let (collected, prof') ←
+    prof.time "collect" (collectFactsWithRewrite goal hints cfg.autoUnfold premiseMax)
   prof := prof'
+  trace[crush] "selected {collected.selectedPremises} library premise(s)"
+  let (normalized, prof') ←
+    prof.time "normalize" (normalizeFacts collected.facts collected.rewriteLemmas)
+  prof := prof'
+  trace[crush] "normalized {normalized.rewritten} fact(s) with \
+                {collected.rewriteLemmas.size} selected equation lemma(s)"
+  let facts := normalized.facts
   -- Specialize polymorphic facts at the types the query mentions. Without this a
   -- polymorphic lemma is emitted at an abstract instantiation, giving SMT symbols
   -- disjoint from the goal's, so it cannot discharge anything — even for a ground
@@ -367,11 +384,11 @@ private def parseUOrDs (stxs : Array (TSyntax ``crushUOrD)) : TacticM (Array Nam
 
 /-- Parse the `[…]` hint list into elaborated proof terms and the `allHyps` flag. -/
 private def parseHintList (goal : MVarId) (stx : TSyntax ``crushHints) :
-    TacticM (Array (Expr × String) × Bool) := goal.withContext do
+    TacticM (Array (Expr × String) × Bool × Bool) := goal.withContext do
   match stx with
   | `(crushHints| ) =>
     -- No list at all: default to all local hypotheses.
-    return (#[], true)
+    return (#[], true, true)
   | `(crushHints| [ $[$elems],* ]) =>
     let mut terms : Array (Expr × String) := #[]
     let mut allHyps := false
@@ -386,7 +403,7 @@ private def parseHintList (goal : MVarId) (stx : TSyntax ``crushHints) :
         terms := terms.push (e, s!"hint {descr}")
       | _ => throwUnsupportedSyntax
     -- An explicit list without `*` is a *restriction*: only the listed facts.
-    return (terms, allHyps)
+    return (terms, allHyps, false)
   | _ => throwUnsupportedSyntax
 
 @[tactic crushTac]
@@ -399,9 +416,9 @@ def evalCrush : Tactic := fun stx => do
   -- Parse the hint grammar: `crush <hints> <uord>*`.
   let hintsStx : TSyntax ``crushHints := ⟨stx[1]⟩
   let uordStxs := stx[2].getArgs.map (⟨·⟩ : Syntax → TSyntax ``crushUOrD)
-  let (terms, allHyps) ← parseHintList goal hintsStx
+  let (terms, allHyps, allowPremiseSelection) ← parseHintList goal hintsStx
   let eqnLemmas ← parseUOrDs uordStxs
-  let hints : Hints := { terms, eqnLemmas, allHyps }
+  let hints : Hints := { terms, eqnLemmas, allHyps, allowPremiseSelection }
   runCrush goal cfg hints
 
 end Crush

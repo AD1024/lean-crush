@@ -202,8 +202,22 @@ register_option crush.reconstruct : ReconstructMode := {
 
 register_option crush.profile : Bool := {
   defValue := false
-  descr := "Log a per-phase wall-clock breakdown of the tactic (collect, monomorphize, \
-            translate, solve, reconstruct) as an info message, to find where time goes."
+  descr := "Log a per-phase wall-clock breakdown of the tactic (collect, normalize, \
+            monomorphize, translate, solve, reconstruct) as an info message, to find \
+            where time goes."
+}
+
+register_option crush.premises : Bool := {
+  defValue := false
+  descr := "Use Lean's registered LibrarySuggestions engine to add relevant library \
+            theorems to bare `crush` calls. Explicit `[...]` lists remain strict \
+            restrictions and disable automatic premise selection."
+}
+
+register_option crush.premises.max : Nat := {
+  defValue := 32
+  descr := "Maximum number of LibrarySuggestions premises added when \
+            `crush.premises` is enabled."
 }
 
 namespace Crush
@@ -224,6 +238,8 @@ structure Config where
   autoUnfold     : Bool      := true
   reconstruct    : ReconstructMode := .auto
   profile        : Bool      := false
+  premises       : Bool      := false
+  premiseMax     : Nat       := 32
   deriving Inhabited
 
 /-- Read the current option environment into a `Config`. -/
@@ -246,6 +262,8 @@ def Config.ofOptions (opts : Options) : Config :=
     traceScript    := crush.trace.script.get opts
     autoUnfold     := crush.autoUnfold.get opts
     reconstruct    := crush.reconstruct.get opts
-    profile        := crush.profile.get opts }
+    profile        := crush.profile.get opts
+    premises       := crush.premises.get opts
+    premiseMax     := crush.premises.max.get opts }
 
 end Crush

@@ -4,7 +4,7 @@ import Lean
 # Lightweight per-phase profiling
 
 A tiny wall-clock profiler for the `crush` pipeline, enabled by `crush.profile`. It
-records how long each phase (collect, monomorphize, translate, solve, reconstruct)
+records how long each phase (collect, normalize, monomorphize, translate, solve, reconstruct)
 takes and prints a breakdown, so optimization targets the phase that actually
 dominates rather than a guess.
 
