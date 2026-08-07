@@ -64,16 +64,15 @@ jobs:
           sh elan-init.sh -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
-      # Keyed on the toolchain and manifest: a toolchain bump or dependency change
-      # must not silently reuse stale artifacts. Mathlib's own oleans (~6.6 GB) are
-      # deliberately *excluded* — they come from `lake exe cache get` below, which is a
-      # fast CDN download, and caching them here would blow the 10 GB Actions cache cap
-      # and thrash. We cache only our build products and the lighter deps.
+      # Keyed on both package manifests: a toolchain bump or dependency change must
+      # not silently reuse stale artifacts. Mathlib's own oleans (~6.6 GB) are
+      # deliberately excluded; the optional suite downloads them from Mathlib's CDN.
       - name: Cache build artifacts
         uses: actions/cache@v4
         with:
           path: |
             .lake/build
+            MathlibTest/.lake/build
             .lake/packages/batteries
             .lake/packages/aesop
             .lake/packages/Qq
@@ -82,23 +81,24 @@ jobs:
             .lake/packages/LeanSearchClient
             .lake/packages/plausible
             .lake/packages/Cli
-          key: lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lake-manifest.json') }}
+          key: lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lake-manifest.json') }}-${{ hashFiles('MathlibTest/lake-manifest.json') }}
           restore-keys: lake-${{ runner.os }}-
-
-      # `Test/CaseStudies/Mathlib.lean` depends on Mathlib (pinned at our toolchain's
-      # tag). Without this, `lake build Test` would compile all ~2500 Mathlib modules
-      # from source and blow past the job timeout. `cache get` clones the dependencies
-      # (per the committed manifest) and downloads Mathlib's prebuilt oleans instead.
-      - name: Download Mathlib cache
-        run: lake exe cache get
 
       - name: Build library
         run: lake build
 
-      # Separate step from the library so a test failure is distinguishable from a
-      # library failure at a glance in the run summary.
-      - name: Build test suite
+      # The core suite runs before Mathlib is fetched, pinning that the root package
+      # and all ordinary tests are independent of it.
+      - name: Build core test suite
         run: lake build Test
+
+      - name: Download optional Mathlib cache
+        working-directory: MathlibTest
+        run: lake exe cache get
+
+      - name: Build optional Mathlib test suite
+        working-directory: MathlibTest
+        run: lake build
 
       # `lake build` reports a `sorry` as a warning, not an error, so a proof that
       # regressed to `sorry` would otherwise pass CI. The suite's contract is that
@@ -111,6 +111,16 @@ jobs:
           # backtick-quoted (declaration uses `sorry`), so the pattern is quote-
           # agnostic rather than assuming a particular quote character.
           if lake build Test 2>&1 | grep -nE "declaration uses .sorry."; then
+            echo "::error::a declaration uses sorry; the suite must be sorry-free"
+            exit 1
+          fi
+          echo "no sorry found"
+
+      - name: Assert no sorry in Mathlib integration tests
+        working-directory: MathlibTest
+        run: |
+          set -euo pipefail
+          if lake build 2>&1 | grep -nE "declaration uses .sorry."; then
             echo "::error::a declaration uses sorry; the suite must be sorry-free"
             exit 1
           fi

@@ -1091,7 +1091,8 @@ exposes fresh fields of the same type, so an unbounded loop would not terminate)
 16 branches. Theory sorts are skipped, since `Nat`'s constructors would trigger an
 induction-shaped split that `omega` handles better.
 
-This closed both limits, and upgraded `Test/CaseStudies/Mathlib.lean`'s datatype section from
+This closed both limits, and upgraded
+`MathlibTest/MathlibTest/CaseStudies.lean`'s datatype section from
 `trust` to `reconstruct`: `BinaryTree`/`SignType`/`Option`/`Prod`/`Sum` exhaustiveness are now
 kernel-checked.
 
@@ -1131,8 +1132,10 @@ compared against `n` only, which rejected the genuine `Tree`/`TreeList` block an
 
 ## 11. Testing strategy
 
-The suite is `Test/`, built by `lake build Test`. Every `theorem` that elaborates is
-a passing test; the build must be clean and produce **no `sorry`**.
+The dependency-free core suite is `Test/`, built by `lake build Test`. Mathlib
+integration tests are isolated in the `MathlibTest` package and built from that
+directory with `lake build`. Every `theorem` that elaborates is a passing test;
+both builds must be clean and produce **no `sorry`**.
 
 | File | Covers |
 |---|---|
@@ -1158,6 +1161,13 @@ a passing test; the build must be clean and produce **no `sorry`**.
 | `LeanAutoPort.lean` | goals ported from lean-auto's `SmtTranslation/` suite (BoolNatInt, BitVec, String, inductive/enum, recursive-with-unfold): demonstrates the same corpus translates and solves, and pins the `Empty`-type cases where we are deliberately *sound* and lean-auto documents itself unsound |
 | `CaseStudies/LeanAuto.lean` | the *harder* lean-auto corpus (§11b): mutually-recursive and single-ctor datatypes, HO Church numerals (kernel-reconstructed), polymorphic lemmas, leading-∀ matching, `Function.comp_def`, and the Paxos consensus goal — each filed as handled / sound-refusal / known-gap; drove four translation fixes and closed three of four gaps |
 | `CaseStudies/Loom.lean` | representative Loom verification conditions (§11b): GCD/MaxElem/IsSorted/SumOfDigits/sqrt/cbrt/binary-search arithmetic, quantified array invariants, an array-update VC, and Cashmere balance invariants; the Mathlib-bound `Multiset`/`Finset` VCs reduce (hammer-in-the-loop) to arithmetic residuals `crush` closes |
+
+The optional `MathlibTest` package adds:
+
+| File | Covers |
+|---|---|
+| `MathlibTest/CaseStudies.lean` | real Mathlib statements restated at `Int`: lattice, Euclidean division, nonlinear arithmetic, quantifier chains, Mathlib datatypes, lowered primitives, and pinned unsupported operations |
+| `MathlibTest/LibraryUnfold.lean` | local `crush_unfold` registration for Mathlib definitions such as `abs`, `List.length`, and `Monotone` |
 
 **Negative tests use `#guard_msgs`, not `sorry`.** A goal that is *false* must be
 rejected, and the guard pins the rejection message, so a regression that let `crush`

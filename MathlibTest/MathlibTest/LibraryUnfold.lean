@@ -5,7 +5,7 @@ import Mathlib
 # Unfolding library definitions
 
 These goals are expected failures without extra configuration in
-`Test/CaseStudies/Mathlib.lean`: their library definitions are otherwise translated as
+`MathlibTest/CaseStudies.lean`: their library definitions are otherwise translated as
 uninterpreted symbols. Registering the definitions with `crush_unfold` exposes operations
 that `crush` already supports.
 

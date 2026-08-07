@@ -419,29 +419,39 @@ timeout, not merely as a correctness test.
 
 **Priority:** P2
 
+**Status:** Fixed after the evaluation. The root `crush` package has no Mathlib
+dependency. Mathlib-only case studies and unfolding tests live in the separate
+`MathlibTest` Lake package, so downstream installations do not fetch Mathlib or
+inherit its Batteries revision.
+
 Cedar is pinned to Lean 4.31.0 while `lean-crush` is pinned to Lean 4.32.2.
-Additionally, `lean-crush` requires Mathlib only for one case-study module, but
-that requirement pulls Mathlib and its Batteries revision into every downstream
-project. Cedar has its own direct Batteries pin, causing a dependency conflict.
+Previously, `lean-crush` required Mathlib only for its case-study modules, but
+that requirement pulled Mathlib and its Batteries revision into every downstream
+project. Cedar has its own direct Batteries pin, which caused a dependency conflict.
 
-This is independent of proof capability: users cannot evaluate the tactic in the
-real project until the package graph and toolchains align.
+This is independent of proof capability. The package graph is now compatible;
+the Lean 4.31.0 versus 4.32.2 toolchain mismatch still prevents direct use in
+Cedar.
 
-### Proposed fix
+### Implemented packaging fix
 
-1. Move the Mathlib case study into a separate Lake package so the core
+1. Mathlib case studies now live in a separate Lake package, so the core
    `lean-crush` library has no Mathlib dependency.
-2. Keep core tests on Lean and Batteries APIs only.
-3. Add downstream fixture CI projects for supported Lean versions, including one
+2. Core tests use Lean APIs only.
+3. CI builds the dependency-free core suite before fetching Mathlib for its
+   optional integration suite.
+
+### Remaining compatibility work
+
+1. Add downstream fixture CI projects for supported Lean versions, including one
    project with a direct Batteries dependency.
-4. Publish tags or compatibility branches for supported Lean releases when Lean
+2. Publish tags or compatibility branches for supported Lean releases when Lean
    metaprogramming API changes require source differences.
-5. Document that the root project's toolchain compiles dependencies and list the
+3. Document that the root project's toolchain compiles dependencies and list the
    versions covered by CI.
 
-Removing the unconditional Mathlib dependency is the highest-value part: it
-eliminates Cedar's Batteries conflict and makes cross-project testing much
-lighter.
+Removing the unconditional Mathlib dependency eliminates Cedar's Batteries
+conflict and makes cross-project testing much lighter.
 
 ## Recommended Order
 
@@ -451,7 +461,7 @@ lighter.
 4. Add selected-definition normalization and bounded native match splitting.
 5. Add arithmetic preprocessing/portfolio behavior for the `BitVec` addition
    case.
-6. Split Mathlib case studies from the core package and add downstream
+6. Split Mathlib case studies from the core package (**done**) and add downstream
    compatibility CI.
 
 The first two items prevent malformed solver input. The next two address the

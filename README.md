@@ -53,13 +53,20 @@ Add to your `lakefile.lean`:
 require crush from git "https://github.com/AD1024/lean-crush" @ "main"
 ```
 
-Then `import Crush` and the `crush` tactic is available. Note that the dependency currently
-pulls in mathlib as well — only one case-study test file uses it, but Lake fetches it
-regardless (`lake exe cache get` gets prebuilt binaries rather than compiling it).
+Then `import Crush` and the `crush` tactic is available. The package has no third-party
+Lean dependencies; Mathlib integration tests live in a separate package.
 
 ```sh
 lake build              # the library
 lake build Test.Smoke   # smoke tests (needs z3 for the round-trip)
+```
+
+Maintainers can run the optional Mathlib integration suite separately:
+
+```sh
+cd MathlibTest
+lake exe cache get
+lake build
 ```
 
 ## Using it
@@ -226,11 +233,11 @@ reconstruction cases for both routes
 ([`Test/AletheReplay.lean`](Test/AletheReplay.lean),
 [`Test/ReconstructHard.lean`](Test/ReconstructHard.lean)).
 
-[`Test/CaseStudies/`](Test/CaseStudies/) runs `crush` against external corpora: lean-auto's
-test suite, Loom/Velvet/Cashmere verification conditions, and mathlib lemma statements
-restated at `Int` ([`Test/CaseStudies/Mathlib.lean`](Test/CaseStudies/Mathlib.lean)) — with
-the mathlib operations that have *no* first-order translation pinned as expected failures, so
-the boundary is recorded rather than implied.
+[`Test/CaseStudies/`](Test/CaseStudies/) runs `crush` against lean-auto's test suite and
+Loom/Velvet/Cashmere verification conditions. The optional
+[`MathlibTest`](MathlibTest/) package checks Mathlib lemma statements restated at `Int`,
+with operations that have *no* first-order translation pinned as expected failures so the
+boundary is recorded rather than implied.
 
 ## Acknowledgements
 
