@@ -585,7 +585,7 @@ crush [h₁, …, hₙ, *] (u[c₁,…]) (d[c₁,…])
   `parseUOrDs`) and `Crush/Reify/Collect.lean` (`Hints`, `collectFacts`); tested in
   `Test/Hints.lean`.
 - The tactic pipeline: collect → selected-definition normalize → monomorphize →
-  HO-encode → translate (handlers) →
+  bounded ground instantiate → HO-encode → translate (handlers) →
   solve → discharge, with `trace.*` classes at each boundary (including
   `crush.mono`) and the full script available via `crush.trace.script` /
   `crush.save`.
@@ -633,9 +633,11 @@ at entry, so this layers on without changing the pipeline.
 | `crush.save` | `String` | `""` | write script to path |
 | `crush.trace.script` | `Bool` | `false` | log generated script |
 | `crush.autoUnfold` | `Bool` | `true` | fold `@[crush_unfold]`/`@[crush_defeq]` equations of relevant defs into each query |
-| `crush.profile` | `Bool` | `false` | log a per-phase wall-clock breakdown (collect/normalize/monomorphize/translate/solve/reconstruct) |
+| `crush.profile` | `Bool` | `false` | log a per-phase wall-clock breakdown (collect/normalize/monomorphize/instantiate/translate/solve/reconstruct) |
 | `crush.premises` | `Bool` | `false` | add bounded `LibrarySuggestions` premises to bare calls |
 | `crush.premises.max` | `Nat` | `32` | maximum selected library premises |
+| `crush.inst.fuel` | `Nat` | `128` | maximum proof-producing ground term instances |
+| `crush.inst.rounds` | `Nat` | `3` | ground-instantiation saturation rounds |
 
 Two notes. Enum-valued options take a **string literal**
 (`set_option crush.trust "trust"`), since that is how `KVMap.Value` round-trips
@@ -1148,6 +1150,8 @@ both builds must be clean and produce **no `sorry`**.
 | `Theories.lean` | `Nat`/`Int`, default library lowerings, custom-instance rejection, datatypes, bit-vectors, strings, and §10 soundness regressions |
 | `Monomorphize.lean` | parametric datatypes: distinct instantiations, nesting, `Nat`-through-parameter guard, selectors/η |
 | `LemmaMono.lean` | lemma-instantiation: polymorphic facts specialized at the query's types, saturation, the polymorphic TIP list theorems, `crush.mono.fuel` gating, and that false goals are still rejected |
+| `Instantiate.lean` | bounded proof-producing ground instances for explicit lemmas, including forward chains that synthesize existential witnesses |
+| `Cashmere.lean` | the Cashmere existential-balance VC, requiring a generated term from one explicit lemma to instantiate the next |
 | `MonoStress.lean` | recursive parametric `Tree`, two-parameter `Map`, nested `FSet`, and all of these combined with higher-order functions |
 | `HigherOrder.lean` | λ-arguments, captures, η-expansion, extensionality, partial application; all reconstruct under the default policy (kernel-checked, `#print axioms` pins no `crushSorry`), thanks to the `funext` finishers |
 | `Regression.lean` | an independent corpus migrated from another Lean SMT bridge, plus cases derived from bugs reported against it |

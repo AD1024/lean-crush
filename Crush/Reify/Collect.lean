@@ -50,6 +50,13 @@ structure Fact where
   /-- Equation facts remain quantified SMT fallbacks but are not normalized by
   their own rewrite rule. -/
   isEquation : Bool := false
+  /-- Generate bounded ground instances before SMT translation. Enabled for
+  explicit hints and selected library premises, not every local hypothesis. -/
+  instantiateTerms : Bool := false
+  /-- Proof of the quantified fact that produced this ground instance. Used only
+  to close reconstruction cores that cite the parent fallback instead of the
+  equivalent ground assertion selected during preprocessing. -/
+  instanceOf : Option Expr := none
   deriving Inhabited
 
 /-- The resolved fact sources requested by the tactic's argument grammar. Produced
@@ -127,7 +134,11 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
         if let .const name _ := proof.getAppFn then
           seenPremises := seenPremises.insert name
         seeds := seeds ++ ty.getUsedConstants
-        facts := facts.push { prop := ty, proof := proof, descr }
+        facts := facts.push {
+          prop := ty
+          proof := proof
+          descr
+          instantiateTerms := true }
       else
         throwError "crush: {descr} has type `{ty}`, which is not a `Prop`; \
                     only propositions can be asserted as facts."
@@ -153,7 +164,8 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
         facts := facts.push {
           prop := ty
           proof := some proof
-          descr := s!"premise {suggestion.name}" }
+          descr := s!"premise {suggestion.name}"
+          instantiateTerms := true }
         selectedPremises := selectedPremises + 1
     -- Equation lemmas from `u[…]`/`d[…]` hints. Fresh level metavariables so a
     -- universe-polymorphic equation lemma instantiates at use.

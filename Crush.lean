@@ -13,6 +13,7 @@ import Crush.Translation.Unfold
 import Crush.Translation.Preprocess
 import Crush.Translation.Builtins
 import Crush.Translation.Monomorphize
+import Crush.Translation.Instantiate
 import Crush.Translation.Translate
 import Crush.Translation.DefaultLowerings
 import Crush.Solver.Process

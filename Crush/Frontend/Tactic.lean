@@ -3,6 +3,7 @@ import Crush.Frontend.Config
 import Crush.Reify.Collect
 import Crush.Translation.Preprocess
 import Crush.Translation.Monomorphize
+import Crush.Translation.Instantiate
 import Crush.Translation.Translate
 import Crush.Translation.DefaultLowerings
 import Crush.Util.Profile
@@ -56,6 +57,7 @@ initialize registerTraceClass `crush
 initialize registerTraceClass `crush.script
 initialize registerTraceClass `crush.result
 initialize registerTraceClass `crush.mono
+initialize registerTraceClass `crush.inst
 
 open SMT
 
@@ -83,7 +85,7 @@ def buildScript (cfg : Config) (facts : Array Fact) :
   let (_, st) ← TranslateM.run cfg do
     for fact in facts do
       let id ← TranslateM.recordFact fact.descr fact.proof (some fact.prop)
-        fact.negationTransform fact.reconstructionProof
+        fact.negationTransform fact.reconstructionProof fact.instanceOf
       let body ← emitTerm fact.prop
       let named := Term.annot body #[.named s!"{factNamePrefix}{id}"]
       TranslateM.emitCommand (.assert named)
@@ -249,6 +251,17 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
                   instance(s) that failed certification and were dropped \
                   ({mono.rejected}); this indicates an internal bug in the \
                   monomorphizer. The affected facts were not asserted."
+  let (instantiated, prof') ←
+    prof.time "instantiate" (instantiateGroundFacts cfg facts)
+  prof := prof'
+  let facts := instantiated.facts
+  trace[crush.inst] "generated {instantiated.generated} ground instance(s); \
+                     exhausted: {instantiated.exhausted}"
+  if instantiated.exhausted then
+    logWarning m!"crush: ground instantiation hit its bound after \
+                  {instantiated.generated} instance(s) (`crush.inst.fuel` = \
+                  {cfg.instFuel}, `crush.inst.rounds` = {cfg.instRounds}); \
+                  raise the bound if an explicit lemma is not being instantiated."
   let ((script, st), prof') ← prof.time "translate" (buildScript cfg facts)
   prof := prof'
   if cfg.traceScript then

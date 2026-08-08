@@ -52,6 +52,8 @@ structure FactSource where
   /-- Specialized equality from the original negated goal to its normalized
       assertion, always supplied to core-directed reconstruction. -/
   reconstructionProof : Option Expr := none
+  /-- Quantified parent proof for a generated ground instance. -/
+  instanceOf : Option Expr := none
   /-- Human-readable origin for diagnostics. -/
   descr    : String
   deriving Inhabited
@@ -156,11 +158,12 @@ def recordSymbolExpr (name : String) (e : Expr) : TranslateM Unit := do
 /-- Register an emitted assertion's provenance, returning the fact id to embed in
 its `:named` attribute. -/
 def recordFact (descr : String) (proof : Option Expr := none) (prop : Option Expr := none)
-    (negationTransform : Option Expr := none) (reconstructionProof : Option Expr := none) :
+    (negationTransform : Option Expr := none) (reconstructionProof : Option Expr := none)
+    (instanceOf : Option Expr := none) :
     TranslateM Nat := do
   let id := (← get).facts.size
   modify fun s => { s with facts := s.facts.push {
-    id, proof, prop, negationTransform, reconstructionProof, descr } }
+    id, proof, prop, negationTransform, reconstructionProof, instanceOf, descr } }
   return id
 
 /-- Bind `fvar` to SMT variable name `name` for the duration of `k` (a quantifier

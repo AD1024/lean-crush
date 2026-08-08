@@ -60,6 +60,16 @@ def coreHypotheses (st : TranslateState) (coreIds : Array Nat) : Array Expr := I
         unless seenProofs.contains proof do
           seenProofs := seenProofs.insert proof
           out := out.push proof
+  -- A solver may cite the quantified fallback even when preprocessing supplied
+  -- the useful ground instances. Add only instances of parents actually named
+  -- by the core; adding every generated fact would undo core minimization.
+  for src in st.facts do
+    if let some parent := src.instanceOf then
+      if seenProofs.contains parent then
+        if let some proof := src.proof then
+          unless seenProofs.contains proof do
+            seenProofs := seenProofs.insert proof
+            out := out.push proof
   -- Preprocessing can make the negated assertion independent of the equations
   -- that produced it, so the solver omits them from the core. Supply the exact,
   -- specialized equality between the original and normalized negated goals

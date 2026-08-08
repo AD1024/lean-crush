@@ -160,6 +160,18 @@ register_option crush.mono.certify : Bool := {
             the pass's soundness from argued into checked at each call."
 }
 
+register_option crush.inst.fuel : Nat := {
+  defValue := 128
+  descr := "Maximum number of proof-producing ground term instances generated from \
+            explicit hints and selected premises before translation."
+}
+
+register_option crush.inst.rounds : Nat := {
+  defValue := 3
+  descr := "Maximum saturation rounds for ground term instantiation. Set either \
+            this option or `crush.inst.fuel` to 0 to disable the pass."
+}
+
 register_option crush.save : String := {
   defValue := ""
   descr := "If nonempty, write the generated SMT-LIB script to this path before solving."
@@ -203,8 +215,8 @@ register_option crush.reconstruct : ReconstructMode := {
 register_option crush.profile : Bool := {
   defValue := false
   descr := "Log a per-phase wall-clock breakdown of the tactic (collect, normalize, \
-            monomorphize, translate, solve, reconstruct) as an info message, to find \
-            where time goes."
+            monomorphize, instantiate, translate, solve, reconstruct) as an info \
+            message, to find where time goes."
 }
 
 register_option crush.premises : Bool := {
@@ -231,6 +243,8 @@ structure Config where
   monoFuel       : Nat       := 512
   monoRounds     : Nat       := 8
   monoCertify    : Bool      := false
+  instFuel       : Nat       := 128
+  instRounds     : Nat       := 3
   savePath       : String    := ""
   additionalArgs : Array String := #[]
   logic          : Option String := none
@@ -256,6 +270,8 @@ def Config.ofOptions (opts : Options) : Config :=
     monoFuel       := crush.mono.fuel.get opts
     monoRounds     := crush.mono.rounds.get opts
     monoCertify    := crush.mono.certify.get opts
+    instFuel       := crush.inst.fuel.get opts
+    instRounds     := crush.inst.rounds.get opts
     savePath       := crush.save.get opts
     additionalArgs := split (crush.additionalArgs.get opts)
     logic          := if logicStr.isEmpty then none else some logicStr

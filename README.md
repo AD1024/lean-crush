@@ -80,6 +80,11 @@ crush [*, myLemma]   -- everything in context, plus a lemma
 crush u[myFn]        -- unfold `myFn` via its equation lemmas
 ```
 
+Explicit lemmas are also instantiated at relevant ground terms before SMT
+translation. This lets one lemma create the term that triggers another, including
+existential-witness chains that SMT E-matching cannot start on its own. The pass is
+bounded by `crush.inst.fuel` and `crush.inst.rounds`.
+
 Selected definitions are rewritten in the actual hypotheses and goal before SMT
 translation; their equations also remain available as fallback solver facts. This
 makes `u[...]` useful without depending entirely on SMT quantifier instantiation.
