@@ -1,5 +1,5 @@
 import Lean
-import Crush.SMT.Syntax
+import Crush.SMT.Print
 
 /-!
 # SMT-LIB term quotations
@@ -27,20 +27,14 @@ open Lean.Parser
 /-- Syntax-node kind used for an SMT-LIB simple symbol. -/
 abbrev symbolKind : SyntaxNodeKind := `Crush.SMT.Parser.symbol
 
-private def isInitialSymbolChar (c : Char) : Bool :=
-  c.isAlpha || "~!@%^&*_-+=<>.?/".contains c
-
-private def isSymbolChar (c : Char) : Bool :=
-  c.isAlphanum || "~!@%^&*_-+=<>.?/".contains c
-
 /-- Parse an SMT-LIB simple symbol independently of Lean's identifier grammar. -/
 def symbolFn : ParserFn := fun c s =>
   let start := s.pos
-  let s := satisfyFn isInitialSymbolChar "SMT-LIB symbol" c s
+  let s := satisfyFn isInitialSimpleSymbolChar "SMT-LIB symbol" c s
   if s.hasError then
     s
   else
-    let s := takeWhileFn isSymbolChar c s
+    let s := takeWhileFn isSimpleSymbolChar c s
     mkNodeToken symbolKind start true c s
 
 /-- Parser for SMT-LIB simple symbols such as `ite`, `str.++`, `=>`, and `>=`. -/

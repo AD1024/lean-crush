@@ -37,6 +37,16 @@ inductive Atom where
   | fresh : Nat → Atom
   deriving Inhabited
 
+/-- A collision-free identity for generated SMT symbols whose meaning depends on
+Lean expressions. Structural `Expr` equality includes universe levels and never
+elides deep terms, unlike pretty-printing. `tag` separates distinct symbol roles
+that happen to use the same expressions. -/
+structure StructuralKey where
+  tag   : String
+  name  : Name := .anonymous
+  exprs : Array Expr
+  deriving BEq, Hashable
+
 /-- Provenance for an emitted assertion, used for unsat-core reporting. -/
 structure FactSource where
   /-- Stable id embedded in the `:named` attribute (`crush_fact_<id>`). -/
@@ -52,7 +62,7 @@ structure FactSource where
   /-- Specialized equality from the original negated goal to its normalized
       assertion, always supplied to core-directed reconstruction. -/
   reconstructionProof : Option Expr := none
-  /-- Quantified parent proof for a generated ground instance. -/
+  /-- Quantified parent proof retained as provenance for a generated instance. -/
   instanceOf : Option Expr := none
   /-- Human-readable origin for diagnostics. -/
   descr    : String
@@ -63,11 +73,14 @@ structure TranslateState where
   cfg        : Config
   /-- Bijection between high-level atoms and emitted SMT symbols. -/
   atomToName : Std.HashMap String String := {}
+  /-- Structural identities for expression-derived symbols. Kept separate from
+      `atomToName`, whose string keys are part of the user extension API. -/
+  structuralToName : Std.HashMap StructuralKey String := {}
   nameToAtom : Std.HashMap String String := {}
   /-- Emitted SMT symbol → the Lean term it stands for.
 
-      `nameToAtom` records only a *string* key (a pretty-printed form), which is enough
-      for diagnostics but cannot be turned back into an `Expr`. Proof replay
+      `nameToAtom` records only a diagnostic label, which cannot be turned back
+      into an `Expr`. Proof replay
       (`Crush/Solver/AletheReplay.lean`) needs the real term: an Alethe proof mentions
       the emitted symbols, and each step has to be restated as a Lean proposition. This
       map is the inverse direction, populated where a symbol is allocated for a Lean
@@ -122,22 +135,30 @@ where
   sanitizeAndReserve (hint : String) : TranslateM String := do
     let base := sanitize hint
     let used := (← get).usedNames
-    match used.get? base with
-    | some k =>
-      modify fun s => { s with usedNames := s.usedNames.insert base (k + 1) }
-      return s!"{base}_{k}"
-    | none =>
+    if !used.contains base then
       modify fun s => { s with usedNames := s.usedNames.insert base 0 }
       return base
+    else
+      let rec findUnused : Nat → Nat → String × Nat
+        | 0, k => (s!"{base}_{k}", k + 1)
+        | fuel + 1, k =>
+          let candidate := s!"{base}_{k}"
+          if used.contains candidate then
+            findUnused fuel (k + 1)
+          else
+            (candidate, k + 1)
+      let (name, next) := findUnused (used.size + 1) (used.getD base 0)
+      modify fun s => { s with usedNames :=
+        (s.usedNames.insert base next).insert name 0 }
+      return name
   sanitize (s : String) : String :=
     let ok (c : Char) := c.isAlphanum || "~!@$%^&*_-+=<>.?/".contains c
     let s := String.ofList (s.toList.map (fun c => if ok c then c else '_'))
     let s := if s.isEmpty || s.front.isDigit then "cr_" ++ s else s
     s
 
-/-- Look up or allocate the SMT symbol for a high-level atom, keyed by a string
-identity `key` (typically the atom's pretty/canonical form). `hint` seeds the
-generated name. Idempotent. -/
+/-- Look up or allocate an SMT symbol for a user-provided or internal string key.
+Expression-derived identities must use `symbolForStructural`. -/
 def symbolFor (key : String) (hint : String) : TranslateM String := do
   match (← get).atomToName.get? key with
   | some name => return name
@@ -147,6 +168,31 @@ def symbolFor (key : String) (hint : String) : TranslateM String := do
       atomToName := s.atomToName.insert key name
       nameToAtom := s.nameToAtom.insert name key }
     return name
+
+/-- Instantiate metavariables and canonicalize universe expressions before using
+an expression-derived key. Lean considers `max u v` and `max v u` equivalent,
+but their raw `Expr` representations differ until levels are normalized. -/
+private def normalizeStructuralKey (key : StructuralKey) : TranslateM StructuralKey := do
+  let exprs ← key.exprs.mapM fun e => do
+    Meta.Sym.normalizeLevels (← instantiateMVars e)
+  return { key with exprs }
+
+/-- Look up or allocate an expression-derived symbol using structural identity. -/
+def symbolForStructural (key : StructuralKey) (hint : String) : TranslateM String := do
+  let key ← normalizeStructuralKey key
+  match (← get).structuralToName.get? key with
+  | some name => return name
+  | none =>
+    let name ← freshSymbol hint
+    modify fun s => { s with
+      structuralToName := s.structuralToName.insert key name
+      nameToAtom := s.nameToAtom.insert name key.tag }
+    return name
+
+/-- Existing symbol for a structural identity, if one has been allocated. -/
+def structuralSymbol? (key : StructuralKey) : TranslateM (Option String) := do
+  let key ← normalizeStructuralKey key
+  return (← get).structuralToName.get? key
 
 /-- Record that SMT symbol `name` stands for the Lean term `e`, for proof replay.
 Idempotent; the first recording wins, so a symbol reused across occurrences keeps its

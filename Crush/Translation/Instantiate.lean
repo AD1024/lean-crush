@@ -24,7 +24,13 @@ pattern matches yet, ground query terms seed triggerless lemmas such as `step`.
 
 Every generated proposition is obtained by applying the original Lean proof term.
 The pass therefore adds only logical consequences of user-supplied facts. Universal
-facts remain in the query as solver fallbacks.
+facts remain as solver fallbacks unless Lean materially simplifies a ground
+instance to a nontrivial proposition without erasing constructor-shaped witness
+terms. In that case the universal form is replaced by the simplified instances:
+this weakens the fact set safely while preventing solver E-matching from recreating
+unbounded term growth. Unchanged, tautological, or witness-erasing simplifications
+keep both the unsimplified instance and original quantifier as completeness
+fallbacks.
 -/
 
 namespace Crush
@@ -150,6 +156,34 @@ private partial def collectGround (e : Expr) : Sym.SymM GroundCollection := do
     | _ => pure ()
   go e
   return { terms := ← terms.get, occurrences := ← occurrences.get }
+
+/-- Ground constructor applications must survive instance simplification.
+
+Such a term may be the witness that a generated fact contributes to an
+existential goal, or the trigger for another template. Erasing one is a
+conservative signal that the simplified proposition could become disconnected
+from the query. -/
+private partial def collectGroundConstructors (env : Environment) (e : Expr) :
+    Array Expr := Id.run do
+  let mut out : Array Expr := #[]
+  let mut seen : Std.HashSet Expr := {}
+  let rec go (e : Expr) : StateM (Array Expr × Std.HashSet Expr) Unit := do
+    let (out, seen) ← get
+    if !e.hasLooseBVars && !e.hasExprMVar && !e.hasLevelMVar then
+      if let .const name _ := e.getAppFn then
+        if env.isConstructor name && !seen.contains e then
+          set (out.push e, seen.insert e)
+    match e with
+    | .app .. =>
+      for arg in e.getAppArgs do go arg
+      match e.getAppFn with
+      | .lam .. | .letE .. | .mdata .. | .proj .. => go e.getAppFn
+      | _ => pure ()
+    | .lam _ ty body _ | .forallE _ ty body _ => go ty; go body
+    | .letE _ ty value body _ => go ty; go value; go body
+    | .mdata _ body | .proj _ _ body => go body
+    | _ => pure ()
+  ((go e).run (out, seen)).2.1
 
 /-- Whether a marked fact can actually produce a ground value instance. This
 keeps ordinary ground hints and proposition-only implications out of the
@@ -489,17 +523,26 @@ private def instantiateGroundFactsS (cfg : Config) (facts : Array Fact) :
     Sym.SymM InstantiationReport := do
   if cfg.instFuel == 0 || cfg.instRounds == 0 then return { facts }
   let mut templates : Array Fact := #[]
+  let mut templateSources : Array Nat := #[]
   let normalizedProps ← IO.mkRef ({} : Std.HashMap Expr Expr)
-  for fact in facts do
+  for sourceIndex in [0:facts.size] do
+    let fact := facts[sourceIndex]!
     if fact.instantiateTerms && fact.proof.isSome && !fact.negated then
       let prop ← preprocessExprS fact.prop
       normalizedProps.modify (·.insert fact.prop prop)
       if ← hasLeadingValueBinder prop then
         templates := templates.push { fact with prop }
+        templateSources := templateSources.push sourceIndex
   if templates.isEmpty then return { facts }
+  let simpContext ← Simp.mkContext
+    (simpTheorems := #[← getSimpTheorems])
+    (congrTheorems := ← getSimpCongrTheorems)
+  let env ← getEnv
   let templateProps : Std.HashSet Expr :=
     templates.foldl (init := {}) fun seen template => seen.insert template.prop
-  let out ← IO.mkRef facts
+  let generatedFacts ← IO.mkRef (#[] : Array Fact)
+  let replaceableTemplates ← IO.mkRef (Array.replicate templates.size false)
+  let retainedTemplates ← IO.mkRef (Array.replicate templates.size false)
   let candidates ← IO.mkRef (#[] : Array GroundCandidate)
   let candidateSeen ← IO.mkRef ({} : Std.HashSet Expr)
   let occurrences ← IO.mkRef ({} : OccurrenceStore)
@@ -527,15 +570,36 @@ private def instantiateGroundFactsS (cfg : Config) (facts : Array Fact) :
   let addInstance (templateIndex : Nat) (template : Fact) (proof prop : Expr)
       (origins : Array Nat) : Sym.SymM Bool := do
     let prop ← preprocessExprS prop
+    let (simpResult, _) ← simp prop simpContext
+    let (proof, prop, simplifiedSafely) ←
+      match simpResult.proof? with
+      | none =>
+        retainedTemplates.modify (·.set! templateIndex true)
+        pure (proof, prop, false)
+      | some _ =>
+        let simplified ← preprocessExprS simpResult.expr
+        let originalConstructors := collectGroundConstructors env prop
+        let simplifiedConstructors := collectGroundConstructors env simplified
+        if !simplified.isConstOf ``True &&
+            originalConstructors.all simplifiedConstructors.contains then
+          pure (← simpResult.mkEqMP proof, simplified, true)
+        else
+          retainedTemplates.modify (·.set! templateIndex true)
+          pure (proof, prop, false)
     let known ← seen.get
-    if known.contains prop then return false
+    if known.contains prop then
+      if simplifiedSafely then
+        replaceableTemplates.modify (·.set! templateIndex true)
+      return false
     if (← generated.get) >= cfg.instFuel then
       exhausted.set true
       return false
     seen.set (known.insert prop)
     generated.modify (· + 1)
+    if simplifiedSafely then
+      replaceableTemplates.modify (·.set! templateIndex true)
     trace[crush.inst] "generated {template.descr}@ground: {prop}"
-    out.modify (·.push {
+    generatedFacts.modify (·.push {
       template with
       prop
       proof := some proof
@@ -586,10 +650,23 @@ private def instantiateGroundFactsS (cfg : Config) (facts : Array Fact) :
       reachedFixpoint := true
       break
   if !reachedFixpoint && (← generated.get) > 0 then exhausted.set true
+  let replaceableTemplates ← replaceableTemplates.get
+  let retainedTemplates ← retainedTemplates.get
+  let exhausted ← exhausted.get
+  let mut replacedSources : Std.HashSet Nat := {}
+  unless exhausted do
+    for i in [0:templates.size] do
+      if replaceableTemplates[i]! && !retainedTemplates[i]! then
+        replacedSources := replacedSources.insert templateSources[i]!
+  let mut result : Array Fact := #[]
+  for sourceIndex in [0:facts.size] do
+    unless replacedSources.contains sourceIndex do
+      result := result.push facts[sourceIndex]!
+  result := result ++ (← generatedFacts.get)
   return {
-    facts := ← out.get
+    facts := result
     generated := ← generated.get
-    exhausted := ← exhausted.get }
+    exhausted }
 
 /-- Run the complete pass in one symbolic-computation session. `SymM` caches
 type inference and restricted definitional equality by shared-expression

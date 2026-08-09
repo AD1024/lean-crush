@@ -24,6 +24,21 @@ axiom lift : ∀ x y, R x y → P y
 axiom project : ∀ x y, R x y → Q y
 axiom grow : ∀ x, P x → P (next x)
 
+axiom NonEmptyList : List Nat → Prop
+axiom ListMarker : List Nat → Prop
+axiom tailLength :
+  ∀ xs : List Nat, NonEmptyList xs → xs.tail.length < xs.length
+axiom listSumWitness (x : Int) :
+  x < (([Int.toNat (x + 1)] : List Nat).sum : Int)
+axiom reflexive (x : Int) : x = x
+
+def listCode : List Nat → Nat
+  | [] => 0
+  | _ :: _ => 1
+
+axiom listCodeOne :
+  ∀ xs : List Nat, NonEmptyList xs → listCode xs = 1
+
 private def reportQuery (x : Int) : Prop :=
   ∃ y, R x y ∧ P y
 
@@ -61,6 +76,178 @@ run_meta do
     unless report.generated == 2 && !report.exhausted do
       throwError "expected two ground instances and a fixpoint, got \
         {report.generated} instance(s) (exhausted: {report.exhausted})"
+
+-- A nontrivially simplified template is replaced by its ground consequence.
+-- Keeping both would let SMT E-matching recreate the term-growth loop that this
+-- bounded pass prevents.
+run_meta do
+  let tailProof ← mkConstWithFreshMVarLevels ``tailLength
+  let empty : Expr :=
+    mkApp (mkConst ``List.nil [.zero]) (mkConst ``Nat)
+  let marker ← mkAppM ``ListMarker #[empty]
+  let expected := mkNot (← mkAppM ``NonEmptyList #[empty])
+  let facts : Array Fact := #[
+    {
+      prop := ← inferType tailProof
+      proof := some tailProof
+      descr := "tailLength"
+      instantiateTerms := true
+    },
+    {
+      prop := mkNot marker
+      proof := none
+      descr := "negated query"
+      negated := true
+    }
+  ]
+  let report ← instantiateGroundFacts
+    ({ instFuel := 8, instRounds := 2 } : Crush.Config) facts
+  unless report.generated == 1 && !report.exhausted do
+    throwError "expected one simplified ground instance, got \
+      {report.generated} instance(s) (exhausted: {report.exhausted})"
+  if report.facts.any (fun fact => fact.descr == "tailLength") then
+    throwError "successfully instantiated template remained in the fact set"
+  unless report.facts.any (fun fact =>
+      fact.descr == "tailLength@ground" && fact.prop == expected) do
+    throwError "expected the simplified consequence `¬ NonEmptyList []`"
+
+-- One unchanged instance vetoes replacement even when another instance of the
+-- same template simplifies safely.
+run_meta do
+  let codeProof ← mkConstWithFreshMVarLevels ``listCodeOne
+  let listNat : Expr :=
+    mkApp (mkConst ``List [.zero]) (mkConst ``Nat)
+  let empty : Expr :=
+    mkApp (mkConst ``List.nil [.zero]) (mkConst ``Nat)
+  withLocalDeclD `xs listNat fun xs => do
+    let emptyMarker ← mkAppM ``ListMarker #[empty]
+    let variableMarker ← mkAppM ``ListMarker #[xs]
+    let query ← mkAppM ``And #[emptyMarker, variableMarker]
+    let report ← instantiateGroundFacts
+      ({ instFuel := 8, instRounds := 2 } : Crush.Config) #[
+        {
+          prop := ← inferType codeProof
+          proof := some codeProof
+          descr := "listCodeOne"
+          instantiateTerms := true
+        },
+        {
+          prop := mkNot query
+          proof := none
+          descr := "negated query"
+          negated := true
+        }
+      ]
+    unless report.generated == 2 &&
+        report.facts.any (fun fact => fact.descr == "listCodeOne") do
+      throwError "unchanged mixed instance did not retain the quantified fallback; \
+        generated {report.generated}, facts: {report.facts.map (·.descr)}"
+
+-- A template with no ground evidence remains quantified so the solver can still
+-- instantiate it directly.
+run_meta do
+  let tailProof ← mkConstWithFreshMVarLevels ``tailLength
+  let original := ← inferType tailProof
+  let report ← instantiateGroundFacts
+    ({ instFuel := 8, instRounds := 2 } : Crush.Config) #[{
+      prop := original
+      proof := some tailProof
+      descr := "tailLength"
+      instantiateTerms := true
+    }]
+  unless report.generated == 0 && !report.exhausted &&
+      report.facts.any (fun fact =>
+        fact.descr == "tailLength" && fact.prop == original) do
+    throwError "unmatched quantified template was not retained"
+
+-- Fuel exhaustion is a global replacement veto: ungenerated instances may still
+-- be needed, so the quantified parent must remain.
+run_meta do
+  let tailProof ← mkConstWithFreshMVarLevels ``tailLength
+  let listNat : Expr :=
+    mkApp (mkConst ``List [.zero]) (mkConst ``Nat)
+  let empty : Expr :=
+    mkApp (mkConst ``List.nil [.zero]) (mkConst ``Nat)
+  withLocalDeclD `xs listNat fun xs => do
+    let emptyMarker ← mkAppM ``ListMarker #[empty]
+    let variableMarker ← mkAppM ``ListMarker #[xs]
+    let query ← mkAppM ``And #[emptyMarker, variableMarker]
+    let report ← instantiateGroundFacts
+      ({ instFuel := 1, instRounds := 2 } : Crush.Config) #[
+        {
+          prop := ← inferType tailProof
+          proof := some tailProof
+          descr := "tailLength"
+          instantiateTerms := true
+        },
+        {
+          prop := mkNot query
+          proof := none
+          descr := "negated query"
+          negated := true
+        }
+      ]
+    unless report.exhausted &&
+        report.facts.any (fun fact => fact.descr == "tailLength") do
+      throwError "fuel exhaustion removed a truncated template's quantified fallback"
+
+-- Simplifying this instance would erase the constructed list that can witness an
+-- existential. Keep both the unsimplified instance and its quantified fallback.
+run_meta do
+  let witnessProof ← mkConstWithFreshMVarLevels ``listSumWitness
+  withLocalDeclD `x (mkConst ``Int) fun x => do
+    let query ← mkAppM ``P #[x]
+    let report ← instantiateGroundFacts
+      ({ instFuel := 8, instRounds := 2 } : Crush.Config) #[
+        {
+          prop := ← inferType witnessProof
+          proof := some witnessProof
+          descr := "listSumWitness"
+          instantiateTerms := true
+        },
+        {
+          prop := mkNot query
+          proof := none
+          descr := "negated query"
+          negated := true
+        }
+      ]
+    unless report.generated == 1 && !report.exhausted do
+      throwError "expected one constructor-bearing ground instance, got \
+        {report.generated} instance(s) (exhausted: {report.exhausted})"
+    unless report.facts.any (fun fact => fact.descr == "listSumWitness") do
+      throwError "constructor-erasing simplification removed the quantified fallback"
+    unless report.facts.any (fun fact =>
+        fact.descr == "listSumWitness@ground" &&
+          fact.prop.getUsedConstants.contains ``List.cons) do
+      throwError "generated instance lost its constructor-shaped witness"
+
+-- Simplification to `True` must not replace either the useful ground equality or
+-- its quantified parent.
+run_meta do
+  let reflexiveProof ← mkConstWithFreshMVarLevels ``reflexive
+  withLocalDeclD `x (mkConst ``Int) fun x => do
+    let query ← mkAppM ``P #[x]
+    let report ← instantiateGroundFacts
+      ({ instFuel := 8, instRounds := 2 } : Crush.Config) #[
+        {
+          prop := ← inferType reflexiveProof
+          proof := some reflexiveProof
+          descr := "reflexive"
+          instantiateTerms := true
+        },
+        {
+          prop := mkNot query
+          proof := none
+          descr := "negated query"
+          negated := true
+        }
+      ]
+    unless report.generated == 1 &&
+        report.facts.any (fun fact => fact.descr == "reflexive") &&
+        report.facts.any (fun fact =>
+          fact.descr == "reflexive@ground" && !fact.prop.isConstOf ``True) do
+      throwError "tautological simplification discarded a useful quantified fact"
 
 -- A named ground hypothesis is not a template, but its terms must still seed a
 -- genuinely quantified hint. This also prevents ground selected premises from

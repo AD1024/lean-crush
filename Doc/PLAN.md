@@ -644,6 +644,12 @@ Two notes. Enum-valued options take a **string literal**
 them. And `crush.mono.*` bound the lemma-instantiation loop (§4b) — `fuel` is an
 instance-count budget, `rounds` a saturation-round bound, and either at `0` disables
 the pass; datatype monomorphization is type-directed and needs no fuel.
+`crush.inst.*` similarly bounds ground term instantiation. Once an explicit lemma
+produces nontrivial simplified instances without erasing constructor-shaped witness
+terms, its universal form is replaced by the bounded ground consequences to prevent
+solver E-matching from escaping those bounds. Unmatched, unchanged, tautological,
+or witness-erasing instances keep the quantified fallback; setting either option
+to `0` disables the pass.
 
 ---
 
@@ -886,6 +892,16 @@ independent tactic call per step on bare `MetaM`, which is the thing `SymM` woul
     `formatCounterexample` path. Orthogonal to reconstruction; a printing/diagnostics
     feature, not a soundness one. See also the `unknown`-model note in §11 (cvc5
     withholds a model it computed): both are counterexample-surfacing improvements.
+9. **Shared SMT operator signatures.** `SMT/Check.lean` currently repeats the core
+   theory operator knowledge used by `Translation/Theories.lean` and the default
+   lowerings. Move the name/arity/sort rules into one registry consumed by both the
+   checker and built-in emitters, while preserving the checker's permissive handling
+   of operators introduced by downstream extensions.
+10. **Extensible reconstruction strategy registries.** The core finisher ladder,
+    Alethe rule hints, and datatype case-split exclusions are fixed tables today.
+    Expose attribute-backed downstream hooks, with deterministic priorities and
+    kernel checking at the existing proof boundaries, so domain libraries can add
+    tactics or theory-sort classifications without forking crush.
 
 **M6 — Verified soundness. not started (out of scope for now).** An earlier
 `Crush/Proofs/` tree stated per-pass equivalence/equisatisfiability obligations, but
@@ -931,8 +947,8 @@ goal and diagnosing the emitted SMT.
 | 3 | **`Nat` inside datatype fields.** SMT datatypes are *freely generated over their field sorts*, so a `Nat` field makes the SMT type strictly larger than the Lean one | A per-datatype `wf_T` predicate carving out the image of the Lean type, guarding every quantifier over `T`, composing transitively. ★ The **true** hypothesis `∀ p : PN, p.x ≥ 0` was unsatisfiable, giving `False` and thence `2+2=5`. Note a per-selector constraint cannot fix this: the problem is the *domain of quantification*, not the selector's range |
 | 4 | **Division rounding.** Truncated vs. Euclidean differ on negatives | Verified empirically: Lean's default `Int./`/`%` are *Euclidean*, matching SMT-LIB, so the direct mapping is sound and no dual-operator apparatus is needed |
 | 5 | **BitVec width and signedness** | Only statically-known widths translate. Lean's `/`, `%`, `<`, `≤` on `BitVec` are the **unsigned** operations. Shift amounts coerce `Nat`→same-width literal. ★ SMT-LIB *fixes* `bvudiv x 0` to all-ones where Lean gives `0` — a genuine disagreement, not an underspecification, so it is guarded by an `ite` |
-| 6 | **Symbol collisions.** Two structures both using the default constructor name `mk` | Constructor/selector symbols are qualified by the owning datatype's (already unique) sort symbol. ★ Two `mk`s and two `mk_sel0`s were being emitted into one script, conflating unrelated types |
-| 7 | **String escaping** | Codepoint-accurate `\u{…}`; note `\` is *not* an SMT-LIB escape character, so a backslash is emitted literally |
+| 6 | **Symbol collisions.** Two structures both using the default constructor name `mk`, or two Lean expressions whose abbreviated pretty-printing is identical | Constructor/selector symbols are qualified by the owning datatype's unique sort symbol. Expression-derived symbols use structural `Expr` keys with normalized universe levels, not `ppExpr`; reserved words are quoted and unsafe quoted-symbol characters are injectively encoded. ★ Two `mk`s and two `mk_sel0`s were being emitted into one script, conflating unrelated types |
+| 7 | **String escaping** | Codepoint-accurate `\u{…}` with an explicit rejection above SMT-LIB 2.6's `0x2FFFF` limit. A Lean backslash is emitted as `\u{5c}` so it cannot begin an SMT Unicode escape. ★ Emitting `\` literally made the Lean string `"\\u{61}"` equal SMT's `"a"`, allowing a false theorem |
 | 8 | **Function-typed bound variables.** A quantifier over an arrow type | Must range over the encoded function sort with applications routed through `app` (§5). ★ Declaring a fresh symbol for the bound variable left it *disconnected from its own quantifier*, so `∀ (f : Int → Int), g f = f 0` asserted "`g` is constant" — strictly stronger than the hypothesis |
 
 | 9 | **Non-value arguments.** A polymorphic constant's *type* argument and a dependent function's *proof* argument have no SMT counterpart | Both are dropped, and the symbol is keyed on the head *together with* its type arguments so distinct instantiations stay distinct. ★ `@List.length Int []` emitted the type as a `Bool`-sorted **term** fed to an `Int`-returning symbol. Worth stressing: **z3 does not reject ill-sorted input** — it silently accepts `(= x true)` for an `Int`-sorted `x`, so nothing surfaces at the boundary and the only symptom is wrong answers |
@@ -1150,8 +1166,8 @@ both builds must be clean and produce **no `sorry`**.
 | `Theories.lean` | `Nat`/`Int`, default library lowerings, custom-instance rejection, datatypes, bit-vectors, strings, and §10 soundness regressions |
 | `Monomorphize.lean` | parametric datatypes: distinct instantiations, nesting, `Nat`-through-parameter guard, selectors/η |
 | `LemmaMono.lean` | lemma-instantiation: polymorphic facts specialized at the query's types, saturation, the polymorphic TIP list theorems, `crush.mono.fuel` gating, and that false goals are still rejected |
-| `Instantiate.lean` | bounded proof-producing ground instances for explicit lemmas, including forward chains that synthesize existential witnesses |
-| `Cashmere.lean` | the Cashmere existential-balance VC, requiring a generated term from one explicit lemma to instantiate the next |
+| `Instantiate.lean` | bounded proof-producing ground instances for explicit lemmas, including forward chains, quantified-parent replacement, simplification, and unmatched-template fallback |
+| `Cashmere.lean` | Cashmere existential-balance VCs, including a forward-chain witness and an unrelated quantified list hint that must not create an SMT instantiation loop |
 | `MonoStress.lean` | recursive parametric `Tree`, two-parameter `Map`, nested `FSet`, and all of these combined with higher-order functions |
 | `HigherOrder.lean` | λ-arguments, captures, η-expansion, extensionality, partial application; all reconstruct under the default policy (kernel-checked, `#print axioms` pins no `crushSorry`), thanks to the `funext` finishers |
 | `Regression.lean` | an independent corpus migrated from another Lean SMT bridge, plus cases derived from bugs reported against it |

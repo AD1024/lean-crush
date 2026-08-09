@@ -53,9 +53,8 @@ structure Fact where
   /-- Generate bounded ground instances before SMT translation. Enabled for
   explicit hints and selected library premises, not every local hypothesis. -/
   instantiateTerms : Bool := false
-  /-- Proof of the quantified fact that produced this ground instance. Used only
-  to close reconstruction cores that cite the parent fallback instead of the
-  equivalent ground assertion selected during preprocessing. -/
+  /-- Proof of the quantified fact that produced this ground instance. Retained
+  as provenance even when preprocessing replaces the parent assertion. -/
   instanceOf : Option Expr := none
   deriving Inhabited
 

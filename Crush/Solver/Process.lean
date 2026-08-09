@@ -1,6 +1,7 @@
 import Lean
 import Crush.SMT.Syntax
 import Crush.SMT.Print
+import Crush.SMT.Sexp
 import Crush.Frontend.Config
 open Lean
 
@@ -62,45 +63,28 @@ def backendSpec (b : Backend) : Option BackendSpec :=
       logic := id }
   | .bitwuzla => some {
       exe := "bitwuzla"
-      args := fun _ => #["--produce-models"]
+      args := fun t => #["--produce-models", "--time-limit", toString (t * 1000)]
       logic := id }
   | .none => none
 
-/-- Split off the first complete parenthesized s-expression, returning it and the
-remaining text. Used to separate a `get-unsat-core` response from the
-`get-proof` output that follows it on the same stream.
-
-Tracks nesting depth and skips over string literals so a `)` inside a quoted string
-cannot end the expression early. Text before the first `(` is dropped (it is
-whitespace or a stray token); if no balanced expression is found, everything is
-returned as the first component so the caller still sees the output. -/
-def splitFirstSexp (s : String) : String × String := Id.run do
-  let cs := s.toList
-  let mut depth : Nat := 0
-  let mut started := false
-  let mut inStr := false
-  let mut acc : List Char := []
-  let mut rest : List Char := []
-  let mut done := false
-  for c in cs do
-    if done then
-      rest := c :: rest
-    else if inStr then
-      acc := c :: acc
-      if c == '"' then inStr := false
-    else if c == '"' then
-      acc := c :: acc; inStr := true
-    else if c == '(' then
-      started := true; depth := depth + 1; acc := c :: acc
-    else if c == ')' then
-      acc := c :: acc
-      depth := depth - 1
-      if started && depth == 0 then done := true
-    else if started then
-      acc := c :: acc
-  let first := String.ofList acc.reverse
-  let remaining := String.ofList rest.reverse
-  if done then (first, remaining) else (s, "")
+/-- Split off the first list S-expression using the shared parser. Any leading
+atoms are ignored, matching solver responses that include a status token. The
+original bytes are retained rather than re-rendering the parsed tree. -/
+def splitFirstSexp (s : String) : String × String :=
+  go (s.toList.length + 1) s
+where
+  go : Nat → String → String × String
+    | 0, current => (current, "")
+    | fuel + 1, current =>
+      match SMT.parseSexp current with
+      | none => (current, "")
+      | some (sexp, rest) =>
+        let currentChars := current.toList
+        let consumedCount := currentChars.length - rest.toList.length
+        let consumed := String.ofList (currentChars.take consumedCount)
+        match sexp with
+        | .list _ => (consumed, rest)
+        | _ => go fuel rest
 
 abbrev SolverProc := IO.Process.Child ⟨.piped, .piped, .piped⟩
 
@@ -160,6 +144,9 @@ def runQuery (cfg : Config) (script : Array SMT.Command) : MetaM Result := do
   finally
     -- Kill unconditionally; harmless if already exited.
     try p.kill catch _ => pure ()
+    -- Reap the process after killing it; otherwise repeated tactic calls can
+    -- accumulate zombies on Unix.
+    try discard p.wait catch _ => pure ()
 where
   /-- Read the solver's remaining response after the verdict line, then let it exit.
   Sends `(exit)` and closes stdin *before* reading so the child terminates and the
@@ -171,7 +158,12 @@ where
   drainResponse (p : SolverProc) : MetaM String := do
     putCmd p .exit
     let (_, p) ← p.takeStdin
-    p.stdout.readToEnd
+    let readTask ← IO.asTask (prio := .dedicated) p.stdout.readToEnd
+    match ← raceWithTimeout readTask ((cfg.timeout + 2) * 1000) with
+    | some response => return response
+    | none =>
+      try p.kill catch _ => pure ()
+      throwError "crush: timed out reading solver output after its verdict"
   /-- Poll `task` until it finishes or `budgetMs` elapses. -/
   raceWithTimeout (task : Task (Except IO.Error String)) (budgetMs : Nat) :
       MetaM (Option String) := do

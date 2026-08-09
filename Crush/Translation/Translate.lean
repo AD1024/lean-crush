@@ -413,11 +413,11 @@ mutual
   application is handled separately (`partialApp?`) by materializing the
   intermediate closure. -/
   partial def declareArrowSort (ty : Expr) : TranslateM (SSort × String) := do
-    let key ← arrowKey ty
-    let sortName ← TranslateM.symbolFor key "Fn"
+    let key := arrowKey ty
+    let sortName ← TranslateM.symbolForStructural key "Fn"
     let sort := SSort.app (.symb sortName) #[]
-    let aKey ← appKey ty
-    let appName ← TranslateM.symbolFor aKey s!"app_{sortName}"
+    let aKey := appKey ty
+    let appName ← TranslateM.symbolForStructural aKey s!"app_{sortName}"
     if !(← declaredSort sortName) then
       markSortDeclared sortName
       TranslateM.emitCommand (.declSort sortName 0)
@@ -483,17 +483,17 @@ mutual
     let (_, appName) ← declareArrowSort lamTy
     let some shape ← arrowShape? lamTy
       | throwError "crush: internal — closure for non-arrow type {lamTy}"
-    let key ← closureKey lam
+    let key := closureKey lam
     -- Captured SMT-bound variables, in a deterministic order.
     let st ← get
     let captures := (collectFVars lam).filter fun fid =>
       st.boundVars.contains fid || st.funVars.contains fid
-    if let some existing := st.atomToName.get? key then
+    if let some existing ← TranslateM.structuralSymbol? key then
       -- Already declared: rebuild the application from the recorded captures.
       let capArgs ← captures.mapM fun fid => emitTerm (.fvar fid)
       return if capArgs.isEmpty then .const existing
              else .app (.symb existing) capArgs
-    let cloName ← TranslateM.symbolFor key "clo"
+    let cloName ← TranslateM.symbolForStructural key "clo"
     let capSorts ← captures.mapM fun fid => do emitSort (← fid.getType)
     let (arrowSort, _) ← declareArrowSort lamTy
     TranslateM.emitCommand (.declFun cloName capSorts arrowSort)
@@ -592,9 +592,9 @@ mutual
 
   /-- Emit a `declare-sort` for an opaque type, once. -/
   partial def declareUninterpretedSort (e : Expr) : TranslateM SSort := do
-    let key := toString (← ppExpr e)
+    let key : StructuralKey := { tag := "opaque-sort", exprs := #[e] }
     let hint := match e with | .const n _ => nameHint n | _ => "s"
-    let name ← TranslateM.symbolFor key hint
+    let name ← TranslateM.symbolForStructural key hint
     -- Remember the Lean type behind the sort, so proof replay can give a quantifier
     -- binder over this sort its Lean type back (`AletheTerm.sortToType?`).
     TranslateM.recordSymbolExpr name e
@@ -621,27 +621,24 @@ mutual
     over `T`* with it (see `quantifier`/`guardSort`). -/
   partial def declareDatatype (n : Name) (typeArgs : Array Expr := #[]) :
       TranslateM String := do
-    -- Key on the head *and* its instantiation, so `Option Int` and `Option Bool`
-    -- get distinct sorts, constructors, and selectors. The key uses the
-    -- pretty-printed type arguments, matching how opaque sorts are keyed.
-    let argKey ← if typeArgs.isEmpty then pure ""
-                 else do
-                   let ks ← typeArgs.mapM fun a => do pure (toString (← ppExpr a))
-                   pure s!"@{String.intercalate "," ks.toList}"
-    let key := s!"__datatype__{n}{argKey}"
-    if let some name := (← get).atomToName.get? key then
+    -- Key structurally on the head and its instantiation, so `Option Int` and
+    -- `Option Bool` get distinct sorts, constructors, and selectors.
+    let key : StructuralKey := { tag := "datatype", name := n, exprs := typeArgs }
+    if let some name ← TranslateM.structuralSymbol? key then
       return name
     -- Emit the whole mutual block together: SMT-LIB requires mutually-recursive
     -- datatypes in one `declare-datatypes` (`tree`'s selector range `treelist` must
     -- be in scope when `tree` is), and a member's `wf` axiom may reference a sibling's
     -- `wf`. `iv.all` is a singleton for an ordinary inductive, so that path is
-    -- unchanged; a mutual block shares parameters, so one `argKey` keys every member.
+    -- unchanged; a mutual block shares parameters, so the same structural
+    -- arguments key every member.
     let iv ← getConstInfoInduct n
     -- Reserve every member's sort name first, so a field mentioning a sibling resolves
     -- to it via the idempotent early-return above rather than recursing.
     let mut memberSorts : Array (Name × String) := #[]
     for m in iv.all do
-      let mSort ← TranslateM.symbolFor s!"__datatype__{m}{argKey}" (nameHint m)
+      let memberKey : StructuralKey := { tag := "datatype", name := m, exprs := typeArgs }
+      let mSort ← TranslateM.symbolForStructural memberKey (nameHint m)
       markSortDeclared mSort
       memberSorts := memberSorts.push (m, mSort)
     let mut dtInfos : Array (String × Nat × DatatypeDecl) := #[]
@@ -1435,17 +1432,16 @@ mutual
     -- ordinary type argument while still being instantiated at different
     -- function-valued carriers. Reusing its first declaration then emits calls
     -- with incompatible `Fn` sorts (`unknown constant ... (Fn ...)` in z3).
-    let droppedKeys ← args.filterMapM fun a => do
+    let droppedTypes ← args.filterMapM fun a => do
       let ty ← inferType a
       if (← isProp ty) then return none
-      if (← whnf ty).isSort then return some (toString (← ppExpr a)) else return none
-    let argTypeKeys ← valueArgs.mapM fun a => do
-      pure (toString (← ppExpr (← whnf (← inferType a))))
-    let resultTypeKey := toString (← ppExpr resTy)
-    let key := s!"{toString (← ppExpr fn)}@types[{String.intercalate "," droppedKeys.toList}]\
-      :({String.intercalate "," argTypeKeys.toList})->{resultTypeKey}"
+      if (← whnf ty).isSort then return some a else return none
+    let argTypes ← valueArgs.mapM fun a => do whnf (← inferType a)
+    let key : StructuralKey := {
+      tag := s!"function-signature:{droppedTypes.size}:{argTypes.size}"
+      exprs := #[fn] ++ droppedTypes ++ argTypes ++ #[resTy] }
     let hint ← headHint fn
-    let name ← TranslateM.symbolFor key hint
+    let name ← TranslateM.symbolForStructural key hint
     -- Record the symbol → Lean-head correspondence for proof replay. Applications are
     -- rebuilt from the head plus replayed arguments, so the *head* is what must be
     -- remembered; for a nullary symbol the head is the whole term.

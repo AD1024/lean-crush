@@ -21,3 +21,17 @@ theorem cashmere_balance_lt (x : Int) : x < x + 1 :=
 theorem cashmere_exists_larger_balance (x : Int) (_h : x > 0) :
     ∃ amounts : List Nat, x < (amounts.sum : Int) := by
   crush [cashmere_sum_lt, cashmere_balance_lt, *]
+
+axiom cashmereNonEmpty : List Nat → Prop
+
+axiom cashmereTailLength :
+  ∀ q : List Nat, cashmereNonEmpty q → q.tail.length < q.length
+
+theorem cashmereEmpSum : (([] : List Nat).sum : Int) = 0 := by
+  rfl
+
+-- The unrelated quantified hint used to trigger an unbounded list-tail
+-- E-matching loop in Z3. The empty list is already a sufficient witness.
+theorem cashmere_exists_bounded_balance (x : Int) (h : 0 ≤ x) :
+    ∃ amounts : List Nat, (amounts.sum : Int) ≤ x := by
+  crush [cashmereTailLength, cashmereEmpSum, *]

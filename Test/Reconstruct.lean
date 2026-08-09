@@ -26,6 +26,21 @@ open Crush
 
 set_option crush.timeout 10
 
+-- Reconstruction may abstract data/type variables needed to state the target,
+-- but it must not inherit proposition hypotheses omitted from the SMT core.
+run_meta do
+  let finishers ← finisherTactics
+  Lean.Meta.withLocalDeclD `p (Lean.mkSort .zero) fun p =>
+    Lean.Meta.withLocalDeclD `hp p fun _ => do
+      let goal ← Lean.Meta.mkFreshExprMVar p
+      let reconstructed ← IO.mkRef false
+      discard <| Lean.Elab.Term.TermElabM.run' <| Lean.Elab.Tactic.run goal.mvarId! do
+        reconstructed.set (← tryReconstruct goal.mvarId! #[] finishers)
+      if ← reconstructed.get then
+        throwError "reconstruction used an ambient hypothesis outside the SMT core"
+      if ← goal.mvarId!.isAssigned then
+        throwError "failed isolated reconstruction assigned the original goal"
+
 /-! ## Reconstruction succeeds — no trust axiom
 
 Each of these is closed by a real Lean proof term. The `#guard_msgs` blocks pin the
@@ -91,6 +106,40 @@ theorem higher_order (g : (Int → Int) → Int) (h : ∀ (f : Int → Int), g f
 /-- info: 'higher_order' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms higher_order
+
+theorem funext_arity3 (f g : Int → Int → Int → Int)
+    (h : ∀ x y z, f x y z = g x y z) : f = g := by crush
+/-- info: 'funext_arity3' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms funext_arity3
+
+-- The `funext` rung must be arity-general on its own, not merely covered by `grind`
+-- happening to reach the same goal. `repeat' funext _ <;> simp_all` parses as
+-- `repeat' (funext _ <;> simp_all)` and closes only arity 1, so a regression there
+-- would leave `funext_arity3` passing via an earlier rung and go unnoticed.
+run_meta do
+  let finishers ← finisherTactics
+  let funextRung := finishers[3]!
+  let intType := Lean.mkConst ``Int
+  for arity in [1, 2, 3] do
+    let mut fnType := intType
+    for _ in [0:arity] do
+      fnType := .forallE `x intType fnType .default
+    Lean.Meta.withLocalDeclD `f fnType fun f =>
+      Lean.Meta.withLocalDeclD `g fnType fun g => do
+        -- `h : ∀ x̄, f x̄ = g x̄`, the pointwise premise a `funext` rung must consume.
+        let pointwise ← Lean.Meta.forallTelescope fnType fun args _ => do
+          Lean.Meta.mkForallFVars args
+            (← Lean.Meta.mkEq (Lean.mkAppN f args) (Lean.mkAppN g args))
+        Lean.Meta.withLocalDeclD `h pointwise fun h => do
+          let goal ← Lean.Meta.mkFreshExprMVar (← Lean.Meta.mkEq f g)
+          let closed ← IO.mkRef false
+          discard <| Lean.Elab.Term.TermElabM.run' <|
+            Lean.Elab.Tactic.run goal.mvarId! do
+              closed.set (← tryReconstruct goal.mvarId! #[h] #[funextRung])
+          unless ← closed.get do
+            throwError "the funext finisher rung failed at arity {arity}; it must strip \
+              every arrow, not just the first"
 
 -- Ground evaluation: after substituting `s = "ab"` the goal is a closed computation
 -- (`String.length "ab" = 2`) that the reasoning finishers never evaluate; the

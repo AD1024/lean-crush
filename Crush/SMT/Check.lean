@@ -97,6 +97,12 @@ private def requireBvArgs (name : String) (args : Array (Option SSort)) :
           throw s!"`{name}` combines bit-vectors of widths {expected} and {current}"
   return width
 
+private def validateStringLiteral (value : String) : Except String Unit := do
+  for c in value.toList do
+    if c.toNat > 0x2FFFF then
+      throw s!"string literal contains Unicode codepoint U+{String.ofList
+        (Nat.toDigits 16 c.toNat)} outside SMT-LIB 2.6's Unicode escape range"
+
 private def checkSignature (name : String) (sig : FunSig)
     (args : Array (Option SSort)) : Except String Unit := do
   requireArity name args.size sig.args.size
@@ -106,7 +112,9 @@ private def checkSignature (name : String) (sig : FunSig)
 private partial def inferTerm (env : CheckEnv) (locals : List (String × SSort))
     (bvars : List SSort) (term : Term) : Except String (Option SSort) := do
   match term with
-  | .lit (.str _) => return some stringSort
+  | .lit (.str value) =>
+    validateStringLiteral value
+    return some stringSort
   | .lit (.num _) => return some intSort
   | .lit (.bitvec width _) => return some (.app (.indexed "BitVec" #[.inr width]) #[])
   | .lit (.bool _) => return some boolSort
@@ -325,8 +333,11 @@ private def checkCommand (env : CheckEnv) (command : Command) : Except String Ch
     let sort ← inferTerm env [] [] term
     requireSort "asserted term" sort boolSort
     return env
+  | .echo value =>
+    validateStringLiteral value
+    return env
   | .setLogic _ | .setOption _ _ | .declSort _ _ | .defSort _ _ _
-  | .checkSat | .getModel | .getProof | .getUnsatCore | .echo _ | .exit =>
+  | .checkSat | .getModel | .getProof | .getUnsatCore | .exit =>
     return env
 
 /-- Validate declaration applications and core-theory sorts in an SMT command

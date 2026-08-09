@@ -48,3 +48,12 @@ private def fnB : SSort := .app (.symb "FnB") #[]
   match checkScript script with
   | .ok () => pure ()
   | .error error => throw <| IO.userError s!"valid uninterpreted relation failed: {error}"
+
+#eval show IO Unit from do
+  let tooHigh := String.singleton (Char.ofNat 0x30000)
+  for command in [Command.assert (.lit (.str tooHigh)), .echo tooHigh] do
+    match checkScript #[command] with
+    | .error error =>
+      unless error.message.contains "outside SMT-LIB 2.6" do
+        throw <| IO.userError s!"unexpected string validation error: {error}"
+    | .ok () => throw <| IO.userError "out-of-range SMT string codepoint was accepted"

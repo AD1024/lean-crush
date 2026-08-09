@@ -83,7 +83,11 @@ crush u[myFn]        -- unfold `myFn` via its equation lemmas
 Explicit lemmas are also instantiated at relevant ground terms before SMT
 translation. This lets one lemma create the term that triggers another, including
 existential-witness chains that SMT E-matching cannot start on its own. The pass is
-bounded by `crush.inst.fuel` and `crush.inst.rounds`.
+bounded by `crush.inst.fuel` and `crush.inst.rounds`. When Lean can simplify the
+ground consequences to useful propositions without discarding terms needed as
+witnesses, they replace the unrestricted quantifier and avoid solver instantiation
+loops. Other lemmas remain quantified as fallbacks. Set either option to `0` to
+disable this pass and send the original quantifiers directly.
 
 Selected definitions are rewritten in the actual hypotheses and goal before SMT
 translation; their equations also remain available as fallback solver facts. This

@@ -13,15 +13,50 @@ Function names here avoid the `.toString` field name so they don't shadow the
 
 namespace Crush.SMT
 
+/-- Characters accepted by both the SMT printer and the `(smt| …)` parser.
+
+`$` is legal in SMT-LIB but reserved for quotation splices in Lean, so crush
+quotes it instead of maintaining two subtly different symbol alphabets. -/
+def simpleSymbolSpecials : String := "~!@%^&*_-+=<>.?/"
+
+def isInitialSimpleSymbolChar (c : Char) : Bool :=
+  c.isAlpha || simpleSymbolSpecials.contains c
+
+def isSimpleSymbolChar (c : Char) : Bool :=
+  c.isAlphanum || simpleSymbolSpecials.contains c
+
+/-- SMT-LIB reserved words cannot be emitted as unquoted symbols. -/
+def isReservedSymbol (s : String) : Bool :=
+  s == "_" || s == "!" || s == "as" || s == "BINARY" ||
+    s == "DECIMAL" || s == "exists" || s == "HEXADECIMAL" ||
+    s == "forall" || s == "let" || s == "match" || s == "NUMERAL" ||
+    s == "par" || s == "STRING"
+
 /-- A symbol is "simple" if it needs no `|…|` quoting in SMT-LIB. -/
 def isSimpleSymbol (s : String) : Bool :=
-  let specials := "~!@$%^&*_-+=<>.?/"
   !s.isEmpty
-    && (s.front.isAlpha || specials.contains s.front)
-    && s.toList.all (fun c => c.isAlphanum || specials.contains c)
+    && !isReservedSymbol s
+    && isInitialSimpleSymbolChar s.front
+    && s.toList.all isSimpleSymbolChar
+
+private def encodedSymbolPrefix := "crush_encoded_"
+
+/-- Injectively encode a symbol that cannot occur inside SMT-LIB `|…|` quoting.
+
+The prefix is reserved by encoding source names that already begin with it, so
+an encoded name cannot collide with an ordinary user symbol. -/
+private def encodeSymbol (s : String) : String :=
+  encodedSymbolPrefix ++ String.intercalate "_"
+    (s.toList.map fun c => String.ofList (Nat.toDigits 16 c.toNat))
 
 def quoteSymbol (s : String) : String :=
-  if isSimpleSymbol s then s else "|" ++ s ++ "|"
+  if s.startsWith encodedSymbolPrefix ||
+      s.toList.any (fun c => c == '|' || c == '\\' || c.toNat < 0x20 || c.toNat > 0x7E) then
+    encodeSymbol s
+  else if isSimpleSymbol s then
+    s
+  else
+    "|" ++ s ++ "|"
 
 def identToString : Ident → String
   | .symb s => quoteSymbol s
@@ -61,15 +96,17 @@ def bvLiteral (width value : Nat) : String := s!"(_ bv{value} {width})"
 
 SMT-LIB string literals are enclosed in `"`, escape an embedded quote by doubling
 it, and are otherwise sequences of printable ASCII; any other character must be
-written with the `\u{…}` escape. Note that `\` is **not** an escape character in
-SMT-LIB (verified: `"\u{5c}"` and `"\\"` are *different* strings in z3), so a
-backslash is emitted literally.
+written with the `\u{…}` escape. A literal backslash must itself be emitted as
+`\u{5c}`: otherwise a Lean substring such as `\u{61}` is reinterpreted by the SMT
+parser as the character `a`.
 
 `str.len` counts codepoints, matching Lean's `String.length`, so a codepoint-wise
-escape keeps lengths in agreement. -/
+escape keeps lengths in agreement. `checkScript` rejects codepoints above SMT-LIB
+2.6's five-hex-digit escape range before this printer is called by `crush`. -/
 def escapeSmtString (s : String) : String :=
   s.foldl (init := "") fun acc c =>
     if c == '"' then acc ++ "\"\""
+    else if c == '\\' then acc ++ "\\u{5c}"
     else if c.toNat ≥ 0x20 && c.toNat ≤ 0x7E then acc.push c
     else acc ++ s!"\\u\{{String.ofList (Nat.toDigits 16 c.toNat)}}"
 
@@ -212,7 +249,7 @@ def commandToString : Command → String
   | .getModel => "(get-model)"
   | .getProof => "(get-proof)"
   | .getUnsatCore => "(get-unsat-core)"
-  | .echo s => s!"(echo \"{s}\")"
+  | .echo s => "(echo \"" ++ escapeSmtString s ++ "\")"
   | .exit => "(exit)"
 
 instance : ToString Command := ⟨commandToString⟩

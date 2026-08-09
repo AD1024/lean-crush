@@ -280,9 +280,9 @@ theorem must_reject_custom_dvd : @Dvd.dvd Int noIntDvd 1 1 := by crush
 
 /-! ## Strings
 
-`str.len` counts codepoints, matching `String.length`. Note that `\` is *not* an
-escape character in SMT-LIB, so non-printable characters use `\u{…}` (see
-`Crush.SMT.escapeSmtString`). -/
+`str.len` counts codepoints, matching `String.length`. A Lean `\` is emitted as
+`\u{5c}` so it cannot begin an SMT-LIB escape; other non-printable characters use
+`\u{…}` (see `Crush.SMT.escapeSmtString`). -/
 
 theorem str_append : ("ab" ++ "cd") = "abcd" := by crush
 theorem str_len : "ab".length = 2 := by crush
@@ -292,6 +292,13 @@ theorem str_prefix : "abc".isPrefixOf "abcd" = true := by crush
 theorem str_assoc (a b c : String) : (a ++ b) ++ c = a ++ (b ++ c) := by crush
 theorem str_len_nonneg (s : String) : s.length ≥ 0 := by crush
 theorem str_cong (a b : String) (h : a = b) : a.length = b.length := by crush
+
+-- A literal Lean backslash must not start an SMT-LIB Unicode escape.
+theorem str_escape_not_alias : ("\\u{61}" : String) ≠ "a" := by crush
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_string_escape_alias : ("\\u{61}" : String) = "a" := by crush
 
 -- FALSE: the empty string has length 0.
 /-- error: crush: the goal is not provable -/

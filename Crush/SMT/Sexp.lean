@@ -7,9 +7,11 @@ Solver responses (`get-unsat-core`, `get-model`, `get-proof`) come back as
 S-expressions. We parse them into a small `Sexp` tree so downstream code can walk
 them structurally instead of slicing the output with string operations.
 
-The parser is deliberately permissive: it recognizes atoms, string literals (with
-SMT-LIB `""` escaping), and parenthesized lists, and skips `;` line comments and
-whitespace. It does not interpret the atoms — that is the caller's job.
+The parser recognizes bare and `|…|`-quoted symbols, string literals (with SMT-LIB
+`""` escaping), and parenthesized lists, and skips `;` line comments and whitespace.
+Malformed or truncated trailing input rejects the complete parse rather than
+returning a misleading prefix. It does not interpret atoms — that is the caller's
+job.
 -/
 
 namespace Crush.SMT
@@ -65,7 +67,7 @@ structure St where
   deriving Inhabited
 
 private def isDelim (c : Char) : Bool :=
-  c == '(' || c == ')' || c.isWhitespace || c == ';' || c == '"'
+  c == '(' || c == ')' || c.isWhitespace || c == ';' || c == '"' || c == '|'
 
 /-- `dropWhile` never lengthens a list. Needed for `skipTrivia`'s termination and not
 present in core, so proved here. -/
@@ -96,6 +98,15 @@ def parseString (acc : String) : List Char → Option (String × List Char)
   | '"' :: '"' :: rest => parseString (acc.push '"') rest
   | '"' :: rest => some (acc, rest)
   | c :: rest => parseString (acc.push c) rest
+termination_by cs => cs.length
+
+/-- Parse an SMT-LIB `|…|`-quoted symbol, returning its semantic name without
+the delimiters. SMT-LIB does not define escapes inside quoted symbols. -/
+def parseQuotedSymbol (acc : String) : List Char → Option (String × List Char)
+  | [] => none
+  | '|' :: rest => some (acc, rest)
+  | '\\' :: _ => none
+  | c :: rest => parseQuotedSymbol (acc.push c) rest
 termination_by cs => cs.length
 
 /-- Parse a bare atom up to the next delimiter. -/
@@ -136,6 +147,9 @@ mutual
       | '"' :: rest => do
         let (s, rest') ← parseString "" rest
         return (.str s, rest')
+      | '|' :: rest => do
+        let (s, rest') ← parseQuotedSymbol "" rest
+        return (.atom s, rest')
       | cs' =>
         let (a, rest') := parseAtom "" cs'
         if a.isEmpty then none else some (.atom a, rest')
@@ -169,18 +183,28 @@ def parseSexp (s : String) : Option (Sexp × String) := do
 
 The `rounds` bound makes this total. It also guards against a subtle hazard the
 previous `repeat` loop had: if `parseOne` ever returned without consuming input, the
-loop would spin forever. Here it simply stops. One round per character is ample,
-since each successful parse consumes at least one. -/
-def parseSexpsAux (rounds : Nat) (acc : Array Sexp) (cs : List Char) : Array Sexp :=
+loop would spin forever. One round per character is ample, since each successful
+parse consumes at least one. Failure with non-trivia input rejects the entire parse
+instead of silently returning a valid-looking prefix. -/
+def parseSexpsAux (rounds : Nat) (acc : Array Sexp) (cs : List Char) :
+    Option (Array Sexp) :=
   match rounds with
-  | 0 => acc
+  | 0 => if SexpParser.skipTrivia cs |>.isEmpty then some acc else none
   | rounds + 1 =>
-    match SexpParser.parseOne (cs.length + 1) cs with
-    | none => acc
-    | some (e, rest) => parseSexpsAux rounds (acc.push e) rest
+    let cs := SexpParser.skipTrivia cs
+    if cs.isEmpty then
+      some acc
+    else
+      match SexpParser.parseOne (cs.length + 1) cs with
+      | none => none
+      | some (e, rest) =>
+        if rest.length < cs.length then
+          parseSexpsAux rounds (acc.push e) rest
+        else
+          none
 
 def parseSexps (s : String) : Array Sexp :=
   let cs := s.toList
-  parseSexpsAux (cs.length + 1) #[] cs
+  (parseSexpsAux (cs.length + 1) #[] cs).getD #[]
 
 end Crush.SMT

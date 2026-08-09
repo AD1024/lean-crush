@@ -102,19 +102,18 @@ All HO symbols are allocated through `TranslateM.symbolFor` on a canonical key, 
 they are unique and idempotent — the same arrow type always yields the same `Fn`
 sort and `app` symbol, and each distinct λ yields exactly one closure. -/
 
-/-- Key identifying an arrow sort. Uses the pretty-printed type, matching how
-`declareUninterpretedSort` keys opaque sorts. -/
-def arrowKey (ty : Expr) : MetaM String := do
-  return s!"__fn__{toString (← ppExpr ty)}"
+/-- Structural key identifying an arrow sort. -/
+def arrowKey (ty : Expr) : StructuralKey :=
+  { tag := "arrow-sort", exprs := #[ty] }
 
 /-- Key for an arrow sort's `app` symbol. -/
-def appKey (ty : Expr) : MetaM String := do
-  return s!"__app__{toString (← ppExpr ty)}"
+def appKey (ty : Expr) : StructuralKey :=
+  { tag := "arrow-app", exprs := #[ty] }
 
 /-- Key for a λ-closure, keyed on the closed λ term so α-equivalent (and repeated)
 λs share one closure constructor. -/
-def closureKey (lam : Expr) : MetaM String := do
-  return s!"__clo__{toString (← ppExpr lam)}"
+def closureKey (lam : Expr) : StructuralKey :=
+  { tag := "closure", exprs := #[lam] }
 
 /-- Whether the extensionality axiom for an arrow sort has been emitted. -/
 def extKey (sortName : String) : String := s!"__ext__{sortName}"

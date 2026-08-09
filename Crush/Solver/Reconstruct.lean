@@ -60,9 +60,9 @@ def coreHypotheses (st : TranslateState) (coreIds : Array Nat) : Array Expr := I
         unless seenProofs.contains proof do
           seenProofs := seenProofs.insert proof
           out := out.push proof
-  -- A solver may cite the quantified fallback even when preprocessing supplied
-  -- the useful ground instances. Add only instances of parents actually named
-  -- by the core; adding every generated fact would undo core minimization.
+  -- Preserve compatibility with fact producers that emit a quantified parent
+  -- together with generated instances. Ground instantiation replaces eligible
+  -- successful parents, so those generated proofs are selected directly above.
   for src in st.facts do
     if let some parent := src.instanceOf then
       if seenProofs.contains parent then
@@ -107,8 +107,11 @@ The shape → rung map:
 * **propositional / rewriting** → `simp_all`.
 * **function equality `f = g`** (a higher-order verdict — a Church-numeral identity,
   β-through-a-closure) → the `funext`/`ext` rungs: `funext` reduces it to the pointwise
-  `f x = g x`, then a first-order closer finishes the body. Harmless on a non-function
-  equality (`funext` fails cleanly), hence after the common case.
+  `f x̄ = g x̄`, then a first-order closer finishes the body. `repeat'` strips every
+  arrow rather than a fixed one or two, so the rung is arity-general. The parentheses
+  around it are load-bearing: `repeat' funext _ <;> simp_all` would parse as
+  `repeat' (funext _ <;> simp_all)`, which only closes the arity-1 case. Harmless on a
+  non-function equality (`funext` fails cleanly), hence after the common case.
 * **ground evaluation** (`String.length "ab" = 2`) → `subst_vars` then `decide`/`rfl`.
   The reasoning closers rewrite and case-split but never *compute*; `subst_vars`
   replaces variables with the values the core's equations pin, then `decide`/`rfl`
@@ -121,8 +124,7 @@ def finisherTactics : CoreM (Array (TSyntax `tactic)) := do
     (← `(tactic| (intros; grind))),
     (← `(tactic| (intros; omega))),
     (← `(tactic| (intros; simp_all))),
-    (← `(tactic| (intros; funext _; simp_all))),
-    (← `(tactic| (intros; funext _ _; simp_all))),
+    (← `(tactic| (intros; (repeat' funext _) <;> simp_all))),
     (← `(tactic| (intros; ext; grind))),
     (← `(tactic| (intros; subst_vars; decide))),
     (← `(tactic| (intros; subst_vars; rfl))),
@@ -220,17 +222,25 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
     let goalType ← goal.getType
     let hypTypes ← coreProofs.mapM fun p => do instantiateMVars (← inferType p)
     let target := mkArrowChain hypTypes goalType
+    -- Abstract exactly the local data/type variables that occur in the target
+    -- (plus their dependencies). Proposition hypotheses not selected by the SMT
+    -- core are absent from `target` and therefore cannot enter the finisher's
+    -- context through metavariable creation.
+    let used := Lean.collectFVars {} target
+    let (_, _, params) ← Meta.removeUnused (← getLCtx).getFVars used
+    let closedTarget ← mkForallFVars params target
     for tac in finishers do
       -- Each attempt gets a fresh metavariable and a saved state, so a failed
       -- finisher leaves nothing behind for the next one to trip over.
       let saved ← saveState
       try
-        let mv ← mkFreshExprMVar target
+        let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
         let gs ← Tactic.run mv.mvarId! (evalTactic tac)
         if gs.isEmpty then
           let assigned ← instantiateMVars mv
           unless assigned.hasSorry || assigned.hasExprMVar do
-            goal.assign (mkAppN assigned coreProofs)
+            check assigned
+            goal.assign (mkAppN (mkAppN assigned params) coreProofs)
             return true
         restoreState saved
       catch _ =>
@@ -239,7 +249,7 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
     -- per branch. Only reached once every rung has failed, so it strictly adds reach.
     let saved ← saveState
     try
-      let mv ← mkFreshExprMVar target
+      let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
       let (_, g) ← mv.mvarId!.intros
       let branches ← splitRounds [g] 2
       -- One branch means nothing was split, so the ladder has already seen this goal.
@@ -248,7 +258,7 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
           let assigned ← instantiateMVars mv
           unless assigned.hasSorry || assigned.hasExprMVar do
             check assigned
-            goal.assign (mkAppN assigned coreProofs)
+            goal.assign (mkAppN (mkAppN assigned params) coreProofs)
             return true
       restoreState saved
     catch _ =>
