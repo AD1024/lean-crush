@@ -1,0 +1,36 @@
+import VersoManual
+
+import CrushManual.GettingStarted
+import CrushManual.UsingCrush
+import CrushManual.Configuration
+import CrushManual.Extending
+import CrushManual.Troubleshooting
+
+open Verso.Genre Manual
+
+set_option pp.rawOnError true
+
+#doc (Manual) "lean-crush User Manual" =>
+%%%
+authors := ["lean-crush contributors"]
+shortTitle := "lean-crush"
+%%%
+
+lean-crush is an SMT hammer for Lean 4.
+It translates the local proof context and the negated goal to SMT-LIB, asks an
+external solver whether they are inconsistent, and either reports a model or
+discharges the Lean goal.
+
+This manual is organized around using the tactic in an application.
+It covers installation, fact selection, unfolding, trust policies, every public
+configuration option, and the metaprogramming APIs for custom translations.
+
+{include 0 CrushManual.GettingStarted}
+
+{include 0 CrushManual.UsingCrush}
+
+{include 0 CrushManual.Configuration}
+
+{include 0 CrushManual.Extending}
+
+{include 0 CrushManual.Troubleshooting}

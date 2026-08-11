@@ -105,3 +105,38 @@ crush_map Int.natAbs => "abs"
 
 theorem sugar_handler_congruence (a b : Int) (h : a = b) :
     Int.natAbs a = Int.natAbs b := by crush
+
+/-! ## The `crush_map_sort` sugar runs on the sort-handler path
+
+`MappedInt` is representation-isomorphic to `Int`. Mapping its sort to SMT `Int`
+and lowering its projection and arithmetic wrapper to identity/arithmetic is
+therefore exact. If `crush_map_sort` were incorrectly registered as a term
+handler, `x` below would retain a datatype sort and the generated `(+ x 1)` would
+fail the SMT sort checker. -/
+
+structure MappedInt where
+  value : Int
+
+namespace MappedInt
+
+def next (x : MappedInt) : MappedInt :=
+  ⟨x.value + 1⟩
+
+end MappedInt
+
+crush_map_sort MappedInt => "Int"
+
+@[crush_lower MappedInt.value]
+def mappedIntValue : LoweringHandler := fun ctx => do
+  let #[x] := ctx.args | return none
+  return some (← ctx.emitTerm x)
+
+@[crush_lower MappedInt.next]
+def mappedIntNext : LoweringHandler := fun ctx => do
+  let #[x] := ctx.args | return none
+  let sx ← ctx.emitTerm x
+  return some (smt| (+ $sx 1))
+
+theorem sort_sugar_fires (x : MappedInt) :
+    (MappedInt.next x).value = x.value + 1 := by
+  crush

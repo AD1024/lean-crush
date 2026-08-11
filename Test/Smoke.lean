@@ -52,7 +52,7 @@ def demoScript : Array Command := #[
       rest.trimAscii.toString == "(proof)" do
     throw <| IO.userError "solver response split drifted from the S-expression parser"
 
--- Extension mechanism: register a handler two ways and confirm both are found.
+-- Extension mechanism: register term and sort handlers and confirm both are found.
 
 /-- A hand-written handler that maps `Nat.succ n` to `(+ n 1)`. -/
 @[crush_translate high]
@@ -66,12 +66,16 @@ def succHandler : TranslationHandler := fun ctx => do
 crush_map Nat.add => "+"
 crush_map_sort Nat => "Int"
 
--- Both the attribute-registered and sugar-registered handlers are present.
+-- The attribute-registered and sugar-registered term handlers are present, and
+-- `crush_map_sort` uses the independent sort-handler registry.
 -- (Run in `MetaM`, since `getTranslationHandlers` lives in `TranslateM`.)
 #eval show Lean.MetaM Unit from do
   let (hs, _) ← TranslateM.run {} getTranslationHandlers
   IO.println s!"registered handlers: {hs.size}"
-  if hs.size < 3 then throwError "expected >= 3 handlers, got {hs.size}"
+  if hs.size < 2 then throwError "expected >= 2 term handlers, got {hs.size}"
+  let (sortHs, _) ← TranslateM.run {} getSortHandlers
+  IO.println s!"registered sort handlers: {sortHs.size}"
+  if sortHs.isEmpty then throwError "expected at least one sort handler"
 
 -- A derived fresh name must itself be reserved. Previously, allocating `x_0`
 -- before the second `x` made the collision branch return `x_0` again.

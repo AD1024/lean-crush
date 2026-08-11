@@ -3,6 +3,9 @@
 **An SMT hammer for Lean 4.** Write `by crush` and an SMT solver does the tedious part of
 the proof for you.
 
+Read the [lean-crush user manual](https://ad1024.github.io/lean-crush/) for installation,
+configuration, extension APIs, and complete examples.
+
 Lean's own automation is strong at goals that follow by rewriting and case analysis. It is
 weaker at goals that are really just *constraint solving* — chains of arithmetic
 inequalities, equalities pushed through uninterpreted functions, bitvector identities,
@@ -272,6 +275,12 @@ Loom/Velvet/Cashmere verification conditions. The optional
 [`MathlibTest`](MathlibTest/) package checks Mathlib lemma statements restated at `Int`,
 with operations that have *no* first-order translation pinned as expected failures so the
 boundary is recorded rather than implied.
+
+Complete downstream integrations are available in the
+[Loom `crush-backend` branch](https://github.com/AD1024/loom/tree/crush-backend) and
+[Velvet `crush-backend` branch](https://github.com/AD1024/velvet/tree/crush-backend).
+They show lean-crush wired into verification-condition generation and used on
+real array, arithmetic, and quantified proof obligations.
 
 ## Acknowledgements
 

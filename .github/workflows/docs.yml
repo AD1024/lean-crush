@@ -1,0 +1,101 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/docs.yml"
+      - "Crush/**"
+      - "Crush.lean"
+      - "Doc/Verso/**"
+      - "lakefile.lean"
+      - "lake-manifest.json"
+      - "lean-toolchain"
+  pull_request:
+    paths:
+      - ".github/workflows/docs.yml"
+      - "Crush/**"
+      - "Crush.lean"
+      - "Doc/Verso/**"
+      - "lakefile.lean"
+      - "lake-manifest.json"
+      - "lean-toolchain"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Z3
+        run: |
+          set -euo pipefail
+          Z3_VERSION=4.15.4
+          Z3_DIR="z3-${Z3_VERSION}-x64-glibc-2.39"
+          curl -sSfL -o z3.zip \
+            "https://github.com/Z3Prover/z3/releases/download/z3-${Z3_VERSION}/${Z3_DIR}.zip"
+          unzip -q z3.zip
+          sudo install -m755 "${Z3_DIR}/bin/z3" /usr/local/bin/z3
+          z3 --version
+
+      - name: Install Lean toolchain
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            -o elan-init.sh
+          sh elan-init.sh -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Cache documentation build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .lake/build
+            Doc/Verso/.lake/build
+            Doc/Verso/.lake/packages
+          key: verso-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.lean', 'lake-manifest.json', 'Doc/Verso/lean-toolchain', 'Doc/Verso/lakefile.lean', 'Doc/Verso/lake-manifest.json') }}
+          restore-keys: verso-${{ runner.os }}-
+
+      - name: Build documentation
+        working-directory: Doc/Verso
+        run: lake build
+
+      - name: Render documentation
+        working-directory: Doc/Verso
+        run: lake exe crush-docs
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: Doc/Verso/_out/html-multi
+
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
