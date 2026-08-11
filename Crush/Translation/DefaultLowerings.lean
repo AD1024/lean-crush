@@ -73,6 +73,38 @@ private def guardedArrayStore (ctx : TranslationCtx)
     let updated := view.mkValue view.length stored
     return (smt| (ite (< $sidx $(view.length)) $updated $(view.value)))
 
+@[crush_lower Array.replicate]
+def arrayReplicate : LoweringHandler := fun ctx => do
+  let #[elem, length, value] := ctx.args | return none
+  let arrayTy ← inferType (mkAppN ctx.fn ctx.args)
+  let slength ← ctx.emitTerm length
+  let svalue ← ctx.emitTerm value
+  withFiniteArrayType ctx arrayTy elem fun encoding => do
+    let elemSort ← ctx.emitSort elem
+    let intSort := SSort.app (.symb "Int") #[]
+    let dataSort := SSort.app (.symb "Array") #[intSort, elemSort]
+    let key : StructuralKey := {
+      tag := "array-replicate-data", name := ``Array.replicate, exprs := #[elem]
+    }
+    let dataFn ← TranslateM.symbolForStructural key "array_replicate"
+    if !(← declaredFun dataFn) then
+      markFunDeclared dataFn
+      TranslateM.emitCommand (.declFun dataFn #[intSort, elemSort] dataSort)
+      let nName ← TranslateM.freshSymbol "n"
+      let valueName ← TranslateM.freshSymbol "value"
+      let iName ← TranslateM.freshSymbol "i"
+      let n := SMT.Term.const nName
+      let v := SMT.Term.const valueName
+      let i := SMT.Term.const iName
+      let data := SMT.Term.app (.symb dataFn) #[n, v]
+      let sentinel := SMT.Term.const encoding.sentinel
+      let rhs := (smt| (ite (and (>= $i 0) (< $i $n)) $v $sentinel))
+      TranslateM.emitCommand (.assert (.forallE
+        #[(nName, intSort), (valueName, elemSort), (iName, intSort)]
+        (smt| (= (select $data $i) $rhs))))
+    let data := SMT.Term.app (.symb dataFn) #[slength, svalue]
+    return SMT.Term.app (.symb encoding.ctor) #[slength, data]
+
 @[crush_lower Array.size]
 def arraySize : LoweringHandler := fun ctx => do
   let #[elem, arr] := ctx.args | return none

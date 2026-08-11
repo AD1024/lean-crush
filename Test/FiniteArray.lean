@@ -61,6 +61,23 @@ theorem finiteArray_push_old
     (arr.push value)[i]! = arr[i]! := by
   crush
 
+theorem finiteArray_replicate_size (n : Nat) (value : Int) :
+    (Array.replicate n value).size = n := by
+  crush
+
+theorem finiteArray_replicate_read :
+    (Array.replicate 1 (7 : Int))[0]! = 7 := by
+  crush
+
+theorem finiteArray_replicate_out_of_bounds :
+    (Array.replicate 1 (7 : Int))[1]? = none := by
+  crush
+
+theorem finiteArray_replicate_symbolic
+    (n i : Nat) (value : Int) (h : i < n) :
+    (Array.replicate n value)[i]! = value := by
+  crush
+
 theorem finiteArray_pop_size (arr : Array Int) :
     arr.pop.size = arr.size - 1 := by
   crush

@@ -46,8 +46,11 @@ private def preprocessExprS (e : Expr) : Sym.SymM Expr := do
 structure InstantiationReport where
   facts       : Array Fact := #[]
   /-- A soundly weakened first query containing generated instances but omitting
-  their quantified templates. If it is satisfiable or unknown, callers retry
-  with `facts`; an unsatisfiable result is already conclusive. -/
+  their quantified templates. This is offered only after reaching a fixpoint:
+  a truncated instance set is unlikely to prove the goal and can consume the
+  full solver timeout before the complete `facts` query is tried. If this query
+  is satisfiable or unknown, callers retry with `facts`; an unsatisfiable result
+  is already conclusive. -/
   groundFacts : Option (Array Fact) := none
   generated   : Nat := 0
   exhausted   : Bool := false
@@ -679,7 +682,7 @@ private def instantiateGroundFactsS (cfg : Config) (facts : Array Fact) :
   let generatedFacts ← generatedFacts.get
   result := result ++ generatedFacts
   let groundFacts ←
-    if generatedFacts.isEmpty then
+    if exhausted || generatedFacts.isEmpty then
       pure none
     else
       let templateSourceSet :=

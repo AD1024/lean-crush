@@ -389,6 +389,23 @@ def FiniteArrayView.mkValue (view : FiniteArrayView)
     (length data : SMT.Term) : SMT.Term :=
   .app (.symb view.encoding.ctor) #[length, data]
 
+/-- Run a lowering over Crush's built-in finite representation of `arrayTy`.
+
+Unlike `withFiniteArray`, this helper does not require an existing Array value.
+It is intended for constructors such as `Array.replicate`. Returns `none` when
+a user sort handler selected a different representation for the Array type.
+-/
+def withFiniteArrayType (ctx : TranslationCtx) (arrayTy elem : Expr)
+    (k : FiniteArrayEncoding → TranslateM SMT.Term) :
+    TranslateM (Option SMT.Term) := do
+  let actualSort ← ctx.emitSort arrayTy
+  let key : StructuralKey := { tag := "finite-array", name := ``Array, exprs := #[elem] }
+  let some sortName ← TranslateM.structuralSymbol? key | return none
+  unless actualSort == SSort.app (.symb sortName) #[] do return none
+  let some sentinel ← TranslateM.structuralSymbol? (finiteArraySentinelKey elem)
+    | throwError "internal error: finite Array sort `{sortName}` has no sentinel"
+  return some (← k { finiteArrayEncodingNames sortName with sentinel })
+
 /-- Run a lowering over Crush's built-in finite representation of `arr`.
 
 Returns `none` when a user `@[crush_translate_sort]` handler selected a different
@@ -400,23 +417,17 @@ def withFiniteArray (ctx : TranslationCtx) (elem arr : Expr)
     (k : FiniteArrayView → TranslateM SMT.Term) :
     TranslateM (Option SMT.Term) := do
   let arrayTy ← inferType arr
-  let actualSort ← ctx.emitSort arrayTy
-  let key : StructuralKey := { tag := "finite-array", name := ``Array, exprs := #[elem] }
-  let some sortName ← TranslateM.structuralSymbol? key | return none
-  unless actualSort == SSort.app (.symb sortName) #[] do return none
-  let some sentinel ← TranslateM.structuralSymbol? (finiteArraySentinelKey elem)
-    | throwError "internal error: finite Array sort `{sortName}` has no sentinel"
-  let encoding := { finiteArrayEncodingNames sortName with sentinel }
-  let arrayValue ← ctx.emitTerm arr
-  let arrayName ← TranslateM.freshSymbol "array"
-  let value := SMT.Term.const arrayName
-  let view : FiniteArrayView := {
-    encoding
-    value
-    length := SMT.Term.app (.symb encoding.lenSel) #[value]
-    data := SMT.Term.app (.symb encoding.dataSel) #[value]
-  }
-  return some (.letE #[(arrayName, arrayValue)] (← k view))
+  withFiniteArrayType ctx arrayTy elem fun encoding => do
+    let arrayValue ← ctx.emitTerm arr
+    let arrayName ← TranslateM.freshSymbol "array"
+    let value := SMT.Term.const arrayName
+    let view : FiniteArrayView := {
+      encoding
+      value
+      length := SMT.Term.app (.symb encoding.lenSel) #[value]
+      data := SMT.Term.app (.symb encoding.dataSel) #[value]
+    }
+    return .letE #[(arrayName, arrayValue)] (← k view)
 
 mutual
   /-- Sort translation. Interpreted Lean types map to SMT theory sorts; supported

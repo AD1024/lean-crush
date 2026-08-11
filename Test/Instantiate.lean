@@ -194,6 +194,8 @@ run_meta do
     unless report.exhausted &&
         report.facts.any (fun fact => fact.descr == "tailLength") do
       throwError "fuel exhaustion removed a truncated template's quantified fallback"
+    if report.groundFacts.isSome then
+      throwError "fuel exhaustion offered an incomplete ground-first query"
 
 -- Simplifying this instance would erase the constructed list that can witness an
 -- existential. Keep both the unsimplified instance and its quantified fallback.
