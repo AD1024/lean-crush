@@ -9,8 +9,7 @@ package «crush-docs» where
     ⟨`linter.unusedVariables, false⟩
   ]
 
-require verso from git
-  "https://github.com/leanprover/verso.git" @ "v4.32.0"
+require "leanprover" / verso @ git "v4.32.0"
 
 require crush from "../.."
 

@@ -61,10 +61,11 @@ jobs:
         with:
           path: |
             .lake/build
-            Doc/Verso/.lake/build
-            Doc/Verso/.lake/packages
-          key: verso-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.lean', 'lake-manifest.json', 'Doc/Verso/lean-toolchain', 'Doc/Verso/lakefile.lean', 'Doc/Verso/lake-manifest.json') }}
-          restore-keys: verso-${{ runner.os }}-
+            .lake/config
+            Doc/Verso/.lake
+          key: verso-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.lean', 'lake-manifest.json', 'Doc/Verso/lean-toolchain', 'Doc/Verso/lakefile.lean', 'Doc/Verso/lake-manifest.json') }}-${{ github.sha }}
+          restore-keys: |
+            verso-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.lean', 'lake-manifest.json', 'Doc/Verso/lean-toolchain', 'Doc/Verso/lakefile.lean', 'Doc/Verso/lake-manifest.json') }}-
 
       - name: Build documentation
         working-directory: Doc/Verso

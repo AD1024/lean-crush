@@ -174,7 +174,7 @@ visible, axiom-backed fallback is acceptable.
 
 # Complete Integrations
 
-Two downstream branches show lean-crush integrated into larger verification
+Three downstream branches show lean-crush integrated into larger verification
 projects rather than isolated examples:
 
 * [Loom's `crush-backend` branch](https://github.com/AD1024/loom/tree/crush-backend)
@@ -182,7 +182,15 @@ projects rather than isolated examples:
 * [Velvet's `crush-backend` branch](https://github.com/AD1024/velvet/tree/crush-backend)
   applies the backend to Dafny-style imperative verification conditions,
   including arrays and quantified invariants.
+* The [Cedar `crush-backend` branch](https://github.com/AD1024/cedar-spec/tree/crush-backend)
+  includes a
+  [`CedarCrushCaseStudy`](https://github.com/AD1024/cedar-spec/blob/crush-backend/cedar-lean/CedarCrushCaseStudy.lean)
+  module built on `Cedar.Thm`. It uses `crush` as a kernel-reconstructed leaf
+  tactic in Cedar foundation proofs.
 
 These branches are useful references for dependency setup, tactic invocation,
 and the lemmas needed at the boundary between a verification-condition
 generator and SMT translation.
+
+The Cedar case study builds on the
+[upstream Cedar specification](https://github.com/cedar-policy/cedar-spec).

@@ -282,6 +282,13 @@ Complete downstream integrations are available in the
 They show lean-crush wired into verification-condition generation and used on
 real array, arithmetic, and quantified proof obligations.
 
+The [Cedar `crush-backend` branch](https://github.com/AD1024/cedar-spec/tree/crush-backend)
+contains a
+[`CedarCrushCaseStudy`](https://github.com/AD1024/cedar-spec/blob/crush-backend/cedar-lean/CedarCrushCaseStudy.lean)
+module built on `Cedar.Thm`. It demonstrates `crush` as an interactive leaf tactic
+for Cedar foundation proofs, using kernel reconstruction rather than
+`Crush.crushSorry`.
+
 ## Acknowledgements
 
 lean-crush builds on ideas and test material from several projects:
@@ -292,5 +299,7 @@ lean-crush builds on ideas and test material from several projects:
 - [Loom](https://github.com/verse-lab/loom) and its verifiers
   [Velvet](https://github.com/verse-lab/velvet) (Dafny-style imperative) and Cashmere
   (effectful monadic) — the source of the verification-condition case study.
+- [Cedar](https://github.com/cedar-policy/cedar-spec) — the formal specification and
+  Lean foundation used by the Cedar case study.
 - [Veil](https://github.com/verse-lab/veil) — its model-minimization approach (`z3model.py`)
   informs the planned counterexample minimization.
