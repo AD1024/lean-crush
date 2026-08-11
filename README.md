@@ -205,6 +205,29 @@ applications, numerals, Booleans, and strings use SMT-LIB syntax; `$term` splice
 existing `Crush.SMT.Term`. The result is still the typed SMT term representation, not
 an unchecked string.
 
+Array-backed operations can reuse Crush's finite Array representation instead of
+reimplementing its length/data encoding:
+
+```lean
+def overwriteFirst {α : Type} (xs : Array α) (value : α) : Array α :=
+  xs.setIfInBounds 0 value
+
+@[crush_lower overwriteFirst]
+def lowerOverwriteFirst : Crush.LoweringHandler := fun ctx => do
+  let #[elem, xs, value] := ctx.args | return none
+  let svalue ← ctx.emitTerm value
+  Crush.withFiniteArray ctx elem xs fun view => do
+    let data := (smt| (store $(view.data) 0 $svalue))
+    let updated := view.mkValue view.length data
+    return (smt| (ite (> $(view.length) 0) $updated $(view.value)))
+```
+
+`withFiniteArray` returns `none` if another sort handler has replaced Array's
+representation, and inserts an SMT `let` so nested updates are not duplicated.
+The built-in lowerings use this API for `size`, bounded/defaulting/optional
+indexing, `set`/`setIfInBounds`/`set!`, `push`, `pop`, `swap`/
+`swapIfInBounds`, `isEmpty`, `back!`, and `back?`.
+
 ## Limitations
 
 - **No induction.** A goal needing a hypothesis about all smaller values times out. Drive the
@@ -214,7 +237,9 @@ an unchecked string.
   do not, and an untranslated one becomes uninterpreted — so the solver reports a
   *counterexample*, not an error. Definitions such as `|·|`, `List.length`, and `Monotone`
   work after enabling `crush_unfold` as shown above. Otherwise, provide a suitable lemma,
-  state the needed property directly, or add a custom lowering.
+  state the needed property directly, or add a custom lowering. Array operations that
+  copy a symbolic range (`append`, `extract`, `map`, `filter`) still need lemmas or custom
+  lowerings; unlike `push`/`pop`, they require quantified element-wise encodings.
 - **A goal is only as strong as its premises.** A missing premise makes the query unprovable,
   which surfaces as a *timeout* — so check the goal actually follows before blaming the solver.
 - **Reconstruction is narrower than solving.** Under `crush.trust "reconstruct"`, some goals

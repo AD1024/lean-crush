@@ -264,6 +264,37 @@ def testerApp (ctorSym : String) (x : SMT.Term) : SMT.Term :=
 /-- The well-formedness predicate symbol for a datatype sort. -/
 def wfSymbol (sortName : String) : String := s!"wf_{sortName}"
 
+/-- Symbols allocated for Crush's finite representation of `Array elem`. The
+total SMT array is paired with a logical length; selectors and the out-of-range
+sentinel are qualified by the structurally allocated sort name. Exposed to
+lowering handlers through `withFiniteArray`. -/
+structure FiniteArrayEncoding where
+  sortName : String
+  ctor     : String
+  lenSel   : String
+  dataSel  : String
+  sentinel : String
+
+private def finiteArrayEncodingNames (sortName : String) : FiniteArrayEncoding := {
+  sortName
+  ctor := s!"{sortName}_mk"
+  lenSel := s!"{sortName}_len"
+  dataSel := s!"{sortName}_data"
+  sentinel := s!"{sortName}_outside"
+}
+
+private def finiteArraySentinelKey (elem : Expr) : StructuralKey := {
+  tag := "finite-array-sentinel", name := ``Array, exprs := #[elem]
+}
+
+/-- Element type of a fully applied Lean `Array`, after reducible aliases. -/
+def finiteArrayElem? (ty : Expr) : MetaM (Option Expr) := do
+  let ty ← whnf ty
+  let .const n _ := ty.getAppFn | return none
+  if n != ``Array then return none
+  let #[elem] := ty.getAppArgs | return none
+  return some elem
+
 /-- Whether `e` is an application of an overloaded arithmetic/comparison operator
 whose instance argument is **not** the one instance synthesis would pick.
 
@@ -344,6 +375,49 @@ partial def declareViaThunk (key hint : String)
     markFunDeclared name
   return name
 
+/-- A translated finite Array operand. `value` is a let-bound reference, so a
+lowering may use `length` and `data` repeatedly without duplicating a nested
+Array expression in the emitted SMT term. -/
+structure FiniteArrayView where
+  encoding : FiniteArrayEncoding
+  value    : SMT.Term
+  length   : SMT.Term
+  data     : SMT.Term
+
+/-- Construct a finite Array value from a logical length and SMT theory array. -/
+def FiniteArrayView.mkValue (view : FiniteArrayView)
+    (length data : SMT.Term) : SMT.Term :=
+  .app (.symb view.encoding.ctor) #[length, data]
+
+/-- Run a lowering over Crush's built-in finite representation of `arr`.
+
+Returns `none` when a user `@[crush_translate_sort]` handler selected a different
+representation, allowing the caller to defer to another lowering or the ordinary
+uninterpreted fallback. The callback result is wrapped in an SMT `let`, so nested
+updates remain linear in the source expression size.
+-/
+def withFiniteArray (ctx : TranslationCtx) (elem arr : Expr)
+    (k : FiniteArrayView → TranslateM SMT.Term) :
+    TranslateM (Option SMT.Term) := do
+  let arrayTy ← inferType arr
+  let actualSort ← ctx.emitSort arrayTy
+  let key : StructuralKey := { tag := "finite-array", name := ``Array, exprs := #[elem] }
+  let some sortName ← TranslateM.structuralSymbol? key | return none
+  unless actualSort == SSort.app (.symb sortName) #[] do return none
+  let some sentinel ← TranslateM.structuralSymbol? (finiteArraySentinelKey elem)
+    | throwError "internal error: finite Array sort `{sortName}` has no sentinel"
+  let encoding := { finiteArrayEncodingNames sortName with sentinel }
+  let arrayValue ← ctx.emitTerm arr
+  let arrayName ← TranslateM.freshSymbol "array"
+  let value := SMT.Term.const arrayName
+  let view : FiniteArrayView := {
+    encoding
+    value
+    length := SMT.Term.app (.symb encoding.lenSel) #[value]
+    data := SMT.Term.app (.symb encoding.dataSel) #[value]
+  }
+  return some (.letE #[(arrayName, arrayValue)] (← k view))
+
 mutual
   /-- Sort translation. Interpreted Lean types map to SMT theory sorts; supported
   inductives are declared as SMT datatypes; everything else becomes a declared
@@ -377,6 +451,12 @@ mutual
     | .sort l => if l.isZero then return .app (.symb "Bool") #[]
                  else declareUninterpretedSort e
     | _ =>
+    -- Lean arrays are finite sequences, not their implementation-level `List`
+    -- structure. Represent them by a length plus an SMT theory array so reads and
+    -- writes receive native read-over-write semantics.
+    if let some elem ← finiteArrayElem? e then
+      let enc ← declareFiniteArray elem
+      return .app (.symb enc.sortName) #[]
     -- `BitVec w` at a statically-known width maps to the indexed sort
     -- `(_ BitVec w)`. A symbolic width has no SMT counterpart, so it falls through
     -- to an opaque sort (where `BitVec` ops will not be recognized either).
@@ -603,6 +683,74 @@ mutual
       markSortDeclared name
     return .app (.symb name) #[]
 
+  /-- Whether sort translation actually selected Crush's finite representation
+  for this Lean Array type. A user sort handler may replace it, in which case
+  built-in operations and well-formedness predicates must both defer. -/
+  partial def finiteArraySortSelected (arrayTy elem : Expr) : TranslateM Bool := do
+    let actual ← emitSort arrayTy
+    let key : StructuralKey := { tag := "finite-array", name := ``Array, exprs := #[elem] }
+    let some sortName ← TranslateM.structuralSymbol? key | return false
+    return actual == SSort.app (.symb sortName) #[]
+
+  /-- Declare the finite representation of `Array elem`.
+
+  Every well-formed value has a nonnegative length, well-formed elements at
+  in-bounds indices, and one canonical sentinel at every out-of-bounds index.
+  Canonicalizing the total-array tail is required for sound equality and
+  congruence: without it, two SMT values could represent the same Lean array but
+  remain distinguishable by equality or an uninterpreted function. -/
+  partial def declareFiniteArray (elem : Expr) : TranslateM FiniteArrayEncoding := do
+    let key : StructuralKey := { tag := "finite-array", name := ``Array, exprs := #[elem] }
+    if let some sortName ← TranslateM.structuralSymbol? key then
+      let some sentinel ← TranslateM.structuralSymbol? (finiteArraySentinelKey elem)
+        | throwError "internal error: finite Array sort `{sortName}` has no sentinel"
+      return { finiteArrayEncodingNames sortName with sentinel }
+    let sortName ← TranslateM.symbolForStructural key "Array"
+    let enc := finiteArrayEncodingNames sortName
+    markSortDeclared sortName
+    let elemSort ← emitSort elem
+    let intSort := SSort.app (.symb "Int") #[]
+    let dataSort := SSort.app (.symb "Array") #[intSort, elemSort]
+    TranslateM.emitCommand (.declDatatypes #[(sortName, 0, {
+      ctors := #[{
+        name := enc.ctor
+        selDecls := #[(enc.lenSel, intSort), (enc.dataSel, dataSort)]
+      }]
+    })])
+    let sentinel ←
+      TranslateM.symbolForStructural (finiteArraySentinelKey elem) enc.sentinel
+    if !(← declaredFun sentinel) then
+      markFunDeclared sentinel
+      TranslateM.emitCommand (.declFun sentinel #[] elemSort)
+    let enc := { enc with sentinel }
+    if ← declDatatypeWF sortName then
+      let xName ← TranslateM.freshSymbol "a"
+      let iName ← TranslateM.freshSymbol "i"
+      let sort := SSort.app (.symb sortName) #[]
+      let x := SMT.Term.const xName
+      let i := SMT.Term.const iName
+      let len := SMT.Term.app (.symb enc.lenSel) #[x]
+      let data := SMT.Term.app (.symb enc.dataSel) #[x]
+      let value := (smt| (select $data $i))
+      let inside := (smt| (and (>= $i 0) (< $i $len)))
+      let outsideCanonical := (smt| (= $value $(SMT.Term.const enc.sentinel)))
+      let pointwise ←
+        if ← isEmptyType elem then
+          pure outsideCanonical
+        else
+          match ← wfCondition elem value with
+          | none => pure (smt| (or $inside $outsideCanonical))
+          | some elemWF =>
+            pure (smt| (and (=> $inside $elemWF)
+                            (=> (not $inside) $outsideCanonical)))
+      let lengthWF :=
+        if ← isEmptyType elem then (smt| (= $len 0)) else (smt| (>= $len 0))
+      let body := (smt| (and $lengthWF
+        $(SMT.Term.forallE #[(iName, intSort)] pointwise)))
+      TranslateM.emitCommand (.assert (.forallE #[(xName, sort)]
+        (smt| (= $(SMT.Term.app (.symb (wfSymbol sortName)) #[x]) $body))))
+    return enc
+
   /-- Declare a supported inductive as an SMT datatype (idempotent); return its
   sort symbol. One SMT constructor per Lean constructor, positional selectors.
 
@@ -696,6 +844,8 @@ mutual
       TranslateM Bool := do
     let ty ← whnf ty
     if ty.isConstOf ``Nat then return true
+    if let some elem ← finiteArrayElem? ty then
+      return ← finiteArraySortSelected ty elem
     let some (n, typeArgs) ← supportedDatatypeType? ty | return false
     if visiting.contains n then return false
     let visiting := visiting.insert n
@@ -769,6 +919,10 @@ mutual
     let ty ← whnf ty
     if ty.isConstOf ``Nat then
       return some (smt| (>= $t 0))
+    if let some elem ← finiteArrayElem? ty then
+      unless ← finiteArraySortSelected ty elem do return none
+      let enc ← declareFiniteArray elem
+      return some (.app (.symb (wfSymbol enc.sortName)) #[t])
     let some (n, typeArgs) ← supportedDatatypeType? ty | return none
     if !(← needsWFGuard ty) then return none
     let sortName ← declareDatatype n typeArgs
@@ -976,6 +1130,7 @@ mutual
     -- Projections take the structure as the argument after `info.numParams`.
     let some structArg := args[info.numParams]? | return none
     let structTy ← whnf (← inferType structArg)
+    if (← finiteArrayElem? structTy).isSome then return none
     let some (_, typeArgs) ← supportedDatatypeType? structTy | return none
     let sortName ← declareDatatype info.ctorName.getPrefix typeArgs
     let sel := selSymbol sortName info.ctorName info.i
@@ -994,6 +1149,7 @@ mutual
     let some (.ctorInfo ci) := env.find? cn | return none
     -- The applied constructor's result type carries the instantiation.
     let resTy ← whnf (← inferType (mkAppN fn args))
+    if (← finiteArrayElem? resTy).isSome then return none
     let some (_, typeArgs) ← supportedDatatypeType? resTy | return none
     let sortName ← declareDatatype ci.induct typeArgs
     -- Drop the leading type-parameter arguments; keep the value fields.

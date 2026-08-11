@@ -254,7 +254,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
   let (instantiated, prof') ←
     prof.time "instantiate" (instantiateGroundFacts cfg facts)
   prof := prof'
-  let facts := instantiated.facts
+  let fullFacts := instantiated.facts
   trace[crush.inst] "generated {instantiated.generated} ground instance(s); \
                      exhausted: {instantiated.exhausted}"
   if instantiated.exhausted then
@@ -262,18 +262,47 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
                   {instantiated.generated} instance(s) (`crush.inst.fuel` = \
                   {cfg.instFuel}, `crush.inst.rounds` = {cfg.instRounds}); \
                   raise the bound if an explicit lemma is not being instantiated."
-  let ((script, st), prof') ← prof.time "translate" (buildScript cfg facts)
+  -- When a quantified template produced useful ground instances but could not be
+  -- removed outright, try the soundly weakened ground-only query first. `unsat`
+  -- is conclusive; every other verdict retries with the complete fact set.
+  let reducedFacts :=
+    if cfg.backend == .none then none else instantiated.groundFacts
+  let firstFacts := reducedFacts.getD fullFacts
+  let ((firstScript, firstSt), prof') ← prof.time "translate" (buildScript cfg firstFacts)
   prof := prof'
+  let mut script := firstScript
+  let mut st := firstSt
   if cfg.traceScript then
     logInfo m!"crush SMT script:{indentD (scriptToString script)}"
   trace[crush.script] "{scriptToString script}"
-  Solver.maybeSave cfg script
   if cfg.backend == .none then
+    Solver.maybeSave cfg script
     logInfo m!"crush: backend is `none`; emitted {script.size} commands, no solver run."
     if cfg.profile then logInfo prof.report
     return
-  let (result, prof') ← prof.time "solve" (Solver.runQuery cfg script)
+  let (firstResult, prof') ← prof.time "solve" (Solver.runQuery cfg script)
   prof := prof'
+  let mut result := firstResult
+  if reducedFacts.isSome then
+    match result with
+    | .unsat .. =>
+      trace[crush.result] "ground-instance query was unsatisfiable; skipped quantified fallback"
+    | .sat .. | .unknown .. =>
+      trace[crush.result] "ground-instance query did not close the goal; retrying with \
+                           retained quantified templates"
+      let ((fallbackScript, fallbackSt), prof') ←
+        prof.time "translate-fallback" (buildScript cfg fullFacts)
+      prof := prof'
+      script := fallbackScript
+      st := fallbackSt
+      if cfg.traceScript then
+        logInfo m!"crush SMT fallback script:{indentD (scriptToString script)}"
+      trace[crush.script] "{scriptToString script}"
+      let (fallbackResult, prof') ←
+        prof.time "solve-fallback" (Solver.runQuery cfg script)
+      prof := prof'
+      result := fallbackResult
+  Solver.maybeSave cfg script
   match result with
   | .unsat coreText proofText =>
     let coreIds := parseUnsatCore coreText

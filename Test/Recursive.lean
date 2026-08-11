@@ -307,23 +307,23 @@ Finding this cost two bug fixes, both in `Crush/Translation/Translate.lean`:
 * `isSupportedDatatypeApp` now *rejects* indirect recursion, so such a type stays an opaque
   uninterpreted sort. Less precise, but a valid query beats a script the solver refuses.
 
-So the goals below are the honest consequence: with `Rose` opaque, its constructor is an
-uninterpreted function, and nothing constrains it to be injective. Pinned as expected
-failures — teaching crush to emit one combined block would make these provable and break
-this section loudly. -/
+`Rose` remains opaque in SMT, but constructor-equality preprocessing now discovers
+Lean's generated injectivity theorem and simplifies same-constructor hypotheses before
+translation. This recovers direct injectivity without requiring mutually recursive SMT
+datatype declarations. Constructor discrimination nested inside an injected field
+remains unavailable.
+-/
 
 namespace Nested
 
 inductive Rose where
   | node (v : Int) (kids : List Rose)
 
--- Injectivity through the nested field: unavailable while `Rose` is opaque.
-/-- error: crush: the goal is not provable -/
-#guard_msgs(error, substring := true) in
+-- Injectivity through the nested field is discharged during preprocessing.
 example (v w : Int) (ks ls : List Rose) (h : Rose.node v ks = Rose.node w ls) :
     v = w ∧ ks = ls := by crush
 
--- Likewise distinctness inside the nested list.
+-- Nested `List.nil ≠ List.cons` discrimination is still hidden behind opacity.
 /-- error: crush: the goal is not provable -/
 #guard_msgs(error, substring := true) in
 example (v : Int) (k : Rose) : Rose.node v [] ≠ Rose.node v [k] := by crush

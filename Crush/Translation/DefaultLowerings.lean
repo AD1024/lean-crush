@@ -1,5 +1,6 @@
 import Crush.Translation.Attr
 import Crush.Translation.Theories
+import Crush.Translation.Translate
 import Crush.SMT.Quote
 open Lean Meta
 
@@ -48,5 +49,149 @@ def dvd : LoweringHandler := fun ctx => do
   let sb ← ctx.emitTerm b
   let remainder := intDivGuard "mod" sb sa
   return some (smt| (= $remainder 0))
+
+/-! ## Finite Array operations
+
+These use the same public `withFiniteArray` view available to downstream
+`@[crush_lower]` handlers. The helper returns `none` when a custom sort handler
+has replaced Crush's finite Array representation.
+-/
+
+private def optionTerms (elem : Expr) (value : SMT.Term) :
+    TranslateM (SMT.Term × SMT.Term) := do
+  let optionSort ← declareDatatype ``Option #[elem]
+  let noneTerm := SMT.Term.const (ctorSymbol optionSort ``Option.none)
+  let someTerm := SMT.Term.app (.symb (ctorSymbol optionSort ``Option.some)) #[value]
+  return (noneTerm, someTerm)
+
+private def guardedArrayStore (ctx : TranslationCtx)
+    (elem arr idx value : Expr) : TranslateM (Option SMT.Term) := do
+  let sidx ← ctx.emitTerm idx
+  let svalue ← ctx.emitTerm value
+  withFiniteArray ctx elem arr fun view => do
+    let stored := (smt| (store $(view.data) $sidx $svalue))
+    let updated := view.mkValue view.length stored
+    return (smt| (ite (< $sidx $(view.length)) $updated $(view.value)))
+
+@[crush_lower Array.size]
+def arraySize : LoweringHandler := fun ctx => do
+  let #[elem, arr] := ctx.args | return none
+  withFiniteArray ctx elem arr fun view => return view.length
+
+@[crush_lower GetElem.getElem]
+def arrayGetElem : LoweringHandler := fun ctx => do
+  let #[coll, idxTy, elem, _, _, arr, idx, _] := ctx.args | return none
+  let some arrayElem ← finiteArrayElem? coll | return none
+  unless (← whnf idxTy).isConstOf ``Nat do return none
+  unless ← isDefEq elem arrayElem do return none
+  unless ← ctx.hasCanonicalInstance 4 do return none
+  let sidx ← ctx.emitTerm idx
+  withFiniteArray ctx arrayElem arr fun view =>
+    return (smt| (select $(view.data) $sidx))
+
+@[crush_lower GetElem?.getElem!]
+def arrayGetElemBang : LoweringHandler := fun ctx => do
+  let #[coll, idxTy, elem, _, _, inhabited, arr, idx] := ctx.args | return none
+  let some arrayElem ← finiteArrayElem? coll | return none
+  unless (← whnf idxTy).isConstOf ``Nat do return none
+  unless ← isDefEq elem arrayElem do return none
+  unless ← ctx.hasCanonicalInstance 4 do return none
+  let sidx ← ctx.emitTerm idx
+  let defaultFn := mkConst ``default [← getLevel elem]
+  let sdefault ← ctx.emitTerm (mkApp2 defaultFn elem inhabited)
+  withFiniteArray ctx arrayElem arr fun view =>
+    return (smt| (ite (< $sidx $(view.length))
+      (select $(view.data) $sidx) $sdefault))
+
+@[crush_lower GetElem?.getElem?]
+def arrayGetElemOpt : LoweringHandler := fun ctx => do
+  let #[coll, idxTy, elem, _, _, arr, idx] := ctx.args | return none
+  let some arrayElem ← finiteArrayElem? coll | return none
+  unless (← whnf idxTy).isConstOf ``Nat do return none
+  unless ← isDefEq elem arrayElem do return none
+  unless ← ctx.hasCanonicalInstance 4 do return none
+  let sidx ← ctx.emitTerm idx
+  withFiniteArray ctx arrayElem arr fun view => do
+    let value := (smt| (select $(view.data) $sidx))
+    let (noneTerm, someTerm) ← optionTerms arrayElem value
+    return (smt| (ite (< $sidx $(view.length)) $someTerm $noneTerm))
+
+@[crush_lower Array.set]
+def arraySet : LoweringHandler := fun ctx => do
+  let #[elem, arr, idx, value, _] := ctx.args | return none
+  guardedArrayStore ctx elem arr idx value
+
+@[crush_lower Array.setIfInBounds]
+def arraySetIfInBounds : LoweringHandler := fun ctx => do
+  let #[elem, arr, idx, value] := ctx.args | return none
+  guardedArrayStore ctx elem arr idx value
+
+@[crush_lower Array.set!]
+def arraySetBang : LoweringHandler := fun ctx => do
+  let #[elem, arr, idx, value] := ctx.args | return none
+  guardedArrayStore ctx elem arr idx value
+
+@[crush_lower Array.push]
+def arrayPush : LoweringHandler := fun ctx => do
+  let #[elem, arr, value] := ctx.args | return none
+  let svalue ← ctx.emitTerm value
+  withFiniteArray ctx elem arr fun view => do
+    let stored := (smt| (store $(view.data) $(view.length) $svalue))
+    return view.mkValue (smt| (+ $(view.length) 1)) stored
+
+@[crush_lower Array.pop]
+def arrayPop : LoweringHandler := fun ctx => do
+  let #[elem, arr] := ctx.args | return none
+  withFiniteArray ctx elem arr fun view => do
+    let newLen := (smt| (ite (> $(view.length) 0) (- $(view.length) 1) 0))
+    let sentinel := SMT.Term.const view.encoding.sentinel
+    let cleaned := (smt| (ite (> $(view.length) 0)
+      (store $(view.data) $newLen $sentinel) $(view.data)))
+    return view.mkValue newLen cleaned
+
+private def arraySwapTerm (ctx : TranslationCtx)
+    (elem arr i j : Expr) : TranslateM (Option SMT.Term) := do
+  let si ← ctx.emitTerm i
+  let sj ← ctx.emitTerm j
+  withFiniteArray ctx elem arr fun view => do
+    let vi := (smt| (select $(view.data) $si))
+    let vj := (smt| (select $(view.data) $sj))
+    let swapped := (smt| (store (store $(view.data) $si $vj) $sj $vi))
+    let updated := view.mkValue view.length swapped
+    return (smt| (ite (and (< $si $(view.length)) (< $sj $(view.length)))
+      $updated $(view.value)))
+
+@[crush_lower Array.swap]
+def arraySwap : LoweringHandler := fun ctx => do
+  let #[elem, arr, i, j, _, _] := ctx.args | return none
+  arraySwapTerm ctx elem arr i j
+
+@[crush_lower Array.swapIfInBounds]
+def arraySwapIfInBounds : LoweringHandler := fun ctx => do
+  let #[elem, arr, i, j] := ctx.args | return none
+  arraySwapTerm ctx elem arr i j
+
+@[crush_lower Array.isEmpty]
+def arrayIsEmpty : LoweringHandler := fun ctx => do
+  let #[elem, arr] := ctx.args | return none
+  withFiniteArray ctx elem arr fun view =>
+    return (smt| (= $(view.length) 0))
+
+@[crush_lower Array.back!]
+def arrayBackBang : LoweringHandler := fun ctx => do
+  let #[elem, inhabited, arr] := ctx.args | return none
+  let defaultFn := mkConst ``default [← getLevel elem]
+  let sdefault ← ctx.emitTerm (mkApp2 defaultFn elem inhabited)
+  withFiniteArray ctx elem arr fun view =>
+    return (smt| (ite (> $(view.length) 0)
+      (select $(view.data) (- $(view.length) 1)) $sdefault))
+
+@[crush_lower Array.back?]
+def arrayBackOpt : LoweringHandler := fun ctx => do
+  let #[elem, arr] := ctx.args | return none
+  withFiniteArray ctx elem arr fun view => do
+    let value := (smt| (select $(view.data) (- $(view.length) 1)))
+    let (noneTerm, someTerm) ← optionTerms elem value
+    return (smt| (ite (> $(view.length) 0) $someTerm $noneTerm))
 
 end Crush.DefaultLowerings

@@ -23,6 +23,8 @@ axiom step : ∀ x, R x (next x)
 axiom lift : ∀ x y, R x y → P y
 axiom project : ∀ x y, R x y → Q y
 axiom grow : ∀ x, P x → P (next x)
+axiom Accepts : (Int → Bool) → Int → Prop
+axiom functionLift : ∀ f x, Accepts f x → P x
 
 axiom NonEmptyList : List Nat → Prop
 axiom ListMarker : List Nat → Prop
@@ -142,6 +144,8 @@ run_meta do
         report.facts.any (fun fact => fact.descr == "listCodeOne") do
       throwError "unchanged mixed instance did not retain the quantified fallback; \
         generated {report.generated}, facts: {report.facts.map (·.descr)}"
+    if report.groundFacts.isNone then
+      throwError "retained quantified parent did not produce a ground-first query"
 
 -- A template with no ground evidence remains quantified so the solver can still
 -- instantiate it directly.
@@ -329,6 +333,12 @@ theorem forward_chain_builds_witness (x : Int) :
 -- an SMT assertion. The matcher must not be limited to whole facts.
 theorem nested_atom_triggers (x y : Int) (h : R x y ∧ P x) : Q y := by
   crush [project, *]
+
+-- Function-valued binders are instantiated only from exact pattern evidence;
+-- they never enter fallback candidate enumeration.
+theorem function_binder_pattern (x : Int)
+    (h : Accepts (fun _ => true) x) : P x := by
+  crush [functionLift, *]
 
 -- A recursive template may use an initial fact but must not consume occurrences
 -- causally produced by its own instances and grow `next (next ...)` until a bound.

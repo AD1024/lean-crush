@@ -1,5 +1,7 @@
 import Lean
+import Lean.Meta.Injective
 import Crush.Reify.Collect
+import Crush.Translation.Attr
 
 open Lean Meta
 
@@ -32,6 +34,44 @@ structure NormalizeReport where
   rewritten : Nat := 0
   deriving Inhabited
 
+private partial def constructorEqLemmas (facts : Array Fact) : MetaM (Array Name) := do
+  let env ← getEnv
+  -- A general handler can intentionally reinterpret any subterm. Rewriting by
+  -- Lean constructor semantics before translation would bypass that first-refusal
+  -- contract (for example, a custom `Nat.succ` encoding).
+  if hasTranslationHandlersInEnv env then return #[]
+  let found ← IO.mkRef (#[] : Array Name)
+  let seen ← IO.mkRef ({} : Std.HashSet Name)
+  let addForEquality (lhs rhs : Expr) : MetaM Unit := do
+    if lhs.hasLooseBVars || rhs.hasLooseBVars then return
+    let hasTargetedLowering (e : Expr) : Bool :=
+      match e.getAppFn with
+      | .const name _ => hasLoweringsForInEnv env name
+      | _ => false
+    if hasTargetedLowering lhs || hasTargetedLowering rhs then return
+    let some leftCtor ← isConstructorApp'? lhs | return
+    let some rightCtor ← isConstructorApp'? rhs | return
+    unless leftCtor.name == rightCtor.name do return
+    if hasLoweringsForInEnv env leftCtor.name then return
+    let lemma := mkInjectiveEqTheoremNameFor leftCtor.name
+    unless env.contains lemma do return
+    let known ← seen.get
+    unless known.contains lemma do
+      seen.set (known.insert lemma)
+      found.modify (·.push lemma)
+  let rec visit (e : Expr) : MetaM Unit := do
+    match_expr e with
+    | Eq _ lhs rhs => addForEquality lhs rhs
+    | _ => pure ()
+    match e with
+    | .app f a => visit f; visit a
+    | .lam _ ty body _ | .forallE _ ty body _ => visit ty; visit body
+    | .letE _ ty value body _ => visit ty; visit value; visit body
+    | .mdata _ body | .proj _ _ body => visit body
+    | _ => pure ()
+  for fact in facts do visit fact.prop
+  found.get
+
 private def selectedSimpContext (lemmas : Array Name) : MetaM Simp.Context := do
   let mut theorems : SimpTheorems := {}
   let mut seen : Std.HashSet Name := {}
@@ -54,6 +94,8 @@ Equation facts themselves are retained verbatim as quantified fallback axioms.
 Every other proof is transported across the simplifier's equality proof. -/
 def normalizeFacts (facts : Array Fact) (lemmas : Array Name) :
     MetaM NormalizeReport := do
+  let constructorLemmas ← constructorEqLemmas facts
+  let lemmas := lemmas ++ constructorLemmas
   if lemmas.isEmpty then return { facts }
   let ctx ← selectedSimpContext lemmas
   let mut out : Array Fact := #[]

@@ -44,9 +44,13 @@ private def preprocessExprS (e : Expr) : Sym.SymM Expr := do
 
 /-- Result and diagnostics for bounded ground instantiation. -/
 structure InstantiationReport where
-  facts      : Array Fact := #[]
-  generated  : Nat := 0
-  exhausted  : Bool := false
+  facts       : Array Fact := #[]
+  /-- A soundly weakened first query containing generated instances but omitting
+  their quantified templates. If it is satisfiable or unknown, callers retry
+  with `facts`; an unsatisfiable result is already conclusive. -/
+  groundFacts : Option (Array Fact) := none
+  generated   : Nat := 0
+  exhausted   : Bool := false
   deriving Inhabited
 
 private structure GroundOccurrence where
@@ -89,6 +93,12 @@ private structure OccurrenceStore where
 private def isClassType (ty : Expr) : Sym.SymM Bool :=
   return (Sym.isClass? (← getEnv) ty).isSome
 
+/-- Binder domains handled by the simply-typed higher-order encoding. A
+nondependent arrow is a first-class value; genuinely dependent functions remain
+unsupported by both instantiation and SMT lowering. -/
+private def isUnsupportedValueDomain (ty : Expr) : Bool :=
+  ty.isSort || (ty.isForall && !ty.isArrow)
+
 private def isPropExpr (e : Expr) : Sym.SymM Bool := do
   let ty ← preprocessExprS (← Sym.inferType e)
   return ty.isProp
@@ -128,8 +138,12 @@ private partial def collectGround (e : Expr) : Sym.SymM GroundCollection := do
           let ty ← preprocessExprS (← Sym.inferType e)
           if ty.isProp then
             pure (some (ty, false))
-          else if ty.isSort || ty.isForall || (← isClassType ty) then
+          else if ty.isSort || (ty.isForall && !ty.isArrow) || (← isClassType ty) then
             pure none
+          else if ty.isArrow then
+            -- Function values participate in application-pattern matching, but
+            -- never enter the fallback candidate pool.
+            pure (some (ty, false))
           else
             pure (some (ty, true))
         catch _ =>
@@ -191,7 +205,7 @@ template loop. -/
 private partial def hasLeadingValueBinder (ty : Expr) : Sym.SymM Bool := do
   match ty with
   | .forallE name dom body info =>
-    if (← isPropExpr dom) || dom.isSort || dom.isForall then return false
+    if (← isPropExpr dom) || isUnsupportedValueDomain dom then return false
     if info == .instImplicit && (← isClassType dom) then
       withLocalDecl name info dom fun binder =>
         hasLeadingValueBinder (body.instantiate1 binder)
@@ -224,7 +238,7 @@ private def isGroundTerm (e : Expr) : Sym.SymM Bool := do
   if e.hasLooseBVars || e.hasExprMVar || e.hasLevelMVar then return false
   try
     let ty ← preprocessExprS (← Sym.inferType e)
-    if ty.isProp || ty.isSort || ty.isForall then return false
+    if ty.isProp || isUnsupportedValueDomain ty then return false
     return !(← isClassType ty)
   catch _ =>
     return false
@@ -443,7 +457,7 @@ private partial def derivePatternSubstitutions (ty : Expr)
     | .forallE name dom body info =>
       if ← isPropExpr dom then
         derive ty binders
-      else if dom.isSort || dom.isForall then
+      else if isUnsupportedValueDomain dom then
         derive ty binders
       else if info == .instImplicit && (← isClassType dom) then
         match ← Sym.synthInstance? dom with
@@ -469,7 +483,7 @@ private partial def instantiateAt (proof ty : Expr) (values : Array Expr) :
         | .some value =>
           return ← go (mkApp proof value) (body.instantiate1 value) index
         | _ => return none
-      if dom.isSort || dom.isForall || index >= values.size then return none
+      if isUnsupportedValueDomain dom || index >= values.size then return none
       let value := values[index]!
       unless ← isDefEqS (← Sym.inferType value) dom do return none
       go (mkApp proof value) (body.instantiate1 value) (index + 1)
@@ -662,9 +676,27 @@ private def instantiateGroundFactsS (cfg : Config) (facts : Array Fact) :
   for sourceIndex in [0:facts.size] do
     unless replacedSources.contains sourceIndex do
       result := result.push facts[sourceIndex]!
-  result := result ++ (← generatedFacts.get)
+  let generatedFacts ← generatedFacts.get
+  result := result ++ generatedFacts
+  let groundFacts ←
+    if generatedFacts.isEmpty then
+      pure none
+    else
+      let templateSourceSet :=
+        templateSources.foldl (init := ({} : Std.HashSet Nat)) (·.insert ·)
+      let hasRetainedParent :=
+        templateSources.any fun source => !replacedSources.contains source
+      if !hasRetainedParent then
+        pure none
+      else
+        let mut reduced : Array Fact := #[]
+        for sourceIndex in [0:facts.size] do
+          unless templateSourceSet.contains sourceIndex do
+            reduced := reduced.push facts[sourceIndex]!
+        pure (some (reduced ++ generatedFacts))
   return {
     facts := result
+    groundFacts
     generated := ← generated.get
     exhausted }
 

@@ -157,8 +157,11 @@ opaque getTranslationHandlers : TranslateM (Array TranslationHandler)
 /-- Whether any `@[crush_translate]` handler is registered. A cheap array read on
 the persistent extension, with no `evalConst` — so the common case of no user
 handlers skips handler resolution entirely on the hot path of `emitTerm`. -/
+def hasTranslationHandlersInEnv (env : Environment) : Bool :=
+  !(crushTranslateExt.getState env).isEmpty
+
 def hasTranslationHandlers : TranslateM Bool := do
-  return !(crushTranslateExt.getState (← getEnv)).isEmpty
+  return hasTranslationHandlersInEnv (← getEnv)
 
 /-! ## Head-indexed lowerings (`@[crush_lower target]`)
 
@@ -224,8 +227,11 @@ initialize registerBuiltinAttribute {
 }
 
 /-- Whether `head` has any targeted lowerings, without evaluating their declarations. -/
+def hasLoweringsForInEnv (env : Environment) (head : Name) : Bool :=
+  (crushLoweringExt.getState env).contains head
+
 def hasLoweringsFor (head : Name) : TranslateM Bool := do
-  return (crushLoweringExt.getState (← getEnv)).contains head
+  return hasLoweringsForInEnv (← getEnv) head
 
 unsafe def getLoweringsForUnsafe (head : Name) : TranslateM (Array LoweringHandler) := do
   let env ← getEnv
