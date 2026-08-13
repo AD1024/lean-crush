@@ -35,6 +35,8 @@ This root module re-exports the public API. `import Crush` gives you:
 * the `@[crush_translate]` and `@[crush_lower]` attributes, `(smt| ...)` quotations,
   and `crush_map`/`crush_map_sort` sugar
   (`Crush.Translation.Attr`, `Crush.SMT.Quote`, `Crush.Translation.Builtins`),
+* the `@[crush_reconstruct]` attribute for extending checked proof replay
+  (`Crush.Solver.ReconstructAttr`),
 * all `crush.*` `set_option`s (`Crush.Frontend.Config`).
 
 See `README.md` and `Doc/PLAN.md` for the architecture and roadmap.

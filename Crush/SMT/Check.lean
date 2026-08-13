@@ -275,9 +275,9 @@ where
         requireArity name args.size 2
         for arg in args do requireSort "argument of `str.++`" arg stringSort
         return some stringSort
-      | "str.prefixof" =>
+      | "str.prefixof" | "str.suffixof" | "str.contains" =>
         requireArity name args.size 2
-        for arg in args do requireSort "argument of `str.prefixof`" arg stringSort
+        for arg in args do requireSort s!"argument of `{name}`" arg stringSort
         return some boolSort
       | "select" =>
         requireArity name args.size 2
@@ -315,6 +315,15 @@ private def checkCommand (env : CheckEnv) (command : Command) : Except String Ch
     let bodySort ← inferTerm env args.toList.reverse (args.toList.reverse.map (·.2)) body
     requireSort s!"body of definition `{name}`" bodySort res
     if recursive then pure env else insertFun env name { args := args.map (·.2), res }
+  | .defFunsRec defs =>
+    let mut env := env
+    for d in defs do
+      env ← insertFun env d.name { args := d.args.map (·.2), res := d.resSort }
+    for d in defs do
+      let bodySort ←
+        inferTerm env d.args.toList.reverse (d.args.toList.reverse.map (·.2)) d.body
+      requireSort s!"body of recursive definition `{d.name}`" bodySort d.resSort
+    return env
   | .declDatatypes datatypes =>
     let mut env := env
     -- Constructors must all be in scope before selectors of recursive datatypes

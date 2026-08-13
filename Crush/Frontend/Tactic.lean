@@ -171,7 +171,7 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState) (proofTe
       -- Assemble `byContradiction (fun hneg => falseProof)` and hand it to the kernel.
       inner.assign falseProof
       let lam ← instantiateMVars mv
-      if lam.hasSorry || lam.hasExprMVar then return false
+      if lam.hasSorry || lam.hasMVar then return false
       try
         let pf ← mkAppOptM ``Classical.byContradiction #[some goalType, some lam]
         let ty ← inferType pf
@@ -184,6 +184,28 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState) (proofTe
         goal.assign pf
         return true
       catch _ => return false
+
+/-- Close a goal that is already one of the selected facts.
+
+Checking only `facts` preserves the strict meaning of `crush [h₁, ...]`: an ambient
+hypothesis omitted by the user cannot be used by this fast path. This runs before
+translation because quantified nonlinear assumptions can otherwise make an identity query
+expensive for SMT despite the Lean proof being a single local constant. -/
+private def closeFromSelectedFacts (goal : MVarId) (facts : Array Fact) : TacticM Bool :=
+  goal.withContext do
+    let target ← instantiateMVars (← goal.getType)
+    for fact in facts do
+      let some proof := fact.proof | continue
+      try
+        let proof ← instantiateMVars proof
+        if ← isDefEqGuarded (← inferType proof) target then
+          let proof ← instantiateMVars proof
+          unless proof.hasSorry || proof.hasMVar do
+            check proof
+            goal.assign proof
+            return true
+      catch _ => pure ()
+    return false
 
 /-- The core driver, given a resolved goal, config, and collected hints. -/
 def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit :=
@@ -219,6 +241,20 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
     prof.time "collect" (collectFactsWithRewrite goal hints cfg.autoUnfold premiseMax)
   prof := prof'
   trace[crush] "selected {collected.selectedPremises} library premise(s)"
+  -- `backend = none` is an emission/debugging mode, so it must still produce the script
+  -- even when Lean can close the goal without consulting a solver.
+  if cfg.backend != .none then
+    if ← closeFromSelectedFacts goal collected.facts then
+      trace[crush.result] "goal is one of the selected facts; skipped SMT"
+      if cfg.profile then logInfo prof.report
+      return
+    let (closed, prof') ←
+      prof.time "pre-reconstruct" (tryPreReconstruct goal collected.facts)
+    prof := prof'
+    if closed then
+      trace[crush.result] "pre-translation checked proof succeeded; skipped SMT"
+      if cfg.profile then logInfo prof.report
+      return
   let (normalized, prof') ←
     prof.time "normalize" (normalizeFacts collected.facts collected.rewriteLemmas)
   prof := prof'

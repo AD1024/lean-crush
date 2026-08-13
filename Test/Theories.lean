@@ -142,19 +142,15 @@ theorem il_inj (x y : Int) (s t : IList) (h : IList.cons x s = IList.cons y t) :
 
 An `Int` field needs no guard, so `IList`'s `wf` is constantly `true` and never
 actually recurses. A `Nat` field is the case that produces a genuinely **recursive**
-`wf` axiom:
+`wf` definition:
 
 ```
-(assert (forall ((x NList)) (= (wf_NList x)
-  (=> ((_ is cons) x) (and (>= (hd x) 0) (wf_NList (tl x)))))))
+(define-fun-rec wf_NList ((x NList)) Bool
+  (=> ((_ is cons) x) (and (>= (hd x) 0) (wf_NList (tl x)))))
 ```
 
-Recursive quantified axioms are the classic way to send a solver into an
-instantiation loop, and that is exactly what happens on some of these: the tests
-below record which queries z3 discharges and which one it cannot
-(`must_not_close_nl_field`). Divergence is a *sound* outcome — `unknown` never
-closes a goal — but it is a real loss of completeness, and it is the cost of
-guarding recursive datatypes. -/
+Using a recursive definition instead of a quantified defining axiom avoids
+quantifier-instantiation loops while preserving the guard through the tail. -/
 
 inductive NList where
   | nil
@@ -168,15 +164,8 @@ theorem nl_tail_field (l : NList) (n : Nat) (t : NList) (h : l = NList.cons n t)
     n ≥ 0 := by crush
 -- Quantifying over the recursive type is where the recursive axiom gets exercised.
 theorem nl_quant : ∀ l : NList, l = NList.nil ∨ ∃ n t, l = NList.cons n t := by crush
--- A false goal about the guarded field must not be closed. Here the recursive
--- `wf` axiom does send z3 into an instantiation loop, so instead of a
--- counterexample we get a timeout. That is still a *sound* outcome — `unknown`
--- never closes a goal — and this test pins the distinction: what matters is that
--- the goal is not proved, and the message says `unknown`, not `unsat`.
---
--- This is the known cost of guarding recursive datatypes; a longer timeout does
--- not help (verified at 30s), so it is genuine divergence rather than slowness.
-/-- error: crush: solver returned `unknown` -/
+-- A false goal about the guarded field must produce a counterexample, not close.
+/-- error: crush: the goal is not provable -/
 #guard_msgs(error, substring := true) in
 theorem must_not_close_nl_field : ∀ (n : Nat) (t : NList),
     NList.cons n t = NList.cons (n - 1) t := by crush
@@ -278,6 +267,22 @@ theorem nat_one_dvd (b : Nat) : 1 ∣ b := by crush
 #guard_msgs(error, substring := true) in
 theorem must_reject_custom_dvd : @Dvd.dvd Int noIntDvd 1 1 := by crush
 
+section
+local instance (priority := high) : Dvd Int := noIntDvd
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_scoped_dvd : (1 : Int) ∣ 1 := by
+  crush
+end
+
+-- A local instance must not become its own "canonical" baseline.
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_local_add [inst : HAdd Int Int Int] :
+    @HAdd.hAdd Int Int Int inst 1 2 = 3 := by
+  crush
+
 /-! ## Strings
 
 `str.len` counts codepoints, matching `String.length`. A Lean `\` is emitted as
@@ -292,6 +297,164 @@ theorem str_prefix : "abc".isPrefixOf "abcd" = true := by crush
 theorem str_assoc (a b c : String) : (a ++ b) ++ c = a ++ (b ++ c) := by crush
 theorem str_len_nonneg (s : String) : s.length ≥ 0 := by crush
 theorem str_cong (a b : String) (h : a = b) : a.length = b.length := by crush
+theorem str_beq_reflects_eq (a b : String) (h : a == b) : a = b := by crush
+theorem str_startsWith (a b : String) : (a ++ b).startsWith a = true := by crush
+theorem str_endsWith (a b : String) : (a ++ b).endsWith b = true := by crush
+theorem str_contains_self (s : String) : s.contains s = true := by crush
+theorem str_contains_append (a b : String) : (a ++ b).contains a = true := by crush
+theorem str_any_append (a b : String) : (a ++ b).any a = true := by crush
+theorem str_isEmpty_iff (s : String) : s.isEmpty = true ↔ s = "" := by crush
+
+-- The notation-level lowering must not assign `str.++` semantics to a custom
+-- `HAppend String String String` instance.
+@[reducible] def constantStringAppend : HAppend String String String :=
+  ⟨fun _ _ => "constant"⟩
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_custom_string_append :
+    @HAppend.hAppend String String String constantStringAppend "a" "b" = "ab" := by
+  crush
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_local_string_append [inst : HAppend String String String] :
+    @HAppend.hAppend String String String inst "a" "b" = "ab" := by
+  crush
+
+section
+local instance (priority := high) : HAppend String String String :=
+  constantStringAppend
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_scoped_string_append : ("a" ++ "b") = "ab" := by
+  crush
+end
+
+@[reducible] def falseStringBEq : BEq String :=
+  ⟨fun _ _ => false⟩
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_custom_string_beq :
+    @BEq.beq String falseStringBEq "a" "a" = true := by
+  crush
+
+section
+local instance (priority := high) : BEq String := falseStringBEq
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_scoped_string_beq : ("a" == "a") = true := by
+  crush
+end
+
+@[reducible] def reverseStringLT : LT String :=
+  ⟨fun a b => b.toList < a.toList⟩
+
+@[reducible] def falseStringLE : LE String :=
+  ⟨fun _ _ => False⟩
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_custom_string_lt :
+    @LT.lt String reverseStringLT "a" "b" := by
+  crush
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_custom_string_le :
+    @LE.le String falseStringLE "a" "a" := by
+  crush
+
+section
+local instance (priority := high) : LT String := reverseStringLT
+local instance (priority := high) : LE String := falseStringLE
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_scoped_string_lt : ("a" : String) < "b" := by
+  crush
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_scoped_string_le : ("a" : String) ≤ "a" := by
+  crush
+end
+
+@[reducible] def neverMatchesPrefix
+    (pattern : String) : String.Slice.Pattern.ForwardPattern pattern where
+  skipPrefix? := fun _ => none
+  startsWith := fun _ => false
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_custom_string_pattern :
+    @String.startsWith String "abc" "a" (neverMatchesPrefix "a") = true := by
+  crush
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_local_string_pattern
+    [inst : String.Slice.Pattern.ForwardPattern ("a" : String)] :
+    @String.startsWith String "abc" "a" inst = true := by
+  crush
+
+section
+local instance (priority := high) :
+    String.Slice.Pattern.ForwardPattern ("a" : String) :=
+  neverMatchesPrefix "a"
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_scoped_string_pattern : "abc".startsWith "a" = true := by
+  crush
+end
+
+@[reducible] def neverMatchesSuffix
+    (pattern : String) : String.Slice.Pattern.BackwardPattern pattern where
+  skipSuffix? := fun _ => none
+  endsWith := fun _ => false
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_custom_string_suffix_pattern :
+    @String.endsWith String "abc" "a" (neverMatchesSuffix "a") = true := by
+  crush
+
+-- `contains` has a separate searcher dictionary from `startsWith`. An arbitrary
+-- local searcher must remain uninterpreted even though its iterator machinery is
+-- the standard `String` implementation.
+open String.Slice.Pattern in
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_local_string_searcher
+    [inst : ToForwardSearcher ("a" : String) ForwardSliceSearcher] :
+    @String.contains String ForwardSliceSearcher
+      ForwardSliceSearcher.instIteratorIdSearchStep
+      (ForwardSliceSearcher.instIteratorLoopIdSearchStep (m := Id))
+      "abc" "a" inst = true := by
+  crush
+
+-- SMT-LIB 2.6 strings cannot contain codepoints above U+2FFFF. Consequently,
+-- `str.<=` would prove this false statement over SMT's smaller domain: Lean has
+-- the one-codepoint counterexample U+30000.
+example : ¬ (("𰀀" : String) ≤ "𯿿") := by decide
+
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_string_order_domain_mismatch (s : String) (h : s.length = 1) :
+    s ≤ "𯿿" := by
+  crush
+
+-- Lean's empty-pattern replacement is "xax", but SMT `str.replace_all` returns
+-- the input unchanged. A direct lowering would prove this false statement.
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_smt_replace_empty_semantics :
+    "a".replace "" "x" = "a" := by
+  crush
 
 -- A literal Lean backslash must not start an SMT-LIB Unicode escape.
 theorem str_escape_not_alias : ("\\u{61}" : String) ≠ "a" := by crush

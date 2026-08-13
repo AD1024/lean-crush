@@ -104,7 +104,7 @@ private def proveStep (target : Expr) (premises : Array Expr) (rule : String) :
       let gs ← Tactic.run mv.mvarId! (evalTactic (← `(tactic| (intros; $tac))))
       if gs.isEmpty then
         let assigned ← instantiateMVars mv
-        unless assigned.hasSorry || assigned.hasExprMVar do
+        unless assigned.hasSorry || assigned.hasMVar do
           -- Check the step's term here, before it enters the final proof. A tactic can
           -- produce a term the elaborator accepts but the kernel rejects (`decide` on `Int`
           -- literals emits an `eagerReduce` the kernel will not replay), which would poison

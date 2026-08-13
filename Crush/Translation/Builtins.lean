@@ -27,12 +27,11 @@ script. Mapping to a fresh name the solver has never seen yields an
 uninterpreted symbol (with its declaration), write a full handler and use the
 `declare` callback in `TranslationCtx`.
 
-Note: the built-in theory mappings themselves are *not* handlers — they live in the
-structural translator in `Crush/Translation/Translate.lean` for directness and
-because several need type-directed dispatch (`bitvecTerm?`, `stringTerm?`) that the
-head-constant handler shape does not express. A user handler still overrides them,
-so the extension surface is not second-class; it is simply not implemented by
-dogfooding.
+Core logical forms and heavily type-directed theory mappings remain in the
+structural translator in `Crush/Translation/Translate.lean`. Library-level defaults
+that fit head dispatch, including the supported `String` operations, dogfood
+`@[crush_lower]` in `Crush/Translation/DefaultLowerings.lean`. A general user handler
+still runs before both paths and can override either.
 -/
 
 namespace Crush.Builtins

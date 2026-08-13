@@ -225,20 +225,22 @@ theorem must_reject_stronger (g : ∀ (α : Type), List α → Nat)
     (h : ∀ (α : Type) (l : List α), g α l = 0) (l : List Int) : g Int l = 1 := by
   crush [h]
 
-/-! ## `crush.mono.fuel 0` disables the pass
+/-! ## `crush.mono.fuel 0` disables SMT monomorphization
 
-With the pass off, a polymorphic hypothesis is emitted at an abstract
-instantiation again and the ground goal is no longer provable. Selected equation
-lemmas are not used here because preprocessing can now rewrite their exact calls
-without monomorphization. -/
+Disabling SMT monomorphization does not disable checked Lean shortcuts. A selected
+polymorphic hypothesis whose conclusion directly matches the goal is applied before
+translation, so this simple case still closes without any axioms. The metaprogram tests
+above inspect generated instance counts independently of that shortcut. -/
 
 set_option crush.mono.fuel 0 in
-/-- error: crush -/
-#guard_msgs(error, substring := true) in
-theorem disabled_no_mono (f : ∀ (α : Type), List α → Nat)
+theorem disabled_mono_direct_reuse (f : ∀ (α : Type), List α → Nat)
     (h : ∀ (α : Type) (l : List α), f α l = 0) (l : List Int) :
     f Int l = 0 := by
   crush [h]
+
+/-- info: 'disabled_mono_direct_reuse' does not depend on any axioms -/
+#guard_msgs in
+#print axioms disabled_mono_direct_reuse
 
 /-! ## `crush.mono.certify` — the instance-certification guard
 

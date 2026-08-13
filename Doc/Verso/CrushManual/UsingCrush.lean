@@ -120,7 +120,9 @@ The built-in translator handles:
 
 * propositional and equality reasoning;
 * `Nat` and `Int` arithmetic, including canonical divisibility;
-* bitvectors, Booleans, strings, and supported inductive datatypes;
+* bitvectors, Booleans, strings (length, append, emptiness, and String-pattern
+  prefix/suffix/containment), and supported
+  inductive datatypes;
 * function values through defunctionalization, or native higher-order cvc5;
 * finite Lean arrays with logical length and SMT array data.
 

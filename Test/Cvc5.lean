@@ -45,6 +45,16 @@ theorem cvc5_nat_sub : ∀ n : Nat, n - 1 ≤ n := by crush
 
 theorem cvc5_string_assoc (a b c : String) : (a ++ b) ++ c = a ++ (b ++ c) := by crush
 
+theorem cvc5_string_patterns (a b : String) :
+    (a ++ b).startsWith a = true ∧
+    (a ++ b).endsWith b = true ∧
+    (a ++ b).contains a = true ∧
+    (a ++ b).any a = true := by
+  crush
+
+theorem cvc5_string_empty (a b : String) :
+    (a ++ b).isEmpty = (a.isEmpty && b.isEmpty) := by crush
+
 /-! ## Native higher-order mode (`crush.ho.mode native`)
 
 Instead of defunctionalizing, the arrow type stays a first-class `(-> Int Int)` sort

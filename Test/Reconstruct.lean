@@ -41,6 +41,201 @@ run_meta do
       if ← goal.mvarId!.isAssigned then
         throwError "failed isolated reconstruction assigned the original goal"
 
+-- Explicitly selected backward rules run before SMT, but their generated premises
+-- may use only other selected facts. An omitted ambient proposition must remain
+-- unavailable even though the original metavariable was created in that context.
+run_meta do
+  Lean.Meta.withLocalDeclD `p (Lean.mkSort .zero) fun p =>
+    Lean.Meta.withLocalDeclD `q (Lean.mkSort .zero) fun q =>
+      Lean.Meta.withLocalDeclD `hp p fun hp => do
+        let ruleType ← Lean.mkArrow p q
+        Lean.Meta.withLocalDeclD `rule ruleType fun rule => do
+          let ruleFact : Fact := {
+            prop := ruleType
+            proof := some rule
+            descr := "selected rule"
+            instantiateTerms := true
+          }
+          let omittedGoal ← Lean.Meta.mkFreshExprMVar q
+          let omittedClosed ← IO.mkRef false
+          discard <| Lean.Elab.Term.TermElabM.run' <|
+            Lean.Elab.Tactic.run omittedGoal.mvarId! do
+              omittedClosed.set (← tryPreReconstruct omittedGoal.mvarId! #[ruleFact])
+          if ← omittedClosed.get then
+            throwError "pre-SMT selected-rule reconstruction used an omitted ambient fact"
+          if ← omittedGoal.mvarId!.isAssigned then
+            throwError "failed selected-rule reconstruction assigned the original goal"
+
+          let premiseFact : Fact := {
+            prop := p
+            proof := some hp
+            descr := "selected premise"
+          }
+          let selectedGoal ← Lean.Meta.mkFreshExprMVar q
+          let selectedClosed ← IO.mkRef false
+          discard <| Lean.Elab.Term.TermElabM.run' <|
+            Lean.Elab.Tactic.run selectedGoal.mvarId! do
+              selectedClosed.set
+                (← tryPreReconstruct selectedGoal.mvarId! #[ruleFact, premiseFact])
+          unless ← selectedClosed.get do
+            throwError "pre-SMT selected-rule reconstruction did not apply a direct helper"
+          let proof ← Lean.instantiateMVars (Lean.mkMVar selectedGoal.mvarId!)
+          if proof.hasSorry || proof.hasMVar then
+            throwError "pre-SMT selected-rule reconstruction produced an incomplete proof"
+          Lean.Meta.check proof
+
+/-! ## Policy-independent constructor witnesses
+
+Witness synthesis runs before SMT even under `trust`: it produces a checked Lean proof,
+not a solver axiom. These predicates intentionally hide constructor existence from SMT,
+whose uninterpreted fallback otherwise admits a model where no list/tree satisfies them. -/
+
+@[reducible]
+def firstIs {α : Type} (value : α) : List α → Prop
+  | [] => False
+  | head :: _ => head = value
+
+set_option crush.trust "trust" in
+theorem pre_smt_list_witness {α : Type} (value : α) :
+    ∃ values : List α, firstIs value values := by
+  crush
+
+/-- info: 'pre_smt_list_witness' does not depend on any axioms -/
+#guard_msgs in
+#print axioms pre_smt_list_witness
+
+inductive WitnessTree (α : Type) where
+  | empty
+  | node (value : α) (rest : WitnessTree α)
+
+@[reducible]
+def rootIs {α : Type} (value : α) : WitnessTree α → Prop
+  | .empty => False
+  | .node root _ => root = value
+
+set_option crush.trust "trust" in
+theorem pre_smt_downstream_witness {α : Type} (value : α) :
+    ∃ tree : WitnessTree α, rootIs value tree := by
+  crush
+
+/-- info: 'pre_smt_downstream_witness' does not depend on any axioms -/
+#guard_msgs in
+#print axioms pre_smt_downstream_witness
+
+@[reducible]
+def pathLike {α : Type} (next : α → α) (start : α) : List α → α → Prop
+  | [], finish => start = finish
+  | head :: tail, finish =>
+      start = head ∧ pathLike next (next head) tail finish
+
+@[reducible]
+def validPathLike {α : Type} (next : α → α) (start : α)
+    (values : List α) (finish : α) : Prop :=
+  pathLike next start values finish ∧
+    match values with
+    | [] => True
+    | _ :: tail => tail = []
+
+set_option crush.trust "trust" in
+theorem pre_smt_nested_reducible_witness {α : Type} (next : α → α) (start : α) :
+    ∃ values : List α, validPathLike next start values (next start) := by
+  crush
+
+/-- info: 'pre_smt_nested_reducible_witness' does not depend on any axioms -/
+#guard_msgs in
+#print axioms pre_smt_nested_reducible_witness
+
+@[reducible]
+def nonzeroPath (next : Int → Int) (start : Int) : List Int → Int → Prop
+  | [], finish => start = finish
+  | head :: tail, finish =>
+      head ≠ 0 ∧ start = head ∧ nonzeroPath next (next head) tail finish
+
+@[reducible]
+def listDistinct : List Int → Prop
+  | [] => True
+  | head :: tail => (∀ value, value ∈ tail → value ≠ head) ∧ listDistinct tail
+
+@[reducible]
+def distinctNonzeroPath (next : Int → Int) (start : Int)
+    (values : List Int) (finish : Int) : Prop :=
+  nonzeroPath next start values finish ∧ listDistinct values
+
+set_option crush.trust "trust" in
+theorem pre_smt_singleton_witness (weight : Int → Nat) (next : Int → Int)
+    (start : Int) (bound : Nat) (hstart : start ≠ 0)
+    (hweight : ¬ weight start ≥ bound) :
+    ∃ values : List Int,
+      (nonzeroPath next start values (next start) ∧ listDistinct values) ∧
+        ∀ value ∈ values, weight value < bound := by
+  crush
+
+/-- info: 'pre_smt_singleton_witness' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms pre_smt_singleton_witness
+
+set_option crush.trust "trust" in
+theorem pre_smt_split_impossible_find (next : Int → Int) (values : List Int)
+    (found : Int) (hpath : nonzeroPath next 0 values 0)
+    (hfind : values.find? (fun _ => true) = some found) :
+    found = 0 ∧ nonzeroPath next 0 (values.erase found) 0 := by
+  crush
+
+/-- info: 'pre_smt_split_impossible_find' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms pre_smt_split_impossible_find
+
+set_option crush.trust "trust" in
+theorem pre_smt_split_find_and_erase (weight : Int → Nat) (next : Int → Int)
+    (start found : Int) (bound : Nat) (values : List Int)
+    (hpath : nonzeroPath next start values 0) (hdistinct : listDistinct values)
+    (hstart : start ≠ 0)
+    (hweight : weight start ≥ bound)
+    (hfind : values.find? (fun value => decide (weight value ≥ bound)) = some found) :
+    start = found ∧
+      distinctNonzeroPath next (next start) (values.erase found) 0 := by
+  crush
+
+/-- info: 'pre_smt_split_find_and_erase' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms pre_smt_split_find_and_erase
+
+@[reducible]
+def nilRequires (p : Prop) : List Nat → Prop
+  | [] => p
+  | _ :: _ => False
+
+set_option crush.trust "trust" in
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem pre_smt_witness_respects_restriction (p : Prop) (hp : p) :
+    ∃ values : List Nat, nilRequires p values := by
+  crush []
+
+set_option crush.trust "trust" in
+theorem pre_smt_witness_uses_selected (p : Prop) (hp : p) :
+    ∃ values : List Nat, nilRequires p values := by
+  crush [hp]
+
+/-- info: 'pre_smt_witness_uses_selected' does not depend on any axioms -/
+#guard_msgs in
+#print axioms pre_smt_witness_uses_selected
+
+/-! ## Policy-independent local invariant reuse
+
+VC generators commonly introduce a universally quantified invariant and then ask for one
+of its instances. The pre-SMT pass should apply that local rule directly rather than send a
+trivial but potentially nonlinear quantified identity to the solver. -/
+
+set_option crush.trust "trust" in
+theorem pre_smt_local_invariant {α : Type} (p : α → Prop)
+    (invariant : ∀ value, p value) (value : α) : p value := by
+  crush
+
+/-- info: 'pre_smt_local_invariant' does not depend on any axioms -/
+#guard_msgs in
+#print axioms pre_smt_local_invariant
+
 /-! ## Reconstruction succeeds — no trust axiom
 
 Each of these is closed by a real Lean proof term. The `#guard_msgs` blocks pin the
@@ -61,7 +256,7 @@ theorem linear_arith (x y : Int) (h : x ≤ y) : x < y + 1 := by crush
 #print axioms linear_arith
 
 theorem propositional (p q : Prop) (hp : p) (hpq : p → q) : q := by crush
-/-- info: 'propositional' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'propositional' does not depend on any axioms -/
 #guard_msgs in
 #print axioms propositional
 
@@ -103,7 +298,7 @@ theorem string_assoc (a b c : String) : (a ++ b) ++ c = a ++ (b ++ c) := by crus
 -- against the original higher-order statement.
 theorem higher_order (g : (Int → Int) → Int) (h : ∀ (f : Int → Int), g f = f 0) :
     g (fun x => x + 1) = 1 := by crush
-/-- info: 'higher_order' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'higher_order' does not depend on any axioms -/
 #guard_msgs in
 #print axioms higher_order
 
@@ -157,32 +352,58 @@ theorem eval_string_append (s t : String) (h : s ++ t = "abc") :
 
 end Succeeds
 
+/-! ## Datatype-guided nonlinear reconstruction
+
+The solver selects the relevant nonlinear facts. Generic constructor splitting then exposes
+the two `Int` constructors, after which the branch-local Lean finishers replay the result. -/
+
+section Nonlinear
+set_option crush.trust "reconstruct"
+
+theorem nonlinear_replayed (x : Int) (h : x * x = 4) (h2 : x > 0) : x = 2 := by
+  crush
+/-- info: 'nonlinear_replayed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms nonlinear_replayed
+
+end Nonlinear
+
+/-! ## Solver skolemization and finite datatype replay -/
+
+section Structured
+set_option crush.trust "reconstruct"
+
+theorem dependentChoiceReplayed {α β : Type} (p : α → β → Prop)
+    (h : ∀ x, ∃ y, p x y) : ∃ f : α → β, ∀ x, p x (f x) := by
+  crush
+
+inductive ReplayColor where
+  | red
+  | green
+  | ultraviolet
+
+theorem enumPigeonholeReplayed (a b c d : ReplayColor) :
+    a = b ∨ a = c ∨ a = d ∨ b = c ∨ b = d ∨ c = d := by
+  crush
+
+theorem emptyEliminated (x y : Empty) : x = y := by
+  crush
+
+end Structured
+
 /-! ## Reconstruction fails — the boundary
 
-The finishers cannot replay everything the solver can prove. Nonlinear arithmetic
-and finite-domain exhaustiveness (enumeration pigeonhole) are the two shapes found
-so far. Under `reconstruct` this is an *error*, not a silent fallback — the whole
-point of that policy is that the axiom is never used. -/
+Constructor splitting and linear finishers still cannot replay every nonlinear integer
+fact. Under `reconstruct` this is an *error*, not a silent fallback — the whole point of
+that policy is that the axiom is never used. -/
 
 section Fails
 set_option crush.trust "reconstruct"
 
--- Nonlinear: the solver decides `x * x = 4 ∧ x > 0 → x = 2`, `omega` is linear-only
--- and `grind` does not find it.
 /-- error: crush: solver reported `unsat`, but reconstruction failed -/
 #guard_msgs(error, substring := true) in
-theorem nonlinear_not_replayed (x : Int) (h : x * x = 4) (h2 : x > 0) : x = 2 := by
+theorem nonlinear_impossibility_not_replayed (x : Int) (h : x * x = 2) : False := by
   crush
-
-inductive Three where | a | b | c
-
--- Pigeonhole over a three-constructor enumeration. The solver gets this from
--- datatype exhaustiveness + distinctness; the finishers would need a case split the
--- core does not hand them (note the core here is *just* the negated goal).
-/-- error: crush: solver reported `unsat`, but reconstruction failed -/
-#guard_msgs(error, substring := true) in
-theorem pigeonhole_not_replayed (w x y z : Three) :
-    w = x ∨ w = y ∨ w = z ∨ x = y ∨ x = z ∨ y = z := by crush
 
 end Fails
 
@@ -204,7 +425,8 @@ theorem fallback_not_needed (x y : Int) (h1 : x = y) (h2 : y = 3) : x = 3 := by 
 -- the fallback being silent.
 /-- warning: crush: solver reported `unsat`, but no finishing tactic could replay it -/
 #guard_msgs(warning, substring := true) in
-theorem fallback_used (x : Int) (h : x * x = 4) (h2 : x > 0) : x = 2 := by crush
+theorem fallback_used (x : Int) (h : x * x = 2) : False := by
+  crush
 
 /-- info: 'fallback_used' depends on axioms: [crushSorry] -/
 #guard_msgs in
@@ -246,20 +468,19 @@ theorem default_trusts (x y : Int) (h1 : x = y) (h2 : y = 3) : x = 3 := by crush
 #guard_msgs in
 #print axioms default_trusts
 
--- The nonlinear goal no finisher can replay: under `reconstruct` this is an error, under
--- the default it closes on trust.
+-- Even a reconstructable nonlinear goal uses the axiom under the default policy.
 theorem default_trusts_nonlinear (x : Int) (h : x * x = 4) (h2 : x > 0) : x = 2 := by
   crush
 /-- info: 'default_trusts_nonlinear' depends on axioms: [crushSorry] -/
 #guard_msgs in
 #print axioms default_trusts_nonlinear
 
--- Asking for `reconstruct` on that same goal errors rather than falling back, so the
--- stricter policy is still available and still strict.
+-- A nonlinear goal outside the bounded reconstruction search errors rather than falling
+-- back, so the stricter policy remains strict.
 /-- error: crush: solver reported `unsat`, but reconstruction failed -/
 #guard_msgs(error, substring := true) in
 set_option crush.trust "reconstruct" in
-theorem reconstruct_errors_not_trusts (x : Int) (h : x * x = 4) (h2 : x > 0) : x = 2 := by
+theorem reconstruct_errors_not_trusts (x : Int) (h : x * x = 2) : False := by
   crush
 
 end DefaultPolicy

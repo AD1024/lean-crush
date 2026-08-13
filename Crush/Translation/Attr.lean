@@ -68,21 +68,40 @@ A lowering may still return `none` when the application shape, type, or typeclas
 instance is not one it can encode soundly. -/
 abbrev LoweringHandler := TranslationHandler
 
-/-- Whether argument `i` is the canonical instance selected by typeclass synthesis.
+/-- Whether argument `i` is the ambient global instance selected by typeclass synthesis.
 
-Custom lowerings for overloaded operations must check this before assigning the
-standard SMT meaning. A user can explicitly pass a different legal instance, in which
-case the operation denotes different Lean code and must be declined rather than
-mistranslated. -/
+Local instances are disabled while synthesizing the baseline; otherwise a local
+override would compare equal to itself. A scoped or imported high-priority global
+instance still becomes the baseline. Therefore, a lowering that models one particular
+library dictionary should use `hasExpectedInstance` instead. -/
 def TranslationCtx.hasCanonicalInstance (ctx : TranslationCtx) (i : Nat) :
     TranslateM Bool := do
   let some inst := ctx.args[i]? | return false
   let instTy ← inferType inst
   try
-    let canonical ← synthInstance instTy
+    let lctx ← getLCtx
+    let canonical ← withLCtx lctx {} do synthInstance instTy
     isDefEq inst canonical
   catch _ =>
     return false
+
+/-- Whether argument `i` is definitionally equal to the exact instance dictionary
+whose semantics a lowering implements. This is the sound check for assigning a fixed
+library operation its SMT meaning, even when users register higher-priority instances. -/
+def TranslationCtx.hasExpectedInstance
+    (ctx : TranslationCtx) (i : Nat) (expected : Expr) : TranslateM Bool := do
+  let some actual := ctx.args[i]? | return false
+  isDefEq actual expected
+
+/-- Whether argument `i` has the given declaration head.
+
+Use this instead of full definitional equality only when the standard dictionary has
+a unique declaration head and its dependent parameters contain elaboration-specific
+proof predicates, as with Array `GetElem`. -/
+def TranslationCtx.hasInstanceHead (ctx : TranslationCtx) (i : Nat) (expected : Name) : Bool :=
+  match ctx.args[i]? with
+  | some actual => actual.getAppFn.isConstOf expected
+  | none => false
 
 /-- A user **sort** handler: claims a Lean *type* and maps it to an SMT sort. The
 `fn`/`args` of the `TranslationCtx` are the type's head constant and its arguments

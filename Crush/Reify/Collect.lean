@@ -86,6 +86,25 @@ structure FactCollection where
   selectedPremises : Nat := 0
   deriving Inhabited
 
+/-- Whether a library theorem can be used as a backward rule for the current goal.
+
+Library suggestion engines optimize for recall and may return propositions that merely
+share vocabulary with the goal. Sending those propositions to SMT is both expensive and,
+for highly polymorphic higher-order lemmas, can create irrelevant encodings. This
+speculative `apply` check retains rules whose conclusions really unify with the goal and
+rolls back every metavariable assignment it makes. -/
+private def premiseAppliesToGoal (goal : MVarId) (declName : Name) : MetaM Bool :=
+  goal.withContext do
+    let saved ← saveState
+    try
+      let proof ← mkConstWithFreshMVarLevels declName
+      discard <| goal.apply proof
+      restoreState saved
+      return true
+    catch _ =>
+      restoreState saved
+      return false
+
 /-- Collect assertable facts from `goal` under `hints`, plus the (negated) goal.
 Returns the facts and leaves the goal untouched (the tactic decides how to close
 it). Only `Prop` propositions are collected; the goal's type is negated. -/
@@ -146,8 +165,12 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
     -- the same monomorphization path as explicit hints.
     let mut selectedPremises := 0
     if premiseMax > 0 && hints.allowPremiseSelection then
+      -- Selectors are allowed to ignore `Config.filter`, so ask for a small surplus and
+      -- enforce applicability ourselves below. This prevents irrelevant high-ranked
+      -- suggestions from crowding every usable rule out of the requested prefix.
+      let candidateMax := min 128 (premiseMax * 4)
       let suggestions ← Lean.LibrarySuggestions.select goal {
-        maxSuggestions := premiseMax
+        maxSuggestions := candidateMax
         caller := some "crush"
         filter := fun name => do
           let some info := (← getEnv).find? name | return false
@@ -155,6 +178,7 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
       for suggestion in suggestions do
         if selectedPremises >= premiseMax then break
         if seenPremises.contains suggestion.name then continue
+        unless ← premiseAppliesToGoal goal suggestion.name do continue
         seenPremises := seenPremises.insert suggestion.name
         let proof ← mkConstWithFreshMVarLevels suggestion.name
         let ty ← inferType proof
@@ -169,12 +193,16 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
     -- Equation lemmas from `u[…]`/`d[…]` hints. Fresh level metavariables so a
     -- universe-polymorphic equation lemma instantiates at use.
     let mut eqnLemmas := hints.eqnLemmas
+    let mut rewriteLemmas := hints.eqnLemmas
     -- Auto-unfold: equation lemmas of `@[crush_unfold]`/`@[crush_defeq]` definitions
     -- reachable from the collected constants. Relevance-filtered so an unrelated marked
     -- definition contributes nothing (see `relevantAutoUnfoldLemmas`). Explicit hints
     -- still win — a name already requested by `u[…]`/`d[…]` is de-duplicated below.
     if autoUnfold then
       eqnLemmas := eqnLemmas ++ (← relevantAutoUnfoldLemmas seeds)
+      rewriteLemmas := eqnLemmas ++ (← relevantReducibleRewriteLemmas seeds)
+    else
+      rewriteLemmas := eqnLemmas
     let mut seenEqn : Std.HashSet Name := {}
     for lemName in eqnLemmas do
       if seenEqn.contains lemName then continue
@@ -193,7 +221,7 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
       proof := none
       descr := "negated goal"
       negated := true }
-    return { facts, rewriteLemmas := eqnLemmas, selectedPremises }
+    return { facts, rewriteLemmas, selectedPremises }
 
 /-- Compatibility wrapper returning only the collected fact array. -/
 def collectFacts (goal : MVarId) (hints : Hints := {}) (autoUnfold : Bool := true) :

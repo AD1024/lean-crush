@@ -66,18 +66,14 @@ values with no Lean counterpart. The monomorphizer composes the `≥0` guard thr
 type parameter, so the phantom values are excluded — the point being that a *true*
 hypothesis about the field must not collapse to `False`.
 
-`Tree` is **recursive** *and* has a guarded `Nat` field, so the emitted `wf_Tree` axiom
-is recursive, and z3 goes into the same instantiation loop documented for `NList` in
-`Test/Theories.lean` (`must_not_close_nl_field`). The outcome is therefore `unknown`
-(a timeout), not a countermodel — which is still **sound** (`unknown` never closes a
-goal), and is the known completeness cost of guarding recursive datatypes rather than
-a monomorphization bug: the encoding is correct, the solver just cannot discharge it.
-The `crush.timeout` here is kept short so the test does not hang the build. -/
+`Tree` is **recursive** *and* has a guarded `Nat` field. Its `wf_Tree` predicate is
+emitted with `define-fun-rec`, not as a quantified defining axiom, so z3 can now find
+the expected countermodel without an instantiation loop. -/
 
 set_option crush.timeout 3 in
-/-- error: crush: solver returned `unknown` -/
+/-- error: crush: the goal is not provable -/
 #guard_msgs(error, substring := true) in
-theorem tree_nat_recursive_wf_diverges
+theorem tree_nat_recursive_wf_rejects_false
     (h : ∀ t : Tree Nat, ∀ l r n, t = Tree.node l n r → n ≥ 0) : False := by crush
 
 /-- A **non-recursive** parametric type with a `Nat` field guards cleanly and without

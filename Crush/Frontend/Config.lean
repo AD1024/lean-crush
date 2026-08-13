@@ -129,8 +129,7 @@ register_option crush.trust : TrustMode := {
   defValue := TrustMode.trust
   descr := "How to discharge the goal on `unsat`: trust (default), reconstruct, or \
             reconstructOrTrust. The default closes the goal with the `crushSorry` axiom, \
-            trusting the solver and the translation, which is what every deployed hammer \
-            does and is the fastest path. Set `reconstruct` to demand a kernel-checked \
+            trusting the solver and the translation. Set `reconstruct` to demand a kernel-checked \
             proof and error if none is found (so no axiom is ever used), or \
             `reconstructOrTrust` to try that first and fall back with a warning. Any \
             theorem closed under `trust` names `crushSorry` in `#print axioms`."

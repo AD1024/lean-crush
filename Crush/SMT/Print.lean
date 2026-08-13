@@ -239,6 +239,14 @@ def commandToString : Command → String
     let names := args.toList.map (·.1)
     s!"({kw} {quoteSymbol n} (" ++ String.intercalate " " argStr ++ s!") {res} " ++
       termToString names.reverse body ++ ")"
+  | .defFunsRec defs =>
+    let signatures := defs.toList.map fun d =>
+      let args := d.args.toList.map fun (nm, s) => s!"({quoteSymbol nm} {s})"
+      s!"({quoteSymbol d.name} (" ++ String.intercalate " " args ++ s!") {d.resSort})"
+    let bodies := defs.toList.map fun d =>
+      termToString (d.args.toList.map (·.1)).reverse d.body
+    "(define-funs-rec (" ++ String.intercalate " " signatures ++ ") (" ++
+      String.intercalate " " bodies ++ "))"
   | .declDatatypes infos =>
     let decls := infos.toList.map (fun (n, ar, _) => s!"({quoteSymbol n} {ar})")
     let bodies := infos.toList.map (fun (_, _, d) => datatypeDeclToString d)

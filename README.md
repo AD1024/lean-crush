@@ -5,6 +5,9 @@ the proof for you.
 
 Read the [lean-crush user manual](https://ad1024.github.io/lean-crush/) for installation,
 configuration, extension APIs, and complete examples.
+Maintainers should also read the
+[optimization and search-heuristic guide](Doc/OPTIMIZATIONS.md) before changing
+reconstruction or instantiation bounds.
 
 Lean's own automation is strong at goals that follow by rewriting and case analysis. It is
 weaker at goals that are really just *constraint solving* — chains of arithmetic
@@ -105,6 +108,11 @@ def myFn : Nat → Nat
   | n + 1 => myFn n + 2
 ```
 
+Predicates marked with Lean's standard `@[reducible]` attribute are also normalized
+automatically, but their equations are not added as quantified SMT facts. Recursive
+predicates use only constructor-specific rewrite equations; use `@[crush_unfold]`
+when SMT also needs their quantified fallback.
+
 You can also enable automatic unfolding for definitions from Lean or another library:
 
 ```lean
@@ -148,6 +156,27 @@ theorem checked (x y : Int) (h1 : x = y) (h2 : y = 3) : x = 3 := by crush
 Under the default policy that same command reports `[Crush.crushSorry]` instead, which is how
 you tell the two apart at a glance.
 
+If SMT can prove a domain-specific fact but checked reconstruction needs a bridge theorem,
+register that theorem for bounded reconstruction search:
+
+```lean
+inductive Phase where
+  | initial
+  | next (previous : Phase)
+
+def Advances (source target : Phase) : Prop :=
+  target = .next source
+
+@[crush_reconstruct]
+theorem advancesNext (phase : Phase) : Advances phase (.next phase) :=
+  rfl
+```
+
+`@[crush_reconstruct]` affects only kernel-checked replay. It does not send the theorem to
+SMT; use `crush [...]`, `@[crush_unfold]`, or a lowering when the solver also needs the
+fact's semantics. Rules are indexed by their conclusion and searched to a fixed depth, so
+rules for unrelated datatypes are not added wholesale to `grind`.
+
 Other behaviour is controlled by `set_option`s (`crush.backend`, `crush.timeout`, and
 others); each carries its own documentation where it is declared.
 
@@ -180,10 +209,12 @@ proof from it takes one of two routes:
   mattered, and a Lean tactic redoes the argument from just those. This needs no
   certificate, so it works with any backend.
 
-Beyond plain logic and arithmetic, lean-crush covers bitvectors, strings, and your own
-inductive types, and it keeps functions-as-arguments alive all the way to the solver — the
-case where Lean-to-SMT bridges usually give up. Polymorphic lemmas are specialized to the
-types a goal mentions, so a general lemma still applies to your concrete instance.
+Beyond plain logic and arithmetic, lean-crush covers bitvectors, string length,
+append, emptiness, String-pattern prefix/suffix/containment, and your own
+inductive types. It keeps
+functions-as-arguments alive all the way to the solver — the case where Lean-to-SMT
+bridges usually give up. Polymorphic lemmas are specialized to the types a goal
+mentions, so a general lemma still applies to your concrete instance.
 
 You can also teach it to translate your own constants, which is how the built-in theory
 mappings are themselves written:
@@ -243,6 +274,12 @@ indexing, `set`/`setIfInBounds`/`set!`, `push`, `pop`, `swap`/
   state the needed property directly, or add a custom lowering. Array operations that
   copy a symbolic range (`append`, `extract`, `map`, `filter`) still need lemmas or custom
   lowerings; unlike `push`/`pop`, they require quantified element-wise encodings.
+  String replacement, character-pattern search, slice/position operations,
+  numeric parsing, and lexicographic order are also untranslated: Lean's
+  empty-pattern replacement differs from SMT `str.replace_all`, symbolic `Char`
+  values do not yet have a codepoint encoding, positions are UTF-8 byte offsets,
+  numeric parsers accept underscores, and SMT-LIB's string alphabet ends at
+  `U+2FFFF` while Lean's does not.
 - **A goal is only as strong as its premises.** A missing premise makes the query unprovable,
   which surfaces as a *timeout* — so check the goal actually follows before blaming the solver.
 - **Reconstruction is narrower than solving.** Under `crush.trust "reconstruct"`, some goals
@@ -281,6 +318,15 @@ Complete downstream integrations are available in the
 [Velvet `crush-backend` branch](https://github.com/AD1024/velvet/tree/crush-backend).
 They show lean-crush wired into verification-condition generation and used on
 real array, arithmetic, and quantified proof obligations.
+
+To compare reconstructed Crush with lean-auto on LeanHammer, Loom, Cashmere, and
+Velvet, run `scripts/benchmark-corpora.sh`. It checks out the configured auto and
+Crush branches in temporary worktrees, overlays the local lean-crush build, and
+writes per-VC timing, coverage, metadata, and matched-goal summaries under
+`BenchmarkResults/`. Set `Z3_BIN`/`CVC5_BIN` when the solvers are not on `PATH`;
+the script preserves existing branch-specific solver binaries and seeds missing
+ones into Loom's build directories. `RUN_AUTO=false` or `RUN_CRUSH=false` selects
+one backend for focused profiling.
 
 The [Cedar `crush-backend` branch](https://github.com/AD1024/cedar-spec/tree/crush-backend)
 contains a

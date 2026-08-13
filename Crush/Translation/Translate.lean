@@ -94,26 +94,44 @@ def getAppFnArgs' (e : Expr) : Expr × Array Expr :=
 def isNatTyped (e : Expr) : TranslateM Bool := do
   return (← whnf (← inferType e)).isConstOf ``Nat
 
-/-- Whether the instance argument at position `i` of the application `e` is the one
-instance synthesis would pick.
+/-- Whether the instance argument at position `i` of the application `e` is the
+canonical global instance.
 
 Recognizing `HAdd.hAdd _ _ _ inst a b` as SMT `+` assumes `inst` is the *standard*
 instance. A user can supply another — `⟨fun _ _ => 99⟩` is a legal `HAdd Int Int Int`
 — and then `1 + 2` is `99`, not `3`. Matching on the head alone therefore imports
 arithmetic that does not hold, and lets the solver prove false goals.
 
-Returns `false` when synthesis fails, so an exotic instance degrades to an
-uninterpreted symbol rather than being silently mistranslated. -/
+Local instances are disabled while synthesizing the baseline. Otherwise a local
+override is exactly what synthesis picks and would compare equal to itself. Returns
+`false` when synthesis fails, so an exotic instance degrades to an uninterpreted
+symbol rather than being silently mistranslated. -/
 def hasCanonicalInstance (e : Expr) (i : Nat) : TranslateM Bool := do
   let args := e.getAppArgs
   let some inst := args[i]? | return false
   let instTy ← inferType inst
   try
-    let canon ← synthInstance instTy
+    let lctx ← getLCtx
+    let canon ← withLCtx lctx {} do synthInstance instTy
     isDefEq inst canon
   catch _ =>
     -- Synthesis failed: we cannot confirm the instance is standard, so treat it as
     -- non-canonical and let the term degrade to an uninterpreted symbol.
+    return false
+
+/-- Whether `inst` is accompanied by a `LawfulBEq` proof for `carrier`.
+
+Unlike arithmetic dictionaries, a nonstandard `BEq` can still be translated as
+SMT equality when the local context proves that it coincides with propositional
+equality. Without this check, `⟨fun _ _ => false⟩ : BEq α` would make `a == a`
+translate to the true SMT equation `a = a`. -/
+def hasLawfulBEq (carrier inst : Expr) : TranslateM Bool := do
+  let carrier ← instantiateMVars carrier
+  let some level := (← getLevel carrier).dec | return false
+  try
+    let _ ← synthInstance (mkApp2 (mkConst ``LawfulBEq [level]) carrier inst)
+    return true
+  catch _ =>
     return false
 
 /-- A supported inductive we can emit as an SMT datatype: enumerations, simple
@@ -296,7 +314,7 @@ def finiteArrayElem? (ty : Expr) : MetaM (Option Expr) := do
   return some elem
 
 /-- Whether `e` is an application of an overloaded arithmetic/comparison operator
-whose instance argument is **not** the one instance synthesis would pick.
+whose instance argument is **not** the canonical global instance.
 
 The recognizers for `+`, `*`, `≤`, `max`, … match on the head symbol, which commits
 them to the standard interpretation of that symbol. A non-standard instance means the
@@ -758,8 +776,8 @@ mutual
         if ← isEmptyType elem then (smt| (= $len 0)) else (smt| (>= $len 0))
       let body := (smt| (and $lengthWF
         $(SMT.Term.forallE #[(iName, intSort)] pointwise)))
-      TranslateM.emitCommand (.assert (.forallE #[(xName, sort)]
-        (smt| (= $(SMT.Term.app (.symb (wfSymbol sortName)) #[x]) $body))))
+      TranslateM.emitCommand (.defFun false (wfSymbol sortName) #[(xName, sort)]
+        (.app (.symb "Bool") #[]) body)
     return enc
 
   /-- Declare a supported inductive as an SMT datatype (idempotent); return its
@@ -829,14 +847,18 @@ mutual
       dtInfos := dtInfos.push (mSort, 0, { ctors := ctorDecls })
       memberWF := memberWF.push (mSort, wfParts)
     TranslateM.emitCommand (.declDatatypes dtInfos)
-    -- Declare *all* wf predicates before emitting *any* axiom, so a member's axiom
-    -- can reference a sibling's `wf` (they are mutually recursive too).
-    let mut needAxiom : Array (String × Array (String × Array (String × Expr))) := #[]
+    -- Reserve all predicates before building any body, then define the whole mutual
+    -- block with `define-funs-rec`. Quantified equations for recursive predicates make
+    -- solvers return `unknown` even on unrelated ground queries.
+    let mut needDef : Array (String × Array (String × Array (String × Expr))) := #[]
     for (mSort, wfParts) in memberWF do
       if ← declDatatypeWF mSort then
-        needAxiom := needAxiom.push (mSort, wfParts)
-    for (mSort, wfParts) in needAxiom do
-      emitDatatypeWFAxiom mSort wfParts
+        needDef := needDef.push (mSort, wfParts)
+    let mut wfDefs : Array FunDef := #[]
+    for (mSort, wfParts) in needDef do
+      wfDefs := wfDefs.push (← datatypeWFDef mSort wfParts)
+    unless wfDefs.isEmpty do
+      TranslateM.emitCommand (.defFunsRec wfDefs)
     let some (_, nSort) := memberSorts.find? (·.1 == n)
       | throwError "crush: internal — `{n}` missing from its own mutual block"
     return nSort
@@ -870,35 +892,30 @@ mutual
         args.anyM fun a => do
           needsWFGuard (← inferType a) visiting
 
-  /-- Declare `wf_T` (returns whether it was newly declared, i.e. still needs its
-  axiom). The `wf` predicate carves the Lean type's image out of its freely-generated
-  SMT sort; its axiom (`emitDatatypeWFAxiom`) is stated in *selector* form,
+  /-- Reserve `wf_T` (returns whether it was newly reserved, i.e. still needs its
+  definition). The `wf` predicate carves the Lean type's image out of its freely-generated
+  SMT sort; its definition (`datatypeWFDef`) is stated in *selector* form,
 
   ```
-  (declare-fun wf_T (T) Bool)
-  (assert (forall ((x T)) (= (wf_T x)
-    (and (=> ((_ is C₁) x) ⟨guards on C₁'s fields of x⟩) …))))
+  (define-fun-rec wf_T ((x T)) Bool
+    (and (=> ((_ is C₁) x) ⟨guards on C₁'s fields of x⟩) …))
   ```
 
   which z3 handles far better than the constructor-applied form. When no field needs a
   guard the predicate is constantly `true`, so the quantifier guard costs nothing.
 
-  Declaration and axiom are split so a mutual block can declare *all* members' `wf`
-  before emitting any axiom — a member's axiom may reference a sibling's `wf`.
+  Reservation and body construction are split so a mutual block can place all members in
+  one `define-funs-rec` command — a member's body may reference a sibling's `wf`.
   `declareDatatype` drives the two in that order across the whole block. -/
   partial def declDatatypeWF (sortName : String) : TranslateM Bool := do
     let wf := wfSymbol sortName
     if ← declaredFun wf then return false
     markFunDeclared wf
-    let sort := SSort.app (.symb sortName) #[]
-    TranslateM.emitCommand (.declFun wf #[sort] (.app (.symb "Bool") #[]))
     return true
 
-  /-- Emit `wf_T`'s defining axiom. `wf_T` must already be declared
-  (`declDatatypeWF`); this is separated so sibling `wf` predicates in a mutual
-  block are all in scope before any axiom references them. -/
-  partial def emitDatatypeWFAxiom (sortName : String)
-      (parts : Array (String × Array (String × Expr))) : TranslateM Unit := do
+  /-- Build one member of a mutually recursive well-formedness definition. -/
+  partial def datatypeWFDef (sortName : String)
+      (parts : Array (String × Array (String × Expr))) : TranslateM FunDef := do
     let wf := wfSymbol sortName
     let sort := SSort.app (.symb sortName) #[]
     let v ← TranslateM.freshSymbol "d"
@@ -920,9 +937,12 @@ mutual
       if conjuncts.isEmpty then (smt| true)
       else if conjuncts.size == 1 then conjuncts[0]!
       else SMT.Term.symbApp "and" conjuncts
-    let wfApp := SMT.Term.app (.symb wf) #[x]
-    TranslateM.emitCommand
-      (.assert (.forallE #[(v, sort)] (smt| (= $wfApp $rhs))))
+    return {
+      name := wf
+      args := #[(v, sort)]
+      resSort := .app (.symb "Bool") #[]
+      body := rhs
+    }
 
   /-- The well-formedness condition on an SMT term of Lean type `ty`: `≥ 0` for
   `Nat`, `wf_T` for a guarded datatype, `none` when nothing is needed. -/
@@ -1187,11 +1207,9 @@ mutual
     if ← isNonCanonicalOverload e then return none
     match e with
     | _ =>
-    -- Bit-vector and string theories, which need type-directed dispatch.
+    -- Bit-vectors need type-directed dispatch. Library-level String operations
+    -- use the public head-indexed lowerings in `DefaultLowerings.lean`.
     match ← bitvecTerm? e with
-    | some t => return some t
-    | none =>
-    match ← stringTerm? e with
     | some t => return some t
     | none =>
     -- Only `Nat` and `Int` inhabit the SMT integer theory. Canonical overloaded
@@ -1237,8 +1255,12 @@ mutual
     | and a b => return some (smt| (and $(← emitTerm a) $(← emitTerm b)))
     | or a b  => return some (smt| (or $(← emitTerm a) $(← emitTerm b)))
     | xor a b => return some (smt| (xor $(← emitTerm a) $(← emitTerm b)))
-    | bne _ _ a b => return some (smt| (not (= $(← emitTerm a) $(← emitTerm b))))
-    | BEq.beq _ _ a b => return some (smt| (= $(← emitTerm a) $(← emitTerm b)))
+    | bne carrier inst a b =>
+      unless ← hasLawfulBEq carrier inst do return none
+      return some (smt| (not (= $(← emitTerm a) $(← emitTerm b))))
+    | BEq.beq carrier inst a b =>
+      unless ← hasLawfulBEq carrier inst do return none
+      return some (smt| (= $(← emitTerm a) $(← emitTerm b)))
     | Iff a b => return some (smt| (= $(← emitTerm a) $(← emitTerm b)))
     | Eq _ a b => return some (smt| (= $(← emitTerm a) $(← emitTerm b)))
     | Ne _ a b => return some (smt| (not (= $(← emitTerm a) $(← emitTerm b))))
@@ -1489,22 +1511,6 @@ mutual
       -- the literal must fit in `w` bits to be representable.
       return some (.symbApp op #[sa, bvLit w (min bv w)])
     return none
-
-  /-- String operations. `str.len` counts codepoints, matching `String.length`. -/
-  partial def stringTerm? (e : Expr) : TranslateM (Option SMT.Term) := do
-    match_expr e with
-    | String.length s =>
-      return some (smt| (str.len $(← emitTerm s)))
-    | String.append a b =>
-      return some (smt| (str.++ $(← emitTerm a) $(← emitTerm b)))
-    | String.isPrefixOf a b =>
-      return some (smt| (str.prefixof $(← emitTerm a) $(← emitTerm b)))
-    | HAppend.hAppend _ _ _ _ a b =>
-      -- Only claim `++` when it really is string append.
-      if (← isStringType (← inferType a)) then
-        return some (smt| (str.++ $(← emitTerm a) $(← emitTerm b)))
-      else return none
-    | _ => return none
 
   /-- `p → q` where `p : Prop`.
 

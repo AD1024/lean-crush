@@ -16,10 +16,15 @@ namespace PremiseSelection
 
 axiom SelectedP {α : Type} : α → Prop
 axiom selectedLemma : ∀ {α : Type} (x : α), SelectedP x
+axiom IrrelevantP : Prop
+axiom irrelevantLemma : IrrelevantP
 
 @[library_suggestions]
 meta def selectedOnly : Selector := fun _ cfg =>
-  return (#[{ name := ``selectedLemma, score := 1.0 }]).take cfg.maxSuggestions
+  return (#[
+    { name := ``irrelevantLemma, score := 2.0 },
+    { name := ``selectedLemma, score := 1.0 }
+  ]).take cfg.maxSuggestions
 
 set_option crush.trust "reconstruct"
 

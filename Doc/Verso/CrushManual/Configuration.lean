@@ -148,7 +148,10 @@ quantifier after `sat` or `unknown`.
 
 {optionDocs crush.autoUnfold}
 
-This controls definitions marked with `@[crush_unfold]` or `@[crush_defeq]`.
+This controls definitions marked with `@[crush_unfold]` or `@[crush_defeq]`, as
+well as preprocessing-only normalization of predicates marked with Lean's standard
+`@[reducible]` attribute. Recursive reducible predicates use constructor-specific
+rewrite equations, and no reducible equation is asserted as a quantified SMT fact.
 Explicit `u[...]` and `d[...]` hints still apply when automatic unfolding is
 disabled.
 

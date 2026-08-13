@@ -42,13 +42,123 @@ zero as well. Other carrier types and custom `Dvd` instances are declined. -/
 @[crush_lower Dvd.dvd]
 def dvd : LoweringHandler := fun ctx => do
   let #[carrier, _, a, b] := ctx.args | return none
-  unless ← ctx.hasCanonicalInstance 1 do return none
   let carrier ← whnf carrier
   unless carrier.isConstOf ``Nat || carrier.isConstOf ``Int do return none
+  let expected := mkConst (if carrier.isConstOf ``Nat then ``Nat.instDvd else ``Int.instDvd)
+  unless ← ctx.hasExpectedInstance 1 expected do return none
   let sa ← ctx.emitTerm a
   let sb ← ctx.emitTerm b
   let remainder := intDivGuard "mod" sb sa
   return some (smt| (= $remainder 0))
+
+/-! ## String operations
+
+These are direct mappings to SMT's sequence-of-codepoints string theory. The
+overloaded append form is claimed only for the canonical `String` instance;
+custom dictionaries continue through the ordinary translator. Every handler
+also declines when a sort extension has replaced the built-in SMT `String`
+representation.
+
+`String.replace` is deliberately absent: Lean inserts the replacement before
+each codepoint when the pattern is empty, while SMT `str.replace_all` returns
+the input unchanged. Character-pattern operations likewise require a dedicated
+`Char` codepoint encoding; `Char` is currently an opaque sort. Lean's validated
+string positions are UTF-8 byte offsets, while `String.take`/`drop` count
+codepoints but return `String.Slice`; both positions and slices therefore need
+a representation that relates them to the underlying SMT string. The numeric
+parsers accept underscore separators, so `String.toNat?`/`String.toInt?` also
+need more than direct symbol mappings.
+
+String order is also deliberately absent. SMT-LIB 2.6's string alphabet stops
+at `U+2FFFF`, while Lean strings admit Unicode scalar values through `U+10FFFF`.
+Mapping Lean's lexicographic order to `str.<` would expose that smaller domain:
+SMT can prove that every one-codepoint string is at most `U+2FFFF`, which is
+false in Lean.
+-/
+
+private def usesStringTheory (ctx : TranslationCtx) : TranslateM Bool := do
+  return (← ctx.emitSort (mkConst ``String)) == .app (.symb "String") #[]
+
+/-- `String.length` counts Unicode codepoints, as does SMT `str.len`. -/
+@[crush_lower String.length]
+def stringLength : LoweringHandler := fun ctx => do
+  let #[s] := ctx.args | return none
+  unless ← usesStringTheory ctx do return none
+  return some (smt| (str.len $(← ctx.emitTerm s)))
+
+/-- Direct string append. -/
+@[crush_lower String.append]
+def stringAppend : LoweringHandler := fun ctx => do
+  let #[a, b] := ctx.args | return none
+  unless ← usesStringTheory ctx do return none
+  return some (smt| (str.++ $(← ctx.emitTerm a) $(← ctx.emitTerm b)))
+
+/-- `String.isEmpty s` is equality with the empty SMT string. -/
+@[crush_lower String.isEmpty]
+def stringIsEmpty : LoweringHandler := fun ctx => do
+  let #[s] := ctx.args | return none
+  unless ← usesStringTheory ctx do return none
+  return some (smt| (= $(← ctx.emitTerm s) ""))
+
+/-- String prefix testing. -/
+@[crush_lower String.isPrefixOf]
+def stringIsPrefixOf : LoweringHandler := fun ctx => do
+  let #[pre, s] := ctx.args | return none
+  unless ← usesStringTheory ctx do return none
+  return some (smt| (str.prefixof $(← ctx.emitTerm pre) $(← ctx.emitTerm s)))
+
+/-- Pattern-polymorphic prefix testing, restricted to the canonical `String` pattern. -/
+@[crush_lower String.startsWith]
+def stringStartsWith : LoweringHandler := fun ctx => do
+  let #[patternTy, s, pre, _] := ctx.args | return none
+  unless ← isStringType patternTy do return none
+  unless ← usesStringTheory ctx do return none
+  let expected := mkApp
+    (mkConst ``String.Slice.Pattern.ForwardSliceSearcher.instForwardPattern_1) pre
+  unless ← ctx.hasExpectedInstance 3 expected do return none
+  return some (smt| (str.prefixof $(← ctx.emitTerm pre) $(← ctx.emitTerm s)))
+
+/-- Pattern-polymorphic suffix testing, restricted to the canonical `String` pattern. -/
+@[crush_lower String.endsWith]
+def stringEndsWith : LoweringHandler := fun ctx => do
+  let #[patternTy, s, suffix, _] := ctx.args | return none
+  unless ← isStringType patternTy do return none
+  unless ← usesStringTheory ctx do return none
+  let expected := mkApp
+    (mkConst ``String.Slice.Pattern.BackwardSliceSearcher.instBackwardPattern_1) suffix
+  unless ← ctx.hasExpectedInstance 3 expected do return none
+  return some (smt| (str.suffixof $(← ctx.emitTerm suffix) $(← ctx.emitTerm s)))
+
+/-- Pattern search (`contains`/`any`), restricted to Lean's canonical `String`
+searcher and iterator instances. -/
+@[crush_lower String.contains, crush_lower String.any]
+def stringContains : LoweringHandler := fun ctx => do
+  let #[patternTy, _, _, _, s, pattern, _] := ctx.args | return none
+  unless ← isStringType patternTy do return none
+  unless ← usesStringTheory ctx do return none
+  unless ← ctx.hasExpectedInstance 2
+    (mkConst ``String.Slice.Pattern.ForwardSliceSearcher.instIteratorIdSearchStep) do
+    return none
+  unless ← ctx.hasExpectedInstance 3
+    (mkConst ``String.Slice.Pattern.ForwardSliceSearcher.instIteratorLoopIdSearchStep [.zero]) do
+    return none
+  let expectedSearcher := mkApp
+    (mkConst ``String.Slice.Pattern.ForwardSliceSearcher.instToForwardSearcher_1) pattern
+  unless ← ctx.hasExpectedInstance 6 expectedSearcher do return none
+  return some (smt| (str.contains $(← ctx.emitTerm s) $(← ctx.emitTerm pattern)))
+
+/-- The notation-level `String` append, after checking its overloaded instance. -/
+@[crush_lower HAppend.hAppend]
+def stringHAppend : LoweringHandler := fun ctx => do
+  let #[leftTy, rightTy, resultTy, _, a, b] := ctx.args | return none
+  unless ← isStringType leftTy do return none
+  unless ← isStringType rightTy do return none
+  unless ← isStringType resultTy do return none
+  unless ← usesStringTheory ctx do return none
+  let expected := mkApp2 (mkConst ``instHAppendOfAppend [.zero])
+    (mkConst ``String) (mkConst ``instAppendString)
+  unless ← ctx.hasExpectedInstance 3 expected do return none
+  return some (smt| (str.++ $(← ctx.emitTerm a) $(← ctx.emitTerm b)))
 
 /-! ## Finite Array operations
 
@@ -116,7 +226,7 @@ def arrayGetElem : LoweringHandler := fun ctx => do
   let some arrayElem ← finiteArrayElem? coll | return none
   unless (← whnf idxTy).isConstOf ``Nat do return none
   unless ← isDefEq elem arrayElem do return none
-  unless ← ctx.hasCanonicalInstance 4 do return none
+  unless ctx.hasInstanceHead 4 ``Array.instGetElemNatLtSize do return none
   let sidx ← ctx.emitTerm idx
   withFiniteArray ctx arrayElem arr fun view =>
     return (smt| (select $(view.data) $sidx))
@@ -127,7 +237,7 @@ def arrayGetElemBang : LoweringHandler := fun ctx => do
   let some arrayElem ← finiteArrayElem? coll | return none
   unless (← whnf idxTy).isConstOf ``Nat do return none
   unless ← isDefEq elem arrayElem do return none
-  unless ← ctx.hasCanonicalInstance 4 do return none
+  unless ctx.hasInstanceHead 4 ``Array.instGetElem?NatLtSize do return none
   let sidx ← ctx.emitTerm idx
   let defaultFn := mkConst ``default [← getLevel elem]
   let sdefault ← ctx.emitTerm (mkApp2 defaultFn elem inhabited)
@@ -141,7 +251,7 @@ def arrayGetElemOpt : LoweringHandler := fun ctx => do
   let some arrayElem ← finiteArrayElem? coll | return none
   unless (← whnf idxTy).isConstOf ``Nat do return none
   unless ← isDefEq elem arrayElem do return none
-  unless ← ctx.hasCanonicalInstance 4 do return none
+  unless ctx.hasInstanceHead 4 ``Array.instGetElem?NatLtSize do return none
   let sidx ← ctx.emitTerm idx
   withFiniteArray ctx arrayElem arr fun view => do
     let value := (smt| (select $(view.data) $sidx))

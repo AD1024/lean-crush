@@ -136,4 +136,48 @@ def relevantAutoUnfoldLemmas (seeds : Array Name) : MetaM (Array Name) := do
     names := names ++ (← eqnLemmasFor n kind)
   return names
 
+/-- Rewrite equations for directly relevant predicates marked `@[reducible]`.
+
+Unlike `@[crush_unfold]`, these equations are intended only for proof-producing
+preprocessing, not as quantified SMT facts. The standard `@[reducible]` annotation
+already asks Lean automation to look through a definition; honoring that signal here
+is particularly useful for lightweight predicate wrappers.
+
+Recursive predicates contribute their per-constructor equations rather than a
+general unfold equation. `simp only` can therefore reduce `p []` or `p (x :: xs)`
+without expanding a symbolic `p xs`, and no recursive universal axiom reaches SMT.
+Users can still opt into that stronger quantified fallback with
+`@[crush_unfold]`. -/
+def relevantReducibleRewriteLemmas (seeds : Array Name) : MetaM (Array Name) := do
+  let env ← getEnv
+  let mut frontier := seeds
+  let mut seen : Std.HashSet Name := {}
+  let mut names : Array Name := #[]
+  while !frontier.isEmpty do
+    let n := frontier.back!
+    frontier := frontier.pop
+    if seen.contains n then continue
+    seen := seen.insert n
+    unless ← Lean.isReducible n do continue
+    let some ci := env.find? n | continue
+    -- Predicates have declaration type `... → Prop`; no binder instantiation is
+    -- needed to recognize the final `Sort 0`.
+    let rec returnsProp : Expr → Bool
+      | .forallE _ _ body _ => returnsProp body
+      | .sort .zero => true
+      | _ => false
+    unless returnsProp ci.type do continue
+    let eqns ← eqnLemmasFor n .unfold
+    if eqns.isEmpty then continue
+    names := names ++ eqns
+    -- Follow chains of reducible predicate wrappers without scanning unrelated
+    -- declarations from the imported environment. Inspect equation types rather
+    -- than `ci.value`: a freshly compiled recursive definition may keep its
+    -- private worker unrealized, while these are the exact rules used below.
+    for eqn in eqns do
+      let some eqnInfo := (← getEnv).find? eqn | continue
+      for c in eqnInfo.type.getUsedConstants do
+        unless seen.contains c do frontier := frontier.push c
+  return names
+
 end Crush

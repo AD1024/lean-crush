@@ -55,6 +55,41 @@ def uses_f (n : Nat) : Nat := f n + 1
 
 theorem transitive_auto : uses_f 2 = 5 := by crush   -- needs both uses_f and f
 
+/-! ## Standard `@[reducible]` predicate wrappers
+
+Reducible predicates are normalized in Lean but are not sent to SMT as quantified
+equations. Recursive predicates contribute only constructor-specific equations, so
+known constructor applications reduce without expanding symbolic recursive calls. -/
+
+@[reducible]
+def inOpenInterval (x lo hi : Int) : Prop :=
+  lo < x ∧ x < hi
+
+theorem reducible_predicate_auto (x lo hi : Int)
+    (h : inOpenInterval x lo hi) : lo + 1 ≤ x := by
+  crush
+
+set_option crush.autoUnfold false in
+/-- error: crush: the goal is not provable -/
+#guard_msgs(error, substring := true) in
+theorem reducible_predicate_disabled (x lo hi : Int)
+    (h : inOpenInterval x lo hi) : lo + 1 ≤ x := by
+  crush
+
+@[reducible]
+def recursiveReducible : Nat → Prop
+  | 0 => True
+  | n + 1 => recursiveReducible n
+
+run_meta
+  let lemmas ← relevantReducibleRewriteLemmas #[``recursiveReducible]
+  if lemmas.isEmpty then
+    throwError "recursive reducible predicate equations were not selected"
+
+theorem recursive_reducible_auto (n : Nat) (h : recursiveReducible n) :
+    recursiveReducible (Nat.succ n) := by
+  crush
+
 /-! ## `crush.autoUnfold false` disables the mechanism
 
 With auto-unfold off and no explicit hint, `f` is uninterpreted again, so a goal that

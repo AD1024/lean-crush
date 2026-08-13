@@ -117,7 +117,7 @@ theorem exhaust (e : Expr) :
     (∃ n, e = .lit n) ∨ (∃ s, e = .var s) ∨ (∃ a b, e = .add a b)
       ∨ (∃ a b, e = .mul a b) ∨ (∃ a, e = .neg a) := by crush
 
-/-- info: 'ExprLang.exhaust' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'ExprLang.exhaust' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms exhaust
 
@@ -276,7 +276,7 @@ theorem node_inj (l r l' r' : Tree) (v w : Int)
 nothing is left. -/
 theorem exhaust (t : Tree) : t = .leaf ∨ ∃ l v r, t = .node l v r := by crush
 
-/-- info: 'Trees.exhaust' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Trees.exhaust' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms exhaust
 
@@ -368,14 +368,14 @@ which the fields are syntactically equal. This is the case needing *two* split r
 per variable. -/
 theorem point_eq_iff (p q : Point) : p = q ↔ p.x = q.x ∧ p.y = q.y := by crush
 
-/-- info: 'Nested.point_eq_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Nested.point_eq_iff' depends on axioms: [propext] -/
 #guard_msgs in
 #print axioms point_eq_iff
 
 /-- One direction alone, with the fields as hypotheses. -/
 theorem point_eq_of_fields (p q : Point) (hx : p.x = q.x) (hy : p.y = q.y) : p = q := by crush
 
-/-- info: 'Nested.point_eq_of_fields' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Nested.point_eq_of_fields' depends on axioms: [propext] -/
 #guard_msgs in
 #print axioms point_eq_of_fields
 

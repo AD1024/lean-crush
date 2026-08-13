@@ -12,6 +12,8 @@ The extension layer covers term handlers, sort handlers, and
 both of datatypes and of polymorphic *lemmas*, which is what lets the TIP list
 theorems be proved over an arbitrary element type. This document is the architecture
 and roadmap; §9 is the current status and remaining work.
+The concrete performance bounds and query-shaping decisions are maintained separately in
+[`OPTIMIZATIONS.md`](OPTIMIZATIONS.md).
 
 ---
 
@@ -340,18 +342,19 @@ idiom) when the tactic runs. This means:
 ### 4.3 User handlers override built-ins
 
 The core theory mappings (Bool, `=`, `∧/∨/¬/→`, Nat→Int with well-formedness
-side-conditions, Int, BitVec, String, datatypes) live in the **structural
-translator** (`Crush/Translation/Translate.lean`), not as handlers — several need
-type-directed dispatch (`bitvecTerm?`, `stringTerm?`) that the head-constant handler
-shape does not express, and inlining them is simpler and faster than routing every
-built-in through `evalConst`.
+side-conditions, Int, BitVec, string literals/sorts, and datatypes) live in the
+**structural translator** (`Crush/Translation/Translate.lean`) where they require
+structural or type-directed dispatch. Library-level operations that fit head
+dispatch use `@[crush_lower]` instead.
 
 What matters for extensibility is the *dispatch order*: `emitTerm` tries general
 `@[crush_translate]` handlers, then matching `@[crush_lower]` handlers, then the
 structural translator. General handlers can therefore override both targeted
 lowerings and core mappings. Library-level defaults such as `Int.sign`,
-`Int.natAbs`, and canonical divisibility dogfood `@[crush_lower]`; the hot
-structural theory core avoids an `evalConst` indirection.
+`Int.natAbs`, canonical divisibility, and `String.length`/append/
+emptiness/String-pattern prefix/suffix/containment
+dogfood `@[crush_lower]`; the hot structural theory core avoids an `evalConst`
+indirection.
 
 ---
 
@@ -674,7 +677,9 @@ parsing, fact collection, the structural translator, and the `crush` tactic.
 - Bit-vectors at statically-known widths: arithmetic, bitwise, shifts, rotations,
   unsigned/signed comparisons, `concat`/`extract`/`setWidth`/`signExtend`,
   `toNat`/`toInt`/`ofNat`/`ofInt`, and guarded division-by-zero.
-- Strings: `str.++`/`str.len`/`str.prefixof` with correct literal escaping.
+- Strings: `str.++`/`str.len`, emptiness, and
+  `str.prefixof`/`str.suffixof`/`str.contains`, with correct literal escaping and
+  exact-instance checks for overloaded operations.
 - `Int` div/mod (Euclidean, matching SMT-LIB) with an exactness guard at zero.
 
 Tested in `Test/Theories.lean`, `Test/Regression.lean`, `Test/Monomorphize.lean`.
@@ -1172,6 +1177,7 @@ both builds must be clean and produce **no `sorry`**.
 | `HigherOrder.lean` | λ-arguments, captures, η-expansion, extensionality, partial application; all reconstruct under the default policy (kernel-checked, `#print axioms` pins no `crushSorry`), thanks to the `funext` finishers |
 | `Regression.lean` | an independent corpus migrated from another Lean SMT bridge, plus cases derived from bugs reported against it |
 | `Reconstruct.lean` | `#print axioms` assertions — reconstructed theorems must not name `crushSorry` — and the replay boundary |
+| `VelvetReconstruct.lean` | Velvet root VCs plus datatype-generic reconstruction: conclusion-indexed downstream rules, bounded constructor splitting over recursive/parameterized/indexed types, and existential witnesses via constructors or downstream rules |
 | `TIP.lean` | inductive theorems from the TIP `prod` benchmarks over a *polymorphic* element type, proved hammer-in-the-loop (manual `induction`, `crush` per case, `@[crush_unfold]` definitions) |
 | `Cvc5.lean` | the **cvc5 backend** and **`native` HO mode** (`HO_ALL`, `(-> σ τ)` sorts, `lambda`), which the default `z3`/`defunctionalize` suite never exercises; plus the z3-vs-cvc5 `sat`/`unknown` difference on false HO goals |
 | `Alethe.lean` | the Alethe proof **parser** (M4 phase 1) against verbatim cvc5 output: command/clause/`:named` structure, premise reading, the empty-clause conclusion, and that an `(error …)` reply parses to `none` |

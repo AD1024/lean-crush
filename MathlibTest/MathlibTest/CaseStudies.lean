@@ -193,7 +193,7 @@ theorem prod_eta (p : Int × Int) : p = (p.1, p.2) := by crush
 theorem sum_exhaust (s : Int ⊕ Int) : (∃ a, s = .inl a) ∨ ∃ b, s = .inr b := by crush
 
 -- Kernel-checked, not trusted: these name the standard-library trio and no `crushSorry`.
-/-- info: 'bt_exhaust' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'bt_exhaust' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms bt_exhaust
 

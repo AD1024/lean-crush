@@ -20,6 +20,40 @@ There are three ways to add the missing semantics:
 2. map a constant directly to an existing SMT theory symbol;
 3. register a metaprogrammed lowering for full control.
 
+# Extending Checked Reconstruction
+
+Translation and proof reconstruction are separate extension points.
+When SMT already understands enough semantics to report `unsat`, but
+`crush.trust "reconstruct"` needs a domain theorem to rebuild the argument,
+register it with `@[crush_reconstruct]`:
+
+```lean
+inductive Phase where
+  | initial
+  | next (previous : Phase)
+
+def Advances (source target : Phase) : Prop :=
+  target = .next source
+
+@[crush_reconstruct]
+theorem advancesNext (phase : Phase) :
+    Advances phase (.next phase) :=
+  rfl
+```
+
+Registered theorems participate in bounded backward proof search.
+The search uses a structural index to match their conclusion against the current
+reconstruction goal,
+solves their premises with the core-restricted Lean finishers, and checks the
+resulting term with Lean's kernel.
+It is datatype-independent, so downstream libraries can register bridge lemmas
+for their own inductive types and relations without adding those rules wholesale
+to `grind`.
+
+This attribute does not send a theorem to SMT.
+If the solver also needs the fact, pass it to `crush [...]`, expose equations
+with `@[crush_unfold]`, or define a lowering as described below.
+
 # Equation-Based Support
 
 Use `u[f]` or `d[f]` at one call site.
@@ -153,8 +187,12 @@ their order in the same style as `simp`.
 
 A handler must decline any shape it cannot encode exactly.
 In particular, lowerings for overloaded operations should verify argument types
-and call `ctx.hasCanonicalInstance` before assigning the standard typeclass
-operation its SMT meaning.
+and call `ctx.hasExpectedInstance` with the exact dictionary whose semantics they
+implement before assigning a standard typeclass operation its SMT meaning.
+`ctx.hasCanonicalInstance` only compares against ambient global typeclass
+synthesis; a higher-priority global instance can change that baseline.
+`ctx.hasInstanceHead` is available for dependent dictionaries whose proof
+parameters make full definitional equality impractical.
 
 # General Handlers
 

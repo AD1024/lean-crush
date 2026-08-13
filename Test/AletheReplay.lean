@@ -104,7 +104,7 @@ theorem bool_chain (p q r s : Bool) (h1 : p = true) (h2 : q = true)
 theorem bool_diseq (p q : Bool) (h : p ≠ q) :
     (p = true ∧ q = false) ∨ (p = false ∧ q = true) := by crush
 
-/-- info: 'bool_diseq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'bool_diseq' depends on axioms: [propext] -/
 #guard_msgs in
 #print axioms bool_diseq
 
@@ -121,9 +121,8 @@ end Harder
 
 /-! ## Replay declines rather than trusting
 
-Each case below is one replay cannot prove, so the goal must *error* rather than close.
-Pinned with `#guard_msgs`, so a regression that took a certificate on faith fails the
-build. -/
+These cases distinguish a replay decline followed by checked core reconstruction from a
+false goal. A declined certificate is never taken on faith. -/
 
 section Declines
 set_option crush.backend "cvc5"
@@ -132,19 +131,20 @@ set_option crush.trust "reconstruct"
 
 inductive Three where | a | b | c
 
--- Finite-domain exhaustiveness over a *datatype*. cvc5 answers `unsat` but cannot express
--- the argument in Alethe — it replies `(error "… DUMMY_SKOLEM")`, so there is no certificate
--- at all, and the ladder cannot close it either. A case no checker can reach, rather than
--- a coverage gap.
-/-- error: crush: solver reported `unsat`, but reconstruction failed -/
-#guard_msgs(error, substring := true) in
-example (w x y z : Three) : w = x ∨ w = y ∨ w = z ∨ x = y ∨ x = z ∨ y = z := by crush
+-- cvc5 cannot express this datatype exhaustiveness argument in Alethe, but bounded
+-- finite-enum splitting reconstructs it after replay declines.
+theorem enum_falls_back (w x y z : Three) :
+    w = x ∨ w = y ∨ w = z ∨ x = y ∨ x = z ∨ y = z := by
+  crush
 
--- Nonlinear arithmetic: cvc5 cannot prove this at all (it times out where z3's nlsat
--- succeeds), so there is no certificate to replay.
-/-- error: crush -/
-#guard_msgs(error, substring := true) in
-example (x : Int) (h : x * x = 4) (h2 : x > 0) : x = 2 := by crush
+-- Certificate replay declines nonlinear arithmetic, but datatype-generic constructor
+-- splitting lets core reconstruction normalize the two `Int` constructors and close the
+-- resulting branches. The result remains kernel-checked.
+theorem nonlinear_falls_back (x : Int) (h : x * x = 4) (h2 : x > 0) : x = 2 := by crush
+
+/-- info: 'nonlinear_falls_back' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms nonlinear_falls_back
 
 -- A goal that is simply false: the solver returns `sat`, so replay never runs. Pins that the
 -- machinery cannot manufacture a proof of a non-theorem.
@@ -154,12 +154,11 @@ example (p q : Bool) : p = q := by crush
 
 /-! ### Declining a `forall_inst` step still closes the goal
 
-Quantifier instantiation is a `subproof` block whose inner `forall_inst` step is justified by
-its `:args` witness, not its premises, so replay declines it. The ladder then closes the
-goal: the decline is invisible except in the trace, and the result is still kernel-checked. -/
+The pre-SMT checked pass now applies this local invariant directly, so no certificate or
+core reconstruction is needed. -/
 theorem forall_inst_falls_back (f : Int → Int) (h : ∀ x, f x = 0) : f 5 = 0 := by crush
 
-/-- info: 'forall_inst_falls_back' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'forall_inst_falls_back' does not depend on any axioms -/
 #guard_msgs in
 #print axioms forall_inst_falls_back
 
@@ -201,12 +200,15 @@ theorem alethe_only (p q r s : Bool) :
 #guard_msgs in
 #print axioms alethe_only
 
--- The converse: `forall_inst` declines, and under `alethe` there is no ladder to rescue it,
--- so it errors rather than silently closing. Pins that `alethe` really excludes the ladder.
+-- The converse: this certificate still declines, and unlike a direct quantified instance
+-- the pre-SMT pass cannot close it. Under `alethe` there is no ladder to rescue it, so it
+-- errors rather than silently closing.
 /-- error: crush: `crush.reconstruct alethe` is set and the solver's Alethe certificate -/
 #guard_msgs(error, substring := true) in
 set_option crush.backend "cvc5" in
 set_option crush.reconstruct "alethe" in
-example (f : Int → Int) (h : ∀ x, f x = 0) : f 5 = 0 := by crush
+example (f g h : Int → Int) (a : Int)
+    (h1 : f a = g a) (h2 : g a = h a) (h3 : h a = 7) : f a = 7 := by
+  crush
 
 end Toggle

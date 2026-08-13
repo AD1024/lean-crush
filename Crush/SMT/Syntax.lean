@@ -81,6 +81,14 @@ structure DatatypeDecl where
   ctors  : Array CtorDecl
   deriving Inhabited, Repr
 
+/-- One function in an SMT-LIB `define-funs-rec` command. -/
+structure FunDef where
+  name    : String
+  args    : Array (String × SSort)
+  resSort : SSort
+  body    : Term
+  deriving Inhabited, Repr
+
 /-- Top-level SMT-LIB commands we can emit. -/
 inductive Command where
   | setLogic   : String → Command
@@ -90,6 +98,7 @@ inductive Command where
   | declFun    : (name : String) → (argSorts : Array SSort) → (resSort : SSort) → Command
   | defFun     : (rec_ : Bool) → (name : String) → (args : Array (String × SSort)) →
                    (resSort : SSort) → (body : Term) → Command
+  | defFunsRec : Array FunDef → Command
   | declDatatypes : Array (String × Nat × DatatypeDecl) → Command
   | assert     : Term → Command
   | checkSat   : Command

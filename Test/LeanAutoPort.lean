@@ -13,10 +13,8 @@ Porting notes worth stating up front:
 * lean-auto runs with `autoImplicit` on; this project has it off (`lakefile.lean`), so
   ported goals get explicit `{α : Type}` binders. That is a syntax difference, not a
   capability one.
-* Two categories where the behaviours *intentionally differ* are called out in their
-  own sections below: the `Empty`-type goals (we are **sound** where lean-auto
-  documents itself unsound) and the cases that were translation gaps until this port
-  surfaced them.
+* Empty-type goals are discharged in Lean before SMT. This preserves the semantics
+  that SMT's nonempty sorts cannot encode directly.
 -/
 
 open Crush
@@ -129,17 +127,13 @@ example {α : Type} (x : α) : List.head? [x] = .some x := by crush u[List.head?
 /-! ## `Empty`
 
 `∀ x y : Empty, x = y` is *true* in Lean (vacuously — `Empty` has no values), and
-lean-auto **proves** it. But its encoding maps `Empty` to a non-empty SMT sort, which
-its own source flags: "the translation to smt solver is unsound. SMT-LIB assume that
-all types are inhabited, while in DTT it's not." lean-crush refuses these instead: an
-uninhabited domain has no faithful SMT image (soundness obligation 1), so the solver is
-free to invent two distinct `Empty` values and reports a **counterexample**. Declining
-to prove a true-but-unfaithfully-encodable goal is the sound choice, and these pins it.
-`unknown`/`sat` never closes a goal. -/
+lean-auto **proves** it, but documents that mapping `Empty` to a nonempty SMT sort is
+unsound. lean-crush instead eliminates local empty values in Lean before translation.
+A quantified empty domain with no local inhabitant remains a sound refusal because SMT
+sorts are nonempty. -/
 
-/-- error: crush: the goal is not provable -/
-#guard_msgs(error, substring := true) in
-example (x y : Empty) : x = y := by crush
+set_option crush.trust "reconstruct" in
+theorem empty_values_equal (x y : Empty) : x = y := by crush
 
 /-- error: crush: the goal is not provable -/
 #guard_msgs(error, substring := true) in
