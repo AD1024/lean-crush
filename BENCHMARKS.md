@@ -10,17 +10,17 @@ LeanHammer, Loom, Cashmere, Velvet, and PLean.
 | Corpus | Backend | Solved / total | Coverage | Total (s) | Avg (ms) | Min (ms) | Max (ms) |
 |---|---|---:|---:|---:|---:|---:|---:|
 | LeanHammer, direct (no Aesop) | auto | 8 / 20 | 40.0% | 2.173 | 108.7 | 1.0 | 254.0 |
-| LeanHammer, direct (no Aesop) | Crush | 20 / 20 | 100.0% | 1.358 | 67.9 | 5.0 | 185.0 |
+| **LeanHammer, direct (no Aesop)** | **Crush** | **20 / 20** | **100.0%** | **1.358** | **67.9** | **5.0** | **185.0** |
 | LeanHammer, Aesop portfolio | auto | 14 / 20 | 70.0% | 131.225 | 6,561.2 | 2.0 | 113,766.0 |
-| LeanHammer, Aesop portfolio | Crush | 20 / 20 | 100.0% | 1.397 | 69.8 | 12.0 | 255.0 |
-| Loom | auto | 4 / 4 | 100.0% | 0.352 | 88.0 | 45.0 | 178.0 |
+| **LeanHammer, Aesop portfolio** | **Crush** | **20 / 20** | **100.0%** | **1.397** | **69.8** | **12.0** | **255.0** |
+| **Loom** | **auto** | **4 / 4** | **100.0%** | **0.352** | **88.0** | **45.0** | **178.0** |
 | Loom | Crush | 4 / 4 | 100.0% | 0.715 | 178.8 | 92.0 | 220.0 |
 | Cashmere | auto | 18 / 38 | 47.4% | 5.232 | 137.7 | 2.0 | 211.0 |
-| Cashmere | Crush | 38 / 38 | 100.0% | 6.483 | 170.6 | 1.0 | 635.0 |
+| **Cashmere** | **Crush** | **38 / 38** | **100.0%** | **6.483** | **170.6** | **1.0** | **635.0** |
 | Velvet, shared VCs | auto | 309 / 380 | 81.3% | 469.931 | 1,236.7 | 11.0 | 78,273.0 |
-| Velvet, shared VCs | Crush | 359 / 380 | 94.5% | 324.533 | 854.0 | 1.0 | 52,023.0 |
+| **Velvet, shared VCs** | **Crush** | **359 / 380** | **94.5%** | **324.533** | **854.0** | **1.0** | **52,023.0** |
 | PLean | auto | 168 / 192 | 87.5% | 715.812 | 3,728.2 | 0.0 | 66,114.0 |
-| PLean | Crush | 174 / 192 | 90.6% | 457.859 | 2,384.7 | 0.0 | 169,370.4 |
+| **PLean** | **Crush** | **174 / 192** | **90.6%** | **457.859** | **2,384.7** | **0.0** | **169,370.4** |
 
 **Rows.** Each auto/Crush pair uses the same set of proof obligations. `auto`
 means the existing non-Crush backend of that project; it is not one common
@@ -57,7 +57,8 @@ selected backend after the host project's VC generation and preprocessing.
 time for all attempts, including failures and timeouts. `Avg` is
 `Total / total attempted VCs`; `Min` and `Max` are the shortest and longest
 individual attempts. Total time is in seconds and the other timing columns are
-in milliseconds.
+in milliseconds. The better row in each pair is bold: coverage is compared
+first, then average time when coverage is equal.
 
 These are not file or process wall times. PLean times sum its native
 per-obligation profiling stages. Each VC was measured once, so the timing
