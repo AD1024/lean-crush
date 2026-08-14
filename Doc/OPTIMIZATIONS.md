@@ -196,26 +196,7 @@ bounded reconstruction-rule mechanism.
 
 ## Reproducing the comparisons
 
-Use the Lean toolchain pinned by each repository and install `z3` and `cvc5`. The
-corpus harness needs sibling checkouts by default:
-
-```sh
-git clone git@github.com:AD1024/LeanHammer.git ../LeanHammer
-git clone https://github.com/AD1024/loom.git ../loom
-git clone https://github.com/AD1024/velvet.git ../velvet
-
-git -C ../loom fetch origin master crush-backend
-git -C ../velvet fetch origin master crush-backend
-lake build Crush
-```
-
-Override `HAMMER_REPO`, `LOOM_REPO`, or `VELVET_REPO` when the checkouts are
-elsewhere. Set `Z3_BIN` and `CVC5_BIN` to executable paths when they are not on
-`PATH`.
-
-The comparison configuration used during development was one measured run per
-obligation, a five-second solver timeout, cvc5, checked reconstruction, and one million
-Lean heartbeats:
+Install `z3` and `cvc5`, then run the corpus harness directly:
 
 ```sh
 REPEATS=1 \
@@ -226,17 +207,22 @@ MAX_HEARTBEATS=1000000 \
 scripts/benchmark-corpora.sh
 ```
 
+The harness builds local Crush, provisions the pinned LeanHammer, Loom, and
+Velvet revisions under `BenchmarkResults/sources`, and builds their Lake
+packages. Override `HAMMER_REPO`, `LOOM_REPO`, or `VELVET_REPO` to use existing
+checkouts. Set `Z3_BIN` and `CVC5_BIN` to executable paths when they are not on
+`PATH`.
+
 The script creates detached worktrees for:
 
-- Loom `origin/master` versus `origin/crush-backend`;
-- Velvet `origin/master` versus `origin/crush-backend`;
-- the LeanHammer checkout's four profiles: `auto-only`, `crush-only`,
-  `aesop-auto`, and `aesop-crush`.
+- the pinned auto, Duper, and Crush Loom revisions;
+- the pinned auto, Duper, and Crush Velvet revisions;
+- the LeanHammer checkout's `duper-only`, `auto-duper`, `crush-only`,
+  `aesop-auto-duper`, and `aesop-crush` profiles.
 
 Cashmere is benchmarked from the Loom branches. No source checkout is modified.
-Set `LOOM_AUTO_REF`, `LOOM_CRUSH_REF`, `VELVET_AUTO_REF`, or
-`VELVET_CRUSH_REF` to compare different commits. For less noisy timing, use at
-least `REPEATS=3`.
+Set the corresponding `LOOM_*_REF` or `VELVET_*_REF` variable to compare
+different commits. For less noisy timing, use at least `REPEATS=3`.
 
 Focused runs avoid rebuilding unrelated corpora:
 
@@ -252,12 +238,39 @@ VELVET_CASES="Velvet/Examples/GCD.lean Velvet/Examples/IsSorted.lean" \
   scripts/benchmark-corpora.sh
 ```
 
-Use `RUN_AUTO=false` or `RUN_CRUSH=false` for one-sided profiling. Use
+Use `RUN_AUTO=false`, `RUN_DUPER=false`, or `RUN_CRUSH=false` for selected
+backend profiling. Use
 `CRUSH_PROFILE=true` to include Crush's per-phase breakdown in logs. The standalone
 LeanHammer harness is:
 
 ```sh
 REPEATS=3 scripts/benchmark-leanhammer.sh
+```
+
+The PLean comparison is also self-provisioning:
+
+```sh
+RUN_DUPER=true \
+REPEATS=1 \
+DUPER_TIMEOUT=1 \
+DUPER_MAX_HEARTBEATS=20000 \
+DUPER_FILE_CPU_SECONDS=60 \
+scripts/benchmark-plean.sh
+```
+
+Its Duper branch is an opt-in scalability stress test because the larger files
+do not complete in practical time. This command runs every file separately
+with a 60 CPU-second limit:
+
+```sh
+RUN_AUTO=false \
+RUN_CRUSH=false \
+RUN_DUPER=true \
+DUPER_TIMEOUT=1 \
+DUPER_MAX_HEARTBEATS=20000 \
+DUPER_FILE_CPU_SECONDS=60 \
+REPEATS=1 \
+scripts/benchmark-plean.sh
 ```
 
 Each run prints two tables and writes the complete data under a timestamped
@@ -269,7 +282,8 @@ Each run prints two tables and writes the complete data under a timestamped
 | `results.tsv` | Per-obligation status, failure category, tactic time, and goal hash |
 | `runs.tsv` | Per-file wall time, exit status, obligation count, and truncation status |
 | `summary.tsv` | Coverage and aggregate attempted-VC timing by corpus/backend |
-| `comparison.tsv` | Matched-VC outcomes and mean times where both backends solved |
+| `matched-summary.tsv` | Coverage and timing on the three-backend VC intersection |
+| `comparison.tsv` | Pairwise matched-VC outcomes and mean times where both backends solved |
 | `logs/` | Complete elaborator and solver output |
 
 Compare matched VCs in `comparison.tsv`; raw corpus totals can differ when the backend

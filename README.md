@@ -329,15 +329,17 @@ Complete downstream integrations are available in the
 They show lean-crush wired into verification-condition generation and used on
 real array, arithmetic, and quantified proof obligations.
 
-To compare reconstructed Crush with lean-auto on LeanHammer, Loom, Cashmere, and
-Velvet, run `scripts/benchmark-corpora.sh`. It checks out the configured auto and
-Crush branches in temporary worktrees, overlays the local lean-crush build, and
-writes per-VC timing, coverage, metadata, and matched-goal summaries under
-`BenchmarkResults/`. Set `Z3_BIN`/`CVC5_BIN` when the solvers are not on `PATH`;
-the script preserves existing branch-specific solver binaries and seeds missing
-ones into Loom's build directories. `RUN_AUTO=false` or `RUN_CRUSH=false` selects
-one backend for focused profiling. See [`BENCHMARKS.md`](BENCHMARKS.md) for the
-latest recorded comparison and PLean reproduction instructions.
+To compare reconstructed Crush with lean-auto and Duper on LeanHammer, Loom,
+Cashmere, and Velvet, run `scripts/benchmark-corpora.sh`. It clones and builds
+the pinned source revisions, checks them out in temporary worktrees, overlays
+the local lean-crush build, and writes per-VC timing, coverage, metadata, and
+matched-goal summaries under `BenchmarkResults/`. Set `Z3_BIN`/`CVC5_BIN` when
+the solvers are not on `PATH`; `RUN_AUTO=false`, `RUN_DUPER=false`, or
+`RUN_CRUSH=false` selects backends for focused profiling.
+`scripts/benchmark-plean.sh` provisions the pinned PLean revisions. Exact
+self-contained commands, including the bounded PLean Duper stress run, are in
+the [benchmark script guide](scripts/README.md). See
+[`BENCHMARKS.md`](BENCHMARKS.md) for the latest recorded comparison.
 
 The [Cedar `crush-backend` branch](https://github.com/AD1024/cedar-spec/tree/crush-backend)
 contains a

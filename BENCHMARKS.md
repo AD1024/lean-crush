@@ -1,207 +1,187 @@
 # Benchmarks
 
-These results were measured on 2026-08-14 at lean-crush commit
-`c60aa1767911ae5efbef3010047ab307e209e189`. They compare each project's
-existing lean-auto-based proof path with its Crush integration across
-LeanHammer, Loom, Cashmere, Velvet, and PLean.
+These results were measured on 2026-08-14. Crush rows use lean-crush commit
+`c60aa1767911ae5efbef3010047ab307e209e189`. The comparison covers lean-auto,
+Duper, and Crush across LeanHammer, Loom, Cashmere, Velvet, and PLean.
 
 ## Results
 
 | Corpus | Backend | Solved / total | Coverage | Total (s) | Avg (ms) | Min (ms) | Max (ms) |
 |---|---|---:|---:|---:|---:|---:|---:|
-| LeanHammer, direct (no Aesop) | auto | 8 / 20 | 40.0% | 2.173 | 108.7 | 1.0 | 254.0 |
-| **LeanHammer, direct (no Aesop)** | **Crush** | **20 / 20** | **100.0%** | **1.358** | **67.9** | **5.0** | **185.0** |
-| LeanHammer, Aesop portfolio | auto | 14 / 20 | 70.0% | 131.225 | 6,561.2 | 2.0 | 113,766.0 |
-| **LeanHammer, Aesop portfolio** | **Crush** | **20 / 20** | **100.0%** | **1.397** | **69.8** | **12.0** | **255.0** |
+| LeanHammer, direct | Auto + Duper | 8 / 20 | 40.0% | 2.173 | 108.7 | 1.0 | 254.0 |
+| LeanHammer, direct | Duper | 12 / 20 | 60.0% | 19.108 | 955.4 | 53.0 | 14,782.0 |
+| **LeanHammer, direct** | **Crush** | **20 / 20** | **100.0%** | **1.358** | **67.9** | **5.0** | **185.0** |
+| LeanHammer, Aesop portfolio | Aesop + Auto/Duper | 14 / 20 | 70.0% | 131.225 | 6,561.2 | 2.0 | 113,766.0 |
+| **LeanHammer, Aesop portfolio** | **Aesop + Crush** | **20 / 20** | **100.0%** | **1.397** | **69.8** | **12.0** | **255.0** |
 | **Loom** | **auto** | **4 / 4** | **100.0%** | **0.352** | **88.0** | **45.0** | **178.0** |
+| Loom | Duper | 1 / 4 | 25.0% | 0.492 | 123.0 | 39.0 | 173.0 |
 | Loom | Crush | 4 / 4 | 100.0% | 0.715 | 178.8 | 92.0 | 220.0 |
 | Cashmere | auto | 18 / 38 | 47.4% | 5.232 | 137.7 | 2.0 | 211.0 |
+| Cashmere | Duper | 21 / 38 | 55.3% | 46.526 | 1,224.4 | 1.0 | 12,280.0 |
 | **Cashmere** | **Crush** | **38 / 38** | **100.0%** | **6.483** | **170.6** | **1.0** | **635.0** |
-| Velvet, shared VCs | auto | 309 / 380 | 81.3% | 469.931 | 1,236.7 | 11.0 | 78,273.0 |
-| **Velvet, shared VCs** | **Crush** | **359 / 380** | **94.5%** | **324.533** | **854.0** | **1.0** | **52,023.0** |
+| Velvet, shared VCs | auto | 284 / 355 | 80.0% | 465.507 | 1,311.3 | 11.0 | 78,273.0 |
+| Velvet, shared VCs | Duper | 196 / 355 | 55.2% | 1,753.782 | 4,940.2 | 0.0 | 270,961.0 |
+| **Velvet, shared VCs** | **Crush** | **334 / 355** | **94.1%** | **272.980** | **769.0** | **1.0** | **52,023.0** |
 | PLean | auto | 168 / 192 | 87.5% | 715.812 | 3,728.2 | 0.0 | 66,114.0 |
 | **PLean** | **Crush** | **174 / 192** | **90.6%** | **457.859** | **2,384.7** | **0.0** | **169,370.4** |
+| PLean, bounded stress | Duper | 19 / 30 | 63.3% | 43.176 | 1,439.2 | 0.0 | 4,963.3 |
 
-**Rows.** Each auto/Crush pair uses the same set of proof obligations. `auto`
-means the existing non-Crush backend of that project; it is not one common
-tactic shared by every corpus.
+**Rows.** `Duper` means direct proof-producing `duper [*]` after the host
+project's normal VC preprocessing. LeanHammer's `Auto + Duper` lane is
+LeanHammer's Auto translation and monomorphization pipeline feeding Duper, not
+a sequential fallback. The Aesop rows race the named backend with Aesop.
 
-- `LeanHammer, direct (no Aesop)` invokes one LeanHammer backend lane without
-  Aesop; "direct" means the backend is invoked directly rather than as part of
-  an Aesop portfolio. The auto row is the `auto-only` profile, which runs
-  LeanHammer's Lean-auto/Zipperposition/Duper pipeline. The Crush row is the
-  `crush-only` profile, which runs Crush alone. Grind and Lean-SMT are disabled
-  in both.
-- `LeanHammer, Aesop portfolio` enables parallel proof-search lanes. The auto
-  profile races Aesop using the Lean-auto/Zipperposition/Duper pipeline as a
-  subprocedure, pure Aesop, and the direct pipeline. The Crush profile races
-  pure Aesop with Crush. A VC is solved when any enabled lane closes it.
-- `Loom` is a four-VC regression fixture covering integer algebra, quantified
-  array invariants, array updates, and conjunctions. The auto row calls Loom's
-  existing `loom_auto`; the Crush row calls its `loom_crush` integration.
-- `Cashmere` contains every generated VC in the two Cashmere case-study files
-  listed by the harness. Backend calls in copies of those files are replaced by
-  timed calls to `loom_auto` or `loom_crush`.
-- `Velvet, shared VCs` contains only the 380 goals emitted by both tested Velvet
-  branches and matched by source file, enclosing proof, and goal identity. It
-  excludes goals emitted by only one branch.
-- `PLean` contains the generated verification conditions from the nine complete
-  PLean examples listed below. Registered manual proofs are disabled. The auto
-  row uses PLean's vanilla Loom/lean-auto path; the Crush row uses the
-  Crush-adapted path.
+Loom is a four-VC regression fixture. Cashmere contains all generated VCs in
+its two case-study files. Velvet uses the 355 goal identities emitted by all
+three tested branches, so every Velvet row measures the same obligations.
+PLean contains the nine complete examples listed below, with registered manual
+proofs disabled and incomplete `Paxos.lean` excluded.
 
-**Columns.** A verification condition (VC) is one Lean goal handed to the
-selected backend after the host project's VC generation and preprocessing.
-`Solved / total` counts goals closed by that backend over goals attempted, and
-`Coverage` is the corresponding percentage. `Total` is the sum of tactic-local
-time for all attempts, including failures and timeouts. `Avg` is
-`Total / total attempted VCs`; `Min` and `Max` are the shortest and longest
-individual attempts. Total time is in seconds and the other timing columns are
-in milliseconds. The better row in each pair is bold: coverage is compared
-first, then average time when coverage is equal.
+PLean's bounded Duper stress row includes the 30 VCs in the four files that
+completed under the configured per-file CPU limit. Five other files reached
+that limit before reporting a complete VC set. They are marked in the
+per-file table and excluded from the stress row's denominator and timings, so
+that row is not directly comparable with the full 192-VC auto and Crush rows.
 
-These are not file or process wall times. PLean times sum its native
-per-obligation profiling stages. Each VC was measured once, so the timing
-numbers are useful for regression detection rather than stable microbenchmark
-claims. The 113.8-second LeanHammer auto outlier is retained.
+**Columns.** A VC is one Lean goal handed to the selected backend after host
+preprocessing. `Solved / total` counts closed goals over attempted goals.
+`Total` sums tactic-local time for all attempts; `Avg` divides it by attempted
+VCs. `Min` and `Max` are individual attempt times. Total is in seconds and the
+other timing columns are in milliseconds. The best row in each comparable
+group is bold, comparing coverage first and average time when coverage ties.
 
-LeanHammer excludes its import-only case. The Loom row is the four-obligation
-regression fixture generated by `benchmark-corpora.sh`, not every declaration in
-the Loom repository.
+These are not file or process wall times. Each VC was measured once, so timings
+are regression indicators rather than stable microbenchmarks. LeanHammer
+excludes its import-only case.
 
-The Velvet branches generated 495 auto records and 428 Crush records. These are
-not comparable totals: their Loom versions perform different preprocessing, and
-the bounded Crush run stopped early in `SpMSpV_Example.lean` and
-`SubstringSearch.lean`. The headline Velvet rows therefore use only the 380
-obligations matched by file, proof, and goal identity. The controlled comparison
-below uses the same matched set; its means include only VCs solved by both
-backends.
+The raw Velvet branches emitted 495 auto records, 483 Duper records, and 428
+Crush records. Duper was truncated in `Examples_Total.lean` and
+`Total_Partial_example.lean`; Crush was truncated in
+`SpMSpV_Example.lean` and `SubstringSearch.lean`. The headline table uses the
+three-way intersection. Pairwise intersections below can therefore be larger.
 
-| Corpus | Shared VCs | Auto only | Crush only | Both | Neither | Auto avg (ms) | Crush avg (ms) |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| LeanHammer, direct (no Aesop) | 20 | 0 | 12 | 8 | 0 | 162.0 | 41.8 |
-| LeanHammer, Aesop portfolio | 20 | 0 | 6 | 14 | 0 | 107.1 | 39.8 |
-| Loom | 4 | 0 | 0 | 4 | 0 | 88.0 | 178.8 |
-| Cashmere | 38 | 0 | 20 | 18 | 0 | 109.2 | 87.3 |
-| Velvet | 380 | 6 | 56 | 303 | 15 | 507.2 | 293.6 |
-| PLean | 192 | 0 | 6 | 168 | 18 | 2,728.1 | 713.4 |
+## Matched VCs
 
-**Rows.** Each row compares auto and Crush on matched obligations from one
-corpus and proof-search profile defined above. LeanHammer cases are matched by
-case name, corpus VCs by file, enclosing proof, and goal identity, and PLean VCs
-by example file and obligation name.
+| Corpus | Left | Right | Shared | Left only | Right only | Both | Neither | Left avg (ms) | Right avg (ms) |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| LeanHammer, direct | Auto + Duper | Duper | 20 | 0 | 4 | 8 | 8 | 162.0 | 93.0 |
+| LeanHammer, direct | Duper | Crush | 20 | 0 | 8 | 12 | 0 | 115.1 | 50.2 |
+| LeanHammer, direct | Auto + Duper | Crush | 20 | 0 | 12 | 8 | 0 | 162.0 | 41.8 |
+| LeanHammer, Aesop | Aesop + Auto/Duper | Aesop + Crush | 20 | 0 | 6 | 14 | 0 | 107.1 | 39.8 |
+| Loom | auto | Duper | 4 | 3 | 0 | 1 | 0 | 45.0 | 39.0 |
+| Loom | Duper | Crush | 4 | 0 | 3 | 1 | 0 | 39.0 | 92.0 |
+| Loom | auto | Crush | 4 | 0 | 0 | 4 | 0 | 88.0 | 178.8 |
+| Cashmere | auto | Duper | 38 | 4 | 7 | 14 | 13 | 99.6 | 65.2 |
+| Cashmere | Duper | Crush | 38 | 0 | 17 | 21 | 0 | 669.9 | 28.3 |
+| Cashmere | auto | Crush | 38 | 0 | 20 | 18 | 0 | 109.2 | 87.3 |
+| Velvet | auto | Duper | 394 | 132 | 34 | 186 | 42 | 730.9 | 964.0 |
+| Velvet | Duper | Crush | 355 | 2 | 140 | 194 | 19 | 877.2 | 60.9 |
+| Velvet | auto | Crush | 380 | 6 | 56 | 303 | 15 | 507.2 | 293.6 |
+| PLean | auto | Duper | 30 | 11 | 0 | 19 | 0 | 483.4 | 1,289.1 |
+| PLean | Duper | Crush | 30 | 0 | 11 | 19 | 0 | 1,289.1 | 173.3 |
+| PLean | auto | Crush | 192 | 0 | 6 | 168 | 18 | 2,728.1 | 713.4 |
 
-**Columns.** `Shared VCs` is the number of obligations attempted by both
-backends. `Auto only` counts goals solved by auto but not Crush; `Crush only`
-counts the reverse; `Both` counts goals solved by both; and `Neither` counts
-goals solved by neither. These four outcome columns are disjoint and sum to
-`Shared VCs`. `Auto avg` and `Crush avg` are mean tactic-local times over only
-the `Both` goals. Unlike `Avg` in the first table, they exclude all goals not
-solved by both backends.
+**Rows.** Each row compares two backends on obligations matched by case name
+for LeanHammer, by file/proof/goal identity for Loom, Cashmere, and Velvet, or
+by file/obligation name for PLean. The PLean comparisons involving Duper use
+only the 30 VCs in files that completed its bounded stress run.
 
-PLean excludes the incomplete `Paxos.lean`. The harness disables registered
-manual proofs so both backends see all generated obligations.
-`Examples/PingPong/Top.lean` is also excluded because it contains no `#pverify`
-directives and generates no VCs.
+**Columns.** `Shared` is the number attempted by both backends. `Left only`,
+`Right only`, `Both`, and `Neither` are disjoint outcomes summing to `Shared`.
+The two averages include only `Both` goals, so they exclude failures and goals
+solved by only one backend.
 
-| PLean example | Auto solved | Crush solved | Total |
-|---|---:|---:|---:|
-| ClockBound | 56 | 56 | 56 |
-| Consensus | 12 | 14 | 17 |
-| DistributedLock | 12 | 12 | 12 |
-| LockServer | 34 | 34 | 37 |
-| PingPongAuto | 6 | 6 | 6 |
-| PingPongTrivial | 1 | 1 | 1 |
-| RingLeader | 11 | 11 | 14 |
-| ShardedKV | 11 | 11 | 11 |
-| TwoPhaseCommit | 25 | 29 | 38 |
+## PLean Files
 
-**Rows.** Each row is one complete PLean module under `Examples/`; its VCs are
-the proof obligations generated by the module's `#pverify` commands. Summing
-the nine `Total` entries gives the 192 PLean VCs in the preceding tables.
+| PLean example | Auto solved | Duper stress | Crush solved | Total |
+|---|---:|---:|---:|---:|
+| ClockBound | 56 | CPU limit | 56 | 56 |
+| Consensus | 12 | CPU limit | 14 | 17 |
+| DistributedLock | 12 | 8 | 12 | 12 |
+| LockServer | 34 | CPU limit | 34 | 37 |
+| PingPongAuto | 6 | 4 | 6 | 6 |
+| PingPongTrivial | 1 | 1 | 1 | 1 |
+| RingLeader | 11 | CPU limit | 11 | 14 |
+| ShardedKV | 11 | 6 | 11 | 11 |
+| TwoPhaseCommit | 25 | CPU limit | 29 | 38 |
 
-**Columns.** `Auto solved` and `Crush solved` independently count how many of
-that module's VCs each backend closed. `Total` is the common number of generated
-VCs presented to each backend, not the sum of the two solved columns.
+**Rows.** Each row is one complete module under `Examples/`. `Total` is the
+common number of generated VCs, not a sum of solved columns.
+
+**Columns.** Backend columns count closed VCs only when a file completed.
+`CPU limit` means that the file's Lean process reached its 60 CPU-second bound,
+so no partial result is presented as complete coverage. Every file is run in a
+separate process, so one limited file does not prevent later files from running.
 
 ## Configuration
 
-Loom, Cashmere, and Velvet used cvc5 1.3.4, a five-second per-query timeout,
-one million Lean heartbeats per VC, and `crush.trust = "reconstruct"`.
-LeanHammer used its five-second Hammer portfolio limits and checked
-reconstruction; its Crush profile used the default Z3 backend. PLean used cvc5
-with the same timeout and heartbeat limit, disabled the proof cache and
-ground-instantiation fuel, and used `crush.trust = "trust"` to match lean-auto's
-trusted SMT discharge.
+Loom, Cashmere, and Velvet used cvc5 1.3.4 for auto and Crush, a five-second
+solver timeout, one million Lean heartbeats per VC, and
+`crush.trust = "reconstruct"`. Their Duper lane used a five-second saturation
+limit and the same heartbeat cap. LeanHammer used its five-second portfolio
+limits; raw Duper and Crush both produced checked Lean proofs.
 
-The machine was Apple Silicon arm64 running macOS 26.6, with Z3 4.15.4 and cvc5
-1.3.4. Builds and imports are excluded from tactic-local times. A per-query
-timeout does not cap a complete tactic invocation that performs multiple solver
-calls or other metaprogramming.
+PLean auto and Crush used cvc5, a five-second timeout, one million heartbeats,
+disabled the proof cache and ground-instantiation fuel, and used
+`crush.trust = "trust"` to match lean-auto's trusted SMT discharge. The
+PLean Duper stress lane used one-second saturation, 20,000 heartbeats per VC,
+and a 60 CPU-second limit per generated Lean file. This lower bounded
+configuration was necessary because `ClockBound` exceeded 40 minutes at one
+million heartbeats and 18 minutes at 200,000 heartbeats.
 
-| Component | Auto revision | Crush revision | Lean |
-|---|---|---|---|
-| lean-crush | - | `c60aa1767911ae5efbef3010047ab307e209e189` | 4.32.2 |
-| LeanHammer | `df4dd13671412591d678eada250b04c030fd4d40` | same tree | 4.32.2 |
-| Loom and Cashmere | `78928abc9054b31d0bea85985496490baae95244` | `ec16b95ff8bbd047248de031cabd3160847e4b1b` | 4.24.0 / 4.32.2 |
-| Velvet | `d254391d5e84546f96576e5b67dfb6bafe9fc301` | `e90d79341bb8ef510ec868623e74cfe98feaa4e8` | 4.24.0 / 4.32.2 |
-| PLean | `be39726723e71f9aa1e02c6cfeeae9b0c31b8947` | same base plus adaptation | 4.24.0 / 4.32.2 |
+The machine was Apple Silicon arm64 running macOS 26.6, with Z3 4.15.4 and
+cvc5 1.3.4. Duper was pinned at
+`ca7c5862bee2e62e019e6a1b70ce95612b6b6365`. Builds and imports are excluded
+from tactic-local times.
 
-**Rows.** `Component` names the repository whose source generated that part of
-the benchmark. Loom supplies both the Loom fixture and Cashmere integration,
-so they share a row. The `lean-crush` row records the local Crush implementation
-used by every Crush run rather than a separate benchmark corpus.
+| Component | Auto revision | Duper revision | Crush revision | Lean |
+|---|---|---|---|---|
+| lean-crush | - | - | `c60aa1767911ae5efbef3010047ab307e209e189` | 4.32.2 |
+| LeanHammer | `df4dd13671412591d678eada250b04c030fd4d40` | same tree | same tree | 4.32.2 |
+| Loom and Cashmere | `78928abc9054b31d0bea85985496490baae95244` | `616f9cd8db660dcd74a1c92b0d19bb50420e1c59` | `ec16b95ff8bbd047248de031cabd3160847e4b1b` | 4.24.0 / 4.32.2 / 4.32.2 |
+| Velvet | `d254391d5e84546f96576e5b67dfb6bafe9fc301` | `5a1180338958908323a921255a8d158cf1f26c95` | `e90d79341bb8ef510ec868623e74cfe98feaa4e8` | 4.24.0 / 4.32.2 / 4.32.2 |
+| PLean | `be39726723e71f9aa1e02c6cfeeae9b0c31b8947` | `3557f1f0fa5246ee88fcde3776f3973349049968` | `9c098b4c5ad32faf2a022929b6726d2a182a9e1d` | 4.24.0 / 4.32.2 / 4.32.2 |
 
-**Columns.** `Auto revision` is the source commit used for the auto run, and
-`Crush revision` is the source commit or adaptation used for the Crush run.
-`same tree` means both LeanHammer profiles used the exact same checkout.
-`same base plus adaptation` means the PLean Crush tree started at the listed
-auto commit and applied the tracked changes identified by the hash below. `-`
-means that the component is not used by that backend. `Lean` gives the compiler
-version; where two versions are separated by `/`, auto is first and Crush is
-second.
-
-The PLean Crush adaptation had tracked diff SHA-256
-`ba75ebbc5de1586515b87c1e2eae23765078422e141d62f2488073dcf3e9d33b`.
-Because Loom, Velvet, and PLean require backend-specific source branches and
-different Lean versions, use the matched-VC table for direct comparisons.
+`same tree` means the profiles used the exact checkout. Loom supplies both the
+Loom fixture and Cashmere integration. The Lean version order is auto, Duper,
+then Crush.
 
 ## Reproduction
 
-Place LeanHammer, Loom, and Velvet beside this checkout, build lean-crush, and
-run:
+The corpus harness provisions and builds all pinned revisions:
 
 ```sh
-lake build Crush
-
 REPEATS=1 \
 TIMEOUT=5 \
+DUPER_TIMEOUT=5 \
 SOLVER=cvc5 \
 CRUSH_TRUST=reconstruct \
-MAX_HEARTBEATS=0 \
+MAX_HEARTBEATS=1000000 \
 OUT_DIR="$PWD/BenchmarkResults/corpora-reproduction" \
 scripts/benchmark-corpora.sh
 ```
 
-For PLean, provide separate vanilla and Crush-adapted trees and build both
-before running the harness:
+The PLean harness runs all three published lanes with:
 
 ```sh
-(cd /path/to/vanilla/PLean && lake build)
-(cd /path/to/crush/PLean && lake build)
-
-PLEAN_AUTO_TREE=/path/to/vanilla/PLean \
-PLEAN_CRUSH_TREE=/path/to/crush/PLean \
+RUN_DUPER=true \
 REPEATS=1 \
 SOLVER=cvc5 \
 TIMEOUT=5 \
 MAX_HEARTBEATS=1000000 \
 CRUSH_TRUST=trust \
 CRUSH_INST_FUEL=0 \
+DUPER_TIMEOUT=1 \
+DUPER_MAX_HEARTBEATS=20000 \
+DUPER_FILE_CPU_SECONDS=60 \
 OUT_DIR="$PWD/BenchmarkResults/plean-reproduction" \
 scripts/benchmark-plean.sh
 ```
 
 Each harness writes metadata, per-VC results, aggregate summaries, per-file
-runs, and complete logs under `BenchmarkResults/`. Use `REPEATS=3` or more for
-performance claims.
+runs, and complete logs under `BenchmarkResults/`. The corpus headline rows
+come from `matched-summary.tsv`, LeanHammer profiles from
+`leanhammer/summary.tsv`, and PLean rows from `summary.tsv` and
+`file-summary.tsv`. The bounded corpus command reports known Velvet truncation
+after writing these files. Use `REPEATS=3` or more for performance claims on
+lanes that complete.

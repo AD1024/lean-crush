@@ -4,48 +4,154 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 crush_root="$(cd "$script_dir/.." && pwd)"
-hammer_repo="${HAMMER_REPO:-$crush_root/../LeanHammer}"
+source "$script_dir/benchmark-common.sh"
+
+hammer_repo="${HAMMER_REPO:-}"
+hammer_url="${HAMMER_REPO_URL:-https://github.com/AD1024/LeanHammer.git}"
+hammer_rev="${HAMMER_REV:-df4dd13671412591d678eada250b04c030fd4d40}"
+source_cache="${BENCHMARK_SOURCE_CACHE:-$crush_root/BenchmarkResults/sources}"
 repeats="${REPEATS:-1}"
+duper_timeout="${DUPER_TIMEOUT:-5}"
 out_dir="${OUT_DIR:-$crush_root/BenchmarkResults/leanhammer-$(date +%Y%m%d-%H%M%S)}"
 results="$out_dir/results.tsv"
 metadata="$out_dir/metadata.tsv"
 summary="$out_dir/summary.tsv"
 logs="$out_dir/logs"
-profiles=(auto-only crush-only aesop-auto aesop-crush)
+read -r -a profiles <<< \
+  "${PROFILES:-duper-only auto-duper crush-only aesop-auto-duper aesop-crush}"
+tmp_root=""
+managed_repo=""
+
+cleanup() {
+  if [[ -n "$managed_repo" && -n "$hammer_repo" ]]; then
+    git -C "$managed_repo" worktree remove --force "$hammer_repo" \
+      >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$tmp_root" ]]; then
+    rmdir "$tmp_root" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if [[ -z "$hammer_repo" ]]; then
+  tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/lean-crush-hammer.XXXXXX")"
+  managed_repo="$(benchmark_ensure_repo "LeanHammer" "$hammer_url" \
+    "$hammer_rev" "$source_cache/LeanHammer")"
+  hammer_repo="$tmp_root/LeanHammer"
+  benchmark_add_worktree "$managed_repo" "$hammer_rev" "$hammer_repo" \
+    >/dev/null
+else
+  hammer_repo="$(cd "$hammer_repo" && pwd)"
+fi
 
 if [[ ! -d "$hammer_repo/Benchmark/Cases" ]]; then
   printf 'error: LeanHammer benchmark not found at %s\n' "$hammer_repo" >&2
   exit 1
 fi
 
-if [[ ! -f "$crush_root/.lake/build/lib/lean/Crush.olean" ]]; then
-  printf 'error: local Crush is not built; run `lake build Crush`\n' >&2
+mkdir -p "$logs"
+printf 'Building local Crush\n'
+if ! (cd "$crush_root" && lake build Crush) \
+    > "$out_dir/build-crush.log" 2>&1; then
+  tail -n 80 "$out_dir/build-crush.log" >&2
+  printf 'error: local Crush build failed\n' >&2
   exit 1
 fi
 
-mkdir -p "$logs"
+printf 'Preparing LeanHammer dependencies\n'
+if ! (cd "$hammer_repo" && lake env printenv LEAN_PATH) \
+    > "$out_dir/dependencies-leanhammer.log" 2>&1; then
+  tail -n 80 "$out_dir/dependencies-leanhammer.log" >&2
+  printf 'error: LeanHammer dependency setup failed\n' >&2
+  exit 1
+fi
+if ! benchmark_sync_crush_sources "$crush_root" "$hammer_repo"; then
+  exit 1
+fi
+
+printf 'Building LeanHammer benchmark\n'
+if ! (cd "$hammer_repo" && lake build Benchmark.Harness) \
+    > "$out_dir/build-leanhammer.log" 2>&1; then
+  tail -n 80 "$out_dir/build-leanhammer.log" >&2
+  printf 'error: LeanHammer benchmark build failed\n' >&2
+  exit 1
+fi
+
+write_duper_case() {
+  local source="$1"
+  local output="$2"
+
+  {
+    printf 'import Duper\n\n'
+    cat <<'EOF'
+open Lean Elab Tactic
+
+private def runBenchmarkDuper (premises : TSyntaxArray `term) : TacticM Unit := do
+  let tactic ← `(tactic| duper [*, $premises,*])
+  let start ← IO.monoMsNow
+  try
+    evalTactic tactic
+    logInfo m!"BENCHMARK_MS={(← IO.monoMsNow) - start}"
+  catch e =>
+    logInfo m!"BENCHMARK_MS={(← IO.monoMsNow) - start}"
+    throw e
+
+syntax "benchmark_hammer" : tactic
+syntax "benchmark_hammer" "[" term,* "]" : tactic
+
+elab_rules : tactic
+  | `(tactic| benchmark_hammer) => runBenchmarkDuper #[]
+  | `(tactic| benchmark_hammer [$premises,*]) =>
+    runBenchmarkDuper premises
+
+EOF
+    tail -n +2 "$source"
+  } > "$output"
+}
+
 printf 'profile\tcase\trun\tstatus\ttactic_ms\n' > "$results"
-printf 'hammer_commit\ttoolchain\tcrush_commit\tcrush_dirty\tcrush_root\n' > "$metadata"
+printf 'hammer_commit\ttoolchain\tduper_commit\tduper_timeout\tcrush_commit\tcrush_dirty\tcrush_root\n' > "$metadata"
 crush_dirty=false
 if [[ -n "$(git -C "$crush_root" status --porcelain -- \
     . ':(exclude)BenchmarkResults')" ]]; then
   crush_dirty=true
 fi
-printf '%s\t%s\t%s\t%s\t%s\n' \
+duper_commit="$(git -C "$hammer_repo/.lake/packages/Duper" rev-parse HEAD)"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
   "$(git -C "$hammer_repo" rev-parse HEAD)" \
   "$(tr -d '\r\n' < "$hammer_repo/lean-toolchain")" \
+  "$duper_commit" \
+  "$duper_timeout" \
   "$(git -C "$crush_root" rev-parse HEAD)" \
   "$crush_dirty" \
   "$crush_root" >> "$metadata"
 
 for profile in "${profiles[@]}"; do
+  harness_profile="$profile"
+  case "$profile" in
+    auto-duper) harness_profile="auto-only" ;;
+    aesop-auto-duper) harness_profile="aesop-auto" ;;
+  esac
   for case_file in "$hammer_repo"/Benchmark/Cases/*.lean; do
     case_name="$(basename "$case_file" .lean)"
     relative_case="Benchmark/Cases/$(basename "$case_file")"
+    input_case="$relative_case"
+    if [[ "$profile" == "duper-only" ]]; then
+      generated="$out_dir/generated/duper-only/$(basename "$case_file")"
+      mkdir -p "$(dirname "$generated")"
+      write_duper_case "$case_file" "$generated"
+      input_case="$generated"
+    fi
     for ((run = 1; run <= repeats; run++)); do
       log="$logs/${profile}-${case_name}-${run}.log"
+      lean_args=("-Dduper.maxSaturationTime=$duper_timeout")
+      if [[ "$profile" != "duper-only" ]]; then
+        lean_args+=("-Dbenchmark.profile=$harness_profile")
+      fi
       if "$script_dir/with-local-crush.sh" "$hammer_repo" \
-          "-Dbenchmark.profile=$profile" "$relative_case" > "$log" 2>&1; then
+          "${lean_args[@]}" "$input_case" > "$log" 2>&1; then
         status=pass
       else
         status=fail
@@ -90,6 +196,7 @@ awk -F '\t' '
 printf '\nSummary (excluding import-only case):\n'
 awk -F '\t' -v repeats="$repeats" '
   function reportPair(label, left, right,    c, lk, rk, common, leftTotal, rightTotal) {
+    if (!(left in profiles) || !(right in profiles)) return
     for (c in caseNames) {
       lk = left SUBSEP c
       rk = right SUBSEP c
@@ -130,8 +237,11 @@ awk -F '\t' -v repeats="$repeats" '
         profile, solved, count, successTotal[profile] / successRuns[profile]
     }
     print ""
-    reportPair("direct", "auto-only", "crush-only")
-    reportPair("with-aesop", "aesop-auto", "aesop-crush")
+    reportPair("auto-duper", "auto-duper", "crush-only")
+    reportPair("duper", "duper-only", "crush-only")
+    reportPair("with-aesop", "aesop-auto-duper", "aesop-crush")
+    reportPair("direct-old", "auto-only", "crush-only")
+    reportPair("aesop-old", "aesop-auto", "aesop-crush")
   }
 ' "$results"
 

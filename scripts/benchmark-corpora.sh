@@ -5,24 +5,35 @@ set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CRUSH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PARENT="$(dirname "$CRUSH_ROOT")"
+source "$SCRIPT_DIR/benchmark-common.sh"
 
-HAMMER_REPO="${HAMMER_REPO:-$PARENT/LeanHammer}"
-LOOM_REPO="${LOOM_REPO:-$PARENT/loom}"
-VELVET_REPO="${VELVET_REPO:-$PARENT/velvet}"
+HAMMER_REPO="${HAMMER_REPO:-}"
+LOOM_REPO="${LOOM_REPO:-}"
+VELVET_REPO="${VELVET_REPO:-}"
+
+HAMMER_REPO_URL="${HAMMER_REPO_URL:-https://github.com/AD1024/LeanHammer.git}"
+LOOM_REPO_URL="${LOOM_REPO_URL:-https://github.com/AD1024/loom.git}"
+VELVET_REPO_URL="${VELVET_REPO_URL:-https://github.com/AD1024/velvet.git}"
+BENCHMARK_SOURCE_CACHE="${BENCHMARK_SOURCE_CACHE:-$CRUSH_ROOT/BenchmarkResults/sources}"
 
 LOOM_AUTO_TREE="${LOOM_AUTO_TREE:-}"
 LOOM_CRUSH_TREE="${LOOM_CRUSH_TREE:-}"
+LOOM_DUPER_TREE="${LOOM_DUPER_TREE:-}"
 VELVET_AUTO_TREE="${VELVET_AUTO_TREE:-}"
 VELVET_CRUSH_TREE="${VELVET_CRUSH_TREE:-}"
+VELVET_DUPER_TREE="${VELVET_DUPER_TREE:-}"
 
-LOOM_AUTO_REF="${LOOM_AUTO_REF:-origin/master}"
-LOOM_CRUSH_REF="${LOOM_CRUSH_REF:-origin/crush-backend}"
-VELVET_AUTO_REF="${VELVET_AUTO_REF:-origin/master}"
-VELVET_CRUSH_REF="${VELVET_CRUSH_REF:-origin/crush-backend}"
+HAMMER_REF="${HAMMER_REF:-df4dd13671412591d678eada250b04c030fd4d40}"
+LOOM_AUTO_REF="${LOOM_AUTO_REF:-78928abc9054b31d0bea85985496490baae95244}"
+LOOM_CRUSH_REF="${LOOM_CRUSH_REF:-ec16b95ff8bbd047248de031cabd3160847e4b1b}"
+LOOM_DUPER_REF="${LOOM_DUPER_REF:-616f9cd8db660dcd74a1c92b0d19bb50420e1c59}"
+VELVET_AUTO_REF="${VELVET_AUTO_REF:-d254391d5e84546f96576e5b67dfb6bafe9fc301}"
+VELVET_CRUSH_REF="${VELVET_CRUSH_REF:-e90d79341bb8ef510ec868623e74cfe98feaa4e8}"
+VELVET_DUPER_REF="${VELVET_DUPER_REF:-5a1180338958908323a921255a8d158cf1f26c95}"
 
 REPEATS="${REPEATS:-1}"
 TIMEOUT="${TIMEOUT:-5}"
+DUPER_TIMEOUT="${DUPER_TIMEOUT:-5}"
 SOLVER="${SOLVER:-cvc5}"
 CRUSH_TRUST="${CRUSH_TRUST:-reconstruct}"
 CRUSH_PROFILE="${CRUSH_PROFILE:-false}"
@@ -31,6 +42,7 @@ MAX_HEARTBEATS="${MAX_HEARTBEATS:-1000000}"
 
 RUN_AUTO="${RUN_AUTO:-true}"
 RUN_CRUSH="${RUN_CRUSH:-true}"
+RUN_DUPER="${RUN_DUPER:-true}"
 RUN_LEANHAMMER="${RUN_LEANHAMMER:-true}"
 RUN_LOOM="${RUN_LOOM:-true}"
 RUN_CASHMERE="${RUN_CASHMERE:-true}"
@@ -47,6 +59,7 @@ RESULTS="$OUT_DIR/results.tsv"
 RUNS="$OUT_DIR/runs.tsv"
 METADATA="$OUT_DIR/metadata.tsv"
 SUMMARY="$OUT_DIR/summary.tsv"
+MATCHED_SUMMARY="$OUT_DIR/matched-summary.tsv"
 COMPARISON="$OUT_DIR/comparison.tsv"
 
 WORKTREES=()
@@ -94,7 +107,8 @@ CVC5_BIN="$(find_solver cvc5 "${CVC5_BIN:-}")" ||
 check_repo() {
   local repo="$1"
   local label="$2"
-  [[ -d "$repo/.git" ]] || die "$label repository not found at $repo"
+  benchmark_is_git_repo "$repo" ||
+    die "$label repository not found at $repo"
 }
 
 check_ref() {
@@ -117,16 +131,18 @@ cleanup() {
       git -C "$repo" worktree remove --force "$path" >/dev/null 2>&1 || true
     done
   fi
-  rmdir "$TMP_ROOT" >/dev/null 2>&1 || true
+  rm -rf "$TMP_ROOT"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 add_worktree() {
   local repo="$1"
   local ref="$2"
   local name="$3"
   local path="$TMP_ROOT/$name"
-  git -C "$repo" worktree add --detach "$path" "$ref" >/dev/null ||
+  benchmark_add_worktree "$repo" "$ref" "$path" >/dev/null ||
     die "failed to create worktree for $repo at $ref"
   WORKTREES+=("$repo|$path")
   ADDED_WORKTREE="$path"
@@ -152,14 +168,8 @@ seed_solvers() {
 
 sync_local_crush_sources() {
   local tree="$1"
-  local package="$tree/.lake/packages/crush"
-  [[ -d "$package/Crush" ]] ||
-    die "lean-crush dependency not materialized at $package"
-  # The benchmark executes with the local Crush olean first on LEAN_PATH. Mirror
-  # its sources into Lake's dependency checkout before building downstream modules
-  # so structure/API changes cannot leave those modules ABI-stale.
-  rsync -a --delete "$CRUSH_ROOT/Crush/" "$package/Crush/"
-  cp "$CRUSH_ROOT/Crush.lean" "$package/Crush.lean"
+  benchmark_sync_crush_sources "$CRUSH_ROOT" "$tree" ||
+    die "failed to synchronize local Crush sources"
 }
 
 prepare_tree() {
@@ -197,11 +207,12 @@ record_metadata() {
   local backend="$2"
   local ref="$3"
   local tree="$4"
-  local commit toolchain crush_commit crush_dirty
+  local commit toolchain crush_commit crush_dirty duper_commit
   commit="$(git -C "$tree" rev-parse HEAD)"
   toolchain="$(tr -d '\r\n' < "$tree/lean-toolchain")"
   crush_commit="-"
   crush_dirty="false"
+  duper_commit="-"
   if [[ "$backend" == "crush" ]]; then
     crush_commit="$(git -C "$CRUSH_ROOT" rev-parse HEAD)"
     if [[ -n "$(git -C "$CRUSH_ROOT" status --porcelain -- \
@@ -209,9 +220,13 @@ record_metadata() {
       crush_dirty="true"
     fi
   fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  if [[ "$backend" == "duper" ]]; then
+    duper_commit="$(git -C "$tree/.lake/packages/Duper" rev-parse HEAD)"
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$suite" "$backend" "$ref" "$commit" "$toolchain" "$SOLVER" "$TIMEOUT" \
-    "$MAX_HEARTBEATS" "$CRUSH_TRUST" "$crush_commit" "$crush_dirty" "$tree" \
+    "$DUPER_TIMEOUT" "$MAX_HEARTBEATS" "$CRUSH_TRUST" "$crush_commit" \
+    "$duper_commit" "$crush_dirty" "$tree" \
     >> "$METADATA"
 }
 
@@ -228,7 +243,7 @@ macro "corpus_backend" : tactic =>
     set_option loom.solver.smt.timeout $TIMEOUT in
     loom_auto)
 EOF
-  else
+  elif [[ "$backend" == "crush" ]]; then
     cat >> "$output" <<EOF
 
 macro "corpus_backend" : tactic =>
@@ -239,6 +254,14 @@ macro "corpus_backend" : tactic =>
     set_option crush.profile $CRUSH_PROFILE in
     set_option trace.crush.inst $CRUSH_TRACE_INST in
     loom_crush)
+EOF
+  else
+    cat >> "$output" <<EOF
+
+macro "corpus_backend" : tactic =>
+  \`(tactic|
+    set_option duper.maxSaturationTime $DUPER_TIMEOUT in
+    loom_duper)
 EOF
   fi
 
@@ -319,11 +342,14 @@ write_benchmark_file() {
       -e 's/loom_solve[!?]/loom_solve/g' \
       -e 's/[[:space:]]*<;>[[:space:]]*try[[:space:]]+loom_crush//g' \
       -e 's/[[:space:]]*<;>[[:space:]]*try[[:space:]]+loom_auto//g' \
+      -e 's/[[:space:]]*<;>[[:space:]]*try[[:space:]]+loom_duper//g' \
       -e 's/[[:space:]]*<;>[[:space:]]*loom_crush//g' \
       -e 's/[[:space:]]*<;>[[:space:]]*loom_auto//g' \
+      -e 's/[[:space:]]*<;>[[:space:]]*loom_duper//g' \
       -e 's/[[:space:]]*<;>[[:space:]]*loom_smt[[:space:]]+\[\*\]//g' \
       -e 's/loom_crush/corpus_bench_solver/g' \
       -e 's/loom_auto/corpus_bench_solver/g' \
+      -e 's/loom_duper/corpus_bench_solver/g' \
       -e 's/loom_smt[[:space:]]+\[[^]]*\]/corpus_bench_solver/g' \
       -e 's/^[[:space:]]*set_option[[:space:]]+maxHeartbeats[[:space:]]+[0-9]+[[:space:]]*$/set_option maxHeartbeats 0/' \
       >> "$output"
@@ -504,8 +530,72 @@ write_reports() {
   awk -F '\t' -v repeats="$REPEATS" '
     BEGIN {
       OFS = "\t"
-      print "suite", "shared_vcs", "auto_only_wins", "crush_only_wins",
-            "both_solved", "neither_solved", "auto_mean_ms", "crush_mean_ms"
+      backend[1] = "auto"
+      backend[2] = "duper"
+      backend[3] = "crush"
+      print "suite", "backend", "attempted", "passed", "failed", "pass_pct",
+            "total_ms", "mean_ms", "min_ms", "max_ms"
+    }
+    NR > 1 {
+      vc = $1 SUBSEP $7 SUBSEP $8 SUBSEP $9 SUBSEP $10
+      run = vc SUBSEP $2 SUBSEP $6
+      runSeen[run] = 1
+      runMs[run] += $13
+      if ($11 != "pass") runFailed[run] = 1
+    }
+    END {
+      for (run in runSeen) {
+        split(run, p, SUBSEP)
+        vc = p[1] SUBSEP p[2] SUBSEP p[3] SUBSEP p[4] SUBSEP p[5]
+        key = vc SUBSEP p[6]
+        runs[key]++
+        totalMs[key] += runMs[run]
+        if (!runFailed[run]) passRuns[key]++
+        vcs[vc] = 1
+      }
+      for (vc in vcs) {
+        autoKey = vc SUBSEP "auto"
+        duperKey = vc SUBSEP "duper"
+        crushKey = vc SUBSEP "crush"
+        if (runs[autoKey] != repeats || runs[duperKey] != repeats ||
+            runs[crushKey] != repeats) continue
+        split(vc, p, SUBSEP)
+        suite = p[1]
+        for (i = 1; i <= 3; i++) {
+          name = backend[i]
+          sourceKey = vc SUBSEP name
+          resultKey = suite SUBSEP name
+          elapsed = totalMs[sourceKey] / repeats
+          attempted[resultKey]++
+          total[resultKey] += elapsed
+          if (!(resultKey in minimum) || elapsed < minimum[resultKey])
+            minimum[resultKey] = elapsed
+          if (!(resultKey in maximum) || elapsed > maximum[resultKey])
+            maximum[resultKey] = elapsed
+          if (passRuns[sourceKey] == repeats) passed[resultKey]++
+        }
+      }
+      for (resultKey in attempted) {
+        split(resultKey, p, SUBSEP)
+        failed = attempted[resultKey] - passed[resultKey]
+        pct = 100 * passed[resultKey] / attempted[resultKey]
+        printf "%s\t%s\t%d\t%d\t%d\t%.1f\t%.1f\t%.1f\t%.1f\t%.1f\n",
+          p[1], p[2], attempted[resultKey], passed[resultKey], failed, pct,
+          total[resultKey], total[resultKey] / attempted[resultKey],
+          minimum[resultKey], maximum[resultKey]
+      }
+    }
+  ' "$RESULTS" > "$MATCHED_SUMMARY"
+
+  awk -F '\t' -v repeats="$REPEATS" '
+    BEGIN {
+      OFS = "\t"
+      left[1] = "auto";  right[1] = "crush"
+      left[2] = "auto";  right[2] = "duper"
+      left[3] = "duper"; right[3] = "crush"
+      print "suite", "left_backend", "right_backend", "shared_vcs",
+            "left_only", "right_only", "both_solved", "neither_solved",
+            "left_mean_ms", "right_mean_ms"
     }
     NR > 1 {
       vc = $1 SUBSEP $7 SUBSEP $8 SUBSEP $9 SUBSEP $10
@@ -529,57 +619,197 @@ write_reports() {
       for (vc in vcs) {
         split(vc, p, SUBSEP)
         suite = p[1]
-        autoKey = vc SUBSEP "auto"
-        crushKey = vc SUBSEP "crush"
-        if (runs[autoKey] != repeats || runs[crushKey] != repeats) continue
-        shared[suite]++
-        autoSolved = passRuns[autoKey] == repeats
-        crushSolved = passRuns[crushKey] == repeats
-        if (autoSolved && !crushSolved) autoWins[suite]++
-        if (!autoSolved && crushSolved) crushWins[suite]++
-        if (!autoSolved && !crushSolved) neither[suite]++
-        if (autoSolved && crushSolved) {
-          both[suite]++
-          autoMs[suite] += totalMs[autoKey] / repeats
-          crushMs[suite] += totalMs[crushKey] / repeats
+        for (pair = 1; pair <= 3; pair++) {
+          leftKey = vc SUBSEP left[pair]
+          rightKey = vc SUBSEP right[pair]
+          if (runs[leftKey] != repeats || runs[rightKey] != repeats) continue
+          resultKey = suite SUBSEP pair
+          shared[resultKey]++
+          leftSolved = passRuns[leftKey] == repeats
+          rightSolved = passRuns[rightKey] == repeats
+          if (leftSolved && !rightSolved) leftOnly[resultKey]++
+          if (!leftSolved && rightSolved) rightOnly[resultKey]++
+          if (!leftSolved && !rightSolved) neither[resultKey]++
+          if (leftSolved && rightSolved) {
+            both[resultKey]++
+            leftMs[resultKey] += totalMs[leftKey] / repeats
+            rightMs[resultKey] += totalMs[rightKey] / repeats
+          }
         }
       }
       for (suite in suites) {
-        autoMean = both[suite] ? autoMs[suite] / both[suite] : 0
-        crushMean = both[suite] ? crushMs[suite] / both[suite] : 0
-        printf "%s\t%d\t%d\t%d\t%d\t%d\t%.1f\t%.1f\n",
-          suite, shared[suite], autoWins[suite], crushWins[suite],
-          both[suite], neither[suite], autoMean, crushMean
+        for (pair = 1; pair <= 3; pair++) {
+          resultKey = suite SUBSEP pair
+          if (!shared[resultKey]) continue
+          leftMean = both[resultKey] ? leftMs[resultKey] / both[resultKey] : 0
+          rightMean = both[resultKey] ? rightMs[resultKey] / both[resultKey] : 0
+          printf "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%.1f\t%.1f\n",
+            suite, left[pair], right[pair], shared[resultKey],
+            leftOnly[resultKey], rightOnly[resultKey], both[resultKey],
+            neither[resultKey], leftMean, rightMean
+        }
       }
     }
   ' "$RESULTS" > "$COMPARISON"
 }
 
 check_repo "$CRUSH_ROOT" "lean-crush"
-[[ -f "$CRUSH_ROOT/.lake/build/lib/lean/Crush.olean" ]] ||
-  die "local Crush is not built; run 'lake build Crush'"
-if ! is_true "$RUN_AUTO" && ! is_true "$RUN_CRUSH"; then
-  die "at least one of RUN_AUTO or RUN_CRUSH must be true"
-fi
-
-if is_true "$RUN_LEANHAMMER"; then
-  check_repo "$HAMMER_REPO" "LeanHammer"
-fi
-if is_true "$RUN_LOOM" || is_true "$RUN_CASHMERE"; then
-  check_repo "$LOOM_REPO" "Loom"
-  check_ref "$LOOM_REPO" "$LOOM_AUTO_REF"
-  check_ref "$LOOM_REPO" "$LOOM_CRUSH_REF"
-fi
-if is_true "$RUN_VELVET"; then
-  check_repo "$VELVET_REPO" "Velvet"
-  check_ref "$VELVET_REPO" "$VELVET_AUTO_REF"
-  check_ref "$VELVET_REPO" "$VELVET_CRUSH_REF"
+if ! is_true "$RUN_AUTO" && ! is_true "$RUN_CRUSH" && ! is_true "$RUN_DUPER"; then
+  die "at least one backend must be enabled"
 fi
 
 mkdir -p "$OUT_DIR/logs"
+printf 'Building local Crush\n'
+if ! (cd "$CRUSH_ROOT" && lake build Crush) \
+    > "$OUT_DIR/build-crush.log" 2>&1; then
+  tail -n 80 "$OUT_DIR/build-crush.log" >&2
+  die "local Crush build failed"
+fi
+
+if is_true "$RUN_LEANHAMMER"; then
+  if [[ -z "$HAMMER_REPO" ]]; then
+    hammer_source="$(benchmark_ensure_repo "LeanHammer" "$HAMMER_REPO_URL" \
+      "$HAMMER_REF" "$BENCHMARK_SOURCE_CACHE/LeanHammer")" ||
+      die "failed to provision LeanHammer"
+    add_worktree "$hammer_source" "$HAMMER_REF" "leanhammer"
+    HAMMER_REPO="$ADDED_WORKTREE"
+  else
+    HAMMER_REPO="$(cd "$HAMMER_REPO" && pwd)"
+  fi
+  check_repo "$HAMMER_REPO" "LeanHammer"
+fi
+if is_true "$RUN_LOOM" || is_true "$RUN_CASHMERE"; then
+  loom_need_auto=false
+  loom_need_crush=false
+  loom_need_duper=false
+  if is_true "$RUN_AUTO" && [[ -z "$LOOM_AUTO_TREE" ]]; then
+    loom_need_auto=true
+  fi
+  if is_true "$RUN_CRUSH" && [[ -z "$LOOM_CRUSH_TREE" ]]; then
+    loom_need_crush=true
+  fi
+  if is_true "$RUN_DUPER" && [[ -z "$LOOM_DUPER_TREE" ]]; then
+    loom_need_duper=true
+  fi
+  if is_true "$loom_need_auto" || is_true "$loom_need_crush" ||
+      is_true "$loom_need_duper"; then
+    loom_managed=false
+    if [[ -z "$LOOM_REPO" ]]; then
+      loom_managed=true
+      if is_true "$loom_need_auto"; then
+        LOOM_REPO="$(benchmark_ensure_repo "Loom" "$LOOM_REPO_URL" \
+          "$LOOM_AUTO_REF" "$BENCHMARK_SOURCE_CACHE/loom")" ||
+          die "failed to provision Loom"
+      elif is_true "$loom_need_crush"; then
+        LOOM_REPO="$(benchmark_ensure_repo "Loom" "$LOOM_REPO_URL" \
+          "$LOOM_CRUSH_REF" "$BENCHMARK_SOURCE_CACHE/loom")" ||
+          die "failed to provision Loom"
+      else
+        LOOM_REPO="$(benchmark_ensure_repo "Loom" "$LOOM_REPO_URL" \
+          "$LOOM_DUPER_REF" "$BENCHMARK_SOURCE_CACHE/loom")" ||
+          die "failed to provision Loom"
+      fi
+    else
+      LOOM_REPO="$(cd "$LOOM_REPO" && pwd)"
+    fi
+    check_repo "$LOOM_REPO" "Loom"
+    if is_true "$loom_need_auto"; then
+      if is_true "$loom_managed"; then
+        benchmark_ensure_repo "Loom" "$LOOM_REPO_URL" "$LOOM_AUTO_REF" \
+          "$LOOM_REPO" >/dev/null ||
+          die "failed to provision Loom auto revision"
+      else
+        check_ref "$LOOM_REPO" "$LOOM_AUTO_REF"
+      fi
+    fi
+    if is_true "$loom_need_crush"; then
+      if is_true "$loom_managed"; then
+        benchmark_ensure_repo "Loom" "$LOOM_REPO_URL" "$LOOM_CRUSH_REF" \
+          "$LOOM_REPO" >/dev/null ||
+          die "failed to provision Loom Crush revision"
+      else
+        check_ref "$LOOM_REPO" "$LOOM_CRUSH_REF"
+      fi
+    fi
+    if is_true "$loom_need_duper"; then
+      if is_true "$loom_managed"; then
+        benchmark_ensure_repo "Loom" "$LOOM_REPO_URL" "$LOOM_DUPER_REF" \
+          "$LOOM_REPO" >/dev/null ||
+          die "failed to provision Loom Duper revision"
+      else
+        check_ref "$LOOM_REPO" "$LOOM_DUPER_REF"
+      fi
+    fi
+  fi
+fi
+if is_true "$RUN_VELVET"; then
+  velvet_need_auto=false
+  velvet_need_crush=false
+  velvet_need_duper=false
+  if is_true "$RUN_AUTO" && [[ -z "$VELVET_AUTO_TREE" ]]; then
+    velvet_need_auto=true
+  fi
+  if is_true "$RUN_CRUSH" && [[ -z "$VELVET_CRUSH_TREE" ]]; then
+    velvet_need_crush=true
+  fi
+  if is_true "$RUN_DUPER" && [[ -z "$VELVET_DUPER_TREE" ]]; then
+    velvet_need_duper=true
+  fi
+  if is_true "$velvet_need_auto" || is_true "$velvet_need_crush" ||
+      is_true "$velvet_need_duper"; then
+    velvet_managed=false
+    if [[ -z "$VELVET_REPO" ]]; then
+      velvet_managed=true
+      if is_true "$velvet_need_auto"; then
+        VELVET_REPO="$(benchmark_ensure_repo "Velvet" "$VELVET_REPO_URL" \
+          "$VELVET_AUTO_REF" "$BENCHMARK_SOURCE_CACHE/velvet")" ||
+          die "failed to provision Velvet"
+      elif is_true "$velvet_need_crush"; then
+        VELVET_REPO="$(benchmark_ensure_repo "Velvet" "$VELVET_REPO_URL" \
+          "$VELVET_CRUSH_REF" "$BENCHMARK_SOURCE_CACHE/velvet")" ||
+          die "failed to provision Velvet"
+      else
+        VELVET_REPO="$(benchmark_ensure_repo "Velvet" "$VELVET_REPO_URL" \
+          "$VELVET_DUPER_REF" "$BENCHMARK_SOURCE_CACHE/velvet")" ||
+          die "failed to provision Velvet"
+      fi
+    else
+      VELVET_REPO="$(cd "$VELVET_REPO" && pwd)"
+    fi
+    check_repo "$VELVET_REPO" "Velvet"
+    if is_true "$velvet_need_auto"; then
+      if is_true "$velvet_managed"; then
+        benchmark_ensure_repo "Velvet" "$VELVET_REPO_URL" \
+          "$VELVET_AUTO_REF" "$VELVET_REPO" >/dev/null ||
+          die "failed to provision Velvet auto revision"
+      else
+        check_ref "$VELVET_REPO" "$VELVET_AUTO_REF"
+      fi
+    fi
+    if is_true "$velvet_need_crush"; then
+      if is_true "$velvet_managed"; then
+        benchmark_ensure_repo "Velvet" "$VELVET_REPO_URL" \
+          "$VELVET_CRUSH_REF" "$VELVET_REPO" >/dev/null ||
+          die "failed to provision Velvet Crush revision"
+      else
+        check_ref "$VELVET_REPO" "$VELVET_CRUSH_REF"
+      fi
+    fi
+    if is_true "$velvet_need_duper"; then
+      if is_true "$velvet_managed"; then
+        benchmark_ensure_repo "Velvet" "$VELVET_REPO_URL" \
+          "$VELVET_DUPER_REF" "$VELVET_REPO" >/dev/null ||
+          die "failed to provision Velvet Duper revision"
+      else
+        check_ref "$VELVET_REPO" "$VELVET_DUPER_REF"
+      fi
+    fi
+  fi
+fi
+
 printf 'suite\tbackend\tref\tcommit\ttoolchain\trepeat\tfile\tproof\tvc\tgoal_hash\tstatus\tcategory\tmilliseconds\tmessage\tgoal\n' > "$RESULTS"
 printf 'suite\tbackend\trepeat\tfile\texit_code\twall_seconds\tvc_count\ttruncated\tmessage\n' > "$RUNS"
-printf 'suite\tbackend\tref\tcommit\ttoolchain\tsolver\ttimeout\tvc_max_heartbeats\tcrush_trust\tcrush_commit\tcrush_dirty\tworktree\n' > "$METADATA"
+printf 'suite\tbackend\tref\tcommit\ttoolchain\tsolver\ttimeout\tduper_timeout\tvc_max_heartbeats\tcrush_trust\tcrush_commit\tduper_commit\tcrush_dirty\tworktree\n' > "$METADATA"
 
 if is_true "$RUN_LEANHAMMER"; then
   printf 'Running LeanHammer focused suite\n'
@@ -634,7 +864,7 @@ if is_true "$RUN_LOOM" || is_true "$RUN_CASHMERE"; then
       loom_auto_tree="$ADDED_WORKTREE"
     fi
     [[ "$(git -C "$loom_auto_tree" rev-parse HEAD)" == \
-        "$(git -C "$LOOM_REPO" rev-parse "${LOOM_AUTO_REF}^{commit}")" ]] ||
+        "$(git -C "$loom_auto_tree" rev-parse "${LOOM_AUTO_REF}^{commit}")" ]] ||
       die "LOOM_AUTO_TREE is not at $LOOM_AUTO_REF"
     prepare_tree "loom-auto" "$loom_auto_tree" \
       CaseStudies.Tactic CaseStudies.Cashmere.Syntax_Cashmere
@@ -647,9 +877,22 @@ if is_true "$RUN_LOOM" || is_true "$RUN_CASHMERE"; then
       loom_crush_tree="$ADDED_WORKTREE"
     fi
     [[ "$(git -C "$loom_crush_tree" rev-parse HEAD)" == \
-        "$(git -C "$LOOM_REPO" rev-parse "${LOOM_CRUSH_REF}^{commit}")" ]] ||
+        "$(git -C "$loom_crush_tree" rev-parse "${LOOM_CRUSH_REF}^{commit}")" ]] ||
       die "LOOM_CRUSH_TREE is not at $LOOM_CRUSH_REF"
     prepare_tree "loom-crush" "$loom_crush_tree" \
+      CaseStudies.Tactic CaseStudies.Cashmere.Syntax_Cashmere
+  fi
+  if is_true "$RUN_DUPER"; then
+    if [[ -n "$LOOM_DUPER_TREE" ]]; then
+      loom_duper_tree="$(cd "$LOOM_DUPER_TREE" && pwd)"
+    else
+      add_worktree "$LOOM_REPO" "$LOOM_DUPER_REF" "loom-duper"
+      loom_duper_tree="$ADDED_WORKTREE"
+    fi
+    [[ "$(git -C "$loom_duper_tree" rev-parse HEAD)" == \
+        "$(git -C "$loom_duper_tree" rev-parse "${LOOM_DUPER_REF}^{commit}")" ]] ||
+      die "LOOM_DUPER_TREE is not at $LOOM_DUPER_REF"
+    prepare_tree "loom-duper" "$loom_duper_tree" \
       CaseStudies.Tactic CaseStudies.Cashmere.Syntax_Cashmere
   fi
 fi
@@ -663,6 +906,10 @@ if is_true "$RUN_LOOM"; then
     record_metadata "loom" "crush" "$LOOM_CRUSH_REF" "$loom_crush_tree"
     run_fixture "crush" "$LOOM_CRUSH_REF" "$loom_crush_tree"
   fi
+  if is_true "$RUN_DUPER"; then
+    record_metadata "loom" "duper" "$LOOM_DUPER_REF" "$loom_duper_tree"
+    run_fixture "duper" "$LOOM_DUPER_REF" "$loom_duper_tree"
+  fi
 fi
 
 if is_true "$RUN_CASHMERE"; then
@@ -673,6 +920,10 @@ if is_true "$RUN_CASHMERE"; then
   if is_true "$RUN_CRUSH"; then
     record_metadata "cashmere" "crush" "$LOOM_CRUSH_REF" "$loom_crush_tree"
     run_files "cashmere" "crush" "$LOOM_CRUSH_REF" "$loom_crush_tree" "${CASHMERE_FILES[@]}"
+  fi
+  if is_true "$RUN_DUPER"; then
+    record_metadata "cashmere" "duper" "$LOOM_DUPER_REF" "$loom_duper_tree"
+    run_files "cashmere" "duper" "$LOOM_DUPER_REF" "$loom_duper_tree" "${CASHMERE_FILES[@]}"
   fi
 fi
 
@@ -685,7 +936,7 @@ if is_true "$RUN_VELVET"; then
       velvet_auto_tree="$ADDED_WORKTREE"
     fi
     [[ "$(git -C "$velvet_auto_tree" rev-parse HEAD)" == \
-        "$(git -C "$VELVET_REPO" rev-parse "${VELVET_AUTO_REF}^{commit}")" ]] ||
+        "$(git -C "$velvet_auto_tree" rev-parse "${VELVET_AUTO_REF}^{commit}")" ]] ||
       die "VELVET_AUTO_TREE is not at $VELVET_AUTO_REF"
     prepare_tree "velvet-auto" "$velvet_auto_tree" Velvet.Std
   fi
@@ -697,9 +948,21 @@ if is_true "$RUN_VELVET"; then
       velvet_crush_tree="$ADDED_WORKTREE"
     fi
     [[ "$(git -C "$velvet_crush_tree" rev-parse HEAD)" == \
-        "$(git -C "$VELVET_REPO" rev-parse "${VELVET_CRUSH_REF}^{commit}")" ]] ||
+        "$(git -C "$velvet_crush_tree" rev-parse "${VELVET_CRUSH_REF}^{commit}")" ]] ||
       die "VELVET_CRUSH_TREE is not at $VELVET_CRUSH_REF"
     prepare_tree "velvet-crush" "$velvet_crush_tree" Velvet.Std
+  fi
+  if is_true "$RUN_DUPER"; then
+    if [[ -n "$VELVET_DUPER_TREE" ]]; then
+      velvet_duper_tree="$(cd "$VELVET_DUPER_TREE" && pwd)"
+    else
+      add_worktree "$VELVET_REPO" "$VELVET_DUPER_REF" "velvet-duper"
+      velvet_duper_tree="$ADDED_WORKTREE"
+    fi
+    [[ "$(git -C "$velvet_duper_tree" rev-parse HEAD)" == \
+        "$(git -C "$velvet_duper_tree" rev-parse "${VELVET_DUPER_REF}^{commit}")" ]] ||
+      die "VELVET_DUPER_TREE is not at $VELVET_DUPER_REF"
+    prepare_tree "velvet-duper" "$velvet_duper_tree" Velvet.Std
   fi
   if is_true "$RUN_AUTO"; then
     record_metadata "velvet" "auto" "$VELVET_AUTO_REF" "$velvet_auto_tree"
@@ -709,12 +972,18 @@ if is_true "$RUN_VELVET"; then
     record_metadata "velvet" "crush" "$VELVET_CRUSH_REF" "$velvet_crush_tree"
     run_files "velvet" "crush" "$VELVET_CRUSH_REF" "$velvet_crush_tree" "${VELVET_FILES[@]}"
   fi
+  if is_true "$RUN_DUPER"; then
+    record_metadata "velvet" "duper" "$VELVET_DUPER_REF" "$velvet_duper_tree"
+    run_files "velvet" "duper" "$VELVET_DUPER_REF" "$velvet_duper_tree" "${VELVET_FILES[@]}"
+  fi
 fi
 
 write_reports
 
 printf '\nCorpus summary:\n'
 column -t -s $'\t' "$SUMMARY" 2>/dev/null || cat "$SUMMARY"
+printf '\nThree-way matched summary:\n'
+column -t -s $'\t' "$MATCHED_SUMMARY" 2>/dev/null || cat "$MATCHED_SUMMARY"
 printf '\nMatched-VC comparison:\n'
 column -t -s $'\t' "$COMPARISON" 2>/dev/null || cat "$COMPARISON"
 printf '\nResults: %s\n' "$OUT_DIR"

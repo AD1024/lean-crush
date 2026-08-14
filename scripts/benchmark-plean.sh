@@ -5,17 +5,32 @@ set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CRUSH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/benchmark-common.sh"
 
-PLEAN_AUTO_TREE="${PLEAN_AUTO_TREE:-/private/tmp/PLean-auto/Src/PLean}"
-PLEAN_CRUSH_TREE="${PLEAN_CRUSH_TREE:-$HOME/Downloads/P/Src/PLean}"
+PLEAN_AUTO_TREE="${PLEAN_AUTO_TREE:-}"
+PLEAN_CRUSH_TREE="${PLEAN_CRUSH_TREE:-}"
+PLEAN_DUPER_TREE="${PLEAN_DUPER_TREE:-}"
+PLEAN_AUTO_REPO_URL="${PLEAN_AUTO_REPO_URL:-https://github.com/AD1024/P.git}"
+PLEAN_AUTO_REV="${PLEAN_AUTO_REV:-be39726723e71f9aa1e02c6cfeeae9b0c31b8947}"
+PLEAN_CRUSH_REPO_URL="${PLEAN_CRUSH_REPO_URL:-https://github.com/AD1024/P.git}"
+PLEAN_CRUSH_REV="${PLEAN_CRUSH_REV:-9c098b4c5ad32faf2a022929b6726d2a182a9e1d}"
+PLEAN_DUPER_REPO_URL="${PLEAN_DUPER_REPO_URL:-https://github.com/AD1024/P.git}"
+PLEAN_DUPER_REV="${PLEAN_DUPER_REV:-3557f1f0fa5246ee88fcde3776f3973349049968}"
+BENCHMARK_SOURCE_CACHE="${BENCHMARK_SOURCE_CACHE:-$CRUSH_ROOT/BenchmarkResults/sources}"
 REPEATS="${REPEATS:-1}"
 SOLVER="${SOLVER:-cvc5}"
 TIMEOUT="${TIMEOUT:-5}"
+DUPER_TIMEOUT="${DUPER_TIMEOUT:-1}"
 CRUSH_TRUST="${CRUSH_TRUST:-trust}"
 CRUSH_INST_FUEL="${CRUSH_INST_FUEL:-0}"
 MAX_HEARTBEATS="${MAX_HEARTBEATS:-1000000}"
+DUPER_MAX_HEARTBEATS="${DUPER_MAX_HEARTBEATS:-20000}"
+DUPER_FILE_CPU_SECONDS="${DUPER_FILE_CPU_SECONDS:-60}"
 RUN_AUTO="${RUN_AUTO:-true}"
 RUN_CRUSH="${RUN_CRUSH:-true}"
+RUN_DUPER="${RUN_DUPER:-false}"
+USE_MATHLIB_CACHE="${USE_MATHLIB_CACHE:-true}"
+PREPARE_TREES="${PREPARE_TREES:-true}"
 OUT_DIR="${OUT_DIR:-$CRUSH_ROOT/BenchmarkResults/plean-$(date +%Y%m%d-%H%M%S)}"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/lean-crush-plean.XXXXXX")"
 
@@ -25,6 +40,8 @@ METADATA="$OUT_DIR/metadata.tsv"
 SUMMARY="$OUT_DIR/summary.tsv"
 FILE_SUMMARY="$OUT_DIR/file-summary.tsv"
 COMPARISON="$OUT_DIR/comparison.tsv"
+WORKTREES=()
+PROVISIONED_TREE=""
 
 PLEAN_FILES=(
   "Examples/ClockBound.lean"
@@ -52,14 +69,70 @@ is_true() {
 }
 
 cleanup() {
+  local entry repo path
+  if [[ "${#WORKTREES[@]}" -gt 0 ]]; then
+    for entry in "${WORKTREES[@]}"; do
+      repo="${entry%%|*}"
+      path="${entry#*|}"
+      git -C "$repo" worktree remove --force "$path" >/dev/null 2>&1 || true
+    done
+  fi
   rm -rf "$TMP_ROOT"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 check_tree() {
   local tree="$1"
   local label="$2"
   [[ -f "$tree/lakefile.lean" ]] || die "$label PLean tree not found at $tree"
+}
+
+provision_tree() {
+  local label="$1"
+  local url="$2"
+  local revision="$3"
+  local cache_name="$4"
+  local checkout_name="$5"
+  local repo checkout
+
+  repo="$(benchmark_ensure_repo "$label" "$url" "$revision" \
+    "$BENCHMARK_SOURCE_CACHE/$cache_name")" ||
+    die "failed to provision $label"
+  checkout="$TMP_ROOT/$checkout_name"
+  benchmark_add_worktree "$repo" "$revision" "$checkout" >/dev/null ||
+    die "failed to check out $label at $revision"
+  WORKTREES+=("$repo|$checkout")
+  PROVISIONED_TREE="$checkout/Src/PLean"
+}
+
+prepare_tree() {
+  local label="$1"
+  local tree="$2"
+  local log="$OUT_DIR/build-$label.log"
+
+  printf 'Building %s PLean tree\n' "$label"
+  if ! (cd "$tree" && lake env printenv LEAN_PATH) \
+      > "$OUT_DIR/dependencies-$label.log" 2>&1; then
+    tail -n 80 "$OUT_DIR/dependencies-$label.log" >&2
+    die "$label PLean dependency setup failed"
+  fi
+  if is_true "$USE_MATHLIB_CACHE"; then
+    if ! (cd "$tree" && lake exe cache get) \
+        > "$OUT_DIR/cache-$label.log" 2>&1; then
+      printf 'warning: Mathlib cache unavailable for %s PLean tree\n' \
+        "$label" >&2
+    fi
+  fi
+  if [[ "$label" == "crush" ]]; then
+    benchmark_sync_crush_sources "$CRUSH_ROOT" "$tree" ||
+      die "failed to synchronize local Crush sources"
+  fi
+  if ! (cd "$tree" && lake build) > "$log" 2>&1; then
+    tail -n 80 "$log" >&2
+    die "$label PLean build failed; see $log"
+  fi
 }
 
 write_prelude() {
@@ -77,7 +150,7 @@ macro "#plean_bench_pverify " name:ident : command =>
     set_option pverify.profile true in
     #pverify \$name)
 EOF
-  else
+  elif [[ "$backend" == "crush" ]]; then
     cat >> "$output" <<EOF
 
 macro "#plean_bench_pverify " name:ident : command =>
@@ -86,6 +159,16 @@ macro "#plean_bench_pverify " name:ident : command =>
     set_option crush.timeout $TIMEOUT in
     set_option crush.trust "$CRUSH_TRUST" in
     set_option crush.inst.fuel $CRUSH_INST_FUEL in
+    set_option pverify.cache false in
+    set_option pverify.profile true in
+    #pverify \$name)
+EOF
+  else
+    cat >> "$output" <<EOF
+
+macro "#plean_bench_pverify " name:ident : command =>
+  \`(command|
+    set_option duper.maxSaturationTime $DUPER_TIMEOUT in
     set_option pverify.cache false in
     set_option pverify.profile true in
     #pverify \$name)
@@ -105,7 +188,7 @@ elab "#plean_bench_report" : command => do
     IO.println s!"PLEAN_TIME\t{row.obligation}\t{nanos}"
 
 EOF
-  else
+  elif [[ "$backend" == "crush" ]]; then
     cat >> "$output" <<'EOF'
 
 open Lean Elab Command
@@ -115,6 +198,19 @@ elab "#plean_bench_report" : command => do
   for row in profile.rows do
     let nanos := row.cachePp + row.cacheHash + row.cacheFs +
       row.cacheClose + row.smtPrep + row.smtCrush
+    IO.println s!"PLEAN_TIME\t{row.obligation}\t{nanos}"
+
+EOF
+  else
+    cat >> "$output" <<'EOF'
+
+open Lean Elab Command
+
+elab "#plean_bench_report" : command => do
+  let profile <- liftM (PLean.Verify.Profile.stateRef.get : IO _)
+  for row in profile.rows do
+    let nanos := row.cachePp + row.cacheHash + row.cacheFs +
+      row.cacheClose + row.smtPrep + row.smtDuper
     IO.println s!"PLEAN_TIME\t{row.obligation}\t{nanos}"
 
 EOF
@@ -162,13 +258,21 @@ write_benchmark_file() {
 record_metadata() {
   local backend="$1"
   local tree="$2"
-  local commit toolchain dirty diff_hash crush_commit crush_dirty
+  local commit toolchain dirty diff_hash crush_commit duper_commit crush_dirty
+  local max_heartbeats file_cpu_seconds
   commit="$(git -C "$tree" rev-parse HEAD)"
   toolchain="$(tr -d '\r\n' < "$tree/lean-toolchain")"
   dirty="false"
   diff_hash="-"
   crush_commit="-"
+  duper_commit="-"
   crush_dirty="false"
+  max_heartbeats="$MAX_HEARTBEATS"
+  file_cpu_seconds="0"
+  if [[ "$backend" == "duper" ]]; then
+    max_heartbeats="$DUPER_MAX_HEARTBEATS"
+    file_cpu_seconds="$DUPER_FILE_CPU_SECONDS"
+  fi
   if [[ -n "$(git -C "$tree" status --porcelain)" ]]; then
     dirty="true"
     diff_hash="$(git -C "$tree" diff --binary | shasum -a 256 | awk '{print $1}')"
@@ -180,10 +284,14 @@ record_metadata() {
       crush_dirty="true"
     fi
   fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  if [[ "$backend" == "duper" ]]; then
+    duper_commit="$(git -C "$tree/.lake/packages/Duper" rev-parse HEAD)"
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$backend" "$commit" "$toolchain" "$dirty" "$diff_hash" "$SOLVER" \
-    "$TIMEOUT" "$MAX_HEARTBEATS" "$CRUSH_TRUST" "$CRUSH_INST_FUEL" \
-    "$crush_commit" "$crush_dirty" "$tree" >> "$METADATA"
+    "$TIMEOUT" "$DUPER_TIMEOUT" "$max_heartbeats" "$file_cpu_seconds" \
+    "$CRUSH_TRUST" "$CRUSH_INST_FUEL" "$crush_commit" "$duper_commit" \
+    "$crush_dirty" "$tree" >> "$METADATA"
 }
 
 append_markers() {
@@ -257,19 +365,31 @@ run_file() {
   local file="$4"
   local generated="$TMP_ROOT/generated/$backend/${file//\//_}"
   local log="$OUT_DIR/logs/$backend/${file//\//_}.$repeat.log"
-  local started elapsed exit_code total
+  local started elapsed exit_code total max_heartbeats cpu_limited message
 
   mkdir -p "$(dirname "$generated")" "$(dirname "$log")"
   write_benchmark_file "$tree/$file" "$generated" "$backend"
+  max_heartbeats="$MAX_HEARTBEATS"
+  if [[ "$backend" == "duper" ]]; then
+    max_heartbeats="$DUPER_MAX_HEARTBEATS"
+  fi
   printf '%-5s run %s: %s\n' "$backend" "$repeat" "$file"
   started="$(date +%s)"
   if [[ "$backend" == "crush" ]]; then
     "$CRUSH_ROOT/scripts/with-local-crush.sh" "$tree" \
-      "-DmaxHeartbeats=$MAX_HEARTBEATS" \
+      "-DmaxHeartbeats=$max_heartbeats" \
       "-Dpverify.cache=false" "$generated" > "$log" 2>&1
+  elif [[ "$backend" == "duper" && "$DUPER_FILE_CPU_SECONDS" -gt 0 ]]; then
+    (
+      ulimit -t "$DUPER_FILE_CPU_SECONDS"
+      cd "$tree"
+      lake env lean \
+        "-DmaxHeartbeats=$max_heartbeats" \
+        "-Dpverify.cache=false" "$generated"
+    ) > "$log" 2>&1
   else
     (cd "$tree" && lake env lean \
-      "-DmaxHeartbeats=$MAX_HEARTBEATS" \
+      "-DmaxHeartbeats=$max_heartbeats" \
       "-Dpverify.cache=false" "$generated") > "$log" 2>&1
   fi
   exit_code=$?
@@ -277,8 +397,16 @@ run_file() {
   append_markers "$backend" "$repeat" "$file" "$log"
   append_synthetic_records "$backend" "$repeat" "$file" "$log"
   total="$(sed -nE 's/.*: ([0-9]+) obligations from.*/\1/p' "$log" | tail -n 1)"
-  printf 'plean\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$backend" "$repeat" "$file" "$exit_code" "$elapsed" "${total:-0}" >> "$RUNS"
+  cpu_limited="false"
+  message="-"
+  if [[ "$backend" == "duper" && "$DUPER_FILE_CPU_SECONDS" -gt 0 &&
+      "$exit_code" -eq 152 ]]; then
+    cpu_limited="true"
+    message="file did not complete within CPU limit"
+  fi
+  printf 'plean\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$backend" "$repeat" "$file" "$exit_code" "$elapsed" "${total:-0}" \
+    "$cpu_limited" "$message" >> "$RUNS"
 }
 
 write_reports() {
@@ -340,8 +468,12 @@ write_reports() {
   awk -F '\t' -v repeats="$REPEATS" '
     BEGIN {
       OFS = "\t"
-      print "suite", "shared_vcs", "auto_only_wins", "crush_only_wins",
-            "both_solved", "neither_solved", "auto_mean_ms", "crush_mean_ms"
+      left[1] = "auto";  right[1] = "crush"
+      left[2] = "auto";  right[2] = "duper"
+      left[3] = "duper"; right[3] = "crush"
+      print "suite", "left_backend", "right_backend", "shared_vcs",
+            "left_only", "right_only", "both_solved", "neither_solved",
+            "left_mean_ms", "right_mean_ms"
     }
     NR > 1 {
       vc = $1 SUBSEP $4 SUBSEP $5
@@ -365,50 +497,112 @@ write_reports() {
       for (vc in vcs) {
         split(vc, p, SUBSEP)
         suite = p[1]
-        autoKey = vc SUBSEP "auto"
-        crushKey = vc SUBSEP "crush"
-        if (runs[autoKey] != repeats || runs[crushKey] != repeats) continue
-        shared[suite]++
-        autoSolved = passRuns[autoKey] == repeats
-        crushSolved = passRuns[crushKey] == repeats
-        if (autoSolved && !crushSolved) autoWins[suite]++
-        if (!autoSolved && crushSolved) crushWins[suite]++
-        if (!autoSolved && !crushSolved) neither[suite]++
-        if (autoSolved && crushSolved) {
-          both[suite]++
-          autoMs[suite] += totalMs[autoKey] / repeats
-          crushMs[suite] += totalMs[crushKey] / repeats
+        for (pair = 1; pair <= 3; pair++) {
+          leftKey = vc SUBSEP left[pair]
+          rightKey = vc SUBSEP right[pair]
+          if (runs[leftKey] != repeats || runs[rightKey] != repeats) continue
+          resultKey = suite SUBSEP pair
+          shared[resultKey]++
+          leftSolved = passRuns[leftKey] == repeats
+          rightSolved = passRuns[rightKey] == repeats
+          if (leftSolved && !rightSolved) leftOnly[resultKey]++
+          if (!leftSolved && rightSolved) rightOnly[resultKey]++
+          if (!leftSolved && !rightSolved) neither[resultKey]++
+          if (leftSolved && rightSolved) {
+            both[resultKey]++
+            leftMs[resultKey] += totalMs[leftKey] / repeats
+            rightMs[resultKey] += totalMs[rightKey] / repeats
+          }
         }
       }
       for (suite in suites) {
-        autoMean = both[suite] ? autoMs[suite] / both[suite] : 0
-        crushMean = both[suite] ? crushMs[suite] / both[suite] : 0
-        printf "%s\t%d\t%d\t%d\t%d\t%d\t%.1f\t%.1f\n",
-          suite, shared[suite], autoWins[suite], crushWins[suite],
-          both[suite], neither[suite], autoMean, crushMean
+        for (pair = 1; pair <= 3; pair++) {
+          resultKey = suite SUBSEP pair
+          if (!shared[resultKey]) continue
+          leftMean = both[resultKey] ? leftMs[resultKey] / both[resultKey] : 0
+          rightMean = both[resultKey] ? rightMs[resultKey] / both[resultKey] : 0
+          printf "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%.1f\t%.1f\n",
+            suite, left[pair], right[pair], shared[resultKey],
+            leftOnly[resultKey], rightOnly[resultKey], both[resultKey],
+            neither[resultKey], leftMean, rightMean
+        }
       }
     }
   ' "$RESULTS" > "$COMPARISON"
 }
 
-check_tree "$PLEAN_AUTO_TREE" "auto"
-check_tree "$PLEAN_CRUSH_TREE" "Crush"
-[[ -f "$CRUSH_ROOT/.lake/build/lib/lean/Crush.olean" ]] ||
-  die "local Crush is not built; run 'lake build Crush'"
-if ! is_true "$RUN_AUTO" && ! is_true "$RUN_CRUSH"; then
+if ! is_true "$RUN_AUTO" && ! is_true "$RUN_CRUSH" && ! is_true "$RUN_DUPER"; then
   die "at least one backend must be enabled"
 fi
 
 mkdir -p "$OUT_DIR/logs"
+
+if is_true "$RUN_CRUSH"; then
+  printf 'Building local Crush\n'
+  if ! (cd "$CRUSH_ROOT" && lake build Crush) \
+      > "$OUT_DIR/build-crush.log" 2>&1; then
+    tail -n 80 "$OUT_DIR/build-crush.log" >&2
+    die "local Crush build failed"
+  fi
+fi
+
+if is_true "$RUN_AUTO"; then
+  if [[ -z "$PLEAN_AUTO_TREE" ]]; then
+    provision_tree "vanilla PLean" "$PLEAN_AUTO_REPO_URL" \
+      "$PLEAN_AUTO_REV" "P-auto" "P-auto"
+    PLEAN_AUTO_TREE="$PROVISIONED_TREE"
+  else
+    PLEAN_AUTO_TREE="$(cd "$PLEAN_AUTO_TREE" && pwd)"
+  fi
+  check_tree "$PLEAN_AUTO_TREE" "auto"
+  if is_true "$PREPARE_TREES"; then
+    prepare_tree "auto" "$PLEAN_AUTO_TREE"
+  fi
+fi
+
+if is_true "$RUN_CRUSH"; then
+  if [[ -z "$PLEAN_CRUSH_TREE" ]]; then
+    if [[ -z "$PLEAN_CRUSH_REV" ]]; then
+      die "set PLEAN_CRUSH_TREE, or publish the PLean Crush adaptation and set PLEAN_CRUSH_REV"
+    fi
+    provision_tree "Crush PLean" "$PLEAN_CRUSH_REPO_URL" \
+      "$PLEAN_CRUSH_REV" "P-crush" "P-crush"
+    PLEAN_CRUSH_TREE="$PROVISIONED_TREE"
+  else
+    PLEAN_CRUSH_TREE="$(cd "$PLEAN_CRUSH_TREE" && pwd)"
+  fi
+  check_tree "$PLEAN_CRUSH_TREE" "Crush"
+  if is_true "$PREPARE_TREES"; then
+    prepare_tree "crush" "$PLEAN_CRUSH_TREE"
+  fi
+fi
+
+if is_true "$RUN_DUPER"; then
+  if [[ -z "$PLEAN_DUPER_TREE" ]]; then
+    provision_tree "Duper PLean" "$PLEAN_DUPER_REPO_URL" \
+      "$PLEAN_DUPER_REV" "P-duper" "P-duper"
+    PLEAN_DUPER_TREE="$PROVISIONED_TREE"
+  else
+    PLEAN_DUPER_TREE="$(cd "$PLEAN_DUPER_TREE" && pwd)"
+  fi
+  check_tree "$PLEAN_DUPER_TREE" "Duper"
+  if is_true "$PREPARE_TREES"; then
+    prepare_tree "duper" "$PLEAN_DUPER_TREE"
+  fi
+fi
+
 printf 'suite\tbackend\trepeat\tfile\tproof\tgoal_hash\tstatus\tcategory\tmilliseconds\tsynthetic\tmessage\tgoal\n' > "$RESULTS"
-printf 'suite\tbackend\trepeat\tfile\texit_code\twall_seconds\tvc_count\n' > "$RUNS"
-printf 'backend\tcommit\ttoolchain\tdirty\tdiff_sha256\tsolver\ttimeout\tmax_heartbeats\tcrush_trust\tcrush_inst_fuel\tcrush_commit\tcrush_dirty\ttree\n' > "$METADATA"
+printf 'suite\tbackend\trepeat\tfile\texit_code\twall_seconds\tvc_count\tcpu_limited\tmessage\n' > "$RUNS"
+printf 'backend\tcommit\ttoolchain\tdirty\tdiff_sha256\tsolver\ttimeout\tduper_timeout\tmax_heartbeats\tfile_cpu_seconds\tcrush_trust\tcrush_inst_fuel\tcrush_commit\tduper_commit\tcrush_dirty\ttree\n' > "$METADATA"
 
 if is_true "$RUN_AUTO"; then
   record_metadata "auto" "$PLEAN_AUTO_TREE"
 fi
 if is_true "$RUN_CRUSH"; then
   record_metadata "crush" "$PLEAN_CRUSH_TREE"
+fi
+if is_true "$RUN_DUPER"; then
+  record_metadata "duper" "$PLEAN_DUPER_TREE"
 fi
 
 for repeat in $(seq 1 "$REPEATS"); do
@@ -418,6 +612,9 @@ for repeat in $(seq 1 "$REPEATS"); do
     fi
     if is_true "$RUN_CRUSH"; then
       run_file "crush" "$PLEAN_CRUSH_TREE" "$repeat" "$file"
+    fi
+    if is_true "$RUN_DUPER"; then
+      run_file "duper" "$PLEAN_DUPER_TREE" "$repeat" "$file"
     fi
   done
 done
