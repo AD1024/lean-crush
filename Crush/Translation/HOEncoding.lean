@@ -104,11 +104,11 @@ sort and `app` symbol, and each distinct λ yields exactly one closure. -/
 
 /-- Structural key identifying an arrow sort. -/
 def arrowKey (ty : Expr) : StructuralKey :=
-  { tag := "arrow-sort", exprs := #[ty] }
+  { tag := "arrow-sort", typeExprs := #[ty] }
 
 /-- Key for an arrow sort's `app` symbol. -/
 def appKey (ty : Expr) : StructuralKey :=
-  { tag := "arrow-app", exprs := #[ty] }
+  { tag := "arrow-app", typeExprs := #[ty] }
 
 /-- Key for a λ-closure, keyed on the closed λ term so α-equivalent (and repeated)
 λs share one closure constructor. -/

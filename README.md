@@ -234,6 +234,16 @@ def lowerSign : Crush.LoweringHandler := fun ctx => do
   return some (smt| (ite (> $sx 0) 1 (ite (= $sx 0) 0 (- 1))))
 ```
 
+Use `@[crush_lower_result T]` when the application head is unstable but the
+result-family head is stable. The dispatcher first matches the immediate head of
+the term's type; for a syntactic dependent function type, it peels binders and
+matches the codomain head. Named aliases are separate keys, so the built-in
+decision lowering registers both `Decidable` and `DecidableEq`. It represents
+decision evidence with an axiomatized singleton SMT sort and lowers `decide p`
+to `p`; equality decisions therefore become SMT equality without depending on a
+particular procedure implementation. Pair a result lowering with a compatible
+`@[crush_translate_sort]` handler whenever it changes representation.
+
 The `(smt| ...)` quotation is a shallow embedding of SMT-LIB terms. Symbols,
 applications, numerals, Booleans, and strings use SMT-LIB syntax; `$term` splices an
 existing `Crush.SMT.Term`. The result is still the typed SMT term representation, not

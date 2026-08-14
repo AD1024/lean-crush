@@ -249,7 +249,8 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
       if cfg.profile then logInfo prof.report
       return
     let (closed, prof') ←
-      prof.time "pre-reconstruct" (tryPreReconstruct goal collected.facts)
+      prof.time "pre-reconstruct"
+        (tryPreReconstruct goal collected.facts (selectedRuleSearch := cfg.trust != .trust))
     prof := prof'
     if closed then
       trace[crush.result] "pre-translation checked proof succeeded; skipped SMT"
@@ -298,9 +299,8 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
                   {instantiated.generated} instance(s) (`crush.inst.fuel` = \
                   {cfg.instFuel}, `crush.inst.rounds` = {cfg.instRounds}); \
                   raise the bound if an explicit lemma is not being instantiated."
-  -- When a quantified template produced useful ground instances but could not be
-  -- removed outright, try the soundly weakened ground-only query first. `unsat`
-  -- is conclusive; every other verdict retries with the complete fact set.
+  -- Try the soundly weakened ground-only query first. `unsat` is conclusive;
+  -- every other verdict retries with the complete quantified fact set.
   let reducedFacts :=
     if cfg.backend == .none then none else instantiated.groundFacts
   let firstFacts := reducedFacts.getD fullFacts
@@ -460,13 +460,14 @@ private def parseUOrDs (stxs : Array (TSyntax ``crushUOrD)) : TacticM (Array Nam
     | _ => throwUnsupportedSyntax
   return names
 
-/-- Parse the `[…]` hint list into elaborated proof terms and the `allHyps` flag. -/
+/-- Parse the `[…]` hint list into elaborated proof terms and local-hypothesis flags. -/
 private def parseHintList (goal : MVarId) (stx : TSyntax ``crushHints) :
-    TacticM (Array (Expr × String) × Bool × Bool) := goal.withContext do
+    TacticM (Array (Expr × String) × Bool × Bool × Bool) := goal.withContext do
   match stx with
   | `(crushHints| ) =>
-    -- No list at all: default to all local hypotheses.
-    return (#[], true, true)
+    -- No list at all: send every local hypothesis to SMT, but reserve eager
+    -- proof-producing instantiation for hypotheses explicitly selected by `*`.
+    return (#[], true, false, true)
   | `(crushHints| [ $[$elems],* ]) =>
     let mut terms : Array (Expr × String) := #[]
     let mut allHyps := false
@@ -481,7 +482,7 @@ private def parseHintList (goal : MVarId) (stx : TSyntax ``crushHints) :
         terms := terms.push (e, s!"hint {descr}")
       | _ => throwUnsupportedSyntax
     -- An explicit list without `*` is a *restriction*: only the listed facts.
-    return (terms, allHyps, false)
+    return (terms, allHyps, allHyps, false)
   | _ => throwUnsupportedSyntax
 
 @[tactic crushTac]
@@ -494,9 +495,11 @@ def evalCrush : Tactic := fun stx => do
   -- Parse the hint grammar: `crush <hints> <uord>*`.
   let hintsStx : TSyntax ``crushHints := ⟨stx[1]⟩
   let uordStxs := stx[2].getArgs.map (⟨·⟩ : Syntax → TSyntax ``crushUOrD)
-  let (terms, allHyps, allowPremiseSelection) ← parseHintList goal hintsStx
+  let (terms, allHyps, instantiateHyps, allowPremiseSelection) ←
+    parseHintList goal hintsStx
   let eqnLemmas ← parseUOrDs uordStxs
-  let hints : Hints := { terms, eqnLemmas, allHyps, allowPremiseSelection }
+  let hints : Hints := {
+    terms, eqnLemmas, allHyps, instantiateHyps, allowPremiseSelection }
   runCrush goal cfg hints
 
 end Crush

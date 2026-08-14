@@ -28,11 +28,15 @@ axiom functionLift : ∀ f x, Accepts f x → P x
 
 axiom NonEmptyList : List Nat → Prop
 axiom ListMarker : List Nat → Prop
+axiom Guard : Int → Prop
+axiom HiddenResult : Int → Prop
 axiom tailLength :
   ∀ xs : List Nat, NonEmptyList xs → xs.tail.length < xs.length
 axiom listSumWitness (x : Int) :
   x < (([Int.toNat (x + 1)] : List Nat).sum : Int)
 axiom reflexive (x : Int) : x = x
+axiom nestedGuarded :
+  Guard 0 → ∀ x, Guard x → ∀ y, Guard y → R x y
 
 def listCode : List Nat → Nat
   | [] => 0
@@ -79,9 +83,62 @@ run_meta do
       throwError "expected two ground instances and a fixpoint, got \
         {report.generated} instance(s) (exhausted: {report.exhausted})"
 
--- A nontrivially simplified template is replaced by its ground consequence.
--- Keeping both would let SMT E-matching recreate the term-growth loop that this
--- bounded pass prevents.
+-- Data binders after proposition premises are specialized without assuming the
+-- premises. The generated proof retains them as implications:
+-- `fun h0 hx hy => nestedGuarded h0 x hx y hy`.
+run_meta do
+  let nestedProof ← mkConstWithFreshMVarLevels ``nestedGuarded
+  withLocalDeclD `x (mkConst ``Int) fun x => do
+    withLocalDeclD `y (mkConst ``Int) fun y => do
+      let relation ← mkAppM ``R #[x, y]
+      let report ← instantiateGroundFacts
+        ({ instFuel := 8, instRounds := 2 } : Crush.Config) #[
+          {
+            prop := ← inferType nestedProof
+            proof := some nestedProof
+            descr := "nestedGuarded"
+            instantiateTerms := true
+          },
+          {
+            prop := mkNot relation
+            proof := none
+            descr := "negated query"
+            negated := true
+          }
+        ]
+      unless report.generated == 1 && !report.exhausted do
+        throwError "expected one nested guarded instance, got \
+          {report.generated} instance(s) (exhausted: {report.exhausted})"
+      let some generated := report.facts.find? (·.descr == "nestedGuarded@ground")
+        | throwError "missing nested guarded ground instance"
+      let some proof := generated.proof
+        | throwError "nested guarded ground instance has no proof"
+      check proof
+      unless ← isDefEq (← inferType proof) generated.prop do
+        throwError "nested guarded instance proof does not prove its proposition"
+
+-- Swept hypotheses enter eager instantiation only when the caller explicitly
+-- opts in, as the `crush [*]` frontend does.
+run_meta do
+  let nestedProof ← mkConstWithFreshMVarLevels ``nestedGuarded
+  let nestedTy ← inferType nestedProof
+  withLocalDeclD `h nestedTy fun h => do
+    let target ← mkAppM ``R #[mkIntLit 1, mkIntLit 2]
+    let goal ← mkFreshExprSyntheticOpaqueMVar target
+    let eager ← collectFactsWithRewrite goal.mvarId! {
+      allHyps := true
+      instantiateHyps := true
+    }
+    unless eager.facts.any fun fact =>
+        fact.proof == some h && fact.instantiateTerms do
+      throwError "explicitly swept local hypothesis was not marked for instantiation"
+    let lazy ← collectFactsWithRewrite goal.mvarId! { allHyps := true }
+    if lazy.facts.any fun fact =>
+        fact.proof == some h && fact.instantiateTerms then
+      throwError "bare local-hypothesis sweep unexpectedly enabled instantiation"
+
+-- A nontrivially simplified instance is used in the ground-first query, while
+-- the complete fallback retains the quantified template.
 run_meta do
   let tailProof ← mkConstWithFreshMVarLevels ``tailLength
   let empty : Expr :=
@@ -107,14 +164,18 @@ run_meta do
   unless report.generated == 1 && !report.exhausted do
     throwError "expected one simplified ground instance, got \
       {report.generated} instance(s) (exhausted: {report.exhausted})"
-  if report.facts.any (fun fact => fact.descr == "tailLength") then
-    throwError "successfully instantiated template remained in the fact set"
+  unless report.facts.any (fun fact => fact.descr == "tailLength") do
+    throwError "complete fallback lost the quantified template"
   unless report.facts.any (fun fact =>
       fact.descr == "tailLength@ground" && fact.prop == expected) do
     throwError "expected the simplified consequence `¬ NonEmptyList []`"
+  let some groundFacts := report.groundFacts
+    | throwError "expected a ground-first query"
+  if groundFacts.any (fun fact => fact.descr == "tailLength") then
+    throwError "ground-first query retained the instantiated template"
 
--- One unchanged instance vetoes replacement even when another instance of the
--- same template simplifies safely.
+-- The complete fallback retains its quantified parent even when generated
+-- instances simplify differently.
 run_meta do
   let codeProof ← mkConstWithFreshMVarLevels ``listCodeOne
   let listNat : Expr :=
@@ -164,8 +225,8 @@ run_meta do
         fact.descr == "tailLength" && fact.prop == original) do
     throwError "unmatched quantified template was not retained"
 
--- Fuel exhaustion is a global replacement veto: ungenerated instances may still
--- be needed, so the quantified parent must remain.
+-- Fuel exhaustion disables the ground-first query: generated instances may be
+-- incomplete, so the solver receives the complete quantified fallback.
 run_meta do
   let tailProof ← mkConstWithFreshMVarLevels ``tailLength
   let listNat : Expr :=
@@ -341,6 +402,21 @@ theorem nested_atom_triggers (x y : Int) (h : R x y ∧ P x) : Q y := by
 theorem function_binder_pattern (x : Int)
     (h : Accepts (fun _ => true) x) : P x := by
   crush [functionLift, *]
+
+-- The quantified rule's witness is absent from its conclusion, so direct backward
+-- application cannot infer it. Ground matching anchors the witness at `hidden`; the
+-- solver selects that checked instance and reconstruction replays it from the core.
+set_option crush.trust "reconstruct" in
+theorem hidden_rule_parameter (oldValue : Int → Int) (hidden updated target : Int)
+    (rule : ∀ witness, oldValue witness = 1 → HiddenResult target)
+    (updatedRead : (if hidden = updated then 0 else oldValue hidden) = 1)
+    (hne : hidden ≠ updated) :
+    HiddenResult target := by
+  crush [*]
+
+/-- info: 'GroundInstantiation.hidden_rule_parameter' depends on axioms: [propext, Classical.choice, HiddenResult, Quot.sound] -/
+#guard_msgs in
+#print axioms hidden_rule_parameter
 
 -- A recursive template may use an initial fact but must not consume occurrences
 -- causally produced by its own instances and grow `next (next ...)` until a bound.

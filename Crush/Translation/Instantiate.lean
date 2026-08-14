@@ -23,14 +23,11 @@ a)` fact directly determines the `x := a, y := next a` instance of `lift`. If no
 pattern matches yet, ground query terms seed triggerless lemmas such as `step`.
 
 Every generated proposition is obtained by applying the original Lean proof term.
-The pass therefore adds only logical consequences of user-supplied facts. Universal
-facts remain as solver fallbacks unless Lean materially simplifies a ground
-instance to a nontrivial proposition without erasing constructor-shaped witness
-terms. In that case the universal form is replaced by the simplified instances:
-this weakens the fact set safely while preventing solver E-matching from recreating
-unbounded term growth. Unchanged, tautological, or witness-erasing simplifications
-keep both the unsimplified instance and original quantifier as completeness
-fallbacks.
+The pass therefore adds only logical consequences of user-supplied facts. A
+ground-first query may omit instantiated universal templates to prevent SMT
+E-matching from recreating unbounded term growth. The complete fallback always
+retains every original fact: finitely many ground instances cannot replace a
+universal fact when proving a quantified goal.
 -/
 
 namespace Crush
@@ -202,14 +199,21 @@ private partial def collectGroundConstructors (env : Environment) (e : Expr) :
     | _ => pure ()
   ((go e).run (out, seen)).2.1
 
-/-- Whether a marked fact can actually produce a ground value instance. This
-keeps ordinary ground hints and proposition-only implications out of the
-template loop. -/
+/-- Whether a marked fact can actually produce a ground value instance.
+
+Proposition binders are transparent for this test: a theorem such as
+`∀ x, P x → ∀ y, Q y → R x y` can be specialized at both `x` and `y` while
+retaining `P x` and `Q y` as premises. Ordinary ground hints and
+proposition-only implications still stay out of the template loop. -/
 private partial def hasLeadingValueBinder (ty : Expr) : Sym.SymM Bool := do
   match ty with
   | .forallE name dom body info =>
-    if (← isPropExpr dom) || isUnsupportedValueDomain dom then return false
-    if info == .instImplicit && (← isClassType dom) then
+    if ← isPropExpr dom then
+      withLocalDecl name info dom fun binder =>
+        hasLeadingValueBinder (body.instantiate1 binder)
+    else if isUnsupportedValueDomain dom then
+      return false
+    else if info == .instImplicit && (← isClassType dom) then
       withLocalDecl name info dom fun binder =>
         hasLeadingValueBinder (body.instantiate1 binder)
     else
@@ -454,23 +458,30 @@ private partial def derivePatternSubstitutions (ty : Expr)
         unless retained do
           out := out.push { values, origins := candidate.origins }
     return out
-  let rec openBinders (ty : Expr) (binders : Array Expr) :
+  let deriveWithPremises (ty : Expr) (binders premises : Array Expr) :
+      Sym.SymM (Array GroundSubstitution) := do
+    derive (← Sym.mkForallFVarsS premises ty) binders
+  let rec openBinders (ty : Expr) (binders premises : Array Expr) :
       Sym.SymM (Array GroundSubstitution) := do
     match ty with
     | .forallE name dom body info =>
       if ← isPropExpr dom then
-        derive ty binders
+        withLocalDecl name info dom fun premise =>
+          openBinders (body.instantiate1 premise) binders
+            (premises.push premise)
       else if isUnsupportedValueDomain dom then
-        derive ty binders
+        deriveWithPremises ty binders premises
       else if info == .instImplicit && (← isClassType dom) then
         match ← Sym.synthInstance? dom with
-        | .some value => openBinders (body.instantiate1 value) binders
-        | _ => derive ty binders
+        | .some value =>
+          openBinders (body.instantiate1 value) binders premises
+        | _ => deriveWithPremises ty binders premises
       else
         withLocalDecl name info dom fun binder =>
           openBinders (body.instantiate1 binder) (binders.push binder)
-    | _ => derive ty binders
-  openBinders (← Sym.instantiateMVarsS ty) #[]
+            premises
+    | _ => deriveWithPremises ty binders premises
+  openBinders (← Sym.instantiateMVarsS ty) #[] #[]
 
 /-- Apply a complete pattern-derived substitution to a quantified proof. -/
 private partial def instantiateAt (proof ty : Expr) (values : Array Expr) :
@@ -478,18 +489,25 @@ private partial def instantiateAt (proof ty : Expr) (values : Array Expr) :
   let rec go (proof ty : Expr) (index : Nat) :
       Sym.SymM (Option (Expr × Expr)) := do
     match ty with
-    | .forallE _ dom body info =>
+    | .forallE name dom body info =>
       if ← isPropExpr dom then
-        if index == values.size then return some (proof, ty) else return none
-      if info == .instImplicit && (← isClassType dom) then
+        withLocalDecl name info dom fun premise => do
+          let some (proof, prop) ←
+              go (mkApp proof premise) (body.instantiate1 premise) index
+            | return none
+          return some (
+            ← Sym.mkLambdaFVarsS #[premise] proof,
+            ← Sym.mkForallFVarsS #[premise] prop)
+      else if info == .instImplicit && (← isClassType dom) then
         match ← Sym.synthInstance? dom with
         | .some value =>
           return ← go (mkApp proof value) (body.instantiate1 value) index
         | _ => return none
-      if isUnsupportedValueDomain dom || index >= values.size then return none
-      let value := values[index]!
-      unless ← isDefEqS (← Sym.inferType value) dom do return none
-      go (mkApp proof value) (body.instantiate1 value) (index + 1)
+      else
+        if isUnsupportedValueDomain dom || index >= values.size then return none
+        let value := values[index]!
+        unless ← isDefEqS (← Sym.inferType value) dom do return none
+        go (mkApp proof value) (body.instantiate1 value) (index + 1)
     | _ =>
       if index != values.size || !(← isPropExpr ty) then return none
       return some (proof, ty)
@@ -558,15 +576,14 @@ private def instantiateGroundFactsS (cfg : Config) (facts : Array Fact) :
   let templateProps : Std.HashSet Expr :=
     templates.foldl (init := {}) fun seen template => seen.insert template.prop
   let generatedFacts ← IO.mkRef (#[] : Array Fact)
-  let replaceableTemplates ← IO.mkRef (Array.replicate templates.size false)
-  let retainedTemplates ← IO.mkRef (Array.replicate templates.size false)
   let candidates ← IO.mkRef (#[] : Array GroundCandidate)
   let candidateSeen ← IO.mkRef ({} : Std.HashSet Expr)
   let occurrences ← IO.mkRef ({} : OccurrenceStore)
   let seen ← IO.mkRef ({} : Std.HashSet Expr)
   let generated ← IO.mkRef (0 : Nat)
   let exhausted ← IO.mkRef false
-  for fact in facts do
+  for sourceIndex in [0:facts.size] do
+    let fact := facts[sourceIndex]!
     let prop ←
       match (← normalizedProps.get).get? fact.prop with
       | some prop => pure prop
@@ -582,39 +599,35 @@ private def instantiateGroundFactsS (cfg : Config) (facts : Array Fact) :
         unless seen.contains term.expr do
           candidateSeen.set (seen.insert term.expr)
           candidates.modify (·.push term)
+    let mut factOrigins : Array Nat := #[]
+    for templateIndex in [0:templateSources.size] do
+      if templateSources[templateIndex]! == sourceIndex then
+        factOrigins := factOrigins.push templateIndex
     for expr in ground.occurrences do
-      occurrences.modify fun current => current.add expr
+      occurrences.modify fun current => current.add expr factOrigins
   let addInstance (templateIndex : Nat) (template : Fact) (proof prop : Expr)
       (origins : Array Nat) : Sym.SymM Bool := do
     let prop ← preprocessExprS prop
     let (simpResult, _) ← simp prop simpContext
-    let (proof, prop, simplifiedSafely) ←
+    let (proof, prop) ←
       match simpResult.proof? with
-      | none =>
-        retainedTemplates.modify (·.set! templateIndex true)
-        pure (proof, prop, false)
+      | none => pure (proof, prop)
       | some _ =>
         let simplified ← preprocessExprS simpResult.expr
         let originalConstructors := collectGroundConstructors env prop
         let simplifiedConstructors := collectGroundConstructors env simplified
         if !simplified.isConstOf ``True &&
             originalConstructors.all simplifiedConstructors.contains then
-          pure (← simpResult.mkEqMP proof, simplified, true)
+          pure (← simpResult.mkEqMP proof, simplified)
         else
-          retainedTemplates.modify (·.set! templateIndex true)
-          pure (proof, prop, false)
+          pure (proof, prop)
     let known ← seen.get
-    if known.contains prop then
-      if simplifiedSafely then
-        replaceableTemplates.modify (·.set! templateIndex true)
-      return false
+    if known.contains prop then return false
     if (← generated.get) >= cfg.instFuel then
       exhausted.set true
       return false
     seen.set (known.insert prop)
     generated.modify (· + 1)
-    if simplifiedSafely then
-      replaceableTemplates.modify (·.set! templateIndex true)
     trace[crush.inst] "generated {template.descr}@ground: {prop}"
     generatedFacts.modify (·.push {
       template with
@@ -667,36 +680,20 @@ private def instantiateGroundFactsS (cfg : Config) (facts : Array Fact) :
       reachedFixpoint := true
       break
   if !reachedFixpoint && (← generated.get) > 0 then exhausted.set true
-  let replaceableTemplates ← replaceableTemplates.get
-  let retainedTemplates ← retainedTemplates.get
   let exhausted ← exhausted.get
-  let mut replacedSources : Std.HashSet Nat := {}
-  unless exhausted do
-    for i in [0:templates.size] do
-      if replaceableTemplates[i]! && !retainedTemplates[i]! then
-        replacedSources := replacedSources.insert templateSources[i]!
-  let mut result : Array Fact := #[]
-  for sourceIndex in [0:facts.size] do
-    unless replacedSources.contains sourceIndex do
-      result := result.push facts[sourceIndex]!
   let generatedFacts ← generatedFacts.get
-  result := result ++ generatedFacts
+  let result := facts ++ generatedFacts
   let groundFacts ←
     if exhausted || generatedFacts.isEmpty then
       pure none
     else
       let templateSourceSet :=
         templateSources.foldl (init := ({} : Std.HashSet Nat)) (·.insert ·)
-      let hasRetainedParent :=
-        templateSources.any fun source => !replacedSources.contains source
-      if !hasRetainedParent then
-        pure none
-      else
-        let mut reduced : Array Fact := #[]
-        for sourceIndex in [0:facts.size] do
-          unless templateSourceSet.contains sourceIndex do
-            reduced := reduced.push facts[sourceIndex]!
-        pure (some (reduced ++ generatedFacts))
+      let mut reduced : Array Fact := #[]
+      for sourceIndex in [0:facts.size] do
+        unless templateSourceSet.contains sourceIndex do
+          reduced := reduced.push facts[sourceIndex]!
+      pure (some (reduced ++ generatedFacts))
   return {
     facts := result
     groundFacts

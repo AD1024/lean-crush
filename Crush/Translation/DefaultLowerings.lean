@@ -20,6 +20,68 @@ namespace Crush.DefaultLowerings
 
 open Crush SMT
 
+/-! ## Decisions and dependent decision procedures
+
+`Decidable p` is a subsingleton, but mapping it directly to SMT `Bool` would be
+unsound for quantifiers: SMT would add a second value that Lean's type does not
+have. All decision values and dependent functions ending in `Decidable` therefore
+share a singleton SMT sort. The singleton axiom makes quantification exact.
+
+The observable operation `decide p` is lowered separately to `p`. In particular,
+applying a `DecidableEq α` and then observing its decision is exactly SMT equality;
+the concrete decision-procedure implementation remains proof-irrelevant. -/
+
+private def hasDecidableCodomain (ty : Expr) : MetaM Bool := do
+  forallTelescopeReducing ty fun _ body => do
+    let body ← whnf body
+    return body.getAppFn.isConstOf ``Decidable
+
+private def decisionEncoding : TranslateM (SSort × SMT.Term) := do
+  let sortKey : StructuralKey := {
+    tag := "decision-subsingleton-sort", name := ``Decidable
+  }
+  let sortName ← TranslateM.symbolForStructural sortKey "Decision"
+  let sort := SSort.app (.symb sortName) #[]
+  if !(← declaredSort sortName) then
+    markSortDeclared sortName
+    TranslateM.emitCommand (.declSort sortName 0)
+  let valueKey : StructuralKey := {
+    tag := "decision-subsingleton-value", name := ``Decidable
+  }
+  let valueName ← TranslateM.symbolForStructural valueKey "decision"
+  if !(← declaredFun valueName) then
+    markFunDeclared valueName
+    TranslateM.emitCommand (.declFun valueName #[] sort)
+    let x ← TranslateM.freshSymbol "decision_x"
+    let xTerm := SMT.Term.const x
+    let valueTerm := SMT.Term.const valueName
+    TranslateM.emitCommand (.assert
+      (.forallE #[(x, sort)] (smt| (= $xTerm $valueTerm))))
+  return (sort, .const valueName)
+
+/-- Every `Decidable p` family is represented by the same singleton sort. -/
+@[crush_translate_sort]
+def decidableSort : SortHandler := fun ctx => do
+  let ty := mkAppN ctx.fn ctx.args
+  unless ← hasDecidableCodomain ty do return none
+  return some (← decisionEncoding).1
+
+/-- A concrete decision or dependent decision procedure is the unique inhabitant
+of the singleton decision sort. `Decidable` catches values and syntactic dependent
+function codomains; `DecidableEq` catches terms whose inferred type retains the
+named alias. -/
+@[crush_lower_result Decidable, crush_lower_result DecidableEq]
+def decidableValue : LoweringHandler := fun ctx => do
+  let ty ← inferType (mkAppN ctx.fn ctx.args)
+  unless ← hasDecidableCodomain ty do return none
+  return some (← decisionEncoding).2
+
+/-- Observing a decision returns the proposition it decides. -/
+@[crush_lower decide]
+def decideValue : LoweringHandler := fun ctx => do
+  let #[p, _] := ctx.args | return none
+  return some (← ctx.emitTerm p)
+
 /-- `Int.natAbs x`, represented in the non-negative `Int` encoding used for `Nat`. -/
 @[crush_lower Int.natAbs]
 def intNatAbs : LoweringHandler := fun ctx => do
@@ -194,7 +256,7 @@ def arrayReplicate : LoweringHandler := fun ctx => do
     let intSort := SSort.app (.symb "Int") #[]
     let dataSort := SSort.app (.symb "Array") #[intSort, elemSort]
     let key : StructuralKey := {
-      tag := "array-replicate-data", name := ``Array.replicate, exprs := #[elem]
+      tag := "array-replicate-data", name := ``Array.replicate, typeExprs := #[elem]
     }
     let dataFn ← TranslateM.symbolForStructural key "array_replicate"
     if !(← declaredFun dataFn) then

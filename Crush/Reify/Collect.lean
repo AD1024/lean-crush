@@ -51,7 +51,8 @@ structure Fact where
   their own rewrite rule. -/
   isEquation : Bool := false
   /-- Generate bounded ground instances before SMT translation. Enabled for
-  explicit hints and selected library premises, not every local hypothesis. -/
+  explicit hints, selected library premises, and local hypotheses when `*` is
+  present in an explicit hint list. -/
   instantiateTerms : Bool := false
   /-- Proof of the quantified fact that produced this ground instance. Retained
   as provenance even when preprocessing replaces the parent assertion. -/
@@ -72,6 +73,9 @@ structure Hints where
   eqnLemmas : Array Name := #[]
   /-- Whether to sweep in every local `Prop` hypothesis. -/
   allHyps  : Bool := true
+  /-- Whether swept local hypotheses enter bounded ground instantiation.
+  Bare `crush` leaves this off; an explicit `*` turns it on. -/
+  instantiateHyps : Bool := false
   /-- Whether automatic library premise selection may add facts. An explicit
   `[...]` list sets this to false so the list remains a strict restriction. -/
   allowPremiseSelection : Bool := true
@@ -131,7 +135,8 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
           facts := facts.push {
             prop := ty
             proof := decl.toExpr
-            descr := s!"hyp {decl.userName}" }
+            descr := s!"hyp {decl.userName}"
+            instantiateTerms := hints.instantiateHyps }
     -- Explicit term hints (lemmas or hypotheses the user named).
     for (proof, descr) in hints.terms do
       -- Re-abstract leftover mvars into leading binders. Elaborating a bare

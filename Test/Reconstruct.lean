@@ -84,6 +84,42 @@ run_meta do
             throwError "pre-SMT selected-rule reconstruction produced an incomplete proof"
           Lean.Meta.check proof
 
+-- Applying a selected invariant may expose an old-state premise whose only evidence is
+-- behind a functional-update guard. The checked pre-SMT path splits that existing guard;
+-- it does not invent an arbitrary equality case analysis.
+private axiom GuardedResult : Int → Prop
+
+example (oldValue : Int → Int) (key updatedKey : Int)
+    (rule : ∀ x, oldValue x = 1 → GuardedResult x)
+    (updatedRead : (if key = updatedKey then 0 else oldValue key) = 1) :
+    GuardedResult key := by
+  run_tac
+    let goal ← Lean.Elab.Tactic.getMainGoal
+    let selected ← collectFactsWithRewrite goal {}
+    unless ← tryPreReconstruct goal selected.facts do
+      throwError "pre-SMT selected-rule reconstruction did not split an update guard"
+
+private inductive GuardedState where
+  | accepted
+  | rejected
+
+example (oldValue : Int → GuardedState) (key updatedKey : Int)
+    (updatedRead :
+      (if key = updatedKey then .rejected else oldValue key) = .accepted)
+    (h : key = updatedKey) : False := by
+  grind only
+
+example (oldValue : Int → GuardedState) (key updatedKey : Int)
+    (rule : ∀ x, oldValue x = .accepted → GuardedResult x)
+    (updatedRead :
+      (if key = updatedKey then .rejected else oldValue key) = .accepted) :
+    GuardedResult key := by
+  run_tac
+    let goal ← Lean.Elab.Tactic.getMainGoal
+    let selected ← collectFactsWithRewrite goal {}
+    unless ← tryPreReconstruct goal selected.facts do
+      throwError "pre-SMT selected-rule reconstruction did not close a constructor guard"
+
 /-! ## Policy-independent constructor witnesses
 
 Witness synthesis runs before SMT even under `trust`: it produces a checked Lean proof,

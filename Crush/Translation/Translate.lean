@@ -301,8 +301,37 @@ private def finiteArrayEncodingNames (sortName : String) : FiniteArrayEncoding :
   sentinel := s!"{sortName}_outside"
 }
 
+/-- Whether a declaration's result is intrinsically logical, before substituting
+its polymorphic parameters. This distinction keeps a data projection such as
+`GetElem.getElem` out of the logical reduction path even when instantiated at
+`Bool`. -/
+private partial def hasDeclaredLogicalCodomain : Expr → Bool
+  | .forallE _ _ body _ => hasDeclaredLogicalCodomain body
+  | .sort .zero => true
+  | body => body.isConstOf ``Bool
+
+/-- Whether `fn` is a class field whose declared result is `Prop` or `Bool`. -/
+private def isLogicalClassProjection (fn : Expr) : MetaM Bool := do
+  let .const head _ := fn | return false
+  let some info ← getProjectionFnInfo? head | return false
+  unless info.fromClass do return false
+  let some decl := (← getEnv).find? head | return false
+  return hasDeclaredLogicalCodomain decl.type
+
+/-- Dispatch head for a result-indexed lowering. An immediate type head wins;
+otherwise dependent function binders are opened to expose a codomain such as
+`Decidable (x = y)`. Named aliases therefore remain distinct dispatch keys. -/
+private def resultHead? (ty : Expr) : MetaM (Option Name) := do
+  let direct := ty.getAppFn
+  if let .const head _ := direct then
+    return some head
+  forallTelescopeReducing ty fun _ body => do
+    let body ← whnf body
+    let .const head _ := body.getAppFn | return none
+    return some head
+
 private def finiteArraySentinelKey (elem : Expr) : StructuralKey := {
-  tag := "finite-array-sentinel", name := ``Array, exprs := #[elem]
+  tag := "finite-array-sentinel", name := ``Array, typeExprs := #[elem]
 }
 
 /-- Element type of a fully applied Lean `Array`, after reducible aliases. -/
@@ -417,7 +446,9 @@ def withFiniteArrayType (ctx : TranslationCtx) (arrayTy elem : Expr)
     (k : FiniteArrayEncoding → TranslateM SMT.Term) :
     TranslateM (Option SMT.Term) := do
   let actualSort ← ctx.emitSort arrayTy
-  let key : StructuralKey := { tag := "finite-array", name := ``Array, exprs := #[elem] }
+  let key : StructuralKey := {
+    tag := "finite-array", name := ``Array, typeExprs := #[elem]
+  }
   let some sortName ← TranslateM.structuralSymbol? key | return none
   unless actualSort == SSort.app (.symb sortName) #[] do return none
   let some sentinel ← TranslateM.structuralSymbol? (finiteArraySentinelKey elem)
@@ -701,7 +732,7 @@ mutual
 
   /-- Emit a `declare-sort` for an opaque type, once. -/
   partial def declareUninterpretedSort (e : Expr) : TranslateM SSort := do
-    let key : StructuralKey := { tag := "opaque-sort", exprs := #[e] }
+    let key : StructuralKey := { tag := "opaque-sort", typeExprs := #[e] }
     let hint := match e with | .const n _ => nameHint n | _ => "s"
     let name ← TranslateM.symbolForStructural key hint
     -- Remember the Lean type behind the sort, so proof replay can give a quantifier
@@ -717,7 +748,9 @@ mutual
   built-in operations and well-formedness predicates must both defer. -/
   partial def finiteArraySortSelected (arrayTy elem : Expr) : TranslateM Bool := do
     let actual ← emitSort arrayTy
-    let key : StructuralKey := { tag := "finite-array", name := ``Array, exprs := #[elem] }
+    let key : StructuralKey := {
+      tag := "finite-array", name := ``Array, typeExprs := #[elem]
+    }
     let some sortName ← TranslateM.structuralSymbol? key | return false
     return actual == SSort.app (.symb sortName) #[]
 
@@ -729,7 +762,9 @@ mutual
   congruence: without it, two SMT values could represent the same Lean array but
   remain distinguishable by equality or an uninterpreted function. -/
   partial def declareFiniteArray (elem : Expr) : TranslateM FiniteArrayEncoding := do
-    let key : StructuralKey := { tag := "finite-array", name := ``Array, exprs := #[elem] }
+    let key : StructuralKey := {
+      tag := "finite-array", name := ``Array, typeExprs := #[elem]
+    }
     if let some sortName ← TranslateM.structuralSymbol? key then
       let some sentinel ← TranslateM.structuralSymbol? (finiteArraySentinelKey elem)
         | throwError "internal error: finite Array sort `{sortName}` has no sentinel"
@@ -800,7 +835,7 @@ mutual
       TranslateM String := do
     -- Key structurally on the head and its instantiation, so `Option Int` and
     -- `Option Bool` get distinct sorts, constructors, and selectors.
-    let key : StructuralKey := { tag := "datatype", name := n, exprs := typeArgs }
+    let key : StructuralKey := { tag := "datatype", name := n, typeExprs := typeArgs }
     if let some name ← TranslateM.structuralSymbol? key then
       return name
     -- Emit the whole mutual block together: SMT-LIB requires mutually-recursive
@@ -814,7 +849,9 @@ mutual
     -- to it via the idempotent early-return above rather than recursing.
     let mut memberSorts : Array (Name × String) := #[]
     for m in iv.all do
-      let memberKey : StructuralKey := { tag := "datatype", name := m, exprs := typeArgs }
+      let memberKey : StructuralKey := {
+        tag := "datatype", name := m, typeExprs := typeArgs
+      }
       let mSort ← TranslateM.symbolForStructural memberKey (nameHint m)
       markSortDeclared mSort
       memberSorts := memberSorts.push (m, mSort)
@@ -1002,6 +1039,30 @@ mutual
         for lowering in (← getLoweringsFor head) do
           if let some t ← lowering ctx then
             return t
+    -- Result-indexed lowerings cover terms whose application head is unstable.
+    -- Direct type heads are cheap; only syntactic function types require opening
+    -- binders. Named aliases remain separate keys by design.
+    if ← hasResultLowerings then
+      let ty ← inferType e
+      if let some resultHead ← resultHead? ty then
+        if ← hasResultLoweringsFor resultHead then
+          let ctx : TranslationCtx := {
+            fn, args
+            emitTerm := emitTerm
+            emitSort := emitSort
+            declare  := declareViaThunk }
+          for lowering in (← getResultLoweringsFor resultHead) do
+            if let some t ← lowering ctx then
+              return t
+    let logicalClassProjection ← isLogicalClassProjection fn
+    -- A logical class field may itself return a predicate/relation before all
+    -- ordinary arguments are supplied (`Membership.mem inst : α → γ → Prop`).
+    -- Expose the selected instance before the generic HO encoder materializes
+    -- that partial application as an unrelated function value.
+    if logicalClassProjection && (← whnf (← inferType e)).isArrow then
+      let reduced ← withTransparency .instances <| whnf e
+      if reduced != e then
+        return ← emitTerm reduced
     -- Higher-order forms, before the first-order structural path.
     if let some t ← hoTerm? e then
       return t
@@ -1015,6 +1076,26 @@ mutual
       -- A structure projection → the SMT selector.
       if let some t ← projApp? fn args then
         return t
+      -- Concrete logical fields should expose the selected instance's semantics.
+      -- The declaration-based check above excludes polymorphic data projections
+      -- that merely happen to be instantiated at `Bool`.
+      if logicalClassProjection then
+        let reduced ← withTransparency .instances <| whnf e
+        if reduced != e then
+          return ← emitTerm reduced
+      if let .const head _ := fn then
+        -- A nullary transparent definition is a value alias, not a fresh SMT
+        -- constant. The nullary restriction avoids unfolding recursive or
+        -- data-processing definitions that have dedicated lowerings.
+        if args.isEmpty then
+          if ← Lean.isReducible head then
+            let reduced ← withReducible <| whnf e
+            if reduced != e then
+              return ← emitTerm reduced
+          else if ← Lean.isImplicitReducible head then
+            let reduced ← withTransparency .instances <| whnf e
+            if reduced != e then
+              return ← emitTerm reduced
       -- Default: uninterpreted function/atom applied to translated args.
       defaultApp fn args
 
@@ -1030,9 +1111,15 @@ mutual
     let mode := (← TranslateM.getConfig).hoMode
     -- (1) A λ becomes a closure with a defining axiom (or a native `lambda`).
     if e.isLambda then
-      if mode == .native then
-        return some (← emitNativeLambda e)
-      return some (← emitClosure e)
+      -- Dependent function values such as `DecidableEq α` have no first-order
+      -- arrow sort: their result sort mentions an argument. Keep those as opaque
+      -- atoms rather than entering `declareArrowSort`, which only accepts a
+      -- non-dependent `ArrowShape`.
+      if (← arrowShape? (← inferType e)).isSome then
+        if mode == .native then
+          return some (← emitNativeLambda e)
+        return some (← emitClosure e)
+      return none
     -- (2) Any expression whose result is still a function is a function *value*.
     -- Materialize it now so a later use cannot declare the partial application as
     -- an unrelated first-order symbol.
@@ -1286,8 +1373,6 @@ mutual
       return some (smt| (ite (<= $sa $sb) $sa $sb))
     -- `Nat.succ n` is `n + 1`; it appears from literals and from recursors.
     | Nat.succ a => return some (smt| (+ $(← emitTerm a) 1))
-    -- `decide p` is `p` itself once `Prop` is encoded as `Bool`.
-    | decide p _ => return some (← emitTerm p)
     -- `Nat.cast` is the identity in this encoding *only* when the target is `Int`
     -- (or `Nat`), since `Nat` is already represented as a non-negative `Int`. For
     -- any other `NatCast` instance the coercion is an arbitrary function — it may
@@ -1612,7 +1697,8 @@ mutual
     let argTypes ← valueArgs.mapM fun a => do whnf (← inferType a)
     let key : StructuralKey := {
       tag := s!"function-signature:{droppedTypes.size}:{argTypes.size}"
-      exprs := #[fn] ++ droppedTypes ++ argTypes ++ #[resTy] }
+      exprs := #[fn]
+      typeExprs := droppedTypes ++ argTypes ++ #[resTy] }
     let hint ← headHint fn
     let name ← TranslateM.symbolForStructural key hint
     -- Record the symbol → Lean-head correspondence for proof replay. Applications are

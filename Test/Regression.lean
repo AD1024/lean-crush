@@ -181,6 +181,65 @@ theorem opaque_overloads_are_uninterpreted (a b c : OpaqueArithmetic) (h : a = b
     min a c = min b c := by
   crush
 
+private structure ConcreteMembership where
+  contains : Int → Bool
+
+private instance : Membership Int ConcreteMembership where
+  mem collection x := collection.contains x = true
+
+theorem concrete_class_projection_reduces (collection : ConcreteMembership) (x : Int)
+    (hmem : x ∈ collection) (hfalse : collection.contains x = false) : False := by
+  crush
+
+private opaque acceptsDecidableEq {α : Type} : DecidableEq α → Bool
+
+-- Dependent decision procedures have no ordinary first-order arrow sort. The
+-- result-indexed lowering maps them to the axiomatized singleton decision sort.
+theorem dependent_decision_argument_uses_singleton
+    (h : acceptsDecidableEq (fun x y : Int => inferInstance) = true) :
+    acceptsDecidableEq (fun x y : Int => inferInstance) = true := by
+  crush
+
+theorem decisions_are_subsingleton {p : Prop} (a b : Decidable p) : a = b := by
+  crush
+
+theorem dependent_decision_procedures_are_subsingleton {α : Type}
+    (a b : DecidableEq α) : a = b := by
+  crush
+
+theorem decidable_eq_observes_equality (x y : Int) :
+    decide (x = y) = true ↔ x = y := by
+  crush
+
+-- The equality semantics come from the proposition indexed by the returned
+-- `Decidable`, not from the implementation of a particular procedure.
+theorem custom_decidable_eq_observes_equality {α : Type}
+    (decEq : DecidableEq α) (x y : α) :
+    @decide (x = y) (decEq x y) = true ↔ x = y := by
+  crush
+
+private class AliasOrder where
+  le : Int → Int → Bool
+
+private axiom aliasOrder : AliasOrder
+private noncomputable instance : AliasOrder := aliasOrder
+
+private axiom aliasOrder_antisymm :
+  ∀ x y, @AliasOrder.le aliasOrder x y = true →
+    @AliasOrder.le aliasOrder y x = true → x = y
+
+-- Data instances are implicit-reducible wrappers. Their projections must share
+-- SMT identity with projections from the wrapped witness.
+theorem implicit_reducible_instance_alias (x y : Int)
+    (hxy : AliasOrder.le x y = true) (hyx : AliasOrder.le y x = true) :
+    x = y := by
+  crush [aliasOrder_antisymm, *]
+
+-- Constructor-guided synthesis is intentionally one witness deep. Nested
+-- existentials proceed to SMT instead of saturating speculative candidate bodies.
+theorem nested_existential_uses_solver : ∃ x : Int, ∃ y : Int, x = y := by
+  crush
+
 -- The `Nat → Int` coercion is the identity here, since `Nat` is already an `Int`
 -- restricted to be non-negative.
 theorem nat_cast_int : (2 : Int) = ((nat_lit 2 : Nat) : Int) := by crush
@@ -243,9 +302,54 @@ theorem option_inj (x y : Int) (h : Option.some x = Option.some y) :
 -- Constructors are distinct: `none ≠ some x`.
 theorem option_distinct (x : Int) : (Option.some x) ≠ Option.none := by crush
 
+private inductive ReducibleAliasState where
+  | initial
+  | accepted
+
+@[reducible] private def acceptedAlias : ReducibleAliasState :=
+  .accepted
+
+-- Reducible term aliases share the constructor's SMT identity rather than
+-- becoming unrelated nullary uninterpreted symbols.
+theorem reducible_term_alias_is_transparent (state : ReducibleAliasState)
+    (h : state = acceptedAlias) : state ≠ .initial := by
+  crush
+
 -- A `List Int` instantiation: `cons` is injective in both head and tail.
 theorem list_cons_inj (a b : Int) (as bs : List Int)
     (h : a :: as = b :: bs) : a = b ∧ as = bs := by crush
+
+/-! ## Definitionally equal datatype parameters
+
+Generated DSLs often package several types in a signature record and expose
+datatype aliases through its projections. The projection and constructor paths
+must allocate the same SMT datatype when their type arguments are definitionally
+equal but not structurally identical before reduction. -/
+
+private structure PackedTypes where
+  Event : Type
+  Goto : Type
+
+private abbrev packedTypes : PackedTypes where
+  Event := Int
+  Goto := Bool
+
+private inductive PackedAction (E G : Type) where
+  | event (e : E)
+  | goto (g : G)
+
+private structure PackedLabel (E G : Type) where
+  action : PackedAction E G
+
+private abbrev PackedTypes.Label (P : PackedTypes) :=
+  PackedLabel P.Event P.Goto
+
+theorem datatype_projection_constructor_sort_identity
+    (lbl : packedTypes.Label) (x : Int)
+    (h : lbl.action =
+      PackedAction.event (G := Bool) x) :
+    lbl.action ≠ PackedAction.goto (E := Int) false := by
+  crush [h]
 
 /-! ## Datatypes -/
 

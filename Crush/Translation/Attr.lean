@@ -13,7 +13,7 @@ time** (via `evalConst`) when the tactic runs. This means the "SMT code" is
 produced *programmatically*, with the full power of `MetaM` and recursion back
 into the default translator, rather than being a fixed table baked into the tool.
 
-Two registration surfaces are provided:
+Four extension surfaces are provided:
 
 1. `@[crush_translate]` on a `def h : TranslationHandler` — the general form. `h`
    inspects the head `Expr` and either returns `some smtTerm` or defers (`none`).
@@ -23,16 +23,25 @@ Two registration surfaces are provided:
    so the handler can focus on argument validation and SMT construction without
    matching every term itself. Multiple lowerings for one head use priorities.
 
-3. `crush_map`/`crush_map_sort` macros (see `Crush/Translation/Builtins.lean`) —
+3. `@[crush_lower_result Target.type]` on a `def h : LoweringHandler` — the
+   result-indexed form. It dispatches on the immediate result head when one is
+   present, or peels a syntactic dependent function type to find its codomain
+   head. Register named aliases separately when both forms must be handled; the
+   built-in decision lowering registers both `Decidable` and `DecidableEq`.
+
+4. `crush_map`/`crush_map_sort` macros (see `Crush/Translation/Builtins.lean`) —
    sugar for the common cases of "map this constant to this SMT symbol/sort", which
    desugar to a `TranslationHandler`.
 
 A handler receives:
-* the `Expr` being translated (already in whnf-of-head form),
-* its spine of arguments,
+* the instantiated expression's syntactic head,
+* its original elaborated argument spine,
 * callbacks `emitSort`/`emitTerm` to recurse,
 all bundled in `TranslationCtx`. Handlers are tried in priority order; the first
-returning `some` wins. If none match, the default structural translator runs.
+returning `some` wins within that dispatch layer. The translator does not
+weak-head-normalize the term before constructing this context; a handler that
+needs reduction must request it through `MetaM`. If no extension claims the
+term, the default structural translator runs.
 -/
 
 namespace Crush
@@ -43,7 +52,8 @@ open SMT
 The callbacks are supplied by the core translator so a handler never needs to
 know the internal representation of `TranslateM`'s recursion. -/
 structure TranslationCtx where
-  /-- The application being translated: `fn` applied to `args`. -/
+  /-- The application being translated: syntactic `fn` applied to the original
+      elaborated `args`. No weak-head normalization is implied. -/
   fn        : Expr
   args      : Array Expr
   /-- Recurse into a subterm, producing an SMT term. -/
@@ -264,6 +274,68 @@ unsafe def getLoweringsForUnsafe (head : Name) : TranslateM (Array LoweringHandl
 
 @[implemented_by getLoweringsForUnsafe]
 opaque getLoweringsFor (head : Name) : TranslateM (Array LoweringHandler)
+
+/-! ## Result-indexed lowerings (`@[crush_lower_result target]`)
+
+Some operations have no stable application head to register: a generated
+decision procedure may be a lambda or an auxiliary declaration. Its result family
+is stable, however. This registry first uses the immediate head of the term's type.
+If the type is syntactically a dependent `∀`, it peels the binders and uses the
+codomain head. A named alias is therefore a distinct dispatch key and should also
+be registered when callers may retain that alias in the inferred type. -/
+
+initialize crushResultLoweringExt :
+    SimplePersistentEnvExtension LoweringEntry (NameMap (Array HandlerEntry)) ←
+  registerSimplePersistentEnvExtension {
+    addEntryFn := addLoweringEntry
+    addImportedFn := mkStateFromImportedEntries addLoweringEntry {}
+  }
+
+/-- Register a lowering selected by the head of a term's result type.
+
+For example, `@[crush_lower_result Decidable]` sees ordinary `Decidable p` values
+and syntactic dependent function types ending in `Decidable (...)`. Register
+`DecidableEq` separately to catch terms whose inferred type retains that alias. -/
+syntax (name := crushLowerResultAttr) "crush_lower_result " ident (ppSpace prio)? : attr
+
+initialize registerBuiltinAttribute {
+  name := `crushLowerResultAttr
+  descr := "Register a result-indexed lean-crush SMT lowering (LoweringHandler)."
+  applicationTime := .afterCompilation
+  add := fun declName stx _ => do
+    let headStx := stx[1]
+    let head ← Elab.realizeGlobalConstNoOverloadWithInfo headStx
+    let prio ← getAttrParamOptPrio stx[2]
+    let env ← getEnv
+    let some info := env.find? declName
+      | throwError "unknown declaration {declName}"
+    let expectedTy := mkConst ``Crush.LoweringHandler
+    unless (← MetaM.run' (Meta.isDefEq info.type expectedTy)) do
+      throwError "@[crush_lower_result] expects a declaration of type \
+                  `LoweringHandler`, but {declName} has type{indentExpr info.type}"
+    modifyEnv fun env =>
+      crushResultLoweringExt.addEntry env { head, declName, priority := prio }
+}
+
+def hasResultLoweringsFor (head : Name) : TranslateM Bool := do
+  return (crushResultLoweringExt.getState (← getEnv)).contains head
+
+unsafe def getResultLoweringsForUnsafe
+    (head : Name) : TranslateM (Array LoweringHandler) := do
+  let env ← getEnv
+  let opts ← getOptions
+  let entries := (crushResultLoweringExt.getState env).getD head #[]
+  let sorted := entries.qsort (fun a b => a.priority > b.priority)
+  sorted.filterMapM fun entry => do
+    match env.evalConst LoweringHandler opts entry.declName with
+    | .ok handler => return some handler
+    | .error _ => return none
+
+@[implemented_by getResultLoweringsForUnsafe]
+opaque getResultLoweringsFor (head : Name) : TranslateM (Array LoweringHandler)
+
+def hasResultLowerings : TranslateM Bool := do
+  return !(crushResultLoweringExt.getState (← getEnv)).isEmpty
 
 /-! ## Sort handlers (`@[crush_translate_sort]`)
 

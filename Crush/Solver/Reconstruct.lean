@@ -175,6 +175,17 @@ private def selectedRuleFinisherTactics : CoreM (Array (TSyntax `tactic)) := do
     (← `(tactic| rfl)),
     (← `(tactic| decide))]
 
+/-- Normalize decided guards and eliminate any resulting constructor conflict.
+
+This must be one tactic invocation: `simp_all` may replace local declarations, so a
+subsequent metaprogram that retained their old fvar ids would inspect a stale context.
+The bounded `grind` call uses no theorem set or E-matching; it only supplies generic
+propositional and constructor reasoning for the normalized local context. -/
+private def guardNormalizationTactic : CoreM (TSyntax `tactic) :=
+  `(tactic|
+    simp_all only [if_pos, if_neg, dif_pos, dif_neg] <;>
+      grind (ematch := 0) only)
+
 /-- Cheap finishers for the pre-SMT one-level datatype split.
 
 Unlike post-verdict reconstruction this path runs on ordinary solver-bound goals, so it
@@ -219,8 +230,70 @@ splitting `n` exposes exactly the zero/successor boundary.
 Depth, candidate, constructor, and branch caps make recursive or high-arity datatypes a
 bounded fallback rather than an accidental induction procedure. -/
 
+private def isConstructorPattern (e : Expr) : MetaM Bool := do
+  let e := e.consumeMData
+  if e.isLit then return true
+  let .const name _ := e.getAppFn | return false
+  return (← getEnv).find? name |>.any fun
+    | .ctorInfo _ => true
+    | _ => false
+
+/-- Argument positions pattern-matched by a definition's equation lemmas.
+
+For example, `Nat.add` scrutinizes its second argument, while `List.erase` scrutinizes
+its list argument. Deriving this from equation lemmas keeps speculative constructor
+splitting independent of datatype and function names. -/
+private def scrutinizedArgPositions (name : Name) : MetaM (Array Nat) := do
+  let some equations ← getEqnsFor? name | return #[]
+  let mut positions := #[]
+  for equation in equations do
+    let some info := (← getEnv).find? equation | continue
+    let found ← forallTelescopeReducing info.type fun _ body => do
+      let body ← whnf body
+      unless body.isEq do return #[]
+      let lhs := body.getAppArgs[1]!
+      unless lhs.getAppFn.constName? == some name do return #[]
+      let args := lhs.getAppArgs
+      let mut found := #[]
+      for i in [0:args.size] do
+        if ← isConstructorPattern args[i]! then
+          found := found.push i
+      return found
+    for position in found do
+      unless positions.contains position do positions := positions.push position
+  return positions
+
+/-- Whether `fv` is directly scrutinized by a definition occurring in `target`.
+
+The pre-SMT case split exists to expose equations stuck on symbolic recursive data.
+Merely carrying a value through a constructor, projection, equality, or arithmetic term
+does not benefit from splitting and can make a failed speculative pass dominate runtime. -/
+private partial def isComputationallyScrutinized (target : Expr) (fv : FVarId) :
+    MetaM Bool := do
+  if target.isApp then
+    if let some name := target.getAppFn.constName? then
+      let positions ← scrutinizedArgPositions name
+      if !positions.isEmpty then
+        let args := target.getAppArgs
+        for position in positions do
+          if let some arg := args[position]? then
+            if arg.consumeMData == mkFVar fv then return true
+    if ← isComputationallyScrutinized target.appFn! fv then return true
+    return ← isComputationallyScrutinized target.appArg! fv
+  match target with
+  | .lam _ type body _ | .forallE _ type body _ =>
+    return (← isComputationallyScrutinized type fv) ||
+      (← isComputationallyScrutinized body fv)
+  | .letE _ type value body _ =>
+    return (← isComputationallyScrutinized type fv) ||
+      (← isComputationallyScrutinized value fv) ||
+      (← isComputationallyScrutinized body fv)
+  | .mdata _ body | .proj _ _ body =>
+    isComputationallyScrutinized body fv
+  | _ => return false
+
 private def splittableFVars (g : MVarId) (onlyFiniteEnums := false)
-    (onlyTargetArgumentTypes := false) :
+    (onlyTargetArgumentTypes := false) (onlyComputationallyScrutinized := false) :
     MetaM (Array FVarId) := g.withContext do
   let target ← instantiateMVars (← g.getType)
   let mut targetArgumentTypes := #[]
@@ -245,15 +318,19 @@ private def splittableFVars (g : MVarId) (onlyFiniteEnums := false)
     let .const n _ := ty.getAppFn | continue
     let some (.inductInfo iv) := (← getEnv).find? n | continue
     if iv.ctors.length > 16 then continue
-    if onlyFiniteEnums then
-      let mut fieldFree := true
+    let mut fieldFree := false
+    if onlyFiniteEnums || onlyComputationallyScrutinized then
+      fieldFree := true
       for ctorName in iv.ctors do
         let some (.ctorInfo ctorInfo) := (← getEnv).find? ctorName
           | fieldFree := false; break
         if ctorInfo.numFields != 0 then
           fieldFree := false
           break
-      unless fieldFree do continue
+    if onlyComputationallyScrutinized && !fieldFree &&
+        !(← isComputationallyScrutinized target d.fvarId) then
+      continue
+    if onlyFiniteEnums && !fieldFree then continue
     out := out.push d.fvarId
   trace[crush.reconstruct] "constructor candidates: {out.map (·.name)}"
   return out
@@ -357,6 +434,50 @@ private def hasApplicableLocalRule (g : MVarId) : TacticM Bool := g.withContext 
       return true
     catch _ => restoreState saved
   return false
+
+/-- First proposition used as an `ite`/`dite` guard in an expression.
+
+Only open, local guards are useful here. Closed guards reduce without case analysis,
+and loose/metavariable guards would make the speculative split underconstrained. -/
+private partial def firstIteGuard? (e : Expr) : Option Expr :=
+  let e := e.consumeMData
+  let guarded :=
+    if e.isAppOfArity ``ite 5 || e.isAppOfArity ``dite 5 then
+      let guard := e.getAppArgs[1]!
+      if guard.hasFVar && !guard.hasLooseBVars && !guard.hasExprMVar then
+        some guard
+      else none
+    else none
+  guarded <|> match e with
+    | .app fn arg => firstIteGuard? fn <|> firstIteGuard? arg
+    | .lam _ type body _ | .forallE _ type body _ =>
+      firstIteGuard? type <|> firstIteGuard? body
+    | .letE _ type value body _ =>
+      firstIteGuard? type <|> firstIteGuard? value <|> firstIteGuard? body
+    | .mdata _ body | .proj _ _ body => firstIteGuard? body
+    | _ => none
+
+/-- Find an undecided functional-update guard in the target or selected facts.
+
+Restricting both discovery and the decidedness check to `proofs` preserves the semantics
+of `crush [...]`: an ambient hypothesis omitted from the hint list cannot influence the
+pre-SMT proof. Branch hypotheses are appended explicitly by `trySelectedFactRules`. -/
+private def firstUndecidedIteGuard? (g : MVarId) (proofs : Array Expr) :
+    MetaM (Option Expr) := g.withContext do
+  let mut candidates : Array Expr := #[← instantiateMVars (← g.getType)]
+  for proof in proofs do
+    candidates := candidates.push (← instantiateMVars (← inferType proof))
+  for candidate in candidates do
+    let some guard := firstIteGuard? candidate | continue
+    let negated := mkNot guard
+    let mut decided := false
+    for proofType in candidates do
+      if (← isDefEqGuarded proofType guard) ||
+          (← isDefEqGuarded proofType negated) then
+        decided := true
+        break
+    unless decided do return some guard
+  return none
 
 mutual
 
@@ -506,6 +627,27 @@ mutual
 
 end
 
+/-- Close a selected-rule premise after bounded functional-update normalization. -/
+private def finishSelectedRulePremise (g : MVarId)
+    (finishers : Array (TSyntax `tactic)) (ruleFuel : Nat) : TacticM Bool :=
+    g.withContext do
+  if ← finishOne g finishers ruleFuel then return true
+  let saved ← saveState
+  try
+    let normalizedGoals ← Tactic.run g (evalTactic (← guardNormalizationTactic))
+    trace[crush.reconstruct] "guard normalization left {normalizedGoals.length} goal(s)"
+    if normalizedGoals.isEmpty then
+      let proof ← instantiateMVars (mkMVar g)
+      unless proof.hasSorry || proof.hasMVar do
+        check proof
+        return true
+    restoreState saved
+    return false
+  catch e =>
+    trace[crush.reconstruct] "guard normalization declined: {e.toMessageData}"
+    restoreState saved
+    return false
+
 /-- Reducible declarations visible in an expression, capped before unfolding.
 
 This deliberately selects only declarations explicitly marked `@[reducible]`.
@@ -576,11 +718,12 @@ is rolled back before trying another target variable. -/
 private partial def splitSearch (g : MVarId) (finishers : Array (TSyntax `tactic))
     (fuel : Nat) (branchBudget : IO.Ref Nat) (finishCurrent := true)
     (onlyFiniteEnums := false) (onlyTargetArgumentTypes := false)
-    (ruleFuel : Nat := 2) : TacticM Bool :=
+    (onlyComputationallyScrutinized := false) (ruleFuel : Nat := 2) : TacticM Bool :=
     g.withContext do
   if finishCurrent && (← finishOne g finishers ruleFuel) then return true
   if fuel == 0 then return false
-  for fv in ← splittableFVars g onlyFiniteEnums onlyTargetArgumentTypes do
+  for fv in ← splittableFVars g onlyFiniteEnums onlyTargetArgumentTypes
+      onlyComputationallyScrutinized do
     if (← branchBudget.get) == 0 then return false
     let saved ← saveState
     try
@@ -597,6 +740,7 @@ private partial def splitSearch (g : MVarId) (finishers : Array (TSyntax `tactic
         unless ← splitSearch branch finishers (fuel - 1) branchBudget
             (onlyFiniteEnums := onlyFiniteEnums)
             (onlyTargetArgumentTypes := onlyTargetArgumentTypes)
+            (onlyComputationallyScrutinized := onlyComputationallyScrutinized)
             (ruleFuel := ruleFuel) do
           closed := false
           break
@@ -680,7 +824,13 @@ private def termsOfType (pool : Array Expr) (type : Expr) (limit : Nat := 32) :
 /-- Existing terms plus two constructor-closure rounds for an inductive witness type. -/
 private def witnessCandidates (target witnessType : Expr) : TacticM (Array Expr) := do
   let witnessType ← whnf witnessType
-  let mut pool := collectSubterms target
+  -- Exact in-scope values are cheaper and generally more relevant than rebuilding
+  -- the same datatype from a broad Cartesian product of field subterms.
+  let mut pool := #[]
+  for localDecl in ← getLCtx do
+    if localDecl.isImplementationDetail || pool.size >= 48 then continue
+    pool := pool.push (mkFVar localDecl.fvarId)
+  pool := collectSubterms target pool
   trace[crush.reconstruct] "witness subterm pool: {pool.size} term(s)"
   let mut witnesses ← termsOfType pool witnessType
   let rawWitnessCount := witnesses.size
@@ -708,7 +858,7 @@ private def witnessCandidates (target witnessType : Expr) : TacticM (Array Expr)
           unless pool.contains app do pool := pool.push app
   trace[crush.reconstruct] "witness candidates: {witnesses.size} term(s)"
   let generated := witnesses.extract rawWitnessCount witnesses.size
-  return generated ++ witnesses.extract 0 rawWitnessCount
+  return witnesses.extract 0 rawWitnessCount ++ generated
 
 /-- Cheap finishers for speculative witness candidates. General `grind` is deliberately
 excluded: most candidates are expected to fail, and saturating each failed body can dwarf
@@ -729,6 +879,22 @@ private def witnessFinisherTactics (useGlobalSimp := true) :
     simpTactic,
     (← `(tactic| decide))]
 
+/-- Whether an expression contains another existential proposition. -/
+private partial def containsExistential (e : Expr) : Bool :=
+  let e := e.consumeMData
+  if e.getAppFn.isConstOf ``Exists then
+    true
+  else
+    match e with
+    | .app fn arg => containsExistential fn || containsExistential arg
+    | .lam _ type body _ | .forallE _ type body _ =>
+      containsExistential type || containsExistential body
+    | .letE _ type value body _ =>
+      containsExistential type || containsExistential value ||
+        containsExistential body
+    | .mdata _ body | .proj _ _ body => containsExistential body
+    | _ => false
+
 /-- Try concrete constructor-generated witnesses for a top-level existential goal. -/
 private def tryExistentialWitness (g : MVarId) (useGlobalSimp := true) :
     TacticM Bool := g.withContext do
@@ -748,7 +914,16 @@ private def tryExistentialWitness (g : MVarId) (useGlobalSimp := true) :
       -- predicates, and so on). Normalize definitionally before invoking the bounded
       -- closers; this is constructor-generic and emits no quantified SMT equations.
       let normalizedGoal ← unfoldReducibleTarget proofGoal
-      trace[crush.reconstruct] "normalized witness target: {← normalizedGoal.getType}"
+      let normalizedTarget ← normalizedGoal.getType
+      trace[crush.reconstruct] "normalized witness target: {normalizedTarget}"
+      -- This pass synthesizes one constructor witness. If its body still needs a
+      -- second witness, broad simplification is both unlikely to close it and can
+      -- index a large quantified context. Leave nested existentials to SMT or the
+      -- full post-verdict reconstruction path.
+      if containsExistential normalizedTarget then
+        trace[crush.reconstruct] "declined witness with nested existential body"
+        restoreState saved
+        continue
       if ← finishOne normalizedGoal finishers then return true
       trace[crush.reconstruct] "witness did not close the body"
       restoreState saved
@@ -822,7 +997,7 @@ private def trySelectedConstructorSplit (goal : MVarId) (proofs : Array Expr) :
   try
     let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
     let (_, g) ← mv.mvarId!.intros
-    if (← splittableFVars g).isEmpty then
+    if (← splittableFVars g (onlyComputationallyScrutinized := true)).isEmpty then
       restoreState saved
       return false
     let useGlobalSimp :=
@@ -835,7 +1010,8 @@ private def trySelectedConstructorSplit (goal : MVarId) (proofs : Array Expr) :
     trace[crush.reconstruct] "pre-SMT constructor global simp: {useGlobalSimp}"
     let branchBudget ← IO.mkRef 24
     if ← splitSearch g finishers 1 branchBudget
-        (finishCurrent := false) (ruleFuel := 0) then
+        (finishCurrent := false) (onlyComputationallyScrutinized := true)
+        (ruleFuel := 0) then
       let assigned ← instantiateMVars mv
       unless assigned.hasSorry || assigned.hasMVar do
         check assigned
@@ -860,8 +1036,9 @@ The search is intentionally narrow: at most sixteen candidates, one top-level
 application, configurable but bounded rule chaining for premises, and no `grind`,
 datatype splitting, or existential witness search. Pre-SMT callers currently use
 zero premise-rule fuel; recursive chaining is reserved for post-verdict reconstruction. -/
-private def trySelectedFactRules (goal : MVarId) (proofs : Array Expr)
-    (candidateIndices : Array Nat) (ruleFuel : Nat := 1) : TacticM Bool :=
+private def trySelectedFactRulesOnce (goal : MVarId) (proofs : Array Expr)
+    (candidateIndices : Array Nat) (ruleFuel : Nat)
+    (premiseFreeOnly := false) : TacticM Bool :=
     goal.withContext do
   if candidateIndices.isEmpty then return false
   let goalType ← goal.getType
@@ -879,7 +1056,8 @@ private def trySelectedFactRules (goal : MVarId) (proofs : Array Expr)
       return false
     let proofFVars := introduced.extract (introduced.size - proofs.size) introduced.size
     let finishers ← selectedRuleFinisherTactics
-    for candidateIndex in candidateIndices.extract 0 (min candidateIndices.size 16) do
+    let candidates := candidateIndices.extract 0 (min candidateIndices.size 16)
+    for candidateIndex in candidates do
       let some candidateFVar := proofFVars[candidateIndex]? | continue
       let candidateSaved ← saveState
       try
@@ -889,9 +1067,17 @@ private def trySelectedFactRules (goal : MVarId) (proofs : Array Expr)
           continue
         trace[crush.reconstruct] "pre-SMT selected rule {candidateIndex} generated \
           {subgoals.length} premise(s)"
+        if premiseFreeOnly && !subgoals.isEmpty then
+          restoreState candidateSaved
+          continue
         let mut closed := true
         for subgoal in subgoals do
-          unless ← finishOne subgoal finishers ruleFuel do
+          subgoal.withContext do
+            trace[crush.reconstruct] "selected-rule premise: {← subgoal.getType}"
+          unless ← finishSelectedRulePremise subgoal finishers ruleFuel do
+            subgoal.withContext do
+              trace[crush.reconstruct] "selected-rule premise did not close: \
+                {← subgoal.getType}"
             closed := false
             break
         if closed then
@@ -907,6 +1093,42 @@ private def trySelectedFactRules (goal : MVarId) (proofs : Array Expr)
     return false
   catch e =>
     trace[crush.reconstruct] "pre-SMT selected-rule reconstruction declined: {e.toMessageData}"
+    restoreState saved
+    return false
+
+/-- Apply a selected rule, splitting only functional-update guards already present in the
+selected proof problem.
+
+Each branch is reconstructed from scratch with its `p` or `¬p` proof appended to the
+selected premises. Rebuilding is important: fvar ids introduced for one isolated
+implication are not valid after `byCases` changes its local context. Two split levels cover
+the common update/read transport pattern without turning this into unrestricted equality
+case search. -/
+private partial def trySelectedFactRules (goal : MVarId) (proofs : Array Expr)
+    (candidateIndices : Array Nat) (ruleFuel : Nat := 1) (guardFuel : Nat := 2) :
+    TacticM Bool := goal.withContext do
+  if candidateIndices.isEmpty then return false
+  if ← trySelectedFactRulesOnce goal proofs candidateIndices ruleFuel then return true
+  if guardFuel == 0 then return false
+  let some guard ← firstUndecidedIteGuard? goal proofs | return false
+  let saved ← saveState
+  try
+    let (positive, negative) ← goal.byCases guard `hUpdateGuard
+    trace[crush.reconstruct] "split selected-rule update guard {guard}"
+    for branch in #[positive, negative] do
+      unless ← trySelectedFactRules branch.mvarId
+          (proofs.push (mkFVar branch.fvarId)) candidateIndices ruleFuel
+          (guardFuel - 1) do
+        restoreState saved
+        return false
+    let assigned ← instantiateMVars (mkMVar goal)
+    unless assigned.hasSorry || assigned.hasMVar do
+      check assigned
+      return true
+    restoreState saved
+    return false
+  catch e =>
+    trace[crush.reconstruct] "selected-rule guard split declined: {e.toMessageData}"
     restoreState saved
     return false
 
@@ -1041,7 +1263,8 @@ Function-valued existential goals finally get the full bounded reconstruction at
 because first-order defunctionalization does not imply that every pointwise choice has a
 member in its encoded function sort. Other goals proceed directly to SMT, avoiding the full
 reconstruction ladder on the normal path. -/
-def tryPreReconstruct (goal : MVarId) (facts : Array Fact) : TacticM Bool :=
+def tryPreReconstruct (goal : MVarId) (facts : Array Fact)
+    (selectedRuleSearch := true) : TacticM Bool :=
     goal.withContext do
   for localDecl in ← getLCtx do
     if localDecl.isImplementationDetail then continue
@@ -1060,6 +1283,7 @@ def tryPreReconstruct (goal : MVarId) (facts : Array Fact) : TacticM Bool :=
     catch _ => restoreState saved
   let mut selectedProofs : Array Expr := #[]
   let mut localCandidateIndices : Array Nat := #[]
+  let mut generatedCandidateIndices : Array Nat := #[]
   let mut explicitCandidateIndices : Array Nat := #[]
   for fact in facts do
     let some proof := fact.proof | continue
@@ -1067,16 +1291,30 @@ def tryPreReconstruct (goal : MVarId) (facts : Array Fact) : TacticM Bool :=
     selectedProofs := selectedProofs.push proof
     if proof.isFVar && fact.prop.isForall then
       localCandidateIndices := localCandidateIndices.push index
-    if fact.instantiateTerms then
+    if fact.instanceOf.isSome && fact.prop.isForall then
+      generatedCandidateIndices := generatedCandidateIndices.push index
+    else if fact.instantiateTerms && fact.prop.isForall then
       explicitCandidateIndices := explicitCandidateIndices.push index
   trace[crush.reconstruct] "pre-SMT selected proofs: {selectedProofs.size}; \
-    local rules: {localCandidateIndices.size}; explicit rules: {explicitCandidateIndices.size}; \
+    local rules: {localCandidateIndices.size}; \
+    generated rules: {generatedCandidateIndices.size}; \
+    explicit rules: {explicitCandidateIndices.size}; \
     global simp: {useGlobalSimpPrepass selectedProofs}"
-  -- Reusing a quantified local invariant should not require a solver query. Keep this
-  -- first pass non-recursive: each generated premise must already be an assumption or a
-  -- cheap definitional/arithmetic consequence of the selected context.
-  if ← trySelectedFactRules goal selectedProofs localCandidateIndices 0 then return true
-  if ← trySelectedFactRules goal selectedProofs explicitCandidateIndices 0 then return true
+  if selectedRuleSearch then
+    -- Generated instances come first: their data parameters are anchored by query
+    -- patterns, unlike a quantified parent whose hidden parameter may not occur in its
+    -- conclusion and can be assigned from an irrelevant easy premise.
+    if ← trySelectedFactRules goal selectedProofs generatedCandidateIndices 0 then return true
+    -- Reusing a quantified local invariant should not require a solver query. Keep this
+    -- first pass non-recursive: each generated premise must already be an assumption or a
+    -- cheap definitional/arithmetic consequence of the selected context.
+    if ← trySelectedFactRules goal selectedProofs localCandidateIndices 0 then return true
+    if ← trySelectedFactRules goal selectedProofs explicitCandidateIndices 0 then return true
+  else
+    -- Trust mode avoids speculative premise search, but direct reuse of a local
+    -- universal invariant is bounded and creates no proof obligations.
+    if ← trySelectedFactRulesOnce goal selectedProofs localCandidateIndices 0
+        (premiseFreeOnly := true) then return true
   if ← trySelectedExistentialWitness goal selectedProofs then return true
   if ← trySelectedConstructorSplit goal selectedProofs then return true
   let target ← whnf (← goal.getType)

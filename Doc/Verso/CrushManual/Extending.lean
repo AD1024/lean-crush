@@ -156,6 +156,8 @@ Use a full handler when a fresh declaration is required.
 `target`.
 The handler receives the original Lean arguments and recursive `emitTerm` and
 `emitSort` callbacks.
+The head and arguments are syntactic and are not weak-head-normalized before
+dispatch; use the available `MetaM` operations when a handler needs reduction.
 It returns `some term` when it recognizes an application and `none` to defer:
 
 ```lean
@@ -193,6 +195,74 @@ implement before assigning a standard typeclass operation its SMT meaning.
 synthesis; a higher-priority global instance can change that baseline.
 `ctx.hasInstanceHead` is available for dependent dictionaries whose proof
 parameters make full definitional equality impractical.
+
+# Dependent Result Lowerings
+
+`@[crush_lower_result T]` dispatches on a term's result-family head instead of
+its application head.
+It first checks the immediate head of the inferred type.
+If that type is syntactically a dependent function, it opens the binders and
+checks the codomain head.
+Named aliases remain separate dispatch keys, so register the alias too when
+callers may retain it in the inferred type.
+This is useful for generated declarations and lambdas whose head is unstable,
+but whose result family is known.
+The handler still receives the original term's `ctx.fn` and `ctx.args`; peeled
+binders are used only to select the handler.
+
+The term representation must agree with a sort handler.
+Here every `IndexedInt index` is representation-isomorphic to SMT `Int`,
+even though the result type depends on the input:
+
+```lean
+open Crush
+
+structure IndexedInt (index : Int) where
+  value : Int
+
+def indexedInt (index : Int) : IndexedInt index :=
+  ⟨index⟩
+
+@[crush_translate_sort]
+def translateIndexedIntSort : SortHandler := fun ctx => do
+  let .const ``IndexedInt _ := ctx.fn
+    | return none
+  let #[_] := ctx.args | return none
+  return some (.app (.symb "Int") #[])
+
+@[crush_lower_result IndexedInt]
+def lowerIndexedInt : LoweringHandler := fun ctx => do
+  let .const ``indexedInt _ := ctx.fn
+    | return none
+  let #[index] := ctx.args | return none
+  return some (← ctx.emitTerm index)
+
+@[crush_lower IndexedInt.value]
+def lowerIndexedIntValue : LoweringHandler := fun ctx => do
+  let #[_, value] := ctx.args | return none
+  return some (← ctx.emitTerm value)
+
+example (index : Int) :
+    (indexedInt index).value = index := by
+  crush
+```
+
+The built-in `Decidable` encoding uses this path.
+`Decidable p` and dependent functions ending in it are represented by an
+axiomatized singleton SMT sort, matching Lean's proof-irrelevant subsingleton.
+Concretely, the lowering emits the equivalent of:
+
+```
+(declare-sort Decision 0)
+(declare-fun decision () Decision)
+(assert (forall ((d Decision)) (= d decision)))
+```
+
+Observing the value with `decide p` lowers to `p`; consequently,
+`DecidableEq` is observed as SMT equality without encoding the implementation
+of a particular decision procedure.
+The built-in handler is registered for both `Decidable` and the named
+`DecidableEq` alias.
 
 # General Handlers
 

@@ -140,3 +140,38 @@ def mappedIntNext : LoweringHandler := fun ctx => do
 theorem sort_sugar_fires (x : MappedInt) :
     (MappedInt.next x).value = x.value + 1 := by
   crush
+
+/-! ## A result-indexed lowering fires
+
+This is the executable counterpart of the Verso example. The term handler is
+selected from `IndexedInt index`, while the sort handler keeps the dependent
+family's representation aligned with SMT `Int`. -/
+
+structure IndexedInt (index : Int) where
+  value : Int
+
+def indexedInt (index : Int) : IndexedInt index :=
+  ⟨index⟩
+
+@[crush_translate_sort]
+def translateIndexedIntSort : SortHandler := fun ctx => do
+  let .const ``IndexedInt _ := ctx.fn
+    | return none
+  let #[_] := ctx.args | return none
+  return some (.app (.symb "Int") #[])
+
+@[crush_lower_result IndexedInt]
+def lowerIndexedInt : LoweringHandler := fun ctx => do
+  let .const ``indexedInt _ := ctx.fn
+    | return none
+  let #[index] := ctx.args | return none
+  return some (← ctx.emitTerm index)
+
+@[crush_lower IndexedInt.value]
+def lowerIndexedIntValue : LoweringHandler := fun ctx => do
+  let #[_, value] := ctx.args | return none
+  return some (← ctx.emitTerm value)
+
+theorem result_lowering_fires (index : Int) :
+    (indexedInt index).value = index := by
+  crush

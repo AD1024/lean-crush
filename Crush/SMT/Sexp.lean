@@ -98,7 +98,6 @@ def parseString (acc : String) : List Char → Option (String × List Char)
   | '"' :: '"' :: rest => parseString (acc.push '"') rest
   | '"' :: rest => some (acc, rest)
   | c :: rest => parseString (acc.push c) rest
-termination_by cs => cs.length
 
 /-- Parse an SMT-LIB `|…|`-quoted symbol, returning its semantic name without
 the delimiters. SMT-LIB does not define escapes inside quoted symbols. -/
@@ -107,7 +106,6 @@ def parseQuotedSymbol (acc : String) : List Char → Option (String × List Char
   | '|' :: rest => some (acc, rest)
   | '\\' :: _ => none
   | c :: rest => parseQuotedSymbol (acc.push c) rest
-termination_by cs => cs.length
 
 /-- Parse a bare atom up to the next delimiter. -/
 def parseAtom (acc : String) : List Char → String × List Char
@@ -117,21 +115,6 @@ def parseAtom (acc : String) : List Char → String × List Char
     else parseAtom (acc.push c) rest
 termination_by cs => cs.length
 
-/-! Termination of the parser proper.
-
-`parseList` recurses on whatever `parseOne` *returned*, so a direct measure on the
-input would need a theorem saying "`parseOne` consumes at least one character" —
-which is a statement about `parseOne` that `parseOne`'s own definition would then
-depend on. Rather than tie the definition to its own correctness proof, both
-functions take an explicit `fuel` bound: each recursive call decreases it, so
-termination is immediate and structural.
-
-Fuel is not a fudge here. `parseSexps` supplies `cs.length`, and each nested
-S-expression consumes at least the character that opened it, so the budget cannot be
-exhausted on well-formed input — running out is reported as a parse failure
-(`none`), which is exactly how malformed input is already handled. The alternative
-(proving the consumption lemma and using it in a well-founded measure) buys nothing
-here, since the parser's result is checked by the caller either way. -/
 mutual
   /-- Parse one S-expression. Returns the parsed value and the remaining input. -/
   def parseOne (fuel : Nat) (cs : List Char) : Option (Sexp × List Char) :=

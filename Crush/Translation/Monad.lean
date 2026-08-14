@@ -40,11 +40,17 @@ inductive Atom where
 /-- A collision-free identity for generated SMT symbols whose meaning depends on
 Lean expressions. Structural `Expr` equality includes universe levels and never
 elides deep terms, unlike pretty-printing. `tag` separates distinct symbol roles
-that happen to use the same expressions. -/
+that happen to use the same expressions.
+
+Types need stronger normalization than terms: reducible aliases and projections
+can give definitionally equal types different syntax, but they must still map to
+one SMT sort. Put those expressions in `typeExprs`; ordinary term identity stays
+in `exprs` and is not unfolded. -/
 structure StructuralKey where
-  tag   : String
-  name  : Name := .anonymous
-  exprs : Array Expr
+  tag       : String
+  name      : Name := .anonymous
+  exprs     : Array Expr := #[]
+  typeExprs : Array Expr := #[]
   deriving BEq, Hashable
 
 /-- Provenance for an emitted assertion, used for unsat-core reporting. -/
@@ -169,13 +175,20 @@ def symbolFor (key : String) (hint : String) : TranslateM String := do
       nameToAtom := s.nameToAtom.insert name key }
     return name
 
-/-- Instantiate metavariables and canonicalize universe expressions before using
-an expression-derived key. Lean considers `max u v` and `max v u` equivalent,
-but their raw `Expr` representations differ until levels are normalized. -/
+/-- Normalize expression-derived identities before lookup.
+
+All expressions have metavariables instantiated and universe levels normalized.
+Type components additionally undergo recursive reducible reduction, which
+canonicalizes abbreviations and record projections below an outer type
+constructor. This is deliberately not applied to `exprs`: unfolding a function
+head or closure body would erase the term identity those keys represent. -/
 private def normalizeStructuralKey (key : StructuralKey) : TranslateM StructuralKey := do
   let exprs ← key.exprs.mapM fun e => do
     Meta.Sym.normalizeLevels (← instantiateMVars e)
-  return { key with exprs }
+  let typeExprs ← key.typeExprs.mapM fun e => do
+    let e ← instantiateMVars e
+    Meta.Sym.normalizeLevels (← Meta.withReducible <| Meta.reduceAll e)
+  return { key with exprs, typeExprs }
 
 /-- Look up or allocate an expression-derived symbol using structural identity. -/
 def symbolForStructural (key : StructuralKey) (hint : String) : TranslateM String := do

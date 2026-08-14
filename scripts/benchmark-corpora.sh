@@ -26,6 +26,7 @@ TIMEOUT="${TIMEOUT:-5}"
 SOLVER="${SOLVER:-cvc5}"
 CRUSH_TRUST="${CRUSH_TRUST:-reconstruct}"
 CRUSH_PROFILE="${CRUSH_PROFILE:-false}"
+CRUSH_TRACE_INST="${CRUSH_TRACE_INST:-false}"
 MAX_HEARTBEATS="${MAX_HEARTBEATS:-1000000}"
 
 RUN_AUTO="${RUN_AUTO:-true}"
@@ -148,6 +149,18 @@ seed_solvers() {
   done
 }
 
+sync_local_crush_sources() {
+  local tree="$1"
+  local package="$tree/.lake/packages/crush"
+  [[ -d "$package/Crush" ]] ||
+    die "lean-crush dependency not materialized at $package"
+  # The benchmark executes with the local Crush olean first on LEAN_PATH. Mirror
+  # its sources into Lake's dependency checkout before building downstream modules
+  # so structure/API changes cannot leave those modules ABI-stale.
+  rsync -a --delete "$CRUSH_ROOT/Crush/" "$package/Crush/"
+  cp "$CRUSH_ROOT/Crush.lean" "$package/Crush.lean"
+}
+
 prepare_tree() {
   local label="$1"
   local tree="$2"
@@ -168,6 +181,7 @@ prepare_tree() {
   # Loom resolves solver paths relative to its own package. Seed both possible
   # locations after Lake has materialized dependencies so no download target runs.
   seed_solvers "$tree"
+  sync_local_crush_sources "$tree"
 
   if ! (cd "$tree" && lake build "$@") > "$OUT_DIR/build-$label.log" 2>&1; then
     tail -n 80 "$OUT_DIR/build-$label.log" >&2
@@ -218,6 +232,7 @@ macro "corpus_backend" : tactic =>
     set_option crush.timeout $TIMEOUT in
     set_option crush.trust "$CRUSH_TRUST" in
     set_option crush.profile $CRUSH_PROFILE in
+    set_option trace.crush.inst $CRUSH_TRACE_INST in
     loom_crush)
 EOF
   fi
