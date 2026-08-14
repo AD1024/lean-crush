@@ -9,6 +9,7 @@ repeats="${REPEATS:-1}"
 out_dir="${OUT_DIR:-$crush_root/BenchmarkResults/leanhammer-$(date +%Y%m%d-%H%M%S)}"
 results="$out_dir/results.tsv"
 metadata="$out_dir/metadata.tsv"
+summary="$out_dir/summary.tsv"
 logs="$out_dir/logs"
 profiles=(auto-only crush-only aesop-auto aesop-crush)
 
@@ -26,7 +27,8 @@ mkdir -p "$logs"
 printf 'profile\tcase\trun\tstatus\ttactic_ms\n' > "$results"
 printf 'hammer_commit\ttoolchain\tcrush_commit\tcrush_dirty\tcrush_root\n' > "$metadata"
 crush_dirty=false
-if [[ -n "$(git -C "$crush_root" status --porcelain)" ]]; then
+if [[ -n "$(git -C "$crush_root" status --porcelain -- \
+    . ':(exclude)BenchmarkResults')" ]]; then
   crush_dirty=true
 fi
 printf '%s\t%s\t%s\t%s\t%s\n' \
@@ -57,6 +59,33 @@ for profile in "${profiles[@]}"; do
     done
   done
 done
+
+awk -F '\t' '
+  BEGIN {
+    OFS = "\t"
+    print "profile", "attempted", "passed", "failed", "pass_pct",
+          "total_ms", "mean_ms", "min_ms", "max_ms"
+  }
+  NR > 1 && $2 != "00_import_only" {
+    profile = $1
+    seen[profile] = 1
+    attempted[profile]++
+    total[profile] += $5
+    if (!(profile in minimum) || $5 < minimum[profile]) minimum[profile] = $5
+    if (!(profile in maximum) || $5 > maximum[profile]) maximum[profile] = $5
+    if ($4 == "pass") passed[profile]++
+  }
+  END {
+    for (profile in seen) {
+      failed = attempted[profile] - passed[profile]
+      pct = attempted[profile] ? 100 * passed[profile] / attempted[profile] : 0
+      printf "%s\t%d\t%d\t%d\t%.1f\t%.1f\t%.1f\t%.1f\t%.1f\n",
+        profile, attempted[profile], passed[profile], failed, pct,
+        total[profile], total[profile] / attempted[profile],
+        minimum[profile], maximum[profile]
+    }
+  }
+' "$results" > "$summary"
 
 printf '\nSummary (excluding import-only case):\n'
 awk -F '\t' -v repeats="$repeats" '

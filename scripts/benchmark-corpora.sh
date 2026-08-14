@@ -51,6 +51,7 @@ COMPARISON="$OUT_DIR/comparison.tsv"
 
 WORKTREES=()
 ADDED_WORKTREE=""
+TRUNCATED_RUNS=0
 
 die() {
   printf 'error: %s\n' "$*" >&2
@@ -181,7 +182,9 @@ prepare_tree() {
   # Loom resolves solver paths relative to its own package. Seed both possible
   # locations after Lake has materialized dependencies so no download target runs.
   seed_solvers "$tree"
-  sync_local_crush_sources "$tree"
+  if [[ "$label" == *"-crush" ]]; then
+    sync_local_crush_sources "$tree"
+  fi
 
   if ! (cd "$tree" && lake build "$@") > "$OUT_DIR/build-$label.log" 2>&1; then
     tail -n 80 "$OUT_DIR/build-$label.log" >&2
@@ -201,13 +204,15 @@ record_metadata() {
   crush_dirty="false"
   if [[ "$backend" == "crush" ]]; then
     crush_commit="$(git -C "$CRUSH_ROOT" rev-parse HEAD)"
-    if [[ -n "$(git -C "$CRUSH_ROOT" status --porcelain)" ]]; then
+    if [[ -n "$(git -C "$CRUSH_ROOT" status --porcelain -- \
+        . ':(exclude)BenchmarkResults')" ]]; then
       crush_dirty="true"
     fi
   fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$suite" "$backend" "$ref" "$commit" "$toolchain" "$SOLVER" "$CRUSH_TRUST" \
-    "$crush_commit" "$crush_dirty" "$tree" >> "$METADATA"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$suite" "$backend" "$ref" "$commit" "$toolchain" "$SOLVER" "$TIMEOUT" \
+    "$MAX_HEARTBEATS" "$CRUSH_TRUST" "$crush_commit" "$crush_dirty" "$tree" \
+    >> "$METADATA"
 }
 
 write_prelude() {
@@ -237,6 +242,11 @@ macro "corpus_backend" : tactic =>
 EOF
   fi
 
+  cat >> "$output" <<EOF
+
+private def corpusBenchMaxHeartbeats : Nat := $MAX_HEARTBEATS * 1000
+EOF
+
   cat >> "$output" <<'EOF'
 
 open Lean Elab Tactic Meta
@@ -254,29 +264,32 @@ private def corpusBenchCategory (msg : String) : String :=
   else if corpusBenchContains msg "reconstruction" then "reconstruction"
   else "tactic"
 
-private def runCorpusBench : TacticM Unit := withMainContext do
-  let goal <- getMainGoal
-  let goalText := (toString (← ppExpr (← goal.getType)))
-    |>.replace "\t" " "
-    |>.replace "\n" " "
-  let goalHash := hash goalText
-  let proofName := (← Term.getDeclName?).getD `anonymous
-  let vc := goalHash
-  let saved <- saveState
-  let start <- IO.monoMsNow
-  try
-    evalTactic (← `(tactic| corpus_backend))
-    unless (← getUnsolvedGoals).isEmpty do
-      throwError "backend returned without closing the goal"
-    let elapsed := (← IO.monoMsNow) - start
-    IO.println s!"CORPUS_BENCH\t{proofName}\t{vc}\t{goalHash}\tpass\t-\t{elapsed}\t-\t{goalText}"
-  catch ex =>
-    let elapsed := (← IO.monoMsNow) - start
-    let msg := (← ex.toMessageData.toString)
-      |>.replace "\t" " "
-      |>.replace "\n" " "
-    saved.restore
-    IO.println s!"CORPUS_BENCH\t{proofName}\t{vc}\t{goalHash}\tfail\t{corpusBenchCategory msg}\t{elapsed}\t{msg}\t{goalText}"
+private def runCorpusBench : TacticM Unit := Lean.withCurrHeartbeats do
+  withTheReader Core.Context
+      (fun ctx => { ctx with maxHeartbeats := corpusBenchMaxHeartbeats }) do
+    withMainContext do
+      let goal <- getMainGoal
+      let goalText := (toString (← ppExpr (← goal.getType)))
+        |>.replace "\t" " "
+        |>.replace "\n" " "
+      let goalHash := hash goalText
+      let proofName := (← Term.getDeclName?).getD `anonymous
+      let vc := goalHash
+      let saved <- saveState
+      let start <- IO.monoMsNow
+      try
+        evalTactic (← `(tactic| corpus_backend))
+        unless (← getUnsolvedGoals).isEmpty do
+          throwError "backend returned without closing the goal"
+        let elapsed := (← IO.monoMsNow) - start
+        IO.println s!"CORPUS_BENCH\t{proofName}\t{vc}\t{goalHash}\tpass\t-\t{elapsed}\t-\t{goalText}"
+      catch ex =>
+        let elapsed := (← IO.monoMsNow) - start
+        let msg := (← ex.toMessageData.toString)
+          |>.replace "\t" " "
+          |>.replace "\n" " "
+        saved.restore
+        IO.println s!"CORPUS_BENCH\t{proofName}\t{vc}\t{goalHash}\tfail\t{corpusBenchCategory msg}\t{elapsed}\t{msg}\t{goalText}"
 
 syntax "corpus_bench_solver" : tactic
 
@@ -312,6 +325,7 @@ write_benchmark_file() {
       -e 's/loom_crush/corpus_bench_solver/g' \
       -e 's/loom_auto/corpus_bench_solver/g' \
       -e 's/loom_smt[[:space:]]+\[[^]]*\]/corpus_bench_solver/g' \
+      -e 's/^[[:space:]]*set_option[[:space:]]+maxHeartbeats[[:space:]]+[0-9]+[[:space:]]*$/set_option maxHeartbeats 0/' \
       >> "$output"
 }
 
@@ -381,7 +395,7 @@ run_lean_file() {
   local label="$6"
   local generated="$7"
   local log="$OUT_DIR/logs/$suite/$backend/${label//\//_}.$repeat.log"
-  local started elapsed exit_code vc_count commit toolchain
+  local started elapsed exit_code vc_count commit toolchain truncated message
 
   commit="$(git -C "$tree" rev-parse HEAD)"
   toolchain="$(tr -d '\r\n' < "$tree/lean-toolchain")"
@@ -389,18 +403,28 @@ run_lean_file() {
   started="$(date +%s)"
   if [[ "$backend" == "crush" ]]; then
     "$CRUSH_ROOT/scripts/with-local-crush.sh" "$tree" \
-      "-DmaxHeartbeats=$MAX_HEARTBEATS" "$generated" > "$log" 2>&1
+      "-DmaxHeartbeats=0" "$generated" > "$log" 2>&1
   else
-    (cd "$tree" && lake env lean "-DmaxHeartbeats=$MAX_HEARTBEATS" "$generated") \
+    (cd "$tree" && lake env lean "-DmaxHeartbeats=0" "$generated") \
       > "$log" 2>&1
   fi
   exit_code=$?
   elapsed="$(( $(date +%s) - started ))"
+  truncated="false"
+  message="-"
+  if grep -qE 'error: .*maximum number of heartbeats' "$log"; then
+    truncated="true"
+    message="declaration heartbeat exhaustion"
+    TRUNCATED_RUNS=$((TRUNCATED_RUNS + 1))
+    printf 'warning: %s %s was truncated by its declaration heartbeat limit\n' \
+      "$suite" "$label" >&2
+  fi
   vc_count="$(awk '/CORPUS_BENCH\t/ { n++ } END { print n + 0 }' "$log")"
   append_records "$suite" "$backend" "$ref" "$commit" "$toolchain" \
     "$repeat" "$label" "$log"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$suite" "$backend" "$repeat" "$label" "$exit_code" "$elapsed" "$vc_count" "-" \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$suite" "$backend" "$repeat" "$label" "$exit_code" "$elapsed" "$vc_count" \
+    "$truncated" "$message" \
     >> "$RUNS"
 }
 
@@ -449,12 +473,15 @@ write_reports() {
     BEGIN {
       OFS = "\t"
       print "suite", "backend", "attempted", "passed", "failed", "pass_pct",
-            "successful_mean_ms"
+            "total_ms", "mean_ms", "min_ms", "max_ms", "successful_mean_ms"
     }
     NR > 1 {
       key = $1 SUBSEP $2
       seen[key] = 1
       attempted[key]++
+      total[key] += $13
+      if (!(key in minimum) || $13 < minimum[key]) minimum[key] = $13
+      if (!(key in maximum) || $13 > maximum[key]) maximum[key] = $13
       if ($11 == "pass") {
         passed[key]++
         elapsed[key] += $13
@@ -465,9 +492,11 @@ write_reports() {
         split(key, p, SUBSEP)
         failed = attempted[key] - passed[key]
         pct = attempted[key] ? 100 * passed[key] / attempted[key] : 0
-        mean = passed[key] ? elapsed[key] / passed[key] : 0
-        printf "%s\t%s\t%d\t%d\t%d\t%.1f\t%.1f\n",
-          p[1], p[2], attempted[key], passed[key], failed, pct, mean
+        successfulMean = passed[key] ? elapsed[key] / passed[key] : 0
+        printf "%s\t%s\t%d\t%d\t%d\t%.1f\t%.1f\t%.1f\t%.1f\t%.1f\t%.1f\n",
+          p[1], p[2], attempted[key], passed[key], failed, pct,
+          total[key], attempted[key] ? total[key] / attempted[key] : 0,
+          minimum[key], maximum[key], successfulMean
       }
     }
   ' "$RESULTS" > "$SUMMARY"
@@ -476,7 +505,7 @@ write_reports() {
     BEGIN {
       OFS = "\t"
       print "suite", "shared_vcs", "auto_only_wins", "crush_only_wins",
-            "both_solved", "auto_mean_ms", "crush_mean_ms"
+            "both_solved", "neither_solved", "auto_mean_ms", "crush_mean_ms"
     }
     NR > 1 {
       vc = $1 SUBSEP $7 SUBSEP $8 SUBSEP $9 SUBSEP $10
@@ -508,6 +537,7 @@ write_reports() {
         crushSolved = passRuns[crushKey] == repeats
         if (autoSolved && !crushSolved) autoWins[suite]++
         if (!autoSolved && crushSolved) crushWins[suite]++
+        if (!autoSolved && !crushSolved) neither[suite]++
         if (autoSolved && crushSolved) {
           both[suite]++
           autoMs[suite] += totalMs[autoKey] / repeats
@@ -517,9 +547,9 @@ write_reports() {
       for (suite in suites) {
         autoMean = both[suite] ? autoMs[suite] / both[suite] : 0
         crushMean = both[suite] ? crushMs[suite] / both[suite] : 0
-        printf "%s\t%d\t%d\t%d\t%d\t%.1f\t%.1f\n",
+        printf "%s\t%d\t%d\t%d\t%d\t%d\t%.1f\t%.1f\n",
           suite, shared[suite], autoWins[suite], crushWins[suite],
-          both[suite], autoMean, crushMean
+          both[suite], neither[suite], autoMean, crushMean
       }
     }
   ' "$RESULTS" > "$COMPARISON"
@@ -548,8 +578,8 @@ fi
 
 mkdir -p "$OUT_DIR/logs"
 printf 'suite\tbackend\tref\tcommit\ttoolchain\trepeat\tfile\tproof\tvc\tgoal_hash\tstatus\tcategory\tmilliseconds\tmessage\tgoal\n' > "$RESULTS"
-printf 'suite\tbackend\trepeat\tfile\texit_code\twall_seconds\tvc_count\tmessage\n' > "$RUNS"
-printf 'suite\tbackend\tref\tcommit\ttoolchain\tsolver\tcrush_trust\tcrush_commit\tcrush_dirty\tworktree\n' > "$METADATA"
+printf 'suite\tbackend\trepeat\tfile\texit_code\twall_seconds\tvc_count\ttruncated\tmessage\n' > "$RUNS"
+printf 'suite\tbackend\tref\tcommit\ttoolchain\tsolver\ttimeout\tvc_max_heartbeats\tcrush_trust\tcrush_commit\tcrush_dirty\tworktree\n' > "$METADATA"
 
 if is_true "$RUN_LEANHAMMER"; then
   printf 'Running LeanHammer focused suite\n'
@@ -688,3 +718,7 @@ column -t -s $'\t' "$SUMMARY" 2>/dev/null || cat "$SUMMARY"
 printf '\nMatched-VC comparison:\n'
 column -t -s $'\t' "$COMPARISON" 2>/dev/null || cat "$COMPARISON"
 printf '\nResults: %s\n' "$OUT_DIR"
+
+if [[ "$TRUNCATED_RUNS" -gt 0 ]]; then
+  die "$TRUNCATED_RUNS benchmark run(s) were truncated before all VCs were emitted"
+fi

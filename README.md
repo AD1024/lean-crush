@@ -336,7 +336,8 @@ writes per-VC timing, coverage, metadata, and matched-goal summaries under
 `BenchmarkResults/`. Set `Z3_BIN`/`CVC5_BIN` when the solvers are not on `PATH`;
 the script preserves existing branch-specific solver binaries and seeds missing
 ones into Loom's build directories. `RUN_AUTO=false` or `RUN_CRUSH=false` selects
-one backend for focused profiling.
+one backend for focused profiling. See [`BENCHMARKS.md`](BENCHMARKS.md) for the
+latest recorded comparison and PLean reproduction instructions.
 
 The [Cedar `crush-backend` branch](https://github.com/AD1024/cedar-spec/tree/crush-backend)
 contains a

@@ -267,9 +267,9 @@ Each run prints two tables and writes the complete data under a timestamped
 |---|---|
 | `metadata.tsv` | Repository commits, toolchains, solver, trust mode, and dirty state |
 | `results.tsv` | Per-obligation status, failure category, tactic time, and goal hash |
-| `runs.tsv` | Per-file wall time, exit status, and obligation count |
-| `summary.tsv` | Coverage and successful-run mean by corpus/backend |
-| `comparison.tsv` | Matched-VC wins and mean times where both backends solved |
+| `runs.tsv` | Per-file wall time, exit status, obligation count, and truncation status |
+| `summary.tsv` | Coverage and aggregate attempted-VC timing by corpus/backend |
+| `comparison.tsv` | Matched-VC outcomes and mean times where both backends solved |
 | `logs/` | Complete elaborator and solver output |
 
 Compare matched VCs in `comparison.tsv`; raw corpus totals can differ when the backend
