@@ -103,7 +103,7 @@ def TranslationCtx.hasCanonicalInstance (ctx : TranslationCtx) (i : Nat) :
   try
     let lctx ← getLCtx
     let canonical ← withLCtx lctx {} do synthInstance instTy
-    isDefEqGuarded inst canonical
+    isDefEqReadOnly inst canonical
   catch _ =>
     return false
 
@@ -113,7 +113,7 @@ library operation its SMT meaning, even when users register higher-priority inst
 def TranslationCtx.hasExpectedInstance
     (ctx : TranslationCtx) (i : Nat) (expected : Expr) : TranslateM Bool := do
   let some actual := ctx.args[i]? | return false
-  isDefEqGuarded actual expected
+  isDefEqReadOnly actual expected
 
 /-- Whether argument `i` has the given declaration head.
 
@@ -182,7 +182,7 @@ initialize registerBuiltinAttribute {
     let some info := env.find? declName
       | throwError "unknown declaration {declName}"
     let expectedTy := mkConst ``Crush.TranslationHandler
-    unless (← MetaM.run' (Meta.isDefEqGuarded info.type expectedTy)) do
+    unless (← MetaM.run' (isDefEqReadOnly info.type expectedTy)) do
       throwError "@[crush_translate] expects a declaration of type `TranslationHandler`, \
                   but {declName} has type{indentExpr info.type}"
     modifyEnv fun env =>
@@ -281,7 +281,7 @@ initialize registerBuiltinAttribute {
     let some info := env.find? declName
       | throwError "unknown declaration {declName}"
     let expectedTy := mkConst ``Crush.LoweringHandler
-    unless (← MetaM.run' (Meta.isDefEqGuarded info.type expectedTy)) do
+    unless (← MetaM.run' (isDefEqReadOnly info.type expectedTy)) do
       throwError "@[crush_lower] expects a declaration of type `LoweringHandler`, \
                   but {declName} has type{indentExpr info.type}"
     modifyEnv fun env =>
@@ -347,7 +347,7 @@ initialize registerBuiltinAttribute {
     let some info := env.find? declName
       | throwError "unknown declaration {declName}"
     let expectedTy := mkConst ``Crush.LoweringHandler
-    unless (← MetaM.run' (Meta.isDefEqGuarded info.type expectedTy)) do
+    unless (← MetaM.run' (isDefEqReadOnly info.type expectedTy)) do
       throwError "@[crush_lower_result] expects a declaration of type \
                   `LoweringHandler`, but {declName} has type{indentExpr info.type}"
     modifyEnv fun env =>
@@ -408,7 +408,7 @@ initialize registerBuiltinAttribute {
     let some info := env.find? declName
       | throwError "unknown declaration {declName}"
     let expectedTy := mkConst ``Crush.SortHandler
-    unless (← MetaM.run' (Meta.isDefEqGuarded info.type expectedTy)) do
+    unless (← MetaM.run' (isDefEqReadOnly info.type expectedTy)) do
       throwError "@[crush_translate_sort] expects a declaration of type `SortHandler`, \
                   but {declName} has type{indentExpr info.type}"
     modifyEnv fun env =>

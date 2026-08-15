@@ -360,9 +360,11 @@ private def checkCommand (env : CheckEnv) (command : Command) : Except String Ch
     for d in defs do
       env ← insertFun env d.name { args := d.args.map (·.2), res := d.resSort }
     for d in defs do
+      let args := d.args.map fun (n, s) => (n, resolveSort env s)
+      let res := resolveSort env d.resSort
       let bodySort ←
-        inferTerm env d.args.toList.reverse (d.args.toList.reverse.map (·.2)) d.body
-      requireSort s!"body of recursive definition `{d.name}`" bodySort d.resSort
+        inferTerm env args.toList.reverse (args.toList.reverse.map (·.2)) d.body
+      requireSort s!"body of recursive definition `{d.name}`" bodySort res
     return env
   | .declDatatypes datatypes =>
     let mut env := env

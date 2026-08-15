@@ -1,6 +1,7 @@
 import Lean
 import Crush.Frontend.Config
 import Crush.Reify.Collect
+import Crush.Translation.Monad
 open Lean Meta
 
 /-!
@@ -241,13 +242,13 @@ private partial def matchPattern (pattern target : Expr) (binders : Array Expr)
     if let .fvar id := pattern then
       if let some index := binderIndex? binders id then
         unless ← isGroundType target do return none
-        unless ← isDefEqGuarded (← inferType target) (← id.getType) do return none
+        unless ← isDefEqReadOnly (← inferType target) (← id.getType) do return none
         match subst[index]! with
         | none => return some (subst.set! index (some target))
         | some previous =>
-          return if ← isDefEqGuarded previous target then some subst else none
+          return if ← isDefEqReadOnly previous target then some subst else none
     unless containsBinder pattern binders do
-      return if ← isDefEqGuarded pattern target then some subst else none
+      return if ← isDefEqReadOnly pattern target then some subst else none
     match pattern, target with
     | .app pf pa, .app tf ta =>
       let some subst ← go pf tf subst | return none
@@ -292,7 +293,7 @@ private def mergeSubstitutions (a b : Array (Option Expr)) :
     match a[i]!, b[i]! with
     | none, some value => merged := merged.set! i (some value)
     | some left, some right =>
-      unless ← isDefEqGuarded left right do return none
+      unless ← isDefEqReadOnly left right do return none
     | _, _ => pure ()
   return some merged
 
@@ -405,7 +406,7 @@ private partial def deriveSubstitutions (ty : Expr) (queryTypes : Array TypeOccu
 
 /-- Instantiate all leading type binders according to one query-derived
 substitution, then synthesize the instance-implicit binders that follow. -/
-private partial def specializationAt (proof ty : Expr) (subst : Array Expr) :
+private partial def specializationAtCore (proof ty : Expr) (subst : Array Expr) :
     MetaM (Option (Expr × Expr)) := do
   let mut proof := proof
   let mut ty := ty
@@ -413,7 +414,7 @@ private partial def specializationAt (proof ty : Expr) (subst : Array Expr) :
     let .forallE _ dom body _ := ty | return none
     let domW ← whnf dom
     unless domW.isSort do return none
-    unless ← isDefEqGuarded (← inferType candidate) domW do return none
+    unless ← Meta.isDefEqGuarded (← inferType candidate) domW do return none
     proof := mkApp proof candidate
     ty := body.instantiate1 candidate
   dischargeInstances proof ty
@@ -427,6 +428,22 @@ where
       | .some value => dischargeInstances (mkApp proof value) (body.instantiate1 value)
       | _ => return none
     | _ => return some (proof, ty)
+
+/-- Specialize transactionally and freeze the resulting expressions before rollback. -/
+private def specializationAt (proof ty : Expr) (subst : Array Expr) :
+    MetaM (Option (Expr × Expr)) := do
+  let saved ← Meta.saveState
+  try
+    match ← specializationAtCore proof ty subst with
+    | none => return none
+    | some (specializedProof, specializedType) =>
+      let specializedProof ← instantiateMVars specializedProof
+      let specializedType ← instantiateMVars specializedType
+      if specializedProof.hasMVar || specializedType.hasMVar then
+        return none
+      return some (specializedProof, specializedType)
+  finally
+    saved.restore
 
 /-- The result of the pass: the rewritten fact set, plus what it had to give up. -/
 structure MonoReport where
@@ -531,7 +548,7 @@ def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := 
         -- the instance is dropped and named loudly, never emitted.
         if cfg.monoCertify then
           let ok ←
-            try isDefEqGuarded (← inferType p) t
+            try isDefEqReadOnly (← inferType p) t
             catch _ => pure false
           unless ok do
             rejected := rejected.push s!"{f.descr}@inst"

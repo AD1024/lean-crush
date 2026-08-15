@@ -86,6 +86,16 @@ structure P2 where b : Int
 
 theorem no_collide (x y : Int) (h : (P1.mk x).a = x) : (P2.mk y).b = y := by crush
 
+inductive DerivedCollision where
+  | node_0
+  | node (value : Int)
+
+set_option crush.backend "none" in
+theorem derived_role_no_collide (value : Int) :
+    DerivedCollision.node value ≠ DerivedCollision.node_0 := by
+  crush
+  simp
+
 /-! ### `Nat` fields in datatypes — the freely-generated-datatype hole
 
 SMT datatypes are freely generated over their field sorts, so a `Nat` field

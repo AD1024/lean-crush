@@ -130,17 +130,17 @@ preceded it.
 Those lines are diagnostics emitted while the script was consumed (cvc5 answers
 `(error …)` for a command it cannot process). The scan runs inside one task so a query
 holds a single reader thread rather than one per line. -/
-private def readVerdictLine (h : IO.FS.Handle) : IO (String × Array String) := do
+private partial def readVerdictLine (h : IO.FS.Handle) : IO (String × Array String) := do
   let mut noise : Array String := #[]
-  -- A bound on lines keeps the loop total; the caller's deadline is the real limit.
-  for _ in [0:4096] do
+  while true do
     let line ← h.getLine
     if line.isEmpty then return ("", noise)
     let token := line.trimAscii.toString
     -- `getLine` returns "" only at EOF.
     if token.isEmpty then continue
     if token == "sat" || token == "unsat" || token == "unknown" then return (token, noise)
-    noise := noise.push token
+    if noise.size < 32 then
+      noise := noise.push token
   return ("", noise)
 
 /-- Wait for `task`, giving up when the query's shared timer finishes. -/

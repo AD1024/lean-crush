@@ -53,6 +53,14 @@ structure StructuralKey where
   typeExprs : Array Expr := #[]
   deriving BEq, Hashable
 
+/-- Semantic identity for a symbol derived from an already allocated SMT symbol. -/
+structure DerivedSymbolKey where
+  tag    : String
+  parent : String
+  member : Name := .anonymous
+  index  : Option Nat := none
+  deriving BEq, Hashable
+
 /-- Provenance for an emitted assertion, used for unsat-core reporting. -/
 structure FactSource where
   /-- Stable id embedded in the `:named` attribute (`crush_fact_<id>`). -/
@@ -112,6 +120,8 @@ structure TranslateState where
   usedNames  : Std.HashMap String Nat := {}
   /-- Requested derived symbol → collision-free allocated symbol. -/
   derivedNames : Std.HashMap String String := {}
+  /-- Semantic derived-symbol identity → collision-free allocated symbol. -/
+  derivedSymbols : Std.HashMap DerivedSymbolKey String := {}
   /-- Emitted commands, in order. -/
   commands   : Array SMT.Command := #[]
   /-- Provenance table indexed by fact id. -/
@@ -138,6 +148,11 @@ structure TranslateState where
 instance synthesis, and access to the environment — everything a user handler
 needs to inspect the term it is translating. -/
 abbrev TranslateM := StateRefT TranslateState MetaM
+
+/-- Test definitional equality without retaining metavariable assignments. -/
+def isDefEqReadOnly (left right : Expr) : MetaM Bool :=
+  withoutModifyingState do
+    Meta.isDefEqGuarded left right
 
 namespace TranslateM
 
@@ -183,7 +198,15 @@ def freshSymbol (hint : String := "x") : TranslateM String := do
   modify fun s => { s with nextFresh := n + 1 }
   reserveSymbol s!"{hint}_{n}"
 
-/-- Allocate a stable symbol derived by string concatenation from another symbol. -/
+/-- Allocate a stable symbol for a semantic derived-symbol identity. -/
+def reserveDerivedFor (key : DerivedSymbolKey) (hint : String) : TranslateM String := do
+  if let some allocated := (← get).derivedSymbols.get? key then
+    return allocated
+  let allocated ← reserveSymbol hint
+  modify fun s => { s with derivedSymbols := s.derivedSymbols.insert key allocated }
+  return allocated
+
+/-- Allocate a stable symbol identified by its requested name. -/
 def reserveDerived (name : String) : TranslateM String := do
   if let some allocated := (← get).derivedNames.get? name then
     return allocated

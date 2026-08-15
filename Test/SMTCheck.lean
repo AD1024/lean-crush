@@ -71,3 +71,18 @@ private def fnB : SSort := .app (.symb "FnB") #[]
   | .ok () => pure ()
   | .error error =>
     throw <| IO.userError s!"parameterized sort alias was not expanded: {error}"
+
+#eval show IO Unit from do
+  let aliasSort : SSort := .app (.symb "IntAlias") #[]
+  let script : Array Command := #[
+    .defSort "IntAlias" #[] (.app (.symb "Int") #[]),
+    .defFunsRec #[{
+      name := "countdown"
+      args := #[("n", aliasSort)]
+      resSort := aliasSort
+      body := (smt| (+ n 0))
+    }]]
+  match checkScript script with
+  | .ok () => pure ()
+  | .error error =>
+    throw <| IO.userError s!"recursive definition did not resolve sort aliases: {error}"

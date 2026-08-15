@@ -95,12 +95,24 @@ crush_map_sort Nat => "Int"
 
 -- Derived names remain stable while avoiding names allocated earlier.
 #eval show Lean.MetaM Unit from do
-  let ((occupied, derived, repeated), _) ← TranslateM.run {} do
+  let ((occupied, named, namedAgain, derived, repeated, distinct), _) ←
+      TranslateM.run {} do
     let occupied ← TranslateM.freshSymbol "Array_mk"
-    let derived ← TranslateM.reserveDerived "Array_mk"
-    let repeated ← TranslateM.reserveDerived "Array_mk"
-    return (occupied, derived, repeated)
-  unless occupied != derived && derived == repeated do
+    let named ← TranslateM.reserveDerived "Array_mk"
+    let namedAgain ← TranslateM.reserveDerived "Array_mk"
+    let ctorKey : DerivedSymbolKey := {
+      tag := "test-constructor"
+      parent := "Array"
+    }
+    let derived ← TranslateM.reserveDerivedFor ctorKey "Array_mk"
+    let repeated ← TranslateM.reserveDerivedFor ctorKey "Array_mk"
+    let distinct ← TranslateM.reserveDerivedFor {
+      tag := "test-selector"
+      parent := "Array"
+    } "Array_mk"
+    return (occupied, named, namedAgain, derived, repeated, distinct)
+  unless occupied != named && named == namedAgain && named != derived &&
+      derived == repeated && derived != distinct do
     throwError "derived SMT symbol allocation was colliding or unstable"
 
 -- Structural symbol keys distinguish universe levels even when pretty-printing

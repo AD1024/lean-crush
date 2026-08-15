@@ -113,7 +113,7 @@ def hasCanonicalInstance (e : Expr) (i : Nat) : TranslateM Bool := do
   try
     let lctx ← getLCtx
     let canon ← withLCtx lctx {} do synthInstance instTy
-    isDefEqGuarded inst canon
+    isDefEqReadOnly inst canon
   catch _ =>
     -- Synthesis failed: we cannot confirm the instance is standard, so treat it as
     -- non-canonical and let the term degrade to an uninterpreted symbol.
@@ -275,12 +275,36 @@ def ctorSymbol (sortName : String) (ctorName : Name) : String :=
 def selSymbol (sortName : String) (ctorName : Name) (i : Nat) : String :=
   s!"{sortName}_{nameHint ctorName}_{i}"
 
+/-- Allocate the constructor symbol identified by its datatype and Lean declaration. -/
+def reserveCtorSymbol (sortName : String) (ctorName : Name) : TranslateM String :=
+  TranslateM.reserveDerivedFor {
+    tag := "datatype-constructor"
+    parent := sortName
+    member := ctorName
+  } (ctorSymbol sortName ctorName)
+
+/-- Allocate the selector symbol identified by its datatype, constructor, and field. -/
+def reserveSelSymbol (sortName : String) (ctorName : Name) (i : Nat) : TranslateM String :=
+  TranslateM.reserveDerivedFor {
+    tag := "datatype-selector"
+    parent := sortName
+    member := ctorName
+    index := some i
+  } (selSymbol sortName ctorName i)
+
 /-- The SMT tester `((_ is C) x)`. -/
 def testerApp (ctorSym : String) (x : SMT.Term) : SMT.Term :=
   .app (.indexed "is" #[.inl ctorSym]) #[x]
 
 /-- The well-formedness predicate symbol for a datatype sort. -/
 def wfSymbol (sortName : String) : String := s!"wf_{sortName}"
+
+/-- Allocate the well-formedness predicate associated with a datatype sort. -/
+def reserveWfSymbol (sortName : String) : TranslateM String :=
+  TranslateM.reserveDerivedFor {
+    tag := "datatype-well-formedness"
+    parent := sortName
+  } (wfSymbol sortName)
 
 /-- Symbols allocated for Crush's finite representation of `Array elem`. The
 total SMT array is paired with a logical length; selectors and the out-of-range
@@ -297,9 +321,18 @@ private def finiteArrayEncodingNames (sortName sentinel : String) :
     TranslateM FiniteArrayEncoding := do
   return {
     sortName
-    ctor := ← TranslateM.reserveDerived s!"{sortName}_mk"
-    lenSel := ← TranslateM.reserveDerived s!"{sortName}_len"
-    dataSel := ← TranslateM.reserveDerived s!"{sortName}_data"
+    ctor := ← TranslateM.reserveDerivedFor {
+      tag := "finite-array-constructor"
+      parent := sortName
+    } s!"{sortName}_mk"
+    lenSel := ← TranslateM.reserveDerivedFor {
+      tag := "finite-array-length-selector"
+      parent := sortName
+    } s!"{sortName}_len"
+    dataSel := ← TranslateM.reserveDerivedFor {
+      tag := "finite-array-data-selector"
+      parent := sortName
+    } s!"{sortName}_data"
     sentinel
   }
 
@@ -872,7 +905,7 @@ mutual
         if ← isEmptyType elem then (smt| (= $len 0)) else (smt| (>= $len 0))
       let body := (smt| (and $lengthWF
         $(SMT.Term.forallE #[(iName, intSort)] pointwise)))
-      let wf ← TranslateM.reserveDerived (wfSymbol sortName)
+      let wf ← reserveWfSymbol sortName
       TranslateM.emitCommand (.defFun false wf #[(xName, sort)]
         (.app (.symb "Bool") #[]) body)
     return enc
@@ -925,7 +958,7 @@ mutual
       -- Field descriptors for the wf axiom: per ctor, the selectors needing a guard.
       let mut wfParts : Array (String × Array (String × Expr)) := #[]
       for ctorName in miv.ctors do
-        let ctorSym ← TranslateM.reserveDerived (ctorSymbol mSort ctorName)
+        let ctorSym ← reserveCtorSymbol mSort ctorName
         let ctorInfo ← getConstInfoCtor ctorName
         -- Instantiate the constructor's type at the datatype's parameters, so each
         -- field type is ground (`Option.some : α → Option α` becomes `Int → Option Int`
@@ -937,7 +970,7 @@ mutual
           for i in [0:args.size] do
             let fieldTy ← inferType args[i]!
             let s ← emitSort fieldTy
-            let selName ← TranslateM.reserveDerived (selSymbol mSort ctorName i)
+            let selName ← reserveSelSymbol mSort ctorName i
             sels := sels.push (selName, s)
             if (← needsWFGuard fieldTy) then
               gs := gs.push (selName, fieldTy)
@@ -1008,7 +1041,7 @@ mutual
   one `define-funs-rec` command — a member's body may reference a sibling's `wf`.
   `declareDatatype` drives the two in that order across the whole block. -/
   partial def declDatatypeWF (sortName : String) : TranslateM Bool := do
-    let wf ← TranslateM.reserveDerived (wfSymbol sortName)
+    let wf ← reserveWfSymbol sortName
     if ← declaredFun wf then return false
     markFunDeclared wf
     return true
@@ -1016,7 +1049,7 @@ mutual
   /-- Build one member of a mutually recursive well-formedness definition. -/
   partial def datatypeWFDef (sortName : String)
       (parts : Array (String × Array (String × Expr))) : TranslateM FunDef := do
-    let wf ← TranslateM.reserveDerived (wfSymbol sortName)
+    let wf ← reserveWfSymbol sortName
     let sort := SSort.app (.symb sortName) #[]
     let v ← TranslateM.freshSymbol "d"
     let x := SMT.Term.const v
@@ -1053,12 +1086,12 @@ mutual
     if let some elem ← finiteArrayElem? ty then
       unless ← finiteArraySortSelected ty elem do return none
       let enc ← declareFiniteArray elem
-      let wf ← TranslateM.reserveDerived (wfSymbol enc.sortName)
+      let wf ← reserveWfSymbol enc.sortName
       return some (.app (.symb wf) #[t])
     let some (n, typeArgs) ← supportedDatatypeType? ty | return none
     if !(← needsWFGuard ty) then return none
     let sortName ← declareDatatype n typeArgs
-    let wf ← TranslateM.reserveDerived (wfSymbol sortName)
+    let wf ← reserveWfSymbol sortName
     return some (.app (.symb wf) #[t])
 
   /-- Translate a term, trying user handlers first.
@@ -1316,7 +1349,7 @@ mutual
     if (← finiteArrayElem? structTy).isSome then return none
     let some (_, typeArgs) ← supportedDatatypeType? structTy | return none
     let sortName ← declareDatatype info.ctorName.getPrefix typeArgs
-    let sel ← TranslateM.reserveDerived (selSymbol sortName info.ctorName info.i)
+    let sel ← reserveSelSymbol sortName info.ctorName info.i
     let extraArgs := args.extract (info.numParams + 1) args.size
     let sarg ← emitTerm structArg
     let sextra ← extraArgs.mapM emitTerm
@@ -1338,7 +1371,7 @@ mutual
     -- Drop the leading type-parameter arguments; keep the value fields.
     let valueArgs := args.extract ci.numParams args.size
     let sargs ← valueArgs.mapM emitTerm
-    let ctor ← TranslateM.reserveDerived (ctorSymbol sortName cn)
+    let ctor ← reserveCtorSymbol sortName cn
     return some (.app (.symb ctor) sargs)
 
   /-- Recognize the built-in logical/arithmetic structure. Returns `none` to let

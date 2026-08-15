@@ -11,9 +11,16 @@ type parameter must still pick up the non-negativity guard (else the freely-gene
 SMT datatype is unsound in the dangerous direction).
 -/
 
-open Crush
+open Lean Meta Crush
 
 set_option crush.trust "trust"
+
+run_meta do
+  let type ← mkFreshExprMVar (mkSort (Level.succ Level.zero))
+  unless ← isDefEqReadOnly type (mkConst ``Nat) do
+    throwError "read-only definitional equality rejected a unifiable type"
+  if ← type.mvarId!.isAssigned then
+    throwError "read-only definitional equality retained a metavariable assignment"
 
 /-! ## Distinct instantiations get distinct sorts
 
