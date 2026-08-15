@@ -148,7 +148,7 @@ theorem nonlinear_falls_back (x : Int) (h : x * x = 4) (h2 : x > 0) : x = 2 := b
 
 -- A goal that is simply false: the solver returns `sat`, so replay never runs. Pins that the
 -- machinery cannot manufacture a proof of a non-theorem.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 example (p q : Bool) : p = q := by crush
 
@@ -199,6 +199,18 @@ theorem alethe_only (p q r s : Bool) :
 /-- info: 'alethe_only' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms alethe_only
+
+-- A strict hint list with unselected ambient hypotheses in scope. Each step is proved as a
+-- closed implication of its explicit premises, so the surrounding propositions — including
+-- a contradictory one — cannot contribute, and replay still produces a checked proof.
+set_option crush.backend "cvc5" in
+set_option crush.reconstruct "alethe" in
+theorem alethe_restricted_hints (p q r s : Bool) (n : Int)
+    (unrelated1 : n = 0) (unrelated2 : n = 1) (unrelated3 : n > 5) :
+    p = q ∨ p = r ∨ p = s ∨ q = r ∨ q = s ∨ r = s := by crush []
+/-- info: 'alethe_restricted_hints' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms alethe_restricted_hints
 
 -- The converse: this certificate still declines, and unlike a direct quantified instance
 -- the pre-SMT pass cannot close it. Under `alethe` there is no ladder to rescue it, so it

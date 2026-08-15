@@ -2,6 +2,7 @@ import Lean
 import Crush.Frontend.Config
 import Crush.Reify.Collect
 import Crush.SMT.Result
+import Crush.Solver.KernelCheck
 import Crush.Solver.ReconstructRules
 open Lean Meta Elab Tactic
 
@@ -946,7 +947,8 @@ The original goal's context may contain propositions omitted by `crush [...]`. B
 and prove a closed implication exactly as core reconstruction does, then apply the
 checked proof to the selected facts. This keeps witness synthesis cheap enough to run
 before SMT under every trust policy without weakening strict hint selection. -/
-private def trySelectedExistentialWitness (goal : MVarId) (proofs : Array Expr) :
+private def trySelectedExistentialWitness (snapshot : KernelCheckSnapshot)
+    (goal : MVarId) (proofs : Array Expr) :
     TacticM Bool := goal.withContext do
   let goalType ← instantiateMVars (← goal.getType)
   let targetHead ← whnf goalType
@@ -963,10 +965,9 @@ private def trySelectedExistentialWitness (goal : MVarId) (proofs : Array Expr) 
     let (_, g) ← mv.mvarId!.intros
     if ← tryExistentialWitness g (useGlobalSimpPrepass proofs) then
       let assigned ← instantiateMVars mv
-      unless assigned.hasSorry || assigned.hasMVar do
-        check assigned
-        goal.assign (mkAppN (mkAppN assigned params) proofs)
-        return true
+      let proof := mkAppN (mkAppN assigned params) proofs
+      goal.assign (← kernelCheckProof snapshot goalType proof)
+      return true
     restoreState saved
     return false
   catch e =>
@@ -981,7 +982,8 @@ SMT axioms. A single Lean constructor split often exposes exactly the equations 
 goals involving operations such as lookup, erase, or downstream reducible predicates. The
 attempt is restricted to small logically structured targets, one split level, and a fixed
 branch budget; failure restores all metavariable state before the query reaches SMT. -/
-private def trySelectedConstructorSplit (goal : MVarId) (proofs : Array Expr) :
+private def trySelectedConstructorSplit (snapshot : KernelCheckSnapshot)
+    (goal : MVarId) (proofs : Array Expr) :
     TacticM Bool := goal.withContext do
   let goalType ← instantiateMVars (← goal.getType)
   let goalHead ← whnf goalType
@@ -1013,10 +1015,9 @@ private def trySelectedConstructorSplit (goal : MVarId) (proofs : Array Expr) :
         (finishCurrent := false) (onlyComputationallyScrutinized := true)
         (ruleFuel := 0) then
       let assigned ← instantiateMVars mv
-      unless assigned.hasSorry || assigned.hasMVar do
-        check assigned
-        goal.assign (mkAppN (mkAppN assigned params) proofs)
-        return true
+      let proof := mkAppN (mkAppN assigned params) proofs
+      goal.assign (← kernelCheckProof snapshot goalType proof)
+      return true
     restoreState saved
     return false
   catch e =>
@@ -1036,12 +1037,12 @@ The search is intentionally narrow: at most sixteen candidates, one top-level
 application, configurable but bounded rule chaining for premises, and no `grind`,
 datatype splitting, or existential witness search. Pre-SMT callers currently use
 zero premise-rule fuel; recursive chaining is reserved for post-verdict reconstruction. -/
-private def trySelectedFactRulesOnce (goal : MVarId) (proofs : Array Expr)
-    (candidateIndices : Array Nat) (ruleFuel : Nat)
+private def trySelectedFactRulesOnce (snapshot : KernelCheckSnapshot)
+    (goal : MVarId) (proofs : Array Expr) (candidateIndices : Array Nat) (ruleFuel : Nat)
     (premiseFreeOnly := false) : TacticM Bool :=
     goal.withContext do
   if candidateIndices.isEmpty then return false
-  let goalType ← goal.getType
+  let goalType ← instantiateMVars (← goal.getType)
   let hypTypes ← proofs.mapM fun proof => do instantiateMVars (← inferType proof)
   let target := mkArrowChain hypTypes goalType
   let used := Lean.collectFVars {} target
@@ -1082,10 +1083,9 @@ private def trySelectedFactRulesOnce (goal : MVarId) (proofs : Array Expr)
             break
         if closed then
           let assigned ← instantiateMVars mv
-          unless assigned.hasSorry || assigned.hasMVar do
-            check assigned
-            goal.assign (mkAppN (mkAppN assigned params) proofs)
-            return true
+          let proof := mkAppN (mkAppN assigned params) proofs
+          goal.assign (← kernelCheckProof snapshot goalType proof)
+          return true
         restoreState candidateSaved
       catch _ =>
         restoreState candidateSaved
@@ -1104,29 +1104,28 @@ selected premises. Rebuilding is important: fvar ids introduced for one isolated
 implication are not valid after `byCases` changes its local context. Two split levels cover
 the common update/read transport pattern without turning this into unrestricted equality
 case search. -/
-private partial def trySelectedFactRules (goal : MVarId) (proofs : Array Expr)
-    (candidateIndices : Array Nat) (ruleFuel : Nat := 1) (guardFuel : Nat := 2) :
+private partial def trySelectedFactRules (snapshot : KernelCheckSnapshot)
+    (goal : MVarId) (proofs : Array Expr) (candidateIndices : Array Nat)
+    (ruleFuel : Nat := 1) (guardFuel : Nat := 2) :
     TacticM Bool := goal.withContext do
   if candidateIndices.isEmpty then return false
-  if ← trySelectedFactRulesOnce goal proofs candidateIndices ruleFuel then return true
+  if ← trySelectedFactRulesOnce snapshot goal proofs candidateIndices ruleFuel then return true
   if guardFuel == 0 then return false
+  let goalType ← instantiateMVars (← goal.getType)
   let some guard ← firstUndecidedIteGuard? goal proofs | return false
   let saved ← saveState
   try
     let (positive, negative) ← goal.byCases guard `hUpdateGuard
     trace[crush.reconstruct] "split selected-rule update guard {guard}"
     for branch in #[positive, negative] do
-      unless ← trySelectedFactRules branch.mvarId
+      unless ← trySelectedFactRules snapshot branch.mvarId
           (proofs.push (mkFVar branch.fvarId)) candidateIndices ruleFuel
           (guardFuel - 1) do
         restoreState saved
         return false
     let assigned ← instantiateMVars (mkMVar goal)
-    unless assigned.hasSorry || assigned.hasMVar do
-      check assigned
-      return true
-    restoreState saved
-    return false
+    discard <| kernelCheckProof snapshot goalType assigned
+    return true
   catch e =>
     trace[crush.reconstruct] "selected-rule guard split declined: {e.toMessageData}"
     restoreState saved
@@ -1144,7 +1143,8 @@ Returns `true` if the goal was closed; leaves `goal` untouched otherwise. -/
 def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
     (finishers : Array (TSyntax `tactic)) : TacticM Bool :=
   goal.withContext do
-    let goalType ← goal.getType
+    let snapshot ← KernelCheckSnapshot.capture
+    let goalType ← instantiateMVars (← goal.getType)
     let hypTypes ← coreProofs.mapM fun p => do instantiateMVars (← inferType p)
     let target := mkArrowChain hypTypes goalType
     -- Abstract exactly the local data/type variables that occur in the target
@@ -1182,12 +1182,12 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
           break
       if closed then
         let assigned ← instantiateMVars mv
-        unless assigned.hasSorry || assigned.hasMVar do
-          check assigned
-          goal.assign (mkAppN (mkAppN assigned params) coreProofs)
-          return true
+        let proof := mkAppN (mkAppN assigned params) coreProofs
+        goal.assign (← kernelCheckProof snapshot goalType proof)
+        return true
       restoreState saved
-    catch _ =>
+    catch e =>
+      trace[crush.reconstruct] "rule-directed reconstruction declined: {e.toMessageData}"
       restoreState saved
     for tac in finishers do
       -- Each attempt gets a fresh metavariable and a saved state, so a failed
@@ -1199,12 +1199,12 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
         let gs ← Tactic.run mv.mvarId! (evalTactic tac)
         if gs.isEmpty then
           let assigned ← instantiateMVars mv
-          unless assigned.hasSorry || assigned.hasMVar do
-            check assigned
-            goal.assign (mkAppN (mkAppN assigned params) coreProofs)
-            return true
+          let proof := mkAppN (mkAppN assigned params) coreProofs
+          goal.assign (← kernelCheckProof snapshot goalType proof)
+          return true
         restoreState saved
-      catch _ =>
+      catch e =>
+        trace[crush.reconstruct] "finisher declined: {e.toMessageData}"
         restoreState saved
     -- Last resort: intro the core hypotheses, synthesize constructor-shaped existential
     -- witnesses, then search bounded datatype splits. Only reached after every fixed rung
@@ -1241,10 +1241,9 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
         let assigned ← instantiateMVars mv
         trace[crush.reconstruct] "structured result: sorry={assigned.hasSorry}, \
           metavariables={assigned.hasMVar}"
-        unless assigned.hasSorry || assigned.hasMVar do
-          check assigned
-          goal.assign (mkAppN (mkAppN assigned params) coreProofs)
-          return true
+        let proof := mkAppN (mkAppN assigned params) coreProofs
+        goal.assign (← kernelCheckProof snapshot goalType proof)
+        return true
       restoreState saved
     catch e =>
       trace[crush.reconstruct] "structured reconstruction declined: {e.toMessageData}"
@@ -1266,6 +1265,8 @@ reconstruction ladder on the normal path. -/
 def tryPreReconstruct (goal : MVarId) (facts : Array Fact)
     (selectedRuleSearch := true) : TacticM Bool :=
     goal.withContext do
+  let snapshot ← KernelCheckSnapshot.capture
+  let goalType ← instantiateMVars (← goal.getType)
   for localDecl in ← getLCtx do
     if localDecl.isImplementationDetail then continue
     let type ← whnf localDecl.type
@@ -1276,9 +1277,8 @@ def tryPreReconstruct (goal : MVarId) (facts : Array Fact)
     try
       if (← goal.cases localDecl.fvarId).isEmpty then
         let proof ← instantiateMVars (mkMVar goal)
-        unless proof.hasSorry || proof.hasMVar do
-          check proof
-          return true
+        discard <| kernelCheckProof snapshot goalType proof
+        return true
       restoreState saved
     catch _ => restoreState saved
   let mut selectedProofs : Array Expr := #[]
@@ -1304,19 +1304,21 @@ def tryPreReconstruct (goal : MVarId) (facts : Array Fact)
     -- Generated instances come first: their data parameters are anchored by query
     -- patterns, unlike a quantified parent whose hidden parameter may not occur in its
     -- conclusion and can be assigned from an irrelevant easy premise.
-    if ← trySelectedFactRules goal selectedProofs generatedCandidateIndices 0 then return true
+    if ← trySelectedFactRules snapshot goal selectedProofs generatedCandidateIndices 0 then
+      return true
     -- Reusing a quantified local invariant should not require a solver query. Keep this
     -- first pass non-recursive: each generated premise must already be an assumption or a
     -- cheap definitional/arithmetic consequence of the selected context.
-    if ← trySelectedFactRules goal selectedProofs localCandidateIndices 0 then return true
-    if ← trySelectedFactRules goal selectedProofs explicitCandidateIndices 0 then return true
+    if ← trySelectedFactRules snapshot goal selectedProofs localCandidateIndices 0 then return true
+    if ← trySelectedFactRules snapshot goal selectedProofs explicitCandidateIndices 0 then
+      return true
   else
     -- Trust mode avoids speculative premise search, but direct reuse of a local
     -- universal invariant is bounded and creates no proof obligations.
-    if ← trySelectedFactRulesOnce goal selectedProofs localCandidateIndices 0
+    if ← trySelectedFactRulesOnce snapshot goal selectedProofs localCandidateIndices 0
         (premiseFreeOnly := true) then return true
-  if ← trySelectedExistentialWitness goal selectedProofs then return true
-  if ← trySelectedConstructorSplit goal selectedProofs then return true
+  if ← trySelectedExistentialWitness snapshot goal selectedProofs then return true
+  if ← trySelectedConstructorSplit snapshot goal selectedProofs then return true
   let target ← whnf (← goal.getType)
   let args := target.getAppArgs
   unless target.getAppFn.isConstOf ``Exists && args.size == 2 do return false

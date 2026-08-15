@@ -93,15 +93,16 @@ Traverses the whole expression rather than only application arguments, so a type
 mentioned solely in a binder (`∀ xs : List Int, …`) is still found. Deduplicated by
 the `Expr` itself; `isDefEq`-level canonicalization happens later, at use. -/
 private partial def collectCandidates (e : Expr) : MetaM (Array Expr) := do
-  let (_, out) ← go e |>.run #[]
-  return out
+  let (_, out) ← go e |>.run (#[], {})
+  return out.1
 where
-  go (e : Expr) : StateRefT (Array Expr) MetaM Unit := do
+  go (e : Expr) : StateRefT (Array Expr × Std.HashSet Expr) MetaM Unit := do
     -- Record `e` itself when it is a type; then recurse into its structure. A type
-    -- can contain another (`List Int` contains `Int`), so both happen.
+    -- can contain another (`List Int` contains `Int`), so both happen. Membership is
+    -- hashed: the traversal covers whole expressions, where a linear scan is quadratic.
     if ← isGroundType e then
-      unless (← get).contains e do
-        modify (·.push e)
+      unless (← get).2.contains e do
+        modify fun (out, seen) => (out.push e, seen.insert e)
     match e with
     | .app f a => go f; go a
     | .lam _ t b _ | .forallE _ t b _ => go t; go b
@@ -240,13 +241,13 @@ private partial def matchPattern (pattern target : Expr) (binders : Array Expr)
     if let .fvar id := pattern then
       if let some index := binderIndex? binders id then
         unless ← isGroundType target do return none
-        unless ← isDefEq (← inferType target) (← id.getType) do return none
+        unless ← isDefEqGuarded (← inferType target) (← id.getType) do return none
         match subst[index]! with
         | none => return some (subst.set! index (some target))
         | some previous =>
-          return if ← isDefEq previous target then some subst else none
+          return if ← isDefEqGuarded previous target then some subst else none
     unless containsBinder pattern binders do
-      return if ← isDefEq pattern target then some subst else none
+      return if ← isDefEqGuarded pattern target then some subst else none
     match pattern, target with
     | .app pf pa, .app tf ta =>
       let some subst ← go pf tf subst | return none
@@ -264,6 +265,18 @@ private def isBareBinderPattern (pattern : Expr) (binders : Array Expr) : Option
 private def originsSubset (left right : Array Nat) : Bool :=
   left.all right.contains
 
+/-- A merge is useful only if both substitutions provide a binder absent from the other.
+Otherwise the merged values equal one input while its provenance is less permissive, so
+that input already dominates the result. -/
+private def substitutionsComplementary (left right : Array (Option Expr)) : Bool :=
+  let leftAdds := (Array.zip left right).any fun
+    | (some _, none) => true
+    | _ => false
+  let rightAdds := (Array.zip left right).any fun
+    | (none, some _) => true
+    | _ => false
+  leftAdds && rightAdds
+
 private def mergeOrigins (left right : Array Nat) : Array Nat := Id.run do
   let mut out := left
   for origin in right do
@@ -279,7 +292,7 @@ private def mergeSubstitutions (a b : Array (Option Expr)) :
     match a[i]!, b[i]! with
     | none, some value => merged := merged.set! i (some value)
     | some left, some right =>
-      unless ← isDefEq left right do return none
+      unless ← isDefEqGuarded left right do return none
     | _, _ => pure ()
   return some merged
 
@@ -346,9 +359,12 @@ private partial def deriveSubstitutions (ty : Expr) (queryTypes : Array TypeOccu
     for _ in [0:binders.size] do
       let before := evidence.size
       let snapshot := evidence
-      for left in snapshot do
-        for right in snapshot do
+      for i in [0:snapshot.size] do
+        for j in [0:i] do
           if evidence.size >= evidenceLimit then break
+          let left := snapshot[i]!
+          let right := snapshot[j]!
+          unless substitutionsComplementary left.values right.values do continue
           if let some merged ← mergeSubstitutions left.values right.values then
             evidence := addEvidence evidence merged
               (mergeOrigins left.origins right.origins)
@@ -397,7 +413,7 @@ private partial def specializationAt (proof ty : Expr) (subst : Array Expr) :
     let .forallE _ dom body _ := ty | return none
     let domW ← whnf dom
     unless domW.isSort do return none
-    unless ← isDefEq (← inferType candidate) domW do return none
+    unless ← isDefEqGuarded (← inferType candidate) domW do return none
     proof := mkApp proof candidate
     ty := body.instantiate1 candidate
   dischargeInstances proof ty
@@ -515,7 +531,7 @@ def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := 
         -- the instance is dropped and named loudly, never emitted.
         if cfg.monoCertify then
           let ok ←
-            try isDefEq (← inferType p) t
+            try isDefEqGuarded (← inferType p) t
             catch _ => pure false
           unless ok do
             rejected := rejected.push s!"{f.descr}@inst"

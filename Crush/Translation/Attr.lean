@@ -42,6 +42,10 @@ returning `some` wins within that dispatch layer. The translator does not
 weak-head-normalize the term before constructing this context; a handler that
 needs reduction must request it through `MetaM`. If no extension claims the
 term, the default structural translator runs.
+
+Sort handlers are additionally offered the weak-head-normalized type when the
+un-normalized one is declined, so a handler may be registered against either an alias
+or its expansion.
 -/
 
 namespace Crush
@@ -78,6 +82,14 @@ A lowering may still return `none` when the application shape, type, or typeclas
 instance is not one it can encode soundly. -/
 abbrev LoweringHandler := TranslationHandler
 
+instance : TypeName TranslationHandler := unsafe (TypeName.mk _ ``TranslationHandler)
+
+private def unpackHandlers (cached : Array Dynamic) : Array TranslationHandler :=
+  cached.filterMap fun value => Dynamic.get? TranslationHandler value
+
+private def packHandlers (handlers : Array TranslationHandler) : Array Dynamic :=
+  handlers.map fun handler => Dynamic.mk handler
+
 /-- Whether argument `i` is the ambient global instance selected by typeclass synthesis.
 
 Local instances are disabled while synthesizing the baseline; otherwise a local
@@ -91,7 +103,7 @@ def TranslationCtx.hasCanonicalInstance (ctx : TranslationCtx) (i : Nat) :
   try
     let lctx ← getLCtx
     let canonical ← withLCtx lctx {} do synthInstance instTy
-    isDefEq inst canonical
+    isDefEqGuarded inst canonical
   catch _ =>
     return false
 
@@ -101,7 +113,7 @@ library operation its SMT meaning, even when users register higher-priority inst
 def TranslationCtx.hasExpectedInstance
     (ctx : TranslationCtx) (i : Nat) (expected : Expr) : TranslateM Bool := do
   let some actual := ctx.args[i]? | return false
-  isDefEq actual expected
+  isDefEqGuarded actual expected
 
 /-- Whether argument `i` has the given declaration head.
 
@@ -125,11 +137,23 @@ operations but not the type itself, so `(select m k)` would be applied to a
 datatype-sorted `m` and the script would be ill-sorted. -/
 abbrev SortHandler := TranslationCtx → TranslateM (Option SMT.SSort)
 
+instance : TypeName SortHandler := unsafe (TypeName.mk _ ``SortHandler)
+
+private def unpackSortHandlers (cached : Array Dynamic) : Array SortHandler :=
+  cached.filterMap fun value => Dynamic.get? SortHandler value
+
+private def packSortHandlers (handlers : Array SortHandler) : Array Dynamic :=
+  handlers.map fun handler => Dynamic.mk handler
+
 /-- A registered handler together with its metadata. -/
 structure HandlerEntry where
   declName : Name
   priority : Nat
   deriving Inhabited
+
+/-- Declaration names of a registry's entries, highest priority first. -/
+private def sortedNames (entries : Array HandlerEntry) : Array Name :=
+  (entries.qsort (fun a b => a.priority > b.priority)).map (·.declName)
 
 /-- Persistent environment extension holding registered handler declaration names.
 We store *names*, not closures, and `evalConst` them at tactic time; this keeps
@@ -158,7 +182,7 @@ initialize registerBuiltinAttribute {
     let some info := env.find? declName
       | throwError "unknown declaration {declName}"
     let expectedTy := mkConst ``Crush.TranslationHandler
-    unless (← MetaM.run' (Meta.isDefEq info.type expectedTy)) do
+    unless (← MetaM.run' (Meta.isDefEqGuarded info.type expectedTy)) do
       throwError "@[crush_translate] expects a declaration of type `TranslationHandler`, \
                   but {declName} has type{indentExpr info.type}"
     modifyEnv fun env =>
@@ -171,14 +195,18 @@ compiled code from the environment), so the real work lives in an `unsafe` def
 exposed through a safe `@[implemented_by]` wrapper — the standard Lean idiom for
 attribute-driven plugins (cf. `KeyedDeclsAttribute`). -/
 unsafe def getTranslationHandlersUnsafe : TranslateM (Array TranslationHandler) := do
+  if let some cached := (← get).registries.translation then
+    return unpackHandlers cached
   let env ← getEnv
   let opts ← getOptions
-  let entries := crushTranslateExt.getState env
-  let sorted := entries.qsort (fun a b => a.priority > b.priority)
-  sorted.filterMapM fun e => do
-    match env.evalConst TranslationHandler opts e.declName with
+  let names := sortedNames (crushTranslateExt.getState env)
+  let handlers ← names.filterMapM fun declName => do
+    match env.evalConst TranslationHandler opts declName with
     | .ok h => return some h
     | .error _ => return none
+  modify fun s => { s with registries :=
+    { s.registries with translation := some (packHandlers handlers) } }
+  return handlers
 
 @[implemented_by getTranslationHandlersUnsafe]
 opaque getTranslationHandlers : TranslateM (Array TranslationHandler)
@@ -190,7 +218,12 @@ def hasTranslationHandlersInEnv (env : Environment) : Bool :=
   !(crushTranslateExt.getState env).isEmpty
 
 def hasTranslationHandlers : TranslateM Bool := do
-  return hasTranslationHandlersInEnv (← getEnv)
+  match (← get).registries.hasTranslation with
+  | some flag => return flag
+  | none =>
+    let flag := hasTranslationHandlersInEnv (← getEnv)
+    modify fun s => { s with registries := { s.registries with hasTranslation := some flag } }
+    return flag
 
 /-! ## Head-indexed lowerings (`@[crush_lower target]`)
 
@@ -248,7 +281,7 @@ initialize registerBuiltinAttribute {
     let some info := env.find? declName
       | throwError "unknown declaration {declName}"
     let expectedTy := mkConst ``Crush.LoweringHandler
-    unless (← MetaM.run' (Meta.isDefEq info.type expectedTy)) do
+    unless (← MetaM.run' (Meta.isDefEqGuarded info.type expectedTy)) do
       throwError "@[crush_lower] expects a declaration of type `LoweringHandler`, \
                   but {declName} has type{indentExpr info.type}"
     modifyEnv fun env =>
@@ -263,14 +296,18 @@ def hasLoweringsFor (head : Name) : TranslateM Bool := do
   return hasLoweringsForInEnv (← getEnv) head
 
 unsafe def getLoweringsForUnsafe (head : Name) : TranslateM (Array LoweringHandler) := do
+  if let some cached := (← get).registries.lowerings.get? head then
+    return unpackHandlers cached
   let env ← getEnv
   let opts ← getOptions
-  let entries := (crushLoweringExt.getState env).getD head #[]
-  let sorted := entries.qsort (fun a b => a.priority > b.priority)
-  sorted.filterMapM fun entry => do
-    match env.evalConst LoweringHandler opts entry.declName with
+  let names := sortedNames ((crushLoweringExt.getState env).getD head #[])
+  let handlers ← names.filterMapM fun declName => do
+    match env.evalConst LoweringHandler opts declName with
     | .ok handler => return some handler
     | .error _ => return none
+  modify fun s => { s with registries := { s.registries with
+    lowerings := s.registries.lowerings.insert head (packHandlers handlers) } }
+  return handlers
 
 @[implemented_by getLoweringsForUnsafe]
 opaque getLoweringsFor (head : Name) : TranslateM (Array LoweringHandler)
@@ -310,7 +347,7 @@ initialize registerBuiltinAttribute {
     let some info := env.find? declName
       | throwError "unknown declaration {declName}"
     let expectedTy := mkConst ``Crush.LoweringHandler
-    unless (← MetaM.run' (Meta.isDefEq info.type expectedTy)) do
+    unless (← MetaM.run' (Meta.isDefEqGuarded info.type expectedTy)) do
       throwError "@[crush_lower_result] expects a declaration of type \
                   `LoweringHandler`, but {declName} has type{indentExpr info.type}"
     modifyEnv fun env =>
@@ -322,20 +359,30 @@ def hasResultLoweringsFor (head : Name) : TranslateM Bool := do
 
 unsafe def getResultLoweringsForUnsafe
     (head : Name) : TranslateM (Array LoweringHandler) := do
+  if let some cached := (← get).registries.resultLowerings.get? head then
+    return unpackHandlers cached
   let env ← getEnv
   let opts ← getOptions
-  let entries := (crushResultLoweringExt.getState env).getD head #[]
-  let sorted := entries.qsort (fun a b => a.priority > b.priority)
-  sorted.filterMapM fun entry => do
-    match env.evalConst LoweringHandler opts entry.declName with
+  let names := sortedNames ((crushResultLoweringExt.getState env).getD head #[])
+  let handlers ← names.filterMapM fun declName => do
+    match env.evalConst LoweringHandler opts declName with
     | .ok handler => return some handler
     | .error _ => return none
+  modify fun s => { s with registries := { s.registries with
+    resultLowerings :=
+      s.registries.resultLowerings.insert head (packHandlers handlers) } }
+  return handlers
 
 @[implemented_by getResultLoweringsForUnsafe]
 opaque getResultLoweringsFor (head : Name) : TranslateM (Array LoweringHandler)
 
 def hasResultLowerings : TranslateM Bool := do
-  return !(crushResultLoweringExt.getState (← getEnv)).isEmpty
+  match (← get).registries.hasResult with
+  | some flag => return flag
+  | none =>
+    let flag := !(crushResultLoweringExt.getState (← getEnv)).isEmpty
+    modify fun s => { s with registries := { s.registries with hasResult := some flag } }
+    return flag
 
 /-! ## Sort handlers (`@[crush_translate_sort]`)
 
@@ -361,7 +408,7 @@ initialize registerBuiltinAttribute {
     let some info := env.find? declName
       | throwError "unknown declaration {declName}"
     let expectedTy := mkConst ``Crush.SortHandler
-    unless (← MetaM.run' (Meta.isDefEq info.type expectedTy)) do
+    unless (← MetaM.run' (Meta.isDefEqGuarded info.type expectedTy)) do
       throwError "@[crush_translate_sort] expects a declaration of type `SortHandler`, \
                   but {declName} has type{indentExpr info.type}"
     modifyEnv fun env =>
@@ -369,14 +416,18 @@ initialize registerBuiltinAttribute {
 }
 
 unsafe def getSortHandlersUnsafe : TranslateM (Array SortHandler) := do
+  if let some cached := (← get).registries.sort then
+    return unpackSortHandlers cached
   let env ← getEnv
   let opts ← getOptions
-  let entries := crushTranslateSortExt.getState env
-  let sorted := entries.qsort (fun a b => a.priority > b.priority)
-  sorted.filterMapM fun e => do
-    match env.evalConst SortHandler opts e.declName with
+  let names := sortedNames (crushTranslateSortExt.getState env)
+  let handlers ← names.filterMapM fun declName => do
+    match env.evalConst SortHandler opts declName with
     | .ok h => return some h
     | .error _ => return none
+  modify fun s => { s with registries :=
+    { s.registries with sort := some (packSortHandlers handlers) } }
+  return handlers
 
 @[implemented_by getSortHandlersUnsafe]
 opaque getSortHandlers : TranslateM (Array SortHandler)
@@ -384,6 +435,11 @@ opaque getSortHandlers : TranslateM (Array SortHandler)
 /-- Whether any `@[crush_translate_sort]` handler is registered. Guards the sort
 hot path (`emitSort`) the same way `hasTranslationHandlers` guards `emitTerm`. -/
 def hasSortHandlers : TranslateM Bool := do
-  return !(crushTranslateSortExt.getState (← getEnv)).isEmpty
+  match (← get).registries.hasSort with
+  | some flag => return flag
+  | none =>
+    let flag := !(crushTranslateSortExt.getState (← getEnv)).isEmpty
+    modify fun s => { s with registries := { s.registries with hasSort := some flag } }
+    return flag
 
 end Crush

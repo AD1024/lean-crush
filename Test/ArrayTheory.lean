@@ -87,7 +87,7 @@ theorem amap_bool_row (m : AMap Int Bool) (k : Int) (b : Bool) :
 
 -- Negative test: a *false* array fact must be refuted, not closed. `get (set m k v) k`
 -- is `v`, not necessarily anything else, so `= w` for an unrelated `w` is false.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem amap_row_false (m : AMap Int Int) (k v w : Int) :
     AMap.get (AMap.set m k v) k = w := by crush

@@ -113,7 +113,7 @@ def hasCanonicalInstance (e : Expr) (i : Nat) : TranslateM Bool := do
   try
     let lctx ← getLCtx
     let canon ← withLCtx lctx {} do synthInstance instTy
-    isDefEq inst canon
+    isDefEqGuarded inst canon
   catch _ =>
     -- Synthesis failed: we cannot confirm the instance is standard, so treat it as
     -- non-canonical and let the term degrade to an uninterpreted symbol.
@@ -293,13 +293,15 @@ structure FiniteArrayEncoding where
   dataSel  : String
   sentinel : String
 
-private def finiteArrayEncodingNames (sortName : String) : FiniteArrayEncoding := {
-  sortName
-  ctor := s!"{sortName}_mk"
-  lenSel := s!"{sortName}_len"
-  dataSel := s!"{sortName}_data"
-  sentinel := s!"{sortName}_outside"
-}
+private def finiteArrayEncodingNames (sortName sentinel : String) :
+    TranslateM FiniteArrayEncoding := do
+  return {
+    sortName
+    ctor := ← TranslateM.reserveDerived s!"{sortName}_mk"
+    lenSel := ← TranslateM.reserveDerived s!"{sortName}_len"
+    dataSel := ← TranslateM.reserveDerived s!"{sortName}_data"
+    sentinel
+  }
 
 /-- Whether a declaration's result is intrinsically logical, before substituting
 its polymorphic parameters. This distinction keeps a data projection such as
@@ -453,7 +455,8 @@ def withFiniteArrayType (ctx : TranslationCtx) (arrayTy elem : Expr)
   unless actualSort == SSort.app (.symb sortName) #[] do return none
   let some sentinel ← TranslateM.structuralSymbol? (finiteArraySentinelKey elem)
     | throwError "internal error: finite Array sort `{sortName}` has no sentinel"
-  return some (← k { finiteArrayEncodingNames sortName with sentinel })
+  let encoding ← finiteArrayEncodingNames sortName sentinel
+  return some (← k encoding)
 
 /-- Run a lowering over Crush's built-in finite representation of `arr`.
 
@@ -485,19 +488,19 @@ mutual
 
   User `@[crush_translate_sort]` handlers get first refusal (like term handlers in
   `emitTerm`), so a user can retarget a Lean type to a theory sort — e.g. a finite map
-  to SMT's `(Array K V)`. Skipped wholesale when none are registered. -/
+  to SMT's `(Array K V)`. Skipped wholesale when none are registered.
+
+  Handlers see the type *before* weak-head normalization, so one registered for a type
+  introduced by `def`/`abbrev` still fires; they are offered the normalized form
+  afterwards, for a handler registered against that instead. -/
   partial def emitSort (e : Expr) : TranslateM SSort := do
-    let e ← whnf e
-    if ← hasSortHandlers then
-      let (fn, args) := getAppFnArgs' e
-      let ctx : TranslationCtx := {
-        fn, args
-        emitTerm := emitTerm
-        emitSort := emitSort
-        declare  := declareViaThunk }
-      for h in (← getSortHandlers) do
-        if let some s ← h ctx then
-          return s
+    let e ← instantiateMVars e
+    let handlers ← if ← hasSortHandlers then getSortHandlers else pure #[]
+    if let some s ← trySortHandlers handlers e then return s
+    let normalized ← whnf e
+    if normalized != e then
+      if let some s ← trySortHandlers handlers normalized then return s
+    let e := normalized
     match e with
     | .const ``Bool _ => return .app (.symb "Bool") #[]
     | .const ``Nat _  => return .app (.symb "Int") #[]
@@ -551,7 +554,11 @@ mutual
   of unary applies: `Int → Int → Bool` gets `app (Fn Int Int) Int → Bool` in one
   step. This keeps the encoding small for the common fully-applied case. Partial
   application is handled separately (`partialApp?`) by materializing the
-  intermediate closure. -/
+  intermediate closure.
+
+  The `app` result carries the codomain's well-formedness constraint at well-formed
+  arguments — the arrow-sort counterpart of `emitResultWF`, confining `app f n` for a
+  `Nat`-codomain arrow to the nonnegative `Int`s. -/
   partial def declareArrowSort (ty : Expr) : TranslateM (SSort × String) := do
     let key := arrowKey ty
     let sortName ← TranslateM.symbolForStructural key "Fn"
@@ -568,7 +575,47 @@ mutual
       let resSort ← emitSort shape.res
       TranslateM.emitCommand (.declFun appName (#[sort] ++ argSorts) resSort)
       markFunDeclared appName
+      let fName ← TranslateM.freshSymbol "wf_f"
+      let mut names : Array String := #[]
+      for _ in shape.args do
+        names := names.push (← TranslateM.freshSymbol "wf_x")
+      let appTerm := SMT.Term.app (.symb appName)
+        (#[SMT.Term.const fName] ++ names.map (SMT.Term.const ·))
+      if let some res ← wfCondition shape.res appTerm then
+        let guarded ←
+          match ← binderGuard names shape.args with
+          | none => pure res
+          | some g => pure (smt| (=> $g $res))
+        let binders := #[(fName, sort)] ++ names.zip argSorts
+        TranslateM.emitCommand (.assert (.forallE binders guarded))
     return (sort, appName)
+
+  /-- Offer a Lean type to `handlers`, in the priority order they were resolved in. -/
+  partial def trySortHandlers (handlers : Array SortHandler) (e : Expr) :
+      TranslateM (Option SSort) := do
+    if handlers.isEmpty then return none
+    let (fn, args) := getAppFnArgs' e
+    let ctx : TranslationCtx := {
+      fn, args
+      emitTerm := emitTerm
+      emitSort := emitSort
+      declare  := declareViaThunk }
+    for h in handlers do
+      if let some s ← h ctx then
+        return some s
+    return none
+
+  /-- The conjoined well-formedness conditions on SMT binders `names` of Lean types
+  `tys`, or `none` when none of them constrains its sort. -/
+  partial def binderGuard (names : Array String) (tys : Array Expr) :
+      TranslateM (Option SMT.Term) := do
+    let mut conds : Array SMT.Term := #[]
+    for (n, ty) in names.zip tys do
+      if let some c ← wfCondition ty (.const n) then
+        conds := conds.push c
+    if conds.isEmpty then return none
+    if conds.size == 1 then return some conds[0]!
+    return some (SMT.Term.symbApp "and" conds)
 
   /-- Emit the extensionality axiom for an arrow sort, on demand and once:
 
@@ -598,7 +645,15 @@ mutual
       argRefs := argRefs.push (.const v)
     let appA := SMT.Term.app (.symb appName) (#[SMT.Term.const a] ++ argRefs)
     let appB := SMT.Term.app (.symb appName) (#[SMT.Term.const b] ++ argRefs)
-    let premise := SMT.Term.forallE binders (smt| (= $appA $appB))
+    -- Agreement is required only at well-formed arguments, which is what makes
+    -- `∀ x : Nat, f x = g x ⊢ f = g` provable: the binders range over `Int`, where the
+    -- two `Nat` functions need not agree.
+    let pointwise := (smt| (= $appA $appB))
+    let pointwise ←
+      match ← binderGuard (binders.map (·.1)) shape.args with
+      | none => pure pointwise
+      | some g => pure (smt| (=> $g $pointwise))
+    let premise := SMT.Term.forallE binders pointwise
     let aRef := SMT.Term.const a
     let bRef := SMT.Term.const b
     TranslateM.emitCommand (.assert
@@ -654,6 +709,13 @@ mutual
     let lhs := SMT.Term.app (.symb appName)
       (#[cloApp] ++ paramBinders.map (fun (n, _) => SMT.Term.const n))
     let axiomBody := (smt| (= $lhs $bodyTerm))
+    -- The defining equation holds at well-formed arguments and captures only; the body is
+    -- a Lean term and has no meaning at a value outside the encoded type's image.
+    let captureTys ← captures.mapM fun fid => fid.getType
+    let axiomBody ←
+      match ← binderGuard ((binders ++ paramBinders).map (·.1)) (captureTys ++ shape.args) with
+      | none => pure axiomBody
+      | some g => pure (smt| (=> $g $axiomBody))
     let allBinders := binders ++ paramBinders
     TranslateM.emitCommand (.assert
       (if allBinders.isEmpty then axiomBody else .forallE allBinders axiomBody))
@@ -768,9 +830,11 @@ mutual
     if let some sortName ← TranslateM.structuralSymbol? key then
       let some sentinel ← TranslateM.structuralSymbol? (finiteArraySentinelKey elem)
         | throwError "internal error: finite Array sort `{sortName}` has no sentinel"
-      return { finiteArrayEncodingNames sortName with sentinel }
+      return ← finiteArrayEncodingNames sortName sentinel
     let sortName ← TranslateM.symbolForStructural key "Array"
-    let enc := finiteArrayEncodingNames sortName
+    let sentinel ←
+      TranslateM.symbolForStructural (finiteArraySentinelKey elem) s!"{sortName}_outside"
+    let enc ← finiteArrayEncodingNames sortName sentinel
     markSortDeclared sortName
     let elemSort ← emitSort elem
     let intSort := SSort.app (.symb "Int") #[]
@@ -781,12 +845,9 @@ mutual
         selDecls := #[(enc.lenSel, intSort), (enc.dataSel, dataSort)]
       }]
     })])
-    let sentinel ←
-      TranslateM.symbolForStructural (finiteArraySentinelKey elem) enc.sentinel
     if !(← declaredFun sentinel) then
       markFunDeclared sentinel
       TranslateM.emitCommand (.declFun sentinel #[] elemSort)
-    let enc := { enc with sentinel }
     if ← declDatatypeWF sortName then
       let xName ← TranslateM.freshSymbol "a"
       let iName ← TranslateM.freshSymbol "i"
@@ -811,7 +872,8 @@ mutual
         if ← isEmptyType elem then (smt| (= $len 0)) else (smt| (>= $len 0))
       let body := (smt| (and $lengthWF
         $(SMT.Term.forallE #[(iName, intSort)] pointwise)))
-      TranslateM.emitCommand (.defFun false (wfSymbol sortName) #[(xName, sort)]
+      let wf ← TranslateM.reserveDerived (wfSymbol sortName)
+      TranslateM.emitCommand (.defFun false wf #[(xName, sort)]
         (.app (.symb "Bool") #[]) body)
     return enc
 
@@ -863,6 +925,7 @@ mutual
       -- Field descriptors for the wf axiom: per ctor, the selectors needing a guard.
       let mut wfParts : Array (String × Array (String × Expr)) := #[]
       for ctorName in miv.ctors do
+        let ctorSym ← TranslateM.reserveDerived (ctorSymbol mSort ctorName)
         let ctorInfo ← getConstInfoCtor ctorName
         -- Instantiate the constructor's type at the datatype's parameters, so each
         -- field type is ground (`Option.some : α → Option α` becomes `Int → Option Int`
@@ -874,13 +937,13 @@ mutual
           for i in [0:args.size] do
             let fieldTy ← inferType args[i]!
             let s ← emitSort fieldTy
-            let selName := selSymbol mSort ctorName i
+            let selName ← TranslateM.reserveDerived (selSymbol mSort ctorName i)
             sels := sels.push (selName, s)
             if (← needsWFGuard fieldTy) then
               gs := gs.push (selName, fieldTy)
           return (sels, gs)
-        ctorDecls := ctorDecls.push { name := ctorSymbol mSort ctorName, selDecls }
-        wfParts := wfParts.push (ctorSymbol mSort ctorName, guards)
+        ctorDecls := ctorDecls.push { name := ctorSym, selDecls }
+        wfParts := wfParts.push (ctorSym, guards)
       dtInfos := dtInfos.push (mSort, 0, { ctors := ctorDecls })
       memberWF := memberWF.push (mSort, wfParts)
     TranslateM.emitCommand (.declDatatypes dtInfos)
@@ -945,7 +1008,7 @@ mutual
   one `define-funs-rec` command — a member's body may reference a sibling's `wf`.
   `declareDatatype` drives the two in that order across the whole block. -/
   partial def declDatatypeWF (sortName : String) : TranslateM Bool := do
-    let wf := wfSymbol sortName
+    let wf ← TranslateM.reserveDerived (wfSymbol sortName)
     if ← declaredFun wf then return false
     markFunDeclared wf
     return true
@@ -953,7 +1016,7 @@ mutual
   /-- Build one member of a mutually recursive well-formedness definition. -/
   partial def datatypeWFDef (sortName : String)
       (parts : Array (String × Array (String × Expr))) : TranslateM FunDef := do
-    let wf := wfSymbol sortName
+    let wf ← TranslateM.reserveDerived (wfSymbol sortName)
     let sort := SSort.app (.symb sortName) #[]
     let v ← TranslateM.freshSymbol "d"
     let x := SMT.Term.const v
@@ -990,11 +1053,13 @@ mutual
     if let some elem ← finiteArrayElem? ty then
       unless ← finiteArraySortSelected ty elem do return none
       let enc ← declareFiniteArray elem
-      return some (.app (.symb (wfSymbol enc.sortName)) #[t])
+      let wf ← TranslateM.reserveDerived (wfSymbol enc.sortName)
+      return some (.app (.symb wf) #[t])
     let some (n, typeArgs) ← supportedDatatypeType? ty | return none
     if !(← needsWFGuard ty) then return none
     let sortName ← declareDatatype n typeArgs
-    return some (.app (.symb (wfSymbol sortName)) #[t])
+    let wf ← TranslateM.reserveDerived (wfSymbol sortName)
+    return some (.app (.symb wf) #[t])
 
   /-- Translate a term, trying user handlers first.
 
@@ -1251,7 +1316,7 @@ mutual
     if (← finiteArrayElem? structTy).isSome then return none
     let some (_, typeArgs) ← supportedDatatypeType? structTy | return none
     let sortName ← declareDatatype info.ctorName.getPrefix typeArgs
-    let sel := selSymbol sortName info.ctorName info.i
+    let sel ← TranslateM.reserveDerived (selSymbol sortName info.ctorName info.i)
     let extraArgs := args.extract (info.numParams + 1) args.size
     let sarg ← emitTerm structArg
     let sextra ← extraArgs.mapM emitTerm
@@ -1273,7 +1338,8 @@ mutual
     -- Drop the leading type-parameter arguments; keep the value fields.
     let valueArgs := args.extract ci.numParams args.size
     let sargs ← valueArgs.mapM emitTerm
-    return some (.app (.symb (ctorSymbol sortName cn)) sargs)
+    let ctor ← TranslateM.reserveDerived (ctorSymbol sortName cn)
+    return some (.app (.symb ctor) sargs)
 
   /-- Recognize the built-in logical/arithmetic structure. Returns `none` to let
   handlers / the default path take over. -/
@@ -1684,7 +1750,9 @@ mutual
       if (← isProp ty) then return false
       return !(← whnf ty).isSort
     let appExpr := mkAppN fn args
-    let resTy ← whnf (← inferType appExpr)
+    -- Preserve aliases for `emitSort`: a user sort handler may intentionally target a
+    -- `def`-defined type. Structural keys normalize type components separately.
+    let resTy ← instantiateMVars (← inferType appExpr)
     -- Key declarations by the complete instantiated signature, not just dropped
     -- type arguments. A polymorphic projection such as `Bind.toBind` may have no
     -- ordinary type argument while still being instantiated at different
@@ -1694,7 +1762,7 @@ mutual
       let ty ← inferType a
       if (← isProp ty) then return none
       if (← whnf ty).isSort then return some a else return none
-    let argTypes ← valueArgs.mapM fun a => do whnf (← inferType a)
+    let argTypes ← valueArgs.mapM fun a => do instantiateMVars (← inferType a)
     let key : StructuralKey := {
       tag := s!"function-signature:{droppedTypes.size}:{argTypes.size}"
       exprs := #[fn]

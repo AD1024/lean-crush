@@ -6,7 +6,7 @@ import Crush.SMT.Sexp
 Turns the raw text captured from a solver's `get-unsat-core` / `get-model` into
 structured data the tactic can act on:
 
-* `parseUnsatCore` — the list of fact ids named `crush_fact_<n>` in the core, so
+* `unsatCoreFactIds` — the list of fact ids named `crush_fact_<n>` in the core, so
   the discharge layer can select exactly the hypotheses the solver used
   so a failure can name the hypotheses actually responsible.
 * `parseModel` — the `(define-fun …)` assignments from a `sat` answer, so a
@@ -43,11 +43,12 @@ mutual
   decreasing_by all_goals (simp_wf; omega)
 end
 
-/-- Extract the fact ids referenced in an unsat core. The core text is an
-S-expression list of names, e.g. `(crush_fact_3 crush_fact_7)`. Robust to a
-leading `unsat` token and to surrounding whitespace/comments. -/
-def parseUnsatCore (coreText : String) : Array Nat :=
-  (parseSexps coreText).foldl (fun acc s => acc ++ collectFactIds s) #[]
+/-- Extract the fact ids referenced in an already-parsed unsat core, an
+S-expression list of names such as `(crush_fact_3 crush_fact_7)`. -/
+def unsatCoreFactIds (core : Option Sexp) : Array Nat :=
+  match core with
+  | some core => collectFactIds core
+  | none => #[]
 
 /-- A single model assignment from `get-model`: a symbol and its value rendered
 back to SMT-LIB text (kept as text since interpreting it needs the sort context). -/

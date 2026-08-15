@@ -4,23 +4,25 @@ open Lean
 /-!
 # Reified simply-typed λ-calculus IR (`CSort` / `CTerm`)
 
-This is lean-crush's intermediate logic: monomorphic, simply-typed λ-calculus
-(= higher-order logic without polymorphism). Lean `Expr`s are reified into
-`CTerm` (after monomorphization), the HO-elimination layer rewrites `CTerm`s, and
-the translator lowers `CTerm` into `Crush.SMT.Term`.
+**Nothing in the pipeline uses this module.** `Crush/Translation/Translate.lean` lowers
+Lean `Expr`s to `Crush.SMT.Term` directly, and no pass constructs or consumes a `CTerm`.
+It is kept as the shape a pure intermediate logic would take — monomorphic, simply-typed
+λ-calculus, i.e. higher-order logic without polymorphism — for a future routing of the
+pipeline through such an IR. Treat the design notes below as intent, not as a description
+of running code.
 
 Two representation choices worth calling out:
 
-* The argument sort is stored on every application node (`app`), so type inference
-  (`check?`) is a single unification-free bottom-up pass.
+* The argument sort is stored on every application node (`app`), so type inference is a
+  single unification-free bottom-up pass.
 * Symbols are split into `atom` (ordinary) and `etom` (existential/Skolem,
   introduced by an encoding pass), so a later pass can tell which symbols it is
   free to reinterpret.
 
-Well-formedness is a plain `Option`-returning `check?` rather than an inductive
+Well-formedness would be a plain `Option`-returning check rather than an inductive
 family indexed by a typing derivation. The latter is what you need to *state and
-prove* a verified checker's soundness theorem; since the SMT path trusts the
-solver's verdict instead of replaying it through a checker, that machinery would
+prove* a verified checker's soundness theorem; since the SMT path either trusts the
+solver's verdict or replays it into a kernel-checked Lean proof, that machinery would
 be dead weight here.
 -/
 

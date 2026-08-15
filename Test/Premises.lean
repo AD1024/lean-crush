@@ -37,21 +37,21 @@ theorem uses_selected_library_lemma (x : Int) : SelectedP x := by
 -- bound disables selection even when the feature itself is enabled.
 set_option crush.premises true in
 set_option crush.premises.max 0 in
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem zero_bound_selects_nothing (x : Int) : SelectedP x := by
   crush
 
 -- Selection is opt-in, so existing bare `crush` behavior does not silently grow
 -- every query.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem selection_disabled_by_default (x : Int) : SelectedP x := by
   crush
 
 -- An explicit list remains a strict restriction even when the global option is on.
 set_option crush.premises true in
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem explicit_list_disables_selection (x : Int) : SelectedP x := by
   crush []

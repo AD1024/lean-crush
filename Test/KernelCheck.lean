@@ -1,0 +1,128 @@
+import Crush.Solver.Reconstruct
+
+open Lean Meta Elab Tactic
+open Crush
+
+private def expectKernelRejection (action : MetaM Unit) : MetaM Unit := do
+  let accepted ←
+    try
+      action
+      pure true
+    catch _ =>
+      pure false
+  if accepted then
+    throwError "kernel validation unexpectedly accepted the proof"
+
+private def malformedDecideProof : MetaM (Expr × Expr) := do
+  let one := mkIntLit 1
+  let proposition ← mkEq one one
+  let expected ← mkEq proposition (mkConst ``False)
+  let decision ← mkDecide proposition
+  let proof := mkApp3 (mkConst ``eq_false_of_decide) proposition decision.appArg!
+    eagerReflBoolFalse
+  return (expected, proof)
+
+run_meta do
+  let snapshot ← KernelCheckSnapshot.capture
+  discard <| kernelCheckProof snapshot (mkConst ``True) (mkConst ``True.intro)
+  let expected ← mkFreshExprMVar (mkSort Level.zero)
+  expected.mvarId!.assign (mkConst ``True)
+  discard <| kernelCheckProof snapshot expected (mkConst ``True.intro)
+  expectKernelRejection do
+    discard <| kernelCheckProof snapshot (mkConst ``False) (mkConst ``True.intro)
+  let (expected, malformed) ← malformedDecideProof
+  expectKernelRejection do
+    discard <| kernelCheckProof snapshot expected malformed
+
+run_meta do
+  let saved ← Lean.Meta.saveState
+  try
+    let snapshot ← KernelCheckSnapshot.capture
+    let first ← mkAuxTheorem (mkConst ``True) (mkConst ``True.intro)
+      (kind? := some `crushKernelCheck) (cache := false)
+    let second ← mkAuxTheorem (mkConst ``True) first
+      (kind? := some `crushKernelCheck) (cache := false)
+    discard <| kernelCheckProof snapshot (mkConst ``True) second
+  finally
+    saved.restore
+
+elab "close_with_generated_axiom" : tactic => do
+  let goal ← getMainGoal
+  goal.withContext do
+    let type ← instantiateMVars (← goal.getType)
+    let name ← mkAuxDeclName `crushKernelCheckBad
+    addDecl <| .axiomDecl {
+      name
+      levelParams := []
+      type
+      isUnsafe := false
+    }
+    goal.assign (mkConst name)
+    replaceMainGoal []
+
+elab "close_with_malformed_decide" : tactic => do
+  let goal ← getMainGoal
+  let (_, proof) ← malformedDecideProof
+  goal.assign proof
+  replaceMainGoal []
+
+elab "close_with_generated_malformed_decide" : tactic => do
+  let goal ← getMainGoal
+  let (expected, malformed) ← malformedDecideProof
+  let proof ← mkAuxTheorem expected malformed
+    (kind? := some `crushKernelCheckBad) (cache := false)
+  goal.assign proof
+  replaceMainGoal []
+
+run_meta do
+  let (expected, _) ← malformedDecideProof
+  let goal ← mkFreshExprMVar expected
+  let accepted ← IO.mkRef true
+  discard <| Lean.Elab.Term.TermElabM.run' <| Lean.Elab.Tactic.run goal.mvarId! do
+    accepted.set (← tryReconstruct goal.mvarId! #[] #[
+      (← `(tactic| close_with_malformed_decide))])
+  if ← accepted.get then
+    throwError "reconstruction accepted the malformed `decide` proof"
+  if ← goal.mvarId!.isAssigned then
+    throwError "declined reconstruction left the original goal assigned"
+
+run_meta do
+  let (expected, _) ← malformedDecideProof
+  let goal ← mkFreshExprMVar expected
+  let accepted ← IO.mkRef true
+  discard <| Lean.Elab.Term.TermElabM.run' <| Lean.Elab.Tactic.run goal.mvarId! do
+    accepted.set (← tryReconstruct goal.mvarId! #[] #[
+      (← `(tactic| close_with_generated_malformed_decide))])
+  if ← accepted.get then
+    throwError "reconstruction accepted a malformed generated declaration"
+  if ← goal.mvarId!.isAssigned then
+    throwError "declined reconstruction left the original goal assigned"
+
+run_meta do
+  let goal ← mkFreshExprMVar (mkConst ``False)
+  let accepted ← IO.mkRef true
+  discard <| Lean.Elab.Term.TermElabM.run' <| Lean.Elab.Tactic.run goal.mvarId! do
+    accepted.set (← tryReconstruct goal.mvarId! #[] #[
+      (← `(tactic| close_with_generated_axiom))])
+  if ← accepted.get then
+    throwError "reconstruction accepted a proof backed by a generated axiom"
+  if ← goal.mvarId!.isAssigned then
+    throwError "declined reconstruction left the original goal assigned"
+
+run_meta do
+  let saved ← Lean.Meta.saveState
+  try
+    let snapshot ← KernelCheckSnapshot.capture
+    let axiomName ← mkAuxDeclName `crushKernelCheckBad
+    addDecl <| .axiomDecl {
+      name := axiomName
+      levelParams := []
+      type := mkConst ``False
+      isUnsafe := false
+    }
+    let wrapper ← mkAuxTheorem (mkConst ``False) (mkConst axiomName)
+      (kind? := some `crushKernelCheck) (cache := false)
+    expectKernelRejection do
+      discard <| kernelCheckProof snapshot (mkConst ``False) wrapper
+  finally
+    saved.restore

@@ -324,7 +324,7 @@ example (v w : Int) (ks ls : List Rose) (h : Rose.node v ks = Rose.node w ls) :
     v = w ∧ ks = ls := by crush
 
 -- Nested `List.nil ≠ List.cons` discrimination is still hidden behind opacity.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 example (v : Int) (k : Rose) : Rose.node v [] ≠ Rose.node v [k] := by crush
 

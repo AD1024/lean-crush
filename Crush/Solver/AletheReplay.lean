@@ -1,5 +1,6 @@
 import Crush.Solver.Alethe
 import Crush.Solver.AletheTerm
+import Crush.Solver.KernelCheck
 import Crush.Translation.Monad
 open Lean Meta Elab Tactic
 
@@ -81,9 +82,10 @@ private def ruleHint? (rule : String) : CoreM (Option (TSyntax `tactic)) := do
 
 /-- Prove `target` from the proofs in `premises`, trying the rule's hinted tactic first.
 
-Builds the closed implication `p₁ → … → pₙ → target`, proves *that*, then applies it to the
-premise proofs — the same technique as `tryReconstruct`, so a tactic cannot reach for
-ambient context the step does not license. -/
+Builds the implication `p₁ → … → pₙ → target`, abstracts exactly its free variables,
+proves the resulting closed proposition in an empty context, then applies it to those
+variables and the premise proofs. Thus a step tactic cannot inspect any ambient declaration
+that is absent from the step itself. -/
 private def proveStep (target : Expr) (premises : Array Expr) (rule : String) :
     TacticM (Option Expr) := do
   -- Rules whose conclusion does not follow from their premises alone: the justification is
@@ -95,23 +97,22 @@ private def proveStep (target : Expr) (premises : Array Expr) (rule : String) :
     return none
   let hypTypes ← premises.mapM fun p => do instantiateMVars (← inferType p)
   let impl := hypTypes.foldr (fun ty acc => mkForall `h .default ty acc) target
+  let used := Lean.collectFVars {} impl
+  let (_, _, params) ← Meta.removeUnused (← getLCtx).getFVars used
+  let closedImpl ← instantiateMVars (← mkForallFVars params impl)
   let hint ← ruleHint? rule
   let tactics := (match hint with | some t => #[t] | none => #[]) ++ (← stepTactics)
   for tac in tactics do
     let saved ← saveState
+    let snapshot ← KernelCheckSnapshot.capture
     try
-      let mv ← mkFreshExprMVar impl
+      let mv ← withLCtx {} {} do mkFreshExprMVar closedImpl
       let gs ← Tactic.run mv.mvarId! (evalTactic (← `(tactic| (intros; $tac))))
       if gs.isEmpty then
         let assigned ← instantiateMVars mv
-        unless assigned.hasSorry || assigned.hasMVar do
-          -- Check the step's term here, before it enters the final proof. A tactic can
-          -- produce a term the elaborator accepts but the kernel rejects (`decide` on `Int`
-          -- literals emits an `eagerReduce` the kernel will not replay), which would poison
-          -- the assembled proof and surface as an opaque "(kernel) application type
-          -- mismatch" at the very end. Per-step checking makes it a clean decline instead.
-          check assigned
-          return some (mkAppN assigned premises)
+        let proof := mkAppN (mkAppN assigned params) premises
+        let proof ← kernelCheckProof snapshot target proof
+        return some proof
       restoreState saved
     catch _ =>
       restoreState saved

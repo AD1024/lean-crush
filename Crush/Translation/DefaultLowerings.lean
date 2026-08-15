@@ -232,8 +232,10 @@ has replaced Crush's finite Array representation.
 private def optionTerms (elem : Expr) (value : SMT.Term) :
     TranslateM (SMT.Term × SMT.Term) := do
   let optionSort ← declareDatatype ``Option #[elem]
-  let noneTerm := SMT.Term.const (ctorSymbol optionSort ``Option.none)
-  let someTerm := SMT.Term.app (.symb (ctorSymbol optionSort ``Option.some)) #[value]
+  let noneCtor ← TranslateM.reserveDerived (ctorSymbol optionSort ``Option.none)
+  let someCtor ← TranslateM.reserveDerived (ctorSymbol optionSort ``Option.some)
+  let noneTerm := SMT.Term.const noneCtor
+  let someTerm := SMT.Term.app (.symb someCtor) #[value]
   return (noneTerm, someTerm)
 
 private def guardedArrayStore (ctx : TranslationCtx)
@@ -287,7 +289,7 @@ def arrayGetElem : LoweringHandler := fun ctx => do
   let #[coll, idxTy, elem, _, _, arr, idx, _] := ctx.args | return none
   let some arrayElem ← finiteArrayElem? coll | return none
   unless (← whnf idxTy).isConstOf ``Nat do return none
-  unless ← isDefEq elem arrayElem do return none
+  unless ← isDefEqGuarded elem arrayElem do return none
   unless ctx.hasInstanceHead 4 ``Array.instGetElemNatLtSize do return none
   let sidx ← ctx.emitTerm idx
   withFiniteArray ctx arrayElem arr fun view =>
@@ -298,7 +300,7 @@ def arrayGetElemBang : LoweringHandler := fun ctx => do
   let #[coll, idxTy, elem, _, _, inhabited, arr, idx] := ctx.args | return none
   let some arrayElem ← finiteArrayElem? coll | return none
   unless (← whnf idxTy).isConstOf ``Nat do return none
-  unless ← isDefEq elem arrayElem do return none
+  unless ← isDefEqGuarded elem arrayElem do return none
   unless ctx.hasInstanceHead 4 ``Array.instGetElem?NatLtSize do return none
   let sidx ← ctx.emitTerm idx
   let defaultFn := mkConst ``default [← getLevel elem]
@@ -312,7 +314,7 @@ def arrayGetElemOpt : LoweringHandler := fun ctx => do
   let #[coll, idxTy, elem, _, _, arr, idx] := ctx.args | return none
   let some arrayElem ← finiteArrayElem? coll | return none
   unless (← whnf idxTy).isConstOf ``Nat do return none
-  unless ← isDefEq elem arrayElem do return none
+  unless ← isDefEqGuarded elem arrayElem do return none
   unless ctx.hasInstanceHead 4 ``Array.instGetElem?NatLtSize do return none
   let sidx ← ctx.emitTerm idx
   withFiniteArray ctx arrayElem arr fun view => do

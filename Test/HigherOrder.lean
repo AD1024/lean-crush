@@ -79,6 +79,15 @@ it and `unsat` with it — verified directly against z3. -/
 
 theorem ho_funext (f g : Int → Int) (h : ∀ x, f x = g x) : f = g := by crush
 
+-- The `Nat` shape needs the well-formedness guards on the arrow encoding: the axiom's
+-- pointwise binders range over `Int`, where two `Nat` functions need not agree, and the
+-- hypothesis only constrains them at nonnegative arguments.
+theorem ho_funext_nat (f g : Nat → Nat) (h : ∀ n, f n = g n) : f = g := by crush
+
+-- `app` on a `Nat`-codomain arrow must land in the codomain: without a result guard the
+-- solver can satisfy `f 0 < 0` with a negative `Int`.
+theorem ho_nat_codomain_nonneg : ¬ ∃ f : Nat → Nat, f 0 < 0 := by crush
+
 /-! ## Higher-order functions of several arguments -/
 
 theorem ho_two_args (c : (Int → Int) → Int → Int) (h : ∀ f x, c f x = f x) :
@@ -168,35 +177,35 @@ Every goal here is **false in Lean**. `must_reject_ho_constant` is the original
 unsoundness: `crush` closed it, yet `g (fun x => x) ≠ g (fun x => x + 1)` is
 provable from `h` (the two sides reduce to `0` and `1`). -/
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_ho_constant (g : (Int → Int) → Int)
     (h : ∀ (f : Int → Int), g f = f 0) :
     g (fun x => x) = g (fun x => x + 1) := by crush
 
 -- Distinct closures must not be conflated even with no hypothesis to relate them.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_closure_conflate (g : (Int → Int) → Int) :
     g (fun x => x) = g (fun x => x + 1) := by crush
 
 -- Extensionality must not be strong enough to equate arbitrary functions.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_funext_free (f g : Int → Int) : f = g := by crush
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_lambda_eq : (fun x : Int => x) = (fun x : Int => x + 1) := by crush
 
 -- Knowing `g` at one closure says nothing about another.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_partial_info (g : (Int → Int) → Int) (h : g (fun x => x) = 0) :
     g (fun x => x + 1) = 0 := by crush
 
 -- Different captured values give different results.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_capture_conflate (g : (Int → Int) → Int)
     (h : ∀ (f : Int → Int), g f = f 0) (n m : Int) :

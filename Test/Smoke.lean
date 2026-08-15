@@ -47,10 +47,15 @@ def demoScript : Array Command := #[
   | _ => throw <| IO.userError "quoted SMT symbol expression did not parse"
   unless (parseSexps "(ok) (").isEmpty do
     throw <| IO.userError "truncated S-expression input was accepted partially"
-  let (first, rest) := Solver.splitFirstSexp "warning (|a ) b| x) (proof)"
-  unless first.trimAscii.toString == "(|a ) b| x)" &&
-      rest.trimAscii.toString == "(proof)" do
+  -- A leading status atom is skipped, the first list is the core, the rest is the proof.
+  let (core, proof) :=
+    Solver.splitCoreAndProof true true (parseSexps "warning (|a ) b| x) (proof)")
+  unless core == some (.list #[.atom "a ) b", .atom "x"]) &&
+      proof == #[Sexp.list #[.atom "proof"]] do
     throw <| IO.userError "solver response split drifted from the S-expression parser"
+  -- A truncated tail keeps the complete S-expressions before it.
+  unless parseSexpPrefix "(core) (step" == #[Sexp.list #[.atom "core"]] do
+    throw <| IO.userError "truncated solver output discarded its usable prefix"
 
 -- Extension mechanism: register term and sort handlers and confirm both are found.
 
@@ -87,6 +92,16 @@ crush_map_sort Nat => "Int"
     return (first, base, second)
   unless first != base && first != second && base != second do
     throwError "fresh SMT symbol allocation returned a reserved name"
+
+-- Derived names remain stable while avoiding names allocated earlier.
+#eval show Lean.MetaM Unit from do
+  let ((occupied, derived, repeated), _) ← TranslateM.run {} do
+    let occupied ← TranslateM.freshSymbol "Array_mk"
+    let derived ← TranslateM.reserveDerived "Array_mk"
+    let repeated ← TranslateM.reserveDerived "Array_mk"
+    return (occupied, derived, repeated)
+  unless occupied != derived && derived == repeated do
+    throwError "derived SMT symbol allocation was colliding or unstable"
 
 -- Structural symbol keys distinguish universe levels even when pretty-printing
 -- would render both constants identically with `pp.universes` disabled.

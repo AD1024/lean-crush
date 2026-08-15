@@ -87,8 +87,9 @@ The solver can return three kinds of result:
 
 * `unsat` means the hypotheses together with the negated goal are inconsistent,
   so the goal follows.
-* `sat` means the solver found a model. lean-crush reports that model as a
-  counterexample and leaves the goal open.
+* `sat` means the solver found a model of the encoded facts. lean-crush reports
+  that model and leaves the goal open. Because the encoding is incomplete in
+  places, a model does not necessarily describe a Lean counterexample.
 * `unknown`, including a timeout, leaves the goal open and reports the solver's
   reason.
 

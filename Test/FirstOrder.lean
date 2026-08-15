@@ -35,6 +35,6 @@ example (x : Int) : x + 1 > x := by crush
 
 -- Negative test: a *false* goal must be rejected (the solver finds a countermodel),
 -- not silently closed.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_false_arith (x : Int) : x + 1 = x := by crush

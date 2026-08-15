@@ -104,11 +104,13 @@ parser as the character `a`.
 escape keeps lengths in agreement. `checkScript` rejects codepoints above SMT-LIB
 2.6's five-hex-digit escape range before this printer is called by `crush`. -/
 def escapeSmtString (s : String) : String :=
+  -- Appends into one accumulator with `push`/`append` rather than rebuilding it per
+  -- character, so escaping stays linear in the literal's length.
   s.foldl (init := "") fun acc c =>
-    if c == '"' then acc ++ "\"\""
-    else if c == '\\' then acc ++ "\\u{5c}"
+    if c == '"' then acc.append "\"\""
+    else if c == '\\' then acc.append "\\u{5c}"
     else if c.toNat ≥ 0x20 && c.toNat ≤ 0x7E then acc.push c
-    else acc ++ s!"\\u\{{String.ofList (Nat.toDigits 16 c.toNat)}}"
+    else (acc.append "\\u{").append (String.ofList (Nat.toDigits 16 c.toNat)) |>.push '}'
 
 def literalToString : Literal → String
   | .str s      => "\"" ++ escapeSmtString s ++ "\""

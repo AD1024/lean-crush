@@ -8,6 +8,7 @@ import Crush.Translation.Translate
 import Crush.Translation.DefaultLowerings
 import Crush.Util.Profile
 import Crush.Solver.Process
+import Crush.Solver.KernelCheck
 import Crush.Solver.Reconstruct
 import Crush.Solver.AletheReplay
 import Crush.SMT.Check
@@ -62,7 +63,11 @@ initialize registerTraceClass `crush.inst
 open SMT
 
 /-- Resolve the SMT-LIB logic string: explicit `crush.logic`, else a permissive
-default (`ALL`, or `HO_ALL` when higher-order support must be switched on). -/
+default (`ALL`, or `HO_ALL` when higher-order support must be switched on) passed
+through the backend's own mapping.
+
+`BackendSpec.logic` rewrites the default only; an explicit `crush.logic` is
+authoritative. -/
 def resolveLogic (cfg : Config) : String :=
   match cfg.logic with
   | some l => l
@@ -72,10 +77,14 @@ def resolveLogic (cfg : Config) : String :=
     -- Only cvc5 understands the prefix — z3 warns "ignoring unsupported logic" and
     -- carries on, then fails on the function sorts — so we emit it solely when it
     -- will actually be honoured.
-    if cfg.hoMode == .native && (cfg.backend == .cvc5 || cfg.backend == .none) then
-      "HO_ALL"
-    else
-      "ALL"
+    let dflt :=
+      if cfg.hoMode == .native && (cfg.backend == .cvc5 || cfg.backend == .none) then
+        "HO_ALL"
+      else
+        "ALL"
+    match Solver.backendSpec cfg.backend with
+    | some spec => spec.logic dflt
+    | none => dflt
 
 /-- Translate all facts into assertion commands, each `:named` for unsat-core
 provenance, prepended by the declarations they induce. Returns the full script
@@ -118,17 +127,49 @@ def buildScript (cfg : Config) (facts : Array Fact) :
     throwError "crush: internal SMT sort error while translating {source}: \
       {err.message}\nSMT command: {command}"
 
-/-- Render a `sat` model into a short counterexample message. -/
-def formatCounterexample (modelText : String) (st : TranslateState) : MessageData := Id.run do
-  let entries := parseModel modelText
+/-- Structural tags of symbols that exist only in the higher-order encoding. -/
+private def encodingTags : Array String := #["arrow-sort", "arrow-app", "closure"]
+
+/-- Whether the model assigns a value that only the encoding can hold: a symbol from
+the higher-order encoding, or a negative integer standing where a `Nat` belongs. -/
+private def mentionsEncodedSort (st : TranslateState) (entries : Array ModelEntry) :
+    MetaM Bool := do
+  for entry in entries do
+    if let some tag := st.nameToAtom.get? entry.name then
+      if encodingTags.contains tag then return true
+    let some origin := st.nameToExpr.get? entry.name | continue
+    let isNat ←
+      try
+        let type ← whnf (← inferType origin)
+        pure (type.isConstOf ``Nat)
+      catch _ =>
+        pure false
+    if isNat && entry.value.contains "(- " then return true
+  return false
+
+/-- Render a `sat` model into a short message.
+
+Labels come from `nameToExpr`, the Lean head a symbol was allocated for; `nameToAtom`
+holds only a structural key's tag, which several distinct symbols share. Entries named
+`crush_fact_<n>` are the solver echoing our own named assertions and are dropped. -/
+def formatCounterexample (modelText : String) (st : TranslateState) :
+    MetaM MessageData := do
+  let entries := (parseModel modelText).filter fun e => !e.name.startsWith factNamePrefix
   if entries.isEmpty then
-    return m!"solver found a model (no assignments reported)"
+    return m!"model (no assignments to report)"
   let mut lines : Array MessageData := #[]
   for e in entries do
-    -- Map the SMT symbol back to its Lean origin when known.
-    let origin := (st.nameToAtom.get? e.name).getD e.name
-    lines := lines.push m!"  {origin} := {e.value}"
-  return m!"counterexample:{indentD (MessageData.joinSep lines.toList "\n")}"
+    let label :=
+      match st.nameToExpr.get? e.name with
+      | some origin => m!"{origin}"
+      | none => m!"{(st.nameToAtom.get? e.name).getD e.name}"
+    lines := lines.push m!"  {label} := {e.value}"
+  let body := m!"model:{indentD (MessageData.joinSep lines.toList "\n")}"
+  if ← mentionsEncodedSort st entries then
+    return body ++ m!"\nSome values above are in encoding sorts (`Nat` as `Int`, \
+                      functions as an uninterpreted sort), where a model need not \
+                      describe any Lean value."
+  return body
 
 /-- Try to close `goal` by replaying the solver's proof certificate
 (`Crush/Solver/AletheReplay.lean`).
@@ -140,50 +181,48 @@ Lean proof of its own), and replay produces the `False`.
 
 Returns `false`, leaving `goal` untouched, whenever anything is missing or a step cannot be
 replayed — so the caller falls back to the finisher ladder. -/
-def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState) (proofText : String) :
-    TacticM Bool := do
+def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
+    (proofSexps : Array SMT.Sexp) : TacticM Bool := do
   if cfg.reconstruct == .core then return false
-  if proofText.trimAscii.isEmpty then return false
-  let some proof := Alethe.parseProof proofText | return false
+  if proofSexps.isEmpty then return false
+  let some proof := Alethe.parseProofSexps proofSexps | return false
   goal.withContext do
-    -- `byContradiction` gives us `¬G` as a hypothesis and `False` as the goal.
-    let goalType ← goal.getType
-    let negGoal ← mkAppM ``Not #[goalType]
-    let mv ← mkFreshExprMVar (← mkArrow negGoal (mkConst ``False))
-    let (fvarId, inner) ← mv.mvarId!.intro `hneg
-    let res ← inner.withContext do
-      -- Map each `crush_fact_<n>` assumption to a Lean proof: a real hypothesis for an
-      -- asserted fact, and the freshly-introduced `¬G` for the negated goal.
-      let mut facts : Std.HashMap String Expr := {}
-      for src in st.facts do
-        let name := s!"{factNamePrefix}{src.id}"
-        match src.proof with
-        | some p => facts := facts.insert name p
-        | none =>
-          let hneg := mkFVar fvarId
-          let proof := src.negationTransform.map (fun transform => mkApp transform hneg)
-            |>.getD hneg
-          facts := facts.insert name proof
-      Alethe.replay? proof (SMT.parseSexps proofText) facts st.nameToExpr
-    match res with
-    | none => return false
-    | some falseProof =>
-      -- Assemble `byContradiction (fun hneg => falseProof)` and hand it to the kernel.
-      inner.assign falseProof
-      let lam ← instantiateMVars mv
-      if lam.hasSorry || lam.hasMVar then return false
-      try
+    let saved ← saveState
+    let snapshot ← KernelCheckSnapshot.capture
+    try
+      -- `byContradiction` gives us `¬G` as a hypothesis and `False` as the goal.
+      let goalType ← instantiateMVars (← goal.getType)
+      let negGoal ← mkAppM ``Not #[goalType]
+      let res ← withLocalDeclD `hneg negGoal fun hneg => do
+        -- Map each `crush_fact_<n>` assumption to a Lean proof: a real hypothesis for an
+        -- asserted fact, and the freshly-introduced `¬G` for the negated goal.
+        let mut facts : Std.HashMap String Expr := {}
+        for src in st.facts do
+          let name := s!"{factNamePrefix}{src.id}"
+          match src.proof with
+          | some p =>
+            facts := facts.insert name p
+          | none =>
+            let proof := src.negationTransform.map (fun transform => mkApp transform hneg)
+              |>.getD hneg
+            facts := facts.insert name proof
+        let some falseProof ← Alethe.replay? proof proofSexps facts st.nameToExpr
+          | return none
+        return some (← mkLambdaFVars #[hneg] falseProof)
+      match res with
+      | none =>
+        restoreState saved
+        return false
+      | some lam =>
+        -- Assemble `byContradiction (fun hneg => falseProof)` and hand it to the kernel.
         let pf ← mkAppOptM ``Classical.byContradiction #[some goalType, some lam]
-        let ty ← inferType pf
-        unless ← isDefEq ty goalType do return false
-        -- Check before assigning: `inferType` above uses the elaborator's checker, which is
-        -- more permissive than the kernel, so a term accepted there can still be rejected at
-        -- the end with an opaque "(kernel) application type mismatch" — after the tactic
-        -- reported success, with no fallback. Checking here makes it a clean decline.
-        check pf
-        goal.assign pf
+        goal.assign (← kernelCheckProof snapshot goalType pf)
         return true
-      catch _ => return false
+    catch e =>
+      trace[crush.result] "alethe replay: declined during final kernel validation \
+                           ({e.toMessageData})"
+      restoreState saved
+      return false
 
 /-- Close a goal that is already one of the selected facts.
 
@@ -193,18 +232,19 @@ translation because quantified nonlinear assumptions can otherwise make an ident
 expensive for SMT despite the Lean proof being a single local constant. -/
 private def closeFromSelectedFacts (goal : MVarId) (facts : Array Fact) : TacticM Bool :=
   goal.withContext do
+    let snapshot ← KernelCheckSnapshot.capture
     let target ← instantiateMVars (← goal.getType)
     for fact in facts do
       let some proof := fact.proof | continue
+      let saved ← saveState
       try
         let proof ← instantiateMVars proof
         if ← isDefEqGuarded (← inferType proof) target then
           let proof ← instantiateMVars proof
-          unless proof.hasSorry || proof.hasMVar do
-            check proof
-            goal.assign proof
-            return true
-      catch _ => pure ()
+          goal.assign (← kernelCheckProof snapshot target proof)
+          return true
+        restoreState saved
+      catch _ => restoreState saved
     return false
 
 /-- The core driver, given a resolved goal, config, and collected hints. -/
@@ -316,6 +356,8 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
     logInfo m!"crush: backend is `none`; emitted {script.size} commands, no solver run."
     if cfg.profile then logInfo prof.report
     return
+  -- Saved before the run, so a query that throws still leaves its script on disk.
+  Solver.maybeSave cfg script
   let (firstResult, prof') ← prof.time "solve" (Solver.runQuery cfg script)
   prof := prof'
   let mut result := firstResult
@@ -334,14 +376,14 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
       if cfg.traceScript then
         logInfo m!"crush SMT fallback script:{indentD (scriptToString script)}"
       trace[crush.script] "{scriptToString script}"
+      Solver.maybeSave cfg script
       let (fallbackResult, prof') ←
         prof.time "solve-fallback" (Solver.runQuery cfg script)
       prof := prof'
       result := fallbackResult
-  Solver.maybeSave cfg script
   match result with
-  | .unsat coreText proofText =>
-    let coreIds := parseUnsatCore coreText
+  | .unsat coreSexp proofSexps =>
+    let coreIds := unsatCoreFactIds coreSexp
     trace[crush.result] "unsat; core facts: {coreIds}"
     match cfg.trust with
     | .trust =>
@@ -358,7 +400,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
       -- goals the single-shot ladder cannot (long chains of trivial steps — Boolean
       -- pigeonhole, deep EUF conflicts) because the chain is already found. A step it
       -- cannot replay falls through to the ladder below.
-      let (replayed, prof') ← prof.time "replay" (tryProofReplay goal cfg st proofText)
+      let (replayed, prof') ← prof.time "replay" (tryProofReplay goal cfg st proofSexps)
       prof := prof'
       if replayed then
         trace[crush.result] "proof replay succeeded; no axiom used"
@@ -391,7 +433,12 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
                       ({coreDescriptions st coreIds}). Set `crush.trust` to \
                       \"reconstructOrTrust\" to accept the solver's verdict anyway."
   | .sat modelText =>
-    throwError m!"crush: the goal is not provable — solver found a {formatCounterexample modelText st}"
+    -- The verdict is about the encoding, which is incomplete in places, so the message
+    -- reports a model rather than claiming the Lean goal is false.
+    throwError m!"crush: could not prove the goal — the solver found a \
+                  {← formatCounterexample modelText st}\n\
+                  The encoding is incomplete, so a model does not necessarily \
+                  describe a Lean counterexample."
   | .unknown reason =>
     let reason := if reason.isEmpty then "no reason given" else reason
     throwError m!"crush: solver returned `unknown` ({reason}). \

@@ -137,16 +137,18 @@ def parseCommand (s : Sexp) : Option Command :=
     | _ => none
   | _ => none
 
-/-- Parse a full Alethe proof from cvc5's `--dump-proofs` output.
+/-- Structure an Alethe proof out of already-parsed solver output.
 
 The output begins with the `unsat` status line and then a single parenthesized list
-of commands: `unsat\n( (assume …) (step …) … )`. We parse every S-expression and keep
-the commands from the largest list found (the proof body), tolerating the leading
-`unsat` atom. Returns `none` if no command list is present (e.g. cvc5 emitted an
-`(error …)` because the proof is unsupported by Alethe — as it does for
-datatype-exhaustiveness goals). -/
-def parseProof (text : String) : Option AletheProof := Id.run do
-  let tops := parseSexps text
+of commands: `unsat\n( (assume …) (step …) … )`. We keep the commands from the first
+list that parses as commands (the proof body), tolerating the leading `unsat` atom.
+Returns `none` if no command list is present (e.g. cvc5 emitted an `(error …)`
+because the proof is unsupported by Alethe — as it does for
+datatype-exhaustiveness goals).
+
+Takes parsed S-expressions, which the caller shares with the `:named` term table
+replay builds from the same certificate. -/
+def parseProofSexps (tops : Array Sexp) : Option AletheProof := Id.run do
   -- cvc5 emits the proof as one big list of commands. An `(error …)` list means no
   -- proof; detect it so the caller can fall back rather than mis-parse.
   for top in tops do
@@ -161,6 +163,10 @@ def parseProof (text : String) : Option AletheProof := Id.run do
       if cmds.size > 0 then
         return some { commands := cmds }
   return none
+
+/-- Parse a full Alethe proof from cvc5's `--dump-proofs` output text. -/
+def parseProof (text : String) : Option AletheProof :=
+  parseProofSexps (parseSexps text)
 
 /-- The `step` deriving the empty clause `(cl)`, if present — the proof's conclusion.
 Its existence is a cheap structural sanity check that a proof actually refutes. -/

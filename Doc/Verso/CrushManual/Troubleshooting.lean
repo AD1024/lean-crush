@@ -10,9 +10,11 @@ set_option pp.rawOnError true
 tag := "troubleshooting"
 %%%
 
-# The Goal Is Reported Unprovable
+# The Goal Is Not Proved
 
-A `sat` result means the emitted facts admit a counterexample.
+A `sat` result means the emitted facts admit a model. The model satisfies the
+encoding, which is weaker than the Lean statement wherever an operation stayed
+uninterpreted, so it need not be a Lean counterexample.
 Check these causes in order:
 
 1. A required premise is missing.

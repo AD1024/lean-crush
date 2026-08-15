@@ -207,19 +207,19 @@ theorem rev_three {α : Type} (x : List α) : M.rev (M.rev (M.rev x)) = M.rev x 
 
 Instantiation weakens, so these must all still be rejected. -/
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_distinct (h : ∀ (α : Type) (x : α), x = x) (a b : Int) :
     a = b := by crush [h]
 
 -- A fact about `Int` must not transfer to `Bool`.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_cross_type (f : ∀ (α : Type), α → Nat)
     (h : ∀ (x : Int), f Int x = 0) (b : Bool) : f Bool b = 0 := by crush [h]
 
 -- An instance must not become *stronger* than the polymorphic fact it came from.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_stronger (g : ∀ (α : Type), List α → Nat)
     (h : ∀ (α : Type) (l : List α), g α l = 0) (l : List Int) : g Int l = 1 := by

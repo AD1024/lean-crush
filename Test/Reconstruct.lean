@@ -242,7 +242,7 @@ def nilRequires (p : Prop) : List Nat → Prop
   | _ :: _ => False
 
 set_option crush.trust "trust" in
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem pre_smt_witness_respects_restriction (p : Prop) (hp : p) :
     ∃ values : List Nat, nilRequires p values := by

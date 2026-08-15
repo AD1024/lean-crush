@@ -11,6 +11,6 @@ structure RefinedValue where
 
 opaque accepts : Array RefinedValue → Prop
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 example : accepts #[] := by crush

@@ -152,7 +152,7 @@ model where the sides differ and declines (sound — lean-auto flags this too); 
 supplies the equation and it closes (the analogue of lean-auto's `d[Option.orElse]`). -/
 
 -- Bare: sound refusal, pinned so a (only-possible-unsoundly) regression fails the build.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 example {α : Type} (x : Option α) :
     Option.orElse x (fun _ => Option.none) = x := by crush

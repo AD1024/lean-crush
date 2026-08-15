@@ -38,13 +38,14 @@ example (g : Int → Int) (x : Int) (h : ∀ z, g z = z + 1) : g (g x) = x + 2 :
 example (g : (Int → Int) → Int) (h : ∀ k, g k = k 1) : g (fun x => x + 1) = 2 := by crush
 ```
 
-When a goal is false, you get a counterexample instead of a failure:
+When the solver satisfies the encoded facts, you get the model instead of a failure:
 
 ```lean
 example (x : Int) : x + 1 = x := by crush
--- crush: the goal is not provable — solver found a counterexample:
---   crush_fact_0 := (not (= (+ x_0 1) x_0))
+-- crush: could not prove the goal — the solver found a model:
 --   x := 0
+-- The encoding is incomplete, so a model does not necessarily describe a Lean
+-- counterexample.
 ```
 
 ## Install

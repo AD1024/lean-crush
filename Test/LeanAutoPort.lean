@@ -135,6 +135,6 @@ sorts are nonempty. -/
 set_option crush.trust "reconstruct" in
 theorem empty_values_equal (x y : Empty) : x = y := by crush
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 example (_ : ¬ (∀ x y : Empty, False)) : False := by crush

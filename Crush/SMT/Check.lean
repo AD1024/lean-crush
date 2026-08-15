@@ -29,8 +29,14 @@ private structure FunSig where
   args : Array SSort
   res  : SSort
 
+private structure SortAlias where
+  arity : Nat
+  body  : SSort
+
 private structure CheckEnv where
   funs : Std.HashMap String FunSig := {}
+  /-- `define-sort` aliases, expanded before sorts are compared. -/
+  sorts : Std.HashMap String SortAlias := {}
 
 /-- A malformed command found by `checkScript`. -/
 structure SortError where
@@ -40,6 +46,33 @@ structure SortError where
 
 instance : ToString SortError where
   toString e := s!"command {e.commandIndex}: {e.message}"
+
+/-- Expand `define-sort` aliases so a sort and its expansion compare equal.
+
+`fuel` bounds the walk; a script that defines a cyclic alias stops rather than looping. -/
+private partial def expandSort (env : CheckEnv) (fuel : Nat) : SSort → SSort
+  | .app id args =>
+    let args := args.map (expandSort env fuel)
+    match fuel, id with
+    | fuel + 1, .symb name =>
+      match env.sorts.get? name with
+      | some alias =>
+        if args.size == alias.arity then
+          expandSort env fuel (instantiateSort alias.body args)
+        else
+          .app id args
+      | none => .app id args
+    | _, _ => .app id args
+  | s => s
+where
+  instantiateSort (body : SSort) (args : Array SSort) : SSort :=
+    match body with
+    | .bvar i => args[i]?.getD body
+    | .app id nested => .app id (nested.map (instantiateSort · args))
+
+/-- Alias-expanding entry point for the fixed alias depth the checker allows. -/
+private def resolveSort (env : CheckEnv) (s : SSort) : SSort :=
+  expandSort env 32 s
 
 private def arrowSig? : SSort → Option FunSig
   | .app (.symb "->") parts =>
@@ -132,16 +165,19 @@ private partial def inferTerm (env : CheckEnv) (locals : List (String × SSort))
         bindingSorts := bindingSorts.push (name, sort)
     inferTerm env (bindingSorts.toList.reverse ++ locals) bvars body
   | .forallE binders body =>
+    let binders := binders.map fun (n, s) => (n, resolveSort env s)
     let bodySort ← inferTerm env (binders.toList.reverse ++ locals)
       (binders.toList.reverse.map (·.2) ++ bvars) body
     requireSort "body of `forall`" bodySort boolSort
     return some boolSort
   | .existsE binders body =>
+    let binders := binders.map fun (n, s) => (n, resolveSort env s)
     let bodySort ← inferTerm env (binders.toList.reverse ++ locals)
       (binders.toList.reverse.map (·.2) ++ bvars) body
     requireSort "body of `exists`" bodySort boolSort
     return some boolSort
   | .lam binders body =>
+    let binders := binders.map fun (n, s) => (n, resolveSort env s)
     let bodySort ← inferTerm env (binders.toList.reverse ++ locals)
       (binders.toList.reverse.map (·.2) ++ bvars) body
     return bodySort.map fun result =>
@@ -201,6 +237,7 @@ where
         requireBoolArgs name args
         return some boolSort
       | "and" | "or" | "xor" =>
+        if args.isEmpty then throw s!"`{name}` expects at least one argument, got none"
         requireBoolArgs name args
         return some boolSort
       | "=>" =>
@@ -300,6 +337,7 @@ where
 
 private def insertFun (env : CheckEnv) (name : String) (sig : FunSig) :
     Except String CheckEnv :=
+  let sig : FunSig := { args := sig.args.map (resolveSort env), res := resolveSort env sig.res }
   match env.funs.get? name with
   | none => pure { env with funs := env.funs.insert name sig }
   | some previous =>
@@ -312,6 +350,8 @@ private def checkCommand (env : CheckEnv) (command : Command) : Except String Ch
     insertFun env name { args, res }
   | .defFun recursive name args res body =>
     let env ← if recursive then insertFun env name { args := args.map (·.2), res } else pure env
+    let args := args.map fun (n, s) => (n, resolveSort env s)
+    let res := resolveSort env res
     let bodySort ← inferTerm env args.toList.reverse (args.toList.reverse.map (·.2)) body
     requireSort s!"body of definition `{name}`" bodySort res
     if recursive then pure env else insertFun env name { args := args.map (·.2), res }
@@ -345,7 +385,9 @@ private def checkCommand (env : CheckEnv) (command : Command) : Except String Ch
   | .echo value =>
     validateStringLiteral value
     return env
-  | .setLogic _ | .setOption _ _ | .declSort _ _ | .defSort _ _ _
+  | .defSort name params body =>
+    return { env with sorts := env.sorts.insert name { arity := params.size, body } }
+  | .setLogic _ | .setOption _ _ | .declSort _ _
   | .checkSat | .getModel | .getProof | .getUnsatCore | .exit =>
     return env
 

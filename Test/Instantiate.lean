@@ -426,7 +426,7 @@ theorem recursive_template_reaches_fixpoint (x : Int) (h : P x) : P (next x) := 
 
 -- Generated instances remain ordinary consequences: they cannot turn an
 -- inconsistent witness requirement into a theorem.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem instances_do_not_strengthen (x : Int) :
     ∃ y, R x y ∧ ¬R x y := by

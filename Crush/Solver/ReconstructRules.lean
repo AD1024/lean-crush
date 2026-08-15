@@ -7,8 +7,15 @@ open Lean
 # Built-in proof-reconstruction rules
 
 These are ordinary Lean theorems registered through the same public mechanism available
-to downstream libraries. The reconstruction engine does not inspect `Nat`, multiplication,
-or a fixed polynomial degree.
+to downstream libraries, and the reconstruction engine itself inspects none of them: it
+indexes whatever is registered by discrimination tree and does not know about `Nat`,
+multiplication, or a polynomial degree.
+
+The shipped set is not correspondingly general. Beyond `existsPiOfForallExists` and the
+`Nat.*` library lemmas re-registered at the bottom, it is integer square-root and
+cube-root loop invariants — degree 2 and 3, in both `succ` and `pred` form. A degree-4
+caller would need four more theorems, so this is a concrete rule table rather than a
+schema, and it is in the global registry for every downstream user.
 -/
 
 namespace Crush

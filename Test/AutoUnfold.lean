@@ -70,7 +70,7 @@ theorem reducible_predicate_auto (x lo hi : Int)
   crush
 
 set_option crush.autoUnfold false in
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem reducible_predicate_disabled (x lo hi : Int)
     (h : inOpenInterval x lo hi) : lo + 1 ≤ x := by
@@ -97,7 +97,7 @@ depends on unfolding it is *not* provable — the negative test pins that the op
 actually gates the behavior. -/
 
 set_option crush.autoUnfold false in
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem disabled_no_unfold : f 2 = 4 := by crush
 

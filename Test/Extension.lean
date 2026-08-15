@@ -175,3 +175,31 @@ def lowerIndexedIntValue : LoweringHandler := fun ctx => do
 theorem result_lowering_fires (index : Int) :
     (indexedInt index).value = index := by
   crush
+
+/-! ## A sort handler can target a `def`-defined type
+
+`emitSort` offers the type to handlers before normalizing it, so an alias introduced by
+`def` is a usable dispatch key. Normalizing first would unfold the alias and hand the
+handler its expansion instead. -/
+
+structure BoxedInt where
+  contents : Int
+
+def AliasedInt := BoxedInt
+
+def aliasedValue (a : AliasedInt) : Int := a.contents
+
+-- Claims the alias for SMT `Int`; `BoxedInt` itself is left to the datatype path.
+@[crush_translate_sort]
+def translateAliasedIntSort : SortHandler := fun ctx => do
+  let .const ``AliasedInt _ := ctx.fn | return none
+  return some (.app (.symb "Int") #[])
+
+@[crush_lower aliasedValue]
+def lowerAliasedValue : LoweringHandler := fun ctx => do
+  let #[a] := ctx.args | return none
+  return some (← ctx.emitTerm a)
+
+theorem alias_sort_handler_fires (a : AliasedInt) (h : aliasedValue a = 0) :
+    aliasedValue a + 1 = 1 := by
+  crush

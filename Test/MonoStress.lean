@@ -71,7 +71,7 @@ emitted with `define-fun-rec`, not as a quantified defining axiom, so z3 can now
 the expected countermodel without an instantiation loop. -/
 
 set_option crush.timeout 3 in
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem tree_nat_recursive_wf_rejects_false
     (h : ∀ t : Tree Nat, ∀ l r n, t = Tree.node l n r → n ≥ 0) : False := by crush
@@ -86,7 +86,7 @@ structure Pair (α : Type) where
   fst : α
   snd : α
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_pair_nat : ∀ p : Pair Nat, p.fst = 0 := by crush
 

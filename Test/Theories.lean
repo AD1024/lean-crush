@@ -35,7 +35,7 @@ theorem nat_fun_nonneg (f : Nat → Nat) (n : Nat) : 0 ≤ f n := by crush
 
 -- FALSE: n = 0 gives 0 - 1 = 0, so `0 < 0` is false. The pre-fix naive `Int`
 -- translation wrongly proved this; the `≥0` guard + truncated `sub` fix it.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_sub : ∀ n : Nat, n - 1 < n := by crush
 
@@ -52,7 +52,7 @@ theorem int_emod : ((-7 : Int) % 2) = 1 := by crush
 theorem int_mod_nonneg : ∀ x : Int, x % 2 ≥ 0 := by crush
 
 -- FALSE under Euclidean division (that would be truncated T-division): rejected.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_tdiv : ((-7 : Int) / 2) = -3 := by crush
 
@@ -98,7 +98,7 @@ structure PN where
   x : Nat
 
 -- The hypothesis is true in Lean, so `False` must NOT be derivable from it.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_nat_field (h : ∀ p : PN, p.x ≥ 0) : False := by crush
 
@@ -107,7 +107,7 @@ theorem pn_field_nonneg (p : PN) : p.x ≥ 0 := by crush
 theorem pn_field_cong (p q : PN) (h : p = q) : p.x = q.x := by crush
 
 -- Truncated subtraction stays truncated inside a field, too.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_field_sub : ∀ p : PN, p.x - 1 < p.x := by crush
 
@@ -117,7 +117,7 @@ Every SMT sort is non-empty, but `Empty` is not: `∀ x : Empty, P` is vacuously
 true while its naive SMT image `(forall ((x S)) P)` is not. `crush` refuses the
 translation rather than emitting an unsound encoding. -/
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_empty (h : ∀ x : Empty, False) : False := by crush
 
@@ -165,7 +165,7 @@ theorem nl_tail_field (l : NList) (n : Nat) (t : NList) (h : l = NList.cons n t)
 -- Quantifying over the recursive type is where the recursive axiom gets exercised.
 theorem nl_quant : ∀ l : NList, l = NList.nil ∨ ∃ n t, l = NList.cons n t := by crush
 -- A false goal about the guarded field must produce a counterexample, not close.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_not_close_nl_field : ∀ (n : Nat) (t : NList),
     NList.cons n t = NList.cons (n - 1) t := by crush
@@ -179,7 +179,7 @@ reaches one through `Inner`. If `needsWFGuard` stopped at the first level, the
 structure Inner where n : Nat
 structure Outer where i : Inner
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_nested (h : ∀ o : Outer, o.i.n ≥ 0) : False := by crush
 theorem nested_field_nonneg (o : Outer) : o.i.n ≥ 0 := by crush
@@ -232,7 +232,7 @@ theorem bv_smod0 (x : BitVec 8) : BitVec.smod x 0 = x := by crush
 
 -- FALSE in Lean (`4 / 0 = 0`), but exactly the value raw SMT `bvudiv` returns.
 -- If this ever closes, the div-by-zero guard has regressed.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_bv_div_zero : (4 : BitVec 8) / 0 = 255 := by crush
 
@@ -263,21 +263,21 @@ theorem nat_one_dvd (b : Nat) : 1 ∣ b := by crush
 -- would let crush prove the false goal `1 ∣ 1`.
 @[reducible] def noIntDvd : Dvd Int := ⟨fun _ _ => False⟩
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_custom_dvd : @Dvd.dvd Int noIntDvd 1 1 := by crush
 
 section
 local instance (priority := high) : Dvd Int := noIntDvd
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_scoped_dvd : (1 : Int) ∣ 1 := by
   crush
 end
 
 -- A local instance must not become its own "canonical" baseline.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_local_add [inst : HAdd Int Int Int] :
     @HAdd.hAdd Int Int Int inst 1 2 = 3 := by
@@ -310,13 +310,13 @@ theorem str_isEmpty_iff (s : String) : s.isEmpty = true ↔ s = "" := by crush
 @[reducible] def constantStringAppend : HAppend String String String :=
   ⟨fun _ _ => "constant"⟩
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_custom_string_append :
     @HAppend.hAppend String String String constantStringAppend "a" "b" = "ab" := by
   crush
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_local_string_append [inst : HAppend String String String] :
     @HAppend.hAppend String String String inst "a" "b" = "ab" := by
@@ -326,7 +326,7 @@ section
 local instance (priority := high) : HAppend String String String :=
   constantStringAppend
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_scoped_string_append : ("a" ++ "b") = "ab" := by
   crush
@@ -335,7 +335,7 @@ end
 @[reducible] def falseStringBEq : BEq String :=
   ⟨fun _ _ => false⟩
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_custom_string_beq :
     @BEq.beq String falseStringBEq "a" "a" = true := by
@@ -344,7 +344,7 @@ theorem must_reject_custom_string_beq :
 section
 local instance (priority := high) : BEq String := falseStringBEq
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_scoped_string_beq : ("a" == "a") = true := by
   crush
@@ -356,13 +356,13 @@ end
 @[reducible] def falseStringLE : LE String :=
   ⟨fun _ _ => False⟩
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_custom_string_lt :
     @LT.lt String reverseStringLT "a" "b" := by
   crush
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_custom_string_le :
     @LE.le String falseStringLE "a" "a" := by
@@ -372,12 +372,12 @@ section
 local instance (priority := high) : LT String := reverseStringLT
 local instance (priority := high) : LE String := falseStringLE
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_scoped_string_lt : ("a" : String) < "b" := by
   crush
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_scoped_string_le : ("a" : String) ≤ "a" := by
   crush
@@ -388,13 +388,13 @@ end
   skipPrefix? := fun _ => none
   startsWith := fun _ => false
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_custom_string_pattern :
     @String.startsWith String "abc" "a" (neverMatchesPrefix "a") = true := by
   crush
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_local_string_pattern
     [inst : String.Slice.Pattern.ForwardPattern ("a" : String)] :
@@ -406,7 +406,7 @@ local instance (priority := high) :
     String.Slice.Pattern.ForwardPattern ("a" : String) :=
   neverMatchesPrefix "a"
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_scoped_string_pattern : "abc".startsWith "a" = true := by
   crush
@@ -417,7 +417,7 @@ end
   skipSuffix? := fun _ => none
   endsWith := fun _ => false
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_custom_string_suffix_pattern :
     @String.endsWith String "abc" "a" (neverMatchesSuffix "a") = true := by
@@ -427,7 +427,7 @@ theorem must_reject_custom_string_suffix_pattern :
 -- local searcher must remain uninterpreted even though its iterator machinery is
 -- the standard `String` implementation.
 open String.Slice.Pattern in
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_local_string_searcher
     [inst : ToForwardSearcher ("a" : String) ForwardSliceSearcher] :
@@ -442,7 +442,7 @@ theorem must_reject_local_string_searcher
 -- the one-codepoint counterexample U+30000.
 example : ¬ (("𰀀" : String) ≤ "𯿿") := by decide
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_string_order_domain_mismatch (s : String) (h : s.length = 1) :
     s ≤ "𯿿" := by
@@ -450,7 +450,7 @@ theorem must_reject_string_order_domain_mismatch (s : String) (h : s.length = 1)
 
 -- Lean's empty-pattern replacement is "xax", but SMT `str.replace_all` returns
 -- the input unchanged. A direct lowering would prove this false statement.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_smt_replace_empty_semantics :
     "a".replace "" "x" = "a" := by
@@ -459,12 +459,12 @@ theorem must_reject_smt_replace_empty_semantics :
 -- A literal Lean backslash must not start an SMT-LIB Unicode escape.
 theorem str_escape_not_alias : ("\\u{61}" : String) ≠ "a" := by crush
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_string_escape_alias : ("\\u{61}" : String) = "a" := by crush
 
 -- FALSE: the empty string has length 0.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_str_len : ∀ s : String, s.length > 0 := by crush
 
@@ -507,7 +507,7 @@ A type-valued position gets an opaque (uninterpreted) sort instead. -/
 
 -- FALSE for any injective `Nat → Type`, and `crush` proved it when `Type` mapped to
 -- `Bool` — with only two inhabitants, pigeonhole forces a collision.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_type_pigeonhole (tyfn : Nat → Type) (a b c : Nat) :
     tyfn a = tyfn b ∨ tyfn a = tyfn c ∨ tyfn b = tyfn c := by crush
@@ -531,7 +531,7 @@ it differs. -/
 
 -- FALSE: the real value is `99`. `crush` proved this by assuming standard `Int`
 -- addition, giving `1 + 2 = 3`.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_nonstandard_add : @HAdd.hAdd Int Int Int weirdAdd 1 2 = 3 := by crush
 
@@ -553,7 +553,7 @@ instance : NatCast Collapsed := ⟨fun _ => ⟨0⟩⟩
 
 -- FALSE: both casts are `⟨0⟩`, so they are equal. `crush` proved them *distinct* by
 -- treating the cast as the identity, and `False` followed from that plus `rfl`.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_collapsing_cast :
     ((2 : Nat) : Collapsed) ≠ ((3 : Nat) : Collapsed) := by crush

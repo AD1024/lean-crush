@@ -74,6 +74,21 @@ structure FactSource where
   descr    : String
   deriving Inhabited
 
+/-- Handler-registry lookups resolved once per `TranslateM.run`.
+
+The persistent extensions store declaration names, but `emitSort` and `emitTerm` consult
+them on every node. The environment cannot change during one translation, so evaluated
+handler closures are stored here as type-tagged `Dynamic` values and reused. -/
+structure RegistryCache where
+  translation     : Option (Array Dynamic) := none
+  sort            : Option (Array Dynamic) := none
+  lowerings       : Std.HashMap Name (Array Dynamic) := {}
+  resultLowerings : Std.HashMap Name (Array Dynamic) := {}
+  hasTranslation  : Option Bool := none
+  hasSort         : Option Bool := none
+  hasResult       : Option Bool := none
+  deriving Inhabited
+
 /-- Mutable translation state. -/
 structure TranslateState where
   cfg        : Config
@@ -95,6 +110,8 @@ structure TranslateState where
   nameToExpr : Std.HashMap String Expr := {}
   /-- Name-collision counter: how many times each sanitized base name is taken. -/
   usedNames  : Std.HashMap String Nat := {}
+  /-- Requested derived symbol → collision-free allocated symbol. -/
+  derivedNames : Std.HashMap String String := {}
   /-- Emitted commands, in order. -/
   commands   : Array SMT.Command := #[]
   /-- Provenance table indexed by fact id. -/
@@ -113,6 +130,8 @@ structure TranslateState where
       such variable, the `app` symbol to route its applications through, keyed the
       same way as `boundVars`. -/
   funVars    : Std.HashMap FVarId String := {}
+  /-- Registry lookups already resolved during this run. -/
+  registries : RegistryCache := {}
   deriving Inhabited
 
 /-- The translation monad. `MetaM` at the bottom gives us `whnf`, unification,
@@ -131,37 +150,46 @@ def run {α : Type} (cfg : Config) (x : TranslateM α) : MetaM (α × TranslateS
 def emitCommand (c : SMT.Command) : TranslateM Unit :=
   modify fun s => { s with commands := s.commands.push c }
 
+private def sanitizeSymbol (s : String) : String :=
+  -- The same alphabet the printer accepts unquoted (`Print.simpleSymbolSpecials`).
+  let ok (c : Char) := c.isAlphanum || "~!@%^&*_-+=<>.?/".contains c
+  let s := String.ofList (s.toList.map (fun c => if ok c then c else '_'))
+  if s.isEmpty || s.front.isDigit then "cr_" ++ s else s
+
+/-- Turn an arbitrary hint into a legal, collision-free SMT symbol. -/
+private def reserveSymbol (hint : String) : TranslateM String := do
+  let base := sanitizeSymbol hint
+  let used := (← get).usedNames
+  if !used.contains base then
+    modify fun s => { s with usedNames := s.usedNames.insert base 0 }
+    return base
+  else
+    let rec findUnused : Nat → Nat → String × Nat
+      | 0, k => (s!"{base}_{k}", k + 1)
+      | fuel + 1, k =>
+        let candidate := s!"{base}_{k}"
+        if used.contains candidate then
+          findUnused fuel (k + 1)
+        else
+          (candidate, k + 1)
+    let (name, next) := findUnused (used.size + 1) (used.getD base 0)
+    modify fun s => { s with usedNames :=
+      (s.usedNames.insert base next).insert name 0 }
+    return name
+
 /-- Allocate a fresh internal symbol not tied to any Lean atom. -/
 def freshSymbol (hint : String := "x") : TranslateM String := do
   let n := (← get).nextFresh
   modify fun s => { s with nextFresh := n + 1 }
-  sanitizeAndReserve s!"{hint}_{n}"
-where
-  /-- Turn an arbitrary hint into a legal, collision-free SMT symbol. -/
-  sanitizeAndReserve (hint : String) : TranslateM String := do
-    let base := sanitize hint
-    let used := (← get).usedNames
-    if !used.contains base then
-      modify fun s => { s with usedNames := s.usedNames.insert base 0 }
-      return base
-    else
-      let rec findUnused : Nat → Nat → String × Nat
-        | 0, k => (s!"{base}_{k}", k + 1)
-        | fuel + 1, k =>
-          let candidate := s!"{base}_{k}"
-          if used.contains candidate then
-            findUnused fuel (k + 1)
-          else
-            (candidate, k + 1)
-      let (name, next) := findUnused (used.size + 1) (used.getD base 0)
-      modify fun s => { s with usedNames :=
-        (s.usedNames.insert base next).insert name 0 }
-      return name
-  sanitize (s : String) : String :=
-    let ok (c : Char) := c.isAlphanum || "~!@$%^&*_-+=<>.?/".contains c
-    let s := String.ofList (s.toList.map (fun c => if ok c then c else '_'))
-    let s := if s.isEmpty || s.front.isDigit then "cr_" ++ s else s
-    s
+  reserveSymbol s!"{hint}_{n}"
+
+/-- Allocate a stable symbol derived by string concatenation from another symbol. -/
+def reserveDerived (name : String) : TranslateM String := do
+  if let some allocated := (← get).derivedNames.get? name then
+    return allocated
+  let allocated ← reserveSymbol name
+  modify fun s => { s with derivedNames := s.derivedNames.insert name allocated }
+  return allocated
 
 /-- Look up or allocate an SMT symbol for a user-provided or internal string key.
 Expression-derived identities must use `symbolForStructural`. -/

@@ -53,7 +53,7 @@ theorem prod_eta_mixed (x : Int × Bool) : x = (x.1, x.2) := by crush
 the parameter, the *true* hypothesis below would become unsatisfiable and `False`
 would follow. It must be **rejected** (the goal `False` is not provable). -/
 
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 theorem must_reject_option_nat_field (h : ∀ o : Option Nat, ∀ n, o = some n → n ≥ 0) :
     False := by crush

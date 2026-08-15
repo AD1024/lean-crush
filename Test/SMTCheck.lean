@@ -57,3 +57,17 @@ private def fnB : SSort := .app (.symb "FnB") #[]
       unless error.message.contains "outside SMT-LIB 2.6" do
         throw <| IO.userError s!"unexpected string validation error: {error}"
     | .ok () => throw <| IO.userError "out-of-range SMT string codepoint was accepted"
+
+#eval show IO Unit from do
+  let script : Array Command := #[
+    .defSort "Alias" #["T"] (.app (.symb "Array")
+      #[.bvar 0, .app (.symb "Int") #[]]),
+    .declFun "a" #[] (.app (.symb "Alias") #[opaqueSort]),
+    .declFun "x" #[] opaqueSort,
+    .assert (.app (.symb "=") #[
+      .app (.symb "select") #[.const "a", .const "x"],
+      .lit (.num 0)])]
+  match checkScript script with
+  | .ok () => pure ()
+  | .error error =>
+    throw <| IO.userError s!"parameterized sort alias was not expanded: {error}"

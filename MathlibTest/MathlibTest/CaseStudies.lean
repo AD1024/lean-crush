@@ -238,23 +238,23 @@ genuinely does not follow, since nothing constrains the uninterpreted symbol. -/
 section Untranslated
 
 -- `abs_abs` / `abs_nonneg`: `|·|` is a lattice operation crush does not map.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 example (a : Int) : 0 ≤ |a| := by crush
 
 -- `Finset.card_eq_zero`.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 example (s : Finset Int) : s.card = 0 ↔ s = ∅ := by crush
 
 -- `List.length_eq_zero_iff`.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 example (l : List Int) : l.length = 0 ↔ l = [] := by crush
 
 -- The bundled `Monotone` predicate. Its unbundled form *does* work — see
 -- `mono_unbundled` above — so what fails is unfolding the bundle, not the reasoning.
-/-- error: crush: the goal is not provable -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 example (f : Int → Int) (hm : Monotone f) (a b : Int) (h : a ≤ b) : f a ≤ f b := by crush
 
