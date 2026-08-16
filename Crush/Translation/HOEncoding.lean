@@ -6,12 +6,11 @@ open Lean Meta
 /-!
 # Higher-order encoding
 
-The layer that makes `crush` usable on higher-order goals. Three strategies,
+The layer that makes `crush` usable on higher-order goals. Two strategies,
 selected by `crush.ho.mode`:
 
 * **`defunctionalize`** (default) — λ-lifting into per-arrow-sort `apply` symbols.
   Keeps everything in first-order logics that *every* backend supports.
-* **`combinators`** — S/K/B/C/W with their defining equations.
 * **`native`** — emit higher-order SMT-LIB and let a HO-capable solver (cvc5)
   handle application directly.
 

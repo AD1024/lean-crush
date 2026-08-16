@@ -297,8 +297,7 @@ indexing, `set`/`setIfInBounds`/`set!`, `push`, `pop`, `swap`/
   the solver proves cannot be replayed as a Lean proof (nonlinear arithmetic, datatype
   pigeonhole) and `crush` fails; `"reconstructOrTrust"` falls back to the axiom with a warning.
 - **Rough edges.** Indirectly recursive datatypes (`Rose` with a `List Rose` field) become an
-  opaque sort; `crush.ho.mode combinators` is unimplemented and warns; Alethe replay needs
-  cvc5 ≥ 1.3.
+  opaque sort; Alethe replay needs cvc5 ≥ 1.3.
 
 ## Relation to lean-auto
 

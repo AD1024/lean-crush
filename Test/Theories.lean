@@ -509,6 +509,58 @@ theorem type_arg_dropped (h : @List.length Int [] = 0) :
 theorem dependent_proof_binder (f : (n : Nat) → n > 0 → Nat) (h5 : (5 : Nat) > 0)
     (hf : ∀ n, ∀ hn : n > 0, f n hn = n) : f 5 h5 = 5 := by crush
 
+/-! ## Instance arguments belong to symbol identity
+
+An instance-implicit dictionary selects the Lean function but need not become an opaque SMT
+value argument. The fallback keys its function symbol on the normalized dictionary and emits
+only ordinary value arguments. -/
+
+private class DictionaryKey where
+  marker : Nat
+
+@[reducible] private def dictionaryOne : DictionaryKey := ⟨1⟩
+@[reducible] private def dictionaryOneAlias : DictionaryKey := dictionaryOne
+@[reducible] private def dictionaryTwo : DictionaryKey := ⟨2⟩
+
+private opaque dictionarySensitive [DictionaryKey] (n : Nat) : Nat
+
+#eval show Lean.MetaM Unit from do
+  let fn := Lean.mkConst ``dictionarySensitive
+  let zero := Lean.mkNatLit 0
+  let app (instanceArg : Lean.Expr) := Lean.mkApp2 fn instanceArg zero
+  let ((one, alias, two), _) ← Crush.TranslateM.run {} do
+    let one ← Crush.emitTerm (app (Lean.mkConst ``dictionaryOne))
+    let alias ← Crush.emitTerm (app (Lean.mkConst ``dictionaryOneAlias))
+    let two ← Crush.emitTerm (app (Lean.mkConst ``dictionaryTwo))
+    return (one, alias, two)
+  let .app (.symb oneName) oneArgs := one
+    | throwError "instance-erased fallback did not emit an SMT function application"
+  let .app (.symb aliasName) aliasArgs := alias
+    | throwError "instance alias did not emit an SMT function application"
+  let .app (.symb twoName) twoArgs := two
+    | throwError "distinct instance did not emit an SMT function application"
+  unless oneArgs.size == 1 && aliasArgs.size == 1 && twoArgs.size == 1 do
+    throwError "instance dictionary remained as an opaque SMT value argument"
+  unless oneName == aliasName do
+    throwError "definitionally equal instance dictionaries received different SMT symbols"
+  if oneName == twoName then
+    throwError "distinct instance dictionaries shared an SMT symbol"
+
+/-- error: crush: could not prove the goal -/
+#guard_msgs(error, substring := true) in
+example
+    (h₁ : @dictionarySensitive dictionaryOne 0 = 0)
+    (h₂ : @dictionarySensitive dictionaryTwo 0 = 1) : False := by
+  crush
+
+-- A quantified dictionary is not fixed query metadata. It remains an SMT argument so an
+-- arbitrary Lean function may vary with the dictionary instead of becoming one constant.
+/-- error: crush: could not prove the goal -/
+#guard_msgs(error, substring := true) in
+example (h : ∀ instanceArg : DictionaryKey,
+    @dictionarySensitive instanceArg 0 = instanceArg.marker) : False := by
+  crush
+
 /-! ## `Type` is not `Bool`
 
 `Prop` maps to SMT `Bool`, but a larger universe must not: that would put every Lean

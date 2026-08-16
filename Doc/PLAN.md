@@ -464,16 +464,13 @@ traced back through its chain.
 ## 5. Higher-order handling (the key capability)
 
 `crush.ho.mode` selects the strategy applied in Layer 4, after monomorphization
-and before first-order translation:
+and before first-order translation. Two strategies are currently selectable:
 
 - **`defunctionalize`** (default). Collect the set of function-valued closures
   that actually appear; introduce an `apply` uninterpreted function per arrow
   sort and a constructor tag per closure, plus defining axioms. This is complete
   for the ground fragment and keeps everything in `QF_UF`/`UF`+theory logics
   that *every* backend supports.
-- **`combinators`** (Sledgehammer-style). Translate λ via S/K/B/C/W combinators
-  with their defining equations. Smaller encoding, weaker for extensionality;
-  useful when defunctionalization blows up.
 - **`native`**. Emit higher-order SMT to a HO-capable backend and let the solver
   handle application/partial application directly. Fastest path when the backend
   supports it; falls back with a diagnostic if the chosen backend is
@@ -485,6 +482,10 @@ and before first-order translation:
   applicative encoding plus extensionality + app-encode axioms ("Extending SMT
   Solvers to Higher-Order", Barbosa et al.) — i.e. our `defunctionalize` mode is
   the manual version of what cvc5 does internally.
+
+A **`combinators`** strategy remains planned: translate λ via S/K/B/C/W
+combinators with their defining equations. It is not exposed as an option until
+implemented.
 
 Naming note: what we call `defunctionalize`/`combinators` are Sledgehammer's
 `lam_trans = lifting`/`combs`. Sledgehammer forces `lifting` for *all* SMT
@@ -627,7 +628,7 @@ at entry, so this layers on without changing the pipeline.
 | `crush.timeout` | `Nat` (s) | `10` | hard wall-clock limit (enforced by us) |
 | `crush.trust` | `trust\|reconstruct\|reconstructOrTrust` | `trust` | how `unsat` discharges the goal (the default closes via the auditable `crushSorry` axiom) |
 | `crush.reconstruct` | `auto\|alethe\|core` | `auto` | which reconstruction path runs when `crush.trust` asks for one: Alethe certificate replay, the core-directed finisher ladder, or both in order |
-| `crush.ho.mode` | `defunctionalize\|combinators\|native` | `defunctionalize` | HO elimination strategy |
+| `crush.ho.mode` | `defunctionalize\|native` | `defunctionalize` | HO elimination strategy |
 | `crush.mono.fuel` | `Nat` | `512` | max monomorphization instances |
 | `crush.mono.rounds` | `Nat` | `8` | max saturation rounds |
 | `crush.mono.certify` | `Bool` | `false` | type-check each mono instance's proof against its proposition (matters under the default trusting policy; the kernel does this on the `reconstruct` path) |
@@ -704,9 +705,9 @@ Tested in `Test/Theories.lean`, `Test/Regression.lean`, `Test/Monomorphize.lean`
   equality `unsat` (Church numerals, β-through-a-closure, funext) closes under the
   default policy without the trust axiom (§6).
 
-*Remaining:* `combinators` (S/K/B/C/W). Accepted but warns and falls back. Its
-value is as an escape hatch when defunctionalization blows up, so it wants a
-workload that actually blows up to tune against.
+*Remaining:* `combinators` (S/K/B/C/W). It is not exposed as an option until
+implemented. Its value is as an escape hatch when defunctionalization blows up,
+so it wants a workload that actually blows up to tune against.
 
 **M4 — Reconstruction. partial.** Core-directed replay is done, and Alethe **proof replay**
 is now real (phase 3, below). `Crush/Solver/Reconstruct.lean` uses the unsat core

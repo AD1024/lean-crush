@@ -102,8 +102,6 @@ The values are:
 * `"defunctionalize"` is the portable default.
 * `"native"` passes function sorts and higher-order application directly to
   cvc5. Other backends warn and fall back to defunctionalization.
-* `"combinators"` is reserved but not implemented; it currently warns and falls
-  back to defunctionalization.
 
 Use native mode only with cvc5:
 

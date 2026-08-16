@@ -92,8 +92,6 @@ instance : KVMap.Value ReconstructMode where
 inductive HOMode where
   /-- Monomorphize + lambda-lift + defunctionalize applied HO args (default). -/
   | defunctionalize
-  /-- Use S/K/B/C/W combinators for lambdas, with their defining equations. -/
-  | combinators
   /-- Pass HO constructs straight to a HO-capable solver (cvc5 `--ho`). -/
   | native
   deriving BEq, Hashable, Inhabited, Repr
@@ -101,13 +99,13 @@ inductive HOMode where
 instance : ToString HOMode where
   toString
     | .defunctionalize => "defunctionalize"
-    | .combinators => "combinators" | .native => "native"
+    | .native => "native"
 
 instance : KVMap.Value HOMode where
   toDataValue m := toString m
   ofDataValue?
     | "defunctionalize" => some .defunctionalize
-    | "combinators" => some .combinators | "native" => some .native
+    | "native" => some .native
     | _ => none
 
 end Crush
@@ -137,7 +135,7 @@ register_option crush.trust : TrustMode := {
 
 register_option crush.ho.mode : HOMode := {
   defValue := HOMode.defunctionalize
-  descr := "Higher-order elimination strategy: defunctionalize, combinators, or native."
+  descr := "Higher-order elimination strategy: defunctionalize or native."
 }
 
 register_option crush.mono.fuel : Nat := {

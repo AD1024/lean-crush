@@ -270,16 +270,6 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
       logWarning m!"crush: `crush.ho.mode native` requires a higher-order capable \
                     backend (cvc5); `{cfg.backend}` is first-order only. Falling \
                     back to `defunctionalize`."
-  -- `combinators` is specified but not yet implemented. Say so rather than
-  -- silently behaving as `defunctionalize` — a user who selected it would
-  -- otherwise believe they were exercising the combinator encoding.
-  let cfg :=
-    if cfg.hoMode == .combinators then
-      { cfg with hoMode := .defunctionalize }
-    else cfg
-  if (← getOptions) |> (fun o => crush.ho.mode.get o == HOMode.combinators) then
-    logWarning "crush: `crush.ho.mode combinators` is not implemented yet \
-                (`defunctionalize` and `native` are); using `defunctionalize`."
   -- Profiling: when `crush.profile` is on, each phase below is wall-clock timed and a
   -- breakdown is logged at the end. Off by default and costs only a branch per phase.
   let mut prof := if cfg.profile then Profiler.on else Profiler.off

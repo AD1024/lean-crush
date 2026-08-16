@@ -514,6 +514,49 @@ def withFiniteArray (ctx : TranslationCtx) (elem arr : Expr)
     }
     return .letE #[(arrayName, arrayValue)] (← k view)
 
+private structure DefaultAppArgs where
+  values    : Array Expr := #[]
+  types     : Array Expr := #[]
+  instances : Array Expr := #[]
+
+/-- Partition application arguments by their Lean binder role.
+
+Type and proof arguments are erased. Instance-implicit arguments affect the selected
+Lean function but are encoded in its structural symbol rather than as opaque SMT values.
+Explicit class-valued arguments remain ordinary values. -/
+private def partitionDefaultAppArgs (fn : Expr) (args : Array Expr) :
+    TranslateM DefaultAppArgs := do
+  let mut applied := fn
+  let mut fnType ← inferType fn
+  let mut out : DefaultAppArgs := {}
+  let boundVars := (← get).boundVars
+  for arg in args do
+    let fnTypeWhnf ← whnf fnType
+    let binderInfo? :=
+      match fnTypeWhnf with
+      | .forallE _ _ _ binderInfo => some binderInfo
+      | _ => none
+    let argType ← inferType arg
+    if ← isProp argType then
+      pure ()
+    else if (← whnf argType).isSort then
+      out := { out with types := out.types.push arg }
+    else if binderInfo? == some .instImplicit then
+      let dependsOnBound :=
+        (Lean.collectFVars {} arg).fvarIds.any boundVars.contains
+      if dependsOnBound then
+        out := { out with values := out.values.push arg }
+      else
+        out := { out with instances := out.instances.push arg }
+    else
+      out := { out with values := out.values.push arg }
+    applied := mkApp applied arg
+    fnType ←
+      match fnTypeWhnf with
+      | .forallE _ _ body _ => pure (body.instantiate1 arg)
+      | _ => inferType applied
+  return out
+
 mutual
   /-- Sort translation. Interpreted Lean types map to SMT theory sorts; supported
   inductives are declared as SMT datatypes; everything else becomes a declared
@@ -1777,11 +1820,8 @@ mutual
     -- constant fed to an `Int`-returning symbol — producing ill-sorted output.
     -- Note z3 does not reject that; it silently reinterprets, so nothing would
     -- surface at the boundary.
-    let valueArgs ← args.filterM fun a => do
-      let ty ← inferType a
-      -- Drop the argument when it *is* a type (`α : Type`) or a proof (`h : p`).
-      if (← isProp ty) then return false
-      return !(← whnf ty).isSort
+    let partition ← partitionDefaultAppArgs fn args
+    let valueArgs := partition.values
     let appExpr := mkAppN fn args
     -- Preserve aliases for `emitSort`: a user sort handler may intentionally target a
     -- `def`-defined type. Structural keys normalize type components separately.
@@ -1791,15 +1831,14 @@ mutual
     -- ordinary type argument while still being instantiated at different
     -- function-valued carriers. Reusing its first declaration then emits calls
     -- with incompatible `Fn` sorts (`unknown constant ... (Fn ...)` in z3).
-    let droppedTypes ← args.filterMapM fun a => do
-      let ty ← inferType a
-      if (← isProp ty) then return none
-      if (← whnf ty).isSort then return some a else return none
+    let instanceKeys ← partition.instances.mapM fun instanceArg => do
+      let instanceArg ← instantiateMVars instanceArg
+      Meta.withTransparency .instances <| Meta.reduceAll instanceArg
     let argTypes ← valueArgs.mapM fun a => do instantiateMVars (← inferType a)
     let key : StructuralKey := {
-      tag := s!"function-signature:{droppedTypes.size}:{argTypes.size}"
-      exprs := #[fn]
-      typeExprs := droppedTypes ++ argTypes ++ #[resTy] }
+      tag := s!"function-signature:{partition.types.size}:{instanceKeys.size}:{argTypes.size}"
+      exprs := #[fn] ++ instanceKeys
+      typeExprs := partition.types ++ argTypes ++ #[resTy] }
     let hint ← headHint fn
     let name ← TranslateM.symbolForStructural key hint
     -- Record the symbol → Lean-head correspondence for proof replay. Applications are

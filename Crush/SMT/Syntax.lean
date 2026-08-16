@@ -55,7 +55,7 @@ mutual
     | existsE : Array (String × SSort) → Term → Term
     /-- A higher-order `lambda` term. Only legal for HO-capable backends under a
         `HO_`-prefixed logic (see `Crush/Translation/HOEncoding.lean`); the
-        `defunctionalize`/`combinators` modes never produce one. -/
+        `defunctionalize` mode never produces one. -/
     | lam     : Array (String × SSort) → Term → Term
     | annot   : Term → Array Attr → Term
     deriving Inhabited, Repr
