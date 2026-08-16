@@ -115,6 +115,14 @@ crush_map_sort Nat => "Int"
       derived == repeated && derived != distinct do
     throwError "derived SMT symbol allocation was colliding or unstable"
 
+opaque modelLabelProbe : Prop → Nat
+
+/-- error: crush: could not prove the goal — the solver found a model:
+    modelLabelProbe [modelLabelProbe_0] := -/
+#guard_msgs(error, substring := true) in
+example (p q : Prop) : modelLabelProbe p = modelLabelProbe q := by
+  crush
+
 -- Structural symbol keys distinguish universe levels even when pretty-printing
 -- would render both constants identically with `pp.universes` disabled.
 #eval show Lean.MetaM Unit from do

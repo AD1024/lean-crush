@@ -157,12 +157,20 @@ def formatCounterexample (modelText : String) (st : TranslateState) :
   let entries := (parseModel modelText).filter fun e => !e.name.startsWith factNamePrefix
   if entries.isEmpty then
     return m!"model (no assignments to report)"
+  let labels ← entries.mapM fun entry =>
+    match st.nameToExpr.get? entry.name with
+    | some origin => return toString (← ppExpr origin)
+    | none => return entry.name
+  let mut labelCounts : Std.HashMap String Nat := {}
+  for label in labels do
+    labelCounts := labelCounts.insert label (labelCounts.getD label 0 + 1)
   let mut lines : Array MessageData := #[]
-  for e in entries do
+  for i in [0:entries.size] do
+    let e := entries[i]!
+    let baseLabel := labels[i]!
     let label :=
-      match st.nameToExpr.get? e.name with
-      | some origin => m!"{origin}"
-      | none => m!"{(st.nameToAtom.get? e.name).getD e.name}"
+      if labelCounts.getD baseLabel 0 > 1 then s!"{baseLabel} [{e.name}]"
+      else baseLabel
     lines := lines.push m!"  {label} := {e.value}"
   let body := m!"model:{indentD (MessageData.joinSep lines.toList "\n")}"
   if ← mentionsEncodedSort st entries then
