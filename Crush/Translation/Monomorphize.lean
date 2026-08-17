@@ -2,6 +2,7 @@ import Lean
 import Crush.Frontend.Config
 import Crush.Reify.Collect
 import Crush.Translation.Monad
+import Crush.Translation.Pattern
 open Lean Meta
 
 /-!
@@ -133,29 +134,6 @@ private structure AppOccurrence where
   origins : Array Nat := #[]
   deriving Inhabited
 
-private structure PartialSubstitution where
-  values  : Array (Option Expr)
-  origins : Array Nat := #[]
-  deriving Inhabited
-
-private structure DerivedSubstitution where
-  values  : Array Expr
-  origins : Array Nat := #[]
-  deriving Inhabited
-
-/-- Whether `e` contains one of the opened leading type-binder fvars. -/
-private partial def containsBinder (e : Expr) (binders : Array Expr) : Bool :=
-  match e with
-  | .fvar id => binders.any fun binder => binder.fvarId! == id
-  | .app f a => containsBinder f binders || containsBinder a binders
-  | .lam _ ty body _ | .forallE _ ty body _ =>
-    containsBinder ty binders || containsBinder body binders
-  | .letE _ ty value body _ =>
-    containsBinder ty binders || containsBinder value binders
-      || containsBinder body binders
-  | .mdata _ body | .proj _ _ body => containsBinder body binders
-  | _ => false
-
 private def sameHead (a b : Expr) : Bool :=
   match a, b with
   | .const an _, .const bn _ => an == bn
@@ -169,7 +147,7 @@ are not added as independent candidates. For `f α x`, the explicit type argumen
 is also indexed by `(f, argument-position)`, allowing a query occurrence `f Int a`
 to derive `α := Int` directly. Bare binder patterns are retained only as a fallback
 when no structured/application match constrains that binder. -/
-private partial def collectPatterns (e : Expr) (binders : Array Expr) :
+private partial def collectTypePatterns (e : Expr) (binders : Array Expr) :
     MetaM (Array Expr × Array AppPattern) := do
   let typePatterns ← IO.mkRef (#[] : Array Expr)
   let appPatterns ← IO.mkRef (#[] : Array AppPattern)
@@ -177,7 +155,7 @@ private partial def collectPatterns (e : Expr) (binders : Array Expr) :
     -- Binder domains and declared result types are known type positions. Avoid
     -- asking `inferType`/`whnf` about arbitrary open terms: Lean treats a loose
     -- value bvar there as a panic rather than a recoverable error.
-    if typePosition && !e.hasLooseBVars && containsBinder e binders && !e.isForall then
+    if typePosition && !e.hasLooseBVars && Pattern.containsBinder e binders && !e.isForall then
       let patterns ← typePatterns.get
       unless patterns.contains e do typePatterns.set (patterns.push e)
       return
@@ -190,7 +168,7 @@ private partial def collectPatterns (e : Expr) (binders : Array Expr) :
           -- Explicit type arguments contain the opened type fvars syntactically.
           -- Ordinary value arguments do not; `matchPattern` additionally requires
           -- any binder target to be a ground type before accepting the evidence.
-          if !arg.hasLooseBVars && containsBinder arg binders then
+          if !arg.hasLooseBVars && Pattern.containsBinder arg binders then
             let patterns ← appPatterns.get
             unless patterns.any (fun p =>
                 sameHead p.head fn && p.argIndex == i && p.pattern == arg) do
@@ -225,77 +203,10 @@ private partial def collectApplications (e : Expr) : Array AppOccurrence :=
     let (_, result) := (go e).run out
     return result
 
-/-- Index of an opened type-binder fvar. -/
-private def binderIndex? (binders : Array Expr) (id : FVarId) : Option Nat := Id.run do
-  for i in [0:binders.size] do
-    if binders[i]!.fvarId! == id then return some i
-  return none
-
-/-- Match a type/application pattern against a query expression, deriving a partial
-substitution for the opened leading type binders. Fixed pieces must be definitionally
-equal; repeated binder occurrences must receive definitionally equal targets. -/
-private partial def matchPattern (pattern target : Expr) (binders : Array Expr)
-    (initial : Array (Option Expr)) : MetaM (Option (Array (Option Expr))) := do
-  let rec go (pattern target : Expr) (subst : Array (Option Expr)) :
-      MetaM (Option (Array (Option Expr))) := do
-    if pattern.hasLooseBVars || target.hasLooseBVars then return none
-    if let .fvar id := pattern then
-      if let some index := binderIndex? binders id then
-        unless ← isGroundType target do return none
-        unless ← isDefEqReadOnly (← inferType target) (← id.getType) do return none
-        match subst[index]! with
-        | none => return some (subst.set! index (some target))
-        | some previous =>
-          return if ← isDefEqReadOnly previous target then some subst else none
-    unless containsBinder pattern binders do
-      return if ← isDefEqReadOnly pattern target then some subst else none
-    match pattern, target with
-    | .app pf pa, .app tf ta =>
-      let some subst ← go pf tf subst | return none
-      go pa ta subst
-    | .mdata _ body, _ => go body target subst
-    | _, .mdata _ body => go pattern body subst
-    | _, _ => return none
-  go pattern target initial
-
 private def isBareBinderPattern (pattern : Expr) (binders : Array Expr) : Option Nat :=
   match pattern with
-  | .fvar id => binderIndex? binders id
+  | .fvar id => Pattern.binderIndex? binders id
   | _ => none
-
-private def originsSubset (left right : Array Nat) : Bool :=
-  left.all right.contains
-
-/-- A merge is useful only if both substitutions provide a binder absent from the other.
-Otherwise the merged values equal one input while its provenance is less permissive, so
-that input already dominates the result. -/
-private def substitutionsComplementary (left right : Array (Option Expr)) : Bool :=
-  let leftAdds := (Array.zip left right).any fun
-    | (some _, none) => true
-    | _ => false
-  let rightAdds := (Array.zip left right).any fun
-    | (none, some _) => true
-    | _ => false
-  leftAdds && rightAdds
-
-private def mergeOrigins (left right : Array Nat) : Array Nat := Id.run do
-  let mut out := left
-  for origin in right do
-    unless out.contains origin do out := out.push origin
-  return out
-
-/-- Merge compatible partial substitutions. -/
-private def mergeSubstitutions (a b : Array (Option Expr)) :
-    MetaM (Option (Array (Option Expr))) := do
-  if a.size != b.size then return none
-  let mut merged := a
-  for i in [0:a.size] do
-    match a[i]!, b[i]! with
-    | none, some value => merged := merged.set! i (some value)
-    | some left, some right =>
-      unless ← isDefEqReadOnly left right do return none
-    | _, _ => pure ()
-  return some merged
 
 /-- Derive relevant leading-type substitutions for `ty` from query type shapes and
 applications.
@@ -307,43 +218,32 @@ letting `Except ε α` independently cross-product every generated type into bot
 binders. -/
 private partial def deriveSubstitutions (ty : Expr) (queryTypes : Array TypeOccurrence)
     (queryApps : Array AppOccurrence) (budget : Nat) :
-    MetaM (Array DerivedSubstitution) := do
+    MetaM (Array Pattern.Substitution) := do
   if budget == 0 then return #[]
   let derive (openedTy : Expr) (binders : Array Expr) :
-      MetaM (Array DerivedSubstitution) := do
+      MetaM (Array Pattern.Substitution) := do
     if binders.isEmpty then return #[]
     let empty := Array.replicate binders.size none
-    let (typePatterns, appPatterns) ← collectPatterns openedTy binders
-    let mut evidence : Array PartialSubstitution := #[]
+    let (typePatterns, appPatterns) ← collectTypePatterns openedTy binders
+    let mut evidence : Array Pattern.PartialSubstitution := #[]
     let evidenceLimit := max budget (binders.size * budget)
-    let addEvidence (evidence : Array PartialSubstitution)
-        (values : Array (Option Expr)) (origins : Array Nat) :
-        Array PartialSubstitution := Id.run do
-      unless evidence.size < evidenceLimit && values.any Option.isSome do
-        return evidence
-      for i in [0:evidence.size] do
-        let existing := evidence[i]!
-        if existing.values == values then
-          -- Keep the least restrictive provenance. Fixed-query evidence has no
-          -- origins and therefore dominates every generated route to the same
-          -- substitution.
-          if originsSubset existing.origins origins then return evidence
-          if originsSubset origins existing.origins then
-            return evidence.set! i { values, origins }
-      return evidence.push { values, origins }
     -- Same-head explicit type arguments are the strongest relevance signal.
     for pattern in appPatterns do
       for occurrence in queryApps do
         if sameHead pattern.head occurrence.head then
           if let some target := occurrence.args[pattern.argIndex]? then
-            if let some subst ← matchPattern pattern.pattern target binders empty then
-              evidence := addEvidence evidence subst occurrence.origins
+            if let some subst ← Pattern.matchPattern isGroundType inferType
+                (fun binder => binder.fvarId!.getType) isDefEqReadOnly pattern.pattern target
+                binders empty then
+              evidence := Pattern.addEvidence evidence subst occurrence.origins evidenceLimit
     -- Match structured data shapes such as `Except ε α` and `List α`.
     for pattern in typePatterns do
       if (isBareBinderPattern pattern binders).isSome then continue
       for target in queryTypes do
-        if let some subst ← matchPattern pattern target.expr binders empty then
-          evidence := addEvidence evidence subst target.origins
+        if let some subst ← Pattern.matchPattern isGroundType inferType
+            (fun binder => binder.fvarId!.getType) isDefEqReadOnly pattern target.expr
+            binders empty then
+          evidence := Pattern.addEvidence evidence subst target.origins evidenceLimit
     -- Fall back to all query types only for a binder not constrained above.
     let mut covered := Array.replicate binders.size false
     for candidate in evidence do
@@ -353,46 +253,14 @@ private partial def deriveSubstitutions (ty : Expr) (queryTypes : Array TypeOccu
       let some index := isBareBinderPattern pattern binders | continue
       if covered[index]! then continue
       for target in queryTypes do
-        if let some subst ← matchPattern pattern target.expr binders empty then
-          evidence := addEvidence evidence subst target.origins
-    -- Close compatible partial substitutions under merge. At most `n` merge
-    -- rounds are needed to fill `n` binders.
-    for _ in [0:binders.size] do
-      let before := evidence.size
-      let snapshot := evidence
-      for i in [0:snapshot.size] do
-        for j in [0:i] do
-          if evidence.size >= evidenceLimit then break
-          let left := snapshot[i]!
-          let right := snapshot[j]!
-          unless substitutionsComplementary left.values right.values do continue
-          if let some merged ← mergeSubstitutions left.values right.values then
-            evidence := addEvidence evidence merged
-              (mergeOrigins left.origins right.origins)
-      if evidence.size == before then break
-    let mut out : Array DerivedSubstitution := #[]
-    for candidate in evidence do
-      if out.size >= budget then break
-      let mut full : Array Expr := #[]
-      let mut complete := true
-      for value in candidate.values do
-        match value with
-        | some value => full := full.push value
-        | none => complete := false
-      if complete then
-        let mut retained := false
-        for i in [0:out.size] do
-          let existing := out[i]!
-          if existing.values == full then
-            retained := true
-            if originsSubset candidate.origins existing.origins then
-              out := out.set! i { values := full, origins := candidate.origins }
-            break
-        unless retained do
-          out := out.push { values := full, origins := candidate.origins }
-    return out
+        if let some subst ← Pattern.matchPattern isGroundType inferType
+            (fun binder => binder.fvarId!.getType) isDefEqReadOnly pattern target.expr
+            binders empty then
+          evidence := Pattern.addEvidence evidence subst target.origins evidenceLimit
+    evidence ← Pattern.closeEvidence isDefEqReadOnly evidence evidenceLimit binders.size
+    return Pattern.completeEvidence evidence budget
   let rec openBinders (ty : Expr) (binders : Array Expr) :
-      MetaM (Array DerivedSubstitution) := do
+      MetaM (Array Pattern.Substitution) := do
     match ty with
     | .forallE name dom body _ =>
       let domW ← whnf dom
@@ -557,7 +425,7 @@ def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := 
         newThisRound := newThisRound + 1
         instantiated := instantiated.set! factIndex true
         out := out.push { f with prop := t, proof := some p, descr := s!"{f.descr}@inst" }
-        let origins := mergeOrigins substitution.origins #[factIndex]
+        let origins := Pattern.mergeOrigins substitution.origins #[factIndex]
         -- Pattern-directed saturation: the new instance may expose a type shape or
         -- same-head application another fact requires. Its provenance prevents a
         -- dependency cycle from feeding the shape back into any producer.

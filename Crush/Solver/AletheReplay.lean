@@ -97,9 +97,9 @@ private def proveStep (target : Expr) (premises : Array Expr) (rule : String) :
     return none
   let hypTypes ← premises.mapM fun p => do instantiateMVars (← inferType p)
   let impl := hypTypes.foldr (fun ty acc => mkForall `h .default ty acc) target
-  let used := Lean.collectFVars {} impl
-  let (_, _, params) ← Meta.removeUnused (← getLCtx).getFVars used
-  let closedImpl ← instantiateMVars (← mkForallFVars params impl)
+  let stepParams ← collectProofParams #[impl]
+  let checkParams ← collectProofParams (premises.push impl)
+  let closedImpl ← instantiateMVars (← mkForallFVars stepParams impl)
   let hint ← ruleHint? rule
   let tactics := (match hint with | some t => #[t] | none => #[]) ++ (← stepTactics)
   for tac in tactics do
@@ -110,8 +110,8 @@ private def proveStep (target : Expr) (premises : Array Expr) (rule : String) :
       let gs ← Tactic.run mv.mvarId! (evalTactic (← `(tactic| (intros; $tac))))
       if gs.isEmpty then
         let assigned ← instantiateMVars mv
-        let proof := mkAppN (mkAppN assigned params) premises
-        let proof ← kernelCheckProof snapshot target proof
+        let proof := mkAppN (mkAppN assigned stepParams) premises
+        let proof ← kernelCheckProofWithParams snapshot checkParams target proof
         return some proof
       restoreState saved
     catch _ =>

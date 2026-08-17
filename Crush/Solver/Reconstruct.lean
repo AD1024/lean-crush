@@ -956,8 +956,7 @@ private def trySelectedExistentialWitness (snapshot : KernelCheckSnapshot)
       targetHead.getAppArgs.size == 2 do return false
   let hypTypes ← proofs.mapM fun proof => do instantiateMVars (← inferType proof)
   let target := mkArrowChain hypTypes goalType
-  let used := Lean.collectFVars {} target
-  let (_, _, params) ← Meta.removeUnused (← getLCtx).getFVars used
+  let params ← collectProofParams #[target]
   let closedTarget ← mkForallFVars params target
   let saved ← saveState
   try
@@ -992,8 +991,7 @@ private def trySelectedConstructorSplit (snapshot : KernelCheckSnapshot)
   unless ← supportsStructuralSplitting goalType do return false
   let hypTypes ← proofs.mapM fun proof => do instantiateMVars (← inferType proof)
   let target := mkArrowChain hypTypes goalType
-  let used := Lean.collectFVars {} target
-  let (_, _, params) ← Meta.removeUnused (← getLCtx).getFVars used
+  let params ← collectProofParams #[target]
   let closedTarget ← mkForallFVars params target
   let saved ← saveState
   try
@@ -1045,8 +1043,7 @@ private def trySelectedFactRulesOnce (snapshot : KernelCheckSnapshot)
   let goalType ← instantiateMVars (← goal.getType)
   let hypTypes ← proofs.mapM fun proof => do instantiateMVars (← inferType proof)
   let target := mkArrowChain hypTypes goalType
-  let used := Lean.collectFVars {} target
-  let (_, _, params) ← Meta.removeUnused (← getLCtx).getFVars used
+  let params ← collectProofParams #[target]
   let closedTarget ← mkForallFVars params target
   let saved ← saveState
   try
@@ -1151,8 +1148,7 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
     -- (plus their dependencies). Proposition hypotheses not selected by the SMT
     -- core are absent from `target` and therefore cannot enter the finisher's
     -- context through metavariable creation.
-    let used := Lean.collectFVars {} target
-    let (_, _, params) ← Meta.removeUnused (← getLCtx).getFVars used
+    let params ← collectProofParams #[target]
     let closedTarget ← mkForallFVars params target
     -- Try conclusion-indexed domain rules before the general tactic ladder. This path is
     -- especially important for nonlinear or datatype-specific bridges: `grind` may spend

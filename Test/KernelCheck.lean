@@ -35,6 +35,21 @@ run_meta do
     discard <| kernelCheckProof snapshot expected malformed
 
 run_meta do
+  withLocalDeclD `α (mkSort (.succ .zero)) fun α =>
+    withLocalDeclD `x α fun x =>
+      withLocalDeclD `unused (mkConst ``False) fun _ =>
+        withLetDecl `y α x fun y => do
+          let params ← collectProofParams #[y]
+          unless params.map (·.fvarId!) == #[α.fvarId!, x.fvarId!, y.fvarId!] do
+            throwError "proof parameter closure omitted a dependent type or visible let value"
+  withLocalDeclD `excluded (mkConst ``False) fun excluded =>
+    let value := mkApp2 (mkConst ``False.elim [Level.zero]) (mkConst ``Nat) excluded
+    withLetDecl `opaqueValue (mkConst ``Nat) value (nondep := true) fun opaqueValue => do
+      let params ← collectProofParams #[opaqueValue]
+      unless params.map (·.fvarId!) == #[opaqueValue.fvarId!] do
+        throwError "a nondependent let value leaked an excluded hypothesis"
+
+run_meta do
   let saved ← Lean.Meta.saveState
   try
     let snapshot ← KernelCheckSnapshot.capture

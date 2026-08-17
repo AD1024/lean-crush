@@ -34,6 +34,31 @@ private def ensureComplete (label : String) (e : Expr) : MetaM Unit := do
   if e.hasMVar then
     throwError "crush: {label} contains unresolved metavariables"
 
+/-- Collect the local declarations needed to close `exprs`, without scanning unrelated
+entries in the ambient context. Visible let values contribute dependencies; nondependent
+lets are generalized and therefore contribute only their types. -/
+def collectProofParams (exprs : Array Expr) : MetaM (Array Expr) := do
+  let lctx ← getLCtx
+  let mut used : CollectFVars.State := {}
+  for expr in exprs do
+    used := Lean.collectFVars used (← instantiateMVars expr)
+  let mut cursor := 0
+  while cursor < used.fvarIds.size do
+    let fvarId := used.fvarIds[cursor]!
+    cursor := cursor + 1
+    if let some decl := lctx.find? fvarId then
+      used := Lean.collectFVars used (← instantiateMVars decl.type)
+      if let some value := decl.value? then
+        used := Lean.collectFVars used (← instantiateMVars value)
+  let mut indexed : Array (Nat × Expr) := #[]
+  let mut retained : FVarIdSet := {}
+  for fvarId in used.fvarIds do
+    if retained.contains fvarId then continue
+    if let some decl := lctx.find? fvarId then
+      retained := retained.insert fvarId
+      indexed := indexed.push (decl.index, mkFVar fvarId)
+  return (indexed.qsort (fun left right => left.1 < right.1)).map (·.2)
+
 /-- Validate a generated declaration and every generated declaration it references. -/
 private partial def checkGeneratedDeclaration (baseline current : Environment) (name : Name)
     (checked visiting : Std.HashSet Name) : MetaM (Std.HashSet Name) := do
@@ -58,12 +83,12 @@ private partial def checkGeneratedDeclaration (baseline current : Environment) (
   kernelCheckExpected current {} type value s!"generated declaration `{name}`"
   return checked.insert name
 
-/-- Kernel-check a complete proof candidate and any declarations generated while building it. -/
-def kernelCheckProof (snapshot : KernelCheckSnapshot) (expected proof : Expr) : MetaM Expr := do
+/-- Kernel-check a complete proof candidate using a dependency-closed list of local
+parameters, together with any declarations generated while building it. -/
+def kernelCheckProofWithParams (snapshot : KernelCheckSnapshot) (params : Array Expr)
+    (expected proof : Expr) : MetaM Expr := do
   let expected ← instantiateMVars expected
   let proof ← instantiateMVars proof
-  let used := Lean.collectFVars (Lean.collectFVars {} expected) proof
-  let (_, _, params) ← Meta.removeUnused (← getLCtx).getFVars used
   let closedExpected ← instantiateMVars (← mkForallFVars params expected)
   let closedProof ← instantiateMVars (← mkLambdaFVars params proof)
   ensureComplete "reconstructed goal type" closedExpected
@@ -76,5 +101,10 @@ def kernelCheckProof (snapshot : KernelCheckSnapshot) (expected proof : Expr) : 
     checked ← checkGeneratedDeclaration snapshot.env current name checked {}
   kernelCheckExpected current {} closedExpected closedProof "reconstructed proof"
   return proof
+
+/-- Kernel-check a complete proof candidate and any declarations generated while building it. -/
+def kernelCheckProof (snapshot : KernelCheckSnapshot) (expected proof : Expr) : MetaM Expr := do
+  let params ← collectProofParams #[expected, proof]
+  kernelCheckProofWithParams snapshot params expected proof
 
 end Crush

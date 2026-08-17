@@ -45,6 +45,16 @@ def demoScript : Array Command := #[
     unless xs == #[.atom "a b", .atom "x(y)"] do
       throw <| IO.userError "quoted SMT symbols parsed incorrectly"
   | _ => throw <| IO.userError "quoted SMT symbol expression did not parse"
+  match parseSexp "\t\r\n(λ |β γ| \"δ\"\"ε\") trailing" with
+  | some (.list xs, " trailing") =>
+    unless xs == #[.atom "λ", .atom "β γ", .str "δ\"ε"] do
+      throw <| IO.userError "UTF-8 atoms or escaped SMT strings parsed incorrectly"
+  | _ => throw <| IO.userError "UTF-8 S-expression or remainder did not parse"
+  unless parseSexps "; first\n(a)\r\n; second\r\n(b)" ==
+      #[.list #[.atom "a"], .list #[.atom "b"]] do
+    throw <| IO.userError "SMT-LIB whitespace or comments parsed incorrectly"
+  unless (parseSexps "(|invalid\\symbol|)").isEmpty do
+    throw <| IO.userError "backslash in a quoted SMT symbol was accepted"
   unless (parseSexps "(ok) (").isEmpty do
     throw <| IO.userError "truncated S-expression input was accepted partially"
   -- A leading status atom is skipped, the first list is the core, the rest is the proof.

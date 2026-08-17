@@ -97,6 +97,11 @@ After an `unsat` verdict, reconstruction builds a fresh closed implication from 
 unsat-core proofs and the goal. Local data parameters that occur in that implication
 are abstracted; propositions outside the core are absent.
 
+Replay and reconstruction compute the dependency closure of those parameters by
+following only referenced local declarations, in declaration order. They do not filter
+the complete ambient context for every proof step, so excluded hypotheses do not cause
+per-step context scans.
+
 The search order is:
 
 1. Unpack conjunction hypotheses and same-constructor equalities.
@@ -190,6 +195,9 @@ bounded reconstruction-rule mechanism.
   assigning built-in SMT semantics to user-defined operations.
 - Function symbols and sorts use canonical structural identities rather than
   potentially non-injective pretty-printed types.
+- Solver responses are parsed once. The S-expression scanner examines UTF-8 bytes
+  directly because SMT-LIB structural characters and whitespace are ASCII; atoms are
+  extracted only after their complete spans are known.
 - SMT string lowerings claim only operations whose Lean and SMT semantics agree.
   Replacement, character patterns, byte positions, numeric parsing, and lexicographic
   order remain uninterpreted where the domains or edge cases differ.

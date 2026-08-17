@@ -2,6 +2,7 @@ import Lean
 import Lean.Meta.Sym
 import Crush.Frontend.Config
 import Crush.Reify.Collect
+import Crush.Translation.Pattern
 
 open Lean Meta
 
@@ -62,16 +63,6 @@ private structure GroundOccurrence where
 private structure GroundCandidate where
   expr : Expr
   type : Expr
-  deriving Inhabited
-
-private structure PartialGroundSubstitution where
-  values  : Array (Option Expr)
-  origins : Array Nat := #[]
-  deriving Inhabited
-
-private structure GroundSubstitution where
-  values  : Array Expr
-  origins : Array Nat := #[]
   deriving Inhabited
 
 private structure GroundCollection where
@@ -220,23 +211,6 @@ private partial def hasLeadingValueBinder (ty : Expr) : Sym.SymM Bool := do
       return true
   | _ => return false
 
-private partial def containsBinder (e : Expr) (binders : Array Expr) : Bool :=
-  match e with
-  | .fvar id => binders.any fun binder => binder.fvarId! == id
-  | .app f a => containsBinder f binders || containsBinder a binders
-  | .lam _ ty body _ | .forallE _ ty body _ =>
-    containsBinder ty binders || containsBinder body binders
-  | .letE _ ty value body _ =>
-    containsBinder ty binders || containsBinder value binders
-      || containsBinder body binders
-  | .mdata _ body | .proj _ _ body => containsBinder body binders
-  | _ => false
-
-private def binderIndex? (binders : Array Expr) (id : FVarId) : Option Nat := Id.run do
-  for i in [0:binders.size] do
-    if binders[i]!.fvarId! == id then return some i
-  return none
-
 /-- A closed data term suitable for a leading value binder.
 
 Local free variables are ground query terms. Loose variables, metavariables,
@@ -250,16 +224,19 @@ private def isGroundTerm (e : Expr) : Sym.SymM Bool := do
   catch _ =>
     return false
 
+private def binderTypeS (binder : Expr) : Sym.SymM Expr :=
+  binder.fvarId!.getType
+
 /-- Open application/proposition patterns containing at least one template binder. -/
-private partial def collectPatterns (e : Expr) (binders : Array Expr) :
+private partial def collectGroundPatterns (e : Expr) (binders : Array Expr) :
     Sym.SymM (Array Expr) := do
   let out ← IO.mkRef (#[] : Array Expr)
   let seen ← IO.mkRef ({} : Std.HashSet Expr)
   let rec go (e : Expr) : Sym.SymM Unit := do
-    if containsBinder e binders then
+    if Pattern.containsBinder e binders then
       let isBare :=
         match e with
-        | .fvar id => (binderIndex? binders id).isSome
+        | .fvar id => (Pattern.binderIndex? binders id).isSome
         | _ => false
       unless isBare do
         let usable ←
@@ -285,79 +262,6 @@ private partial def collectPatterns (e : Expr) (binders : Array Expr) :
   go e
   out.get
 
-/-- Match an opened template expression against a ground query expression. -/
-private partial def matchPattern (pattern target : Expr) (binders : Array Expr)
-    (initial : Array (Option Expr)) :
-    Sym.SymM (Option (Array (Option Expr))) := do
-  let rec go (pattern target : Expr) (subst : Array (Option Expr)) :
-      Sym.SymM (Option (Array (Option Expr))) := do
-    if pattern.hasLooseBVars || target.hasLooseBVars then return none
-    if let .fvar id := pattern then
-      if let some index := binderIndex? binders id then
-        unless ← isGroundTerm target do return none
-        unless ← isDefEqS (← Sym.inferType target) (← id.getType) do
-          return none
-        match subst[index]! with
-        | none => return some (subst.set! index (some target))
-        | some previous =>
-          return if ← isDefEqS previous target then some subst else none
-    unless containsBinder pattern binders do
-      return if ← isDefEqS pattern target then some subst else none
-    match pattern, target with
-    | .app pf pa, .app tf ta =>
-      let some subst ← go pf tf subst | return none
-      go pa ta subst
-    | .mdata _ body, _ => go body target subst
-    | _, .mdata _ body => go pattern body subst
-    | _, _ => return none
-  go pattern target initial
-
-private def mergeSubstitutions (a b : Array (Option Expr)) :
-    Sym.SymM (Option (Array (Option Expr))) := do
-  if a.size != b.size then return none
-  let mut merged := a
-  for i in [0:a.size] do
-    match a[i]!, b[i]! with
-    | none, some value => merged := merged.set! i (some value)
-    | some left, some right =>
-      unless ← isDefEqS left right do return none
-    | _, _ => pure ()
-  return some merged
-
-private def originsSubset (left right : Array Nat) : Bool :=
-  left.all right.contains
-
-private def mergeOrigins (left right : Array Nat) : Array Nat :=
-  right.foldl (init := left) fun origins origin =>
-    if origins.contains origin then origins else origins.push origin
-
-/-- A merge is useful only if both substitutions provide a binder absent from the
-other. Otherwise the merged values equal one input while its provenance is less
-permissive, so the input already dominates it. -/
-private def substitutionsComplementary (left right : Array (Option Expr)) : Bool :=
-  let leftAdds := (Array.zip left right).any fun
-    | (some _, none) => true
-    | _ => false
-  let rightAdds := (Array.zip left right).any fun
-    | (none, some _) => true
-    | _ => false
-  leftAdds && rightAdds
-
-/-- Retain the least restrictive provenance routes for each partial
-substitution. Routes with the same values but a superset of origins can never
-enable a match that the smaller route cannot. -/
-private def addEvidence (evidence : Array PartialGroundSubstitution)
-    (values : Array (Option Expr)) (origins : Array Nat) (limit : Nat) :
-    Array PartialGroundSubstitution := Id.run do
-  unless evidence.size < limit && values.any Option.isSome do return evidence
-  for i in [0:evidence.size] do
-    let existing := evidence[i]!
-    if existing.values == values then
-      if originsSubset existing.origins origins then return evidence
-      if originsSubset origins existing.origins then
-        return evidence.set! i { values, origins }
-  return evidence.push { values, origins }
-
 /-- Insert an occurrence in expected constant time while maintaining a provenance
 antichain for that expression. A route from fewer producers is eligible for every
 template that a superset route is, so supersets only multiply matching work. -/
@@ -369,9 +273,9 @@ private def OccurrenceStore.add (store : OccurrenceStore) (expr : Expr)
       origins := #[origins] }
     order := store.order.push expr }
   for existing in routes.origins do
-    if originsSubset existing origins then return store
+    if Pattern.originsSubset existing origins then return store
   let retained := routes.origins.filter fun existing =>
-    !originsSubset origins existing
+    !Pattern.originsSubset origins existing
   return { store with
     byExpr := store.byExpr.insert expr {
       routes with origins := retained.push origins } }
@@ -399,15 +303,15 @@ private def indexOccurrences (occurrences : Array GroundOccurrence) :
 private partial def derivePatternSubstitutions (ty : Expr)
     (occurrences : Array GroundOccurrence) (occurrenceIndex : OccurrenceIndex)
     (templateIndex budget : Nat) :
-    Sym.SymM (Array GroundSubstitution) := do
+    Sym.SymM (Array Pattern.Substitution) := do
   if budget == 0 then return #[]
   let derive (openedTy : Expr) (binders : Array Expr) :
-      Sym.SymM (Array GroundSubstitution) := do
+      Sym.SymM (Array Pattern.Substitution) := do
     if binders.isEmpty then return #[]
-    let patterns ← collectPatterns openedTy binders
+    let patterns ← collectGroundPatterns openedTy binders
     let empty := Array.replicate binders.size none
     let limit := max budget (binders.size * budget)
-    let mut evidence : Array PartialGroundSubstitution := #[]
+    let mut evidence : Array Pattern.PartialSubstitution := #[]
     for pattern in patterns do
       if evidence.size >= limit then break
       let matching :=
@@ -417,52 +321,16 @@ private partial def derivePatternSubstitutions (ty : Expr)
       for occurrence in matching do
         if evidence.size >= limit then break
         if occurrence.origins.contains templateIndex then continue
-        if let some subst ← matchPattern pattern occurrence.expr binders empty then
-          evidence := addEvidence evidence subst occurrence.origins limit
-    -- Different premises can constrain different binders. Close compatible
-    -- partial substitutions under merge before requiring a complete instance.
-    for _ in [0:binders.size] do
-      let before := evidence.size
-      let snapshot := evidence
-      for i in [0:snapshot.size] do
-        if evidence.size >= limit then break
-        let left := snapshot[i]!
-        -- Merge is commutative for compatibility and bound positions, so each
-        -- unordered pair is sufficient. Self-merges cannot add a binder.
-        for j in [0:i] do
-          if evidence.size >= limit then break
-          let right := snapshot[j]!
-          unless substitutionsComplementary left.values right.values do continue
-          if let some merged ← mergeSubstitutions left.values right.values then
-            evidence := addEvidence evidence merged
-              (mergeOrigins left.origins right.origins) limit
-      if evidence.size == before then break
-    let mut out : Array GroundSubstitution := #[]
-    for candidate in evidence do
-      if out.size >= budget then break
-      let mut values : Array Expr := #[]
-      let mut complete := true
-      for value in candidate.values do
-        match value with
-        | some value => values := values.push value
-        | none => complete := false
-      if complete then
-        let mut retained := false
-        for i in [0:out.size] do
-          let existing := out[i]!
-          if existing.values == values then
-            retained := true
-            if originsSubset candidate.origins existing.origins then
-              out := out.set! i { values, origins := candidate.origins }
-            break
-        unless retained do
-          out := out.push { values, origins := candidate.origins }
-    return out
+        if let some subst ← Pattern.matchPattern isGroundTerm Sym.inferType binderTypeS
+            isDefEqS pattern occurrence.expr binders empty then
+          evidence := Pattern.addEvidence evidence subst occurrence.origins limit
+    evidence ← Pattern.closeEvidence isDefEqS evidence limit binders.size
+    return Pattern.completeEvidence evidence budget
   let deriveWithPremises (ty : Expr) (binders premises : Array Expr) :
-      Sym.SymM (Array GroundSubstitution) := do
+      Sym.SymM (Array Pattern.Substitution) := do
     derive (← Sym.mkForallFVarsS premises ty) binders
   let rec openBinders (ty : Expr) (binders premises : Array Expr) :
-      Sym.SymM (Array GroundSubstitution) := do
+      Sym.SymM (Array Pattern.Substitution) := do
     match ty with
     | .forallE name dom body info =>
       if ← isPropExpr dom then
@@ -636,7 +504,7 @@ private def instantiateGroundFactsS (cfg : Config) (facts : Array Fact) :
       descr := s!"{template.descr}@ground"
       instantiateTerms := false
       instanceOf := template.proof })
-    let origins := mergeOrigins origins #[templateIndex]
+    let origins := Pattern.mergeOrigins origins #[templateIndex]
     for expr in (← collectGround prop).occurrences do
       occurrences.modify fun current => current.add expr origins
     if (← generated.get) >= cfg.instFuel then exhausted.set true

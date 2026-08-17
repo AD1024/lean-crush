@@ -13,12 +13,12 @@ Malformed or truncated trailing input rejects the complete parse rather than
 returning a misleading prefix. It does not interpret atoms — that is the caller's
 job.
 
-The scanner indexes the input by byte position and produces atoms and quoted symbols
-with a single `String.extract` over the matched span, so no `List Char` is
-materialized. Certificates reach megabytes, where that conversion dominated replay.
+The scanner reads UTF-8 bytes directly and produces atoms and quoted symbols with a
+single `String.extract` over the matched span. SMT-LIB's structural characters and
+whitespace are ASCII, so scanning bytes avoids decoding every non-structural character.
 Recursion is bounded by an explicit fuel argument — one unit per remaining byte, and
-every step consumes at least one — so these are total definitions rather than
-`partial` ones.
+every step consumes at least one — so these are total definitions rather than `partial`
+ones.
 -/
 
 namespace Crush.SMT
@@ -76,70 +76,77 @@ namespace SexpParser
 string. -/
 abbrev Pos := String.Pos.Raw
 
-@[inline] private def done (s : String) (i : Pos) : Bool := String.Pos.Raw.atEnd s i
-@[inline] private def charAt (s : String) (i : Pos) : Char := String.Pos.Raw.get s i
-@[inline] private def after (s : String) (i : Pos) : Pos := String.Pos.Raw.next s i
+@[inline] private def after (i : Pos) : Pos := ⟨i.byteIdx + 1⟩
+@[inline] private def byteAt (s : String) (i : Pos) (h : i < s.rawEndPos) : UInt8 :=
+  s.getUTF8Byte i h
 @[inline] private def span (s : String) (b e : Pos) : String := String.Pos.Raw.extract s b e
 
-private def isDelim (c : Char) : Bool :=
-  c == '(' || c == ')' || c.isWhitespace || c == ';' || c == '"' || c == '|'
+@[inline] private def isWhitespace (c : UInt8) : Bool :=
+  c == '\t'.toUInt8 || c == '\n'.toUInt8 || c == '\r'.toUInt8 || c == ' '.toUInt8
+
+@[inline] private def isDelim (c : UInt8) : Bool :=
+  c == '('.toUInt8 || c == ')'.toUInt8 || isWhitespace c || c == ';'.toUInt8 ||
+    c == '"'.toUInt8 || c == '|'.toUInt8
 
 /-- Position of the next newline at or after `i` (or end of input). -/
 def lineEnd (s : String) : Pos → Nat → Pos
   | i, 0 => i
   | i, fuel + 1 =>
-    if done s i then i
-    else if charAt s i == '\n' then i
-    else lineEnd s (after s i) fuel
+    if h : i < s.rawEndPos then
+      if byteAt s i h == '\n'.toUInt8 then i else lineEnd s (after i) fuel
+    else i
 
 /-- Position after leading whitespace and `;`-to-end-of-line comments. -/
 def skipTrivia (s : String) : Pos → Nat → Pos
   | i, 0 => i
   | i, fuel + 1 =>
-    if done s i then i
-    else
-      let c := charAt s i
-      if c.isWhitespace then skipTrivia s (after s i) fuel
-      else if c == ';' then skipTrivia s (lineEnd s (after s i) fuel) fuel
+    if h : i < s.rawEndPos then
+      let c := byteAt s i h
+      if isWhitespace c then skipTrivia s (after i) fuel
+      else if c == ';'.toUInt8 then skipTrivia s (lineEnd s (after i) fuel) fuel
       else i
+    else i
 
 /-- End of the bare atom starting at `i`, i.e. the next delimiter or end of input. -/
 def atomEnd (s : String) : Pos → Nat → Pos
   | i, 0 => i
   | i, fuel + 1 =>
-    if done s i then i
-    else if isDelim (charAt s i) then i
-    else atomEnd s (after s i) fuel
+    if h : i < s.rawEndPos then
+      if isDelim (byteAt s i h) then i else atomEnd s (after i) fuel
+    else i
 
 /-- Parse a `"..."` string literal body (cursor is just past the opening quote).
 Handles the SMT-LIB `""` escape for a literal double-quote, which is why this
 accumulates instead of extracting a span. -/
-def parseString (s : String) (acc : String) : Pos → Nat → Option (String × Pos)
+def parseString (s : String) (start : Pos) (acc : String) :
+    Pos → Nat → Option (String × Pos)
   | _, 0 => none
   | i, fuel + 1 =>
-    if done s i then none
-    else
-      let c := charAt s i
-      let rest := after s i
-      if c == '"' then
-        if !done s rest && charAt s rest == '"' then
-          parseString s (acc.push '"') (after s rest) fuel
+    if h : i < s.rawEndPos then
+      if byteAt s i h == '"'.toUInt8 then
+        let rest := after i
+        if hrest : rest < s.rawEndPos then
+          if byteAt s rest hrest == '"'.toUInt8 then
+            parseString s (after rest) (acc ++ span s start i ++ "\"") (after rest) fuel
+          else
+            some (acc ++ span s start i, rest)
         else
-          some (acc, rest)
+          some (acc ++ span s start i, rest)
       else
-        parseString s (acc.push c) rest fuel
+        parseString s start acc (after i) fuel
+    else none
 
 /-- End of an SMT-LIB `|…|`-quoted symbol body (the position of the closing `|`).
 SMT-LIB does not define escapes inside quoted symbols, so a backslash is rejected. -/
 def quotedSymbolEnd (s : String) : Pos → Nat → Option Pos
   | _, 0 => none
   | i, fuel + 1 =>
-    if done s i then none
-    else
-      let c := charAt s i
-      if c == '|' then some i
-      else if c == '\\' then none
-      else quotedSymbolEnd s (after s i) fuel
+    if h : i < s.rawEndPos then
+      let c := byteAt s i h
+      if c == '|'.toUInt8 then some i
+      else if c == '\\'.toUInt8 then none
+      else quotedSymbolEnd s (after i) fuel
+    else none
 
 mutual
   /-- Parse one S-expression starting at `i`. Returns the value and the position
@@ -149,27 +156,27 @@ mutual
     | 0 => none
     | fuel + 1 =>
       let i := skipTrivia s i (fuel + 1)
-      if done s i then none
-      else
-        let c := charAt s i
-        let rest := after s i
-        if c == '(' then
+      if h : i < s.rawEndPos then
+        let c := byteAt s i h
+        let rest := after i
+        if c == '('.toUInt8 then
           match parseList s fuel #[] rest with
           | some (elems, close) => some (.list elems, close)
           | none => none
-        else if c == ')' then none
-        else if c == '"' then
-          match parseString s "" rest (fuel + 1) with
+        else if c == ')'.toUInt8 then none
+        else if c == '"'.toUInt8 then
+          match parseString s rest "" rest (fuel + 1) with
           | some (str, close) => some (.str str, close)
           | none => none
-        else if c == '|' then
+        else if c == '|'.toUInt8 then
           match quotedSymbolEnd s rest (fuel + 1) with
-          | some close => some (.atom (span s rest close), after s close)
+          | some close => some (.atom (span s rest close), after close)
           | none => none
         else
           let close := atomEnd s i (fuel + 1)
           if close.byteIdx == i.byteIdx then none
           else some (.atom (span s i close), close)
+      else none
 
   /-- Parse list elements until the matching `)`. -/
   def parseList (s : String) (fuel : Nat) (acc : Array Sexp) (i : Pos) :
@@ -178,12 +185,13 @@ mutual
     | 0 => none
     | fuel + 1 =>
       let i := skipTrivia s i (fuel + 1)
-      if done s i then none
-      else if charAt s i == ')' then some (acc, after s i)
-      else
-        match parseOne s fuel i with
-        | some (e, rest) => parseList s fuel (acc.push e) rest
-        | none => none
+      if h : i < s.rawEndPos then
+        if byteAt s i h == ')'.toUInt8 then some (acc, after i)
+        else
+          match parseOne s fuel i with
+          | some (e, rest) => parseList s fuel (acc.push e) rest
+          | none => none
+      else none
 end
 
 /-- Fuel sufficient for any scan of `s`: one unit per byte, plus one so an empty
@@ -213,13 +221,13 @@ The `rounds` bound makes this total, and a round that fails to advance is reject
 private def parseSexpsFrom (s : String) (stopOnError : Bool) :
     Nat → Array Sexp → Pos → Option (Array Sexp)
   | 0, acc, i =>
-    if String.Pos.Raw.atEnd s (SexpParser.skipTrivia s i (SexpParser.fuelFor s))
+    if (SexpParser.skipTrivia s i (SexpParser.fuelFor s)).byteIdx == s.rawEndPos.byteIdx
         || stopOnError then
       some acc
     else none
   | rounds + 1, acc, i =>
     let i := SexpParser.skipTrivia s i (SexpParser.fuelFor s)
-    if String.Pos.Raw.atEnd s i then some acc
+    if i.byteIdx == s.rawEndPos.byteIdx then some acc
     else
       match parseSexpAt s i with
       | none => if stopOnError then some acc else none
