@@ -196,3 +196,10 @@ generator and SMT translation.
 
 The Cedar case study builds on the
 [upstream Cedar specification](https://github.com/cedar-policy/cedar-spec).
+
+# Acknowledgements
+
+The extracted type-matching case study in
+`Test/CaseStudies/StrataUnification.lean` builds on
+[Strata](https://github.com/strata-org/Strata), particularly its Lambda type
+matcher and associated soundness, completeness, and occurs-check proofs.

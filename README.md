@@ -360,5 +360,7 @@ lean-crush builds on ideas and test material from several projects:
   (effectful monadic) — the source of the verification-condition case study.
 - [Cedar](https://github.com/cedar-policy/cedar-spec) — the formal specification and
   Lean foundation used by the Cedar case study.
+- [Strata](https://github.com/strata-org/Strata) — its Lambda type matcher and proof
+  structure underpin the extracted soundness, completeness, and occurs-check case study.
 - [Veil](https://github.com/verse-lab/veil) — its model-minimization approach (`z3model.py`)
   informs the planned counterexample minimization.
