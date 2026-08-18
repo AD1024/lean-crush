@@ -89,12 +89,6 @@ fully applied; only *unapplied* or *argument-position* functions need encoding. 
 def isFunctionType (ty : Expr) : MetaM Bool := do
   return (← whnf ty).isArrow
 
-/-- The number of leading explicit arguments an arrow type takes. -/
-def arrowArity (ty : Expr) : MetaM Nat := do
-  match ← arrowShape? ty with
-  | some s => return s.args.size
-  | none => return 0
-
 /-! ## Naming and bookkeeping
 
 All HO symbols are allocated through `TranslateM.symbolFor` on a canonical key, so

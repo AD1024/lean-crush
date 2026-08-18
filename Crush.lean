@@ -5,7 +5,6 @@ import Crush.SMT.Check
 import Crush.SMT.Sexp
 import Crush.SMT.Result
 import Crush.Frontend.Config
-import Crush.Reify.Term
 import Crush.Reify.Collect
 import Crush.Translation.Monad
 import Crush.Translation.Attr

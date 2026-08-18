@@ -78,7 +78,6 @@ fallback.
 | `Crush/Frontend/Config.lean` | Options and resolved `Config` |
 | `Crush/Frontend/Tactic.lean` | Tactic syntax, hint parsing, pipeline, verdict handling |
 | `Crush/Reify/Collect.lean` | Fact and premise collection with provenance |
-| `Crush/Reify/Term.lean` | Reified STLC types and sanity-checking IR |
 | `Crush/Translation/Monad.lean` | `TranslateM`, state, symbols, declarations, provenance |
 | `Crush/Translation/Attr.lean` | Translation, lowering, result-lowering, and sort-handler registries |
 | `Crush/Translation/Unfold.lean` | `@[crush_unfold]` and `@[crush_defeq]` |

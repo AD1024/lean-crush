@@ -59,13 +59,6 @@ checker that is "slow on large input" (their words) — 6s to typecheck one
 - The **typed SMT IR** shape (`Auto/IR/SMT.lean`) — reimplemented as
   `Crush.SMT.Syntax` with `Repr` everywhere and a `:named`-provenance slot.
 - The **bijective high↔low name map** for symbol generation.
-- The **reified STLC IR** `LamSort`/`LamTerm` *shape* — specifically the trick of
-  storing the argument sort on each `app` node so type-checking is a single
-  unification-free bottom-up pass, and the `atom`/`etom` (ordinary vs.
-  existential/Skolem) split. Reimplemented as `Crush.Reify.CSort`/`CTerm`. But we
-  keep only a plain `lamCheck? : CTerm → Option CSort` sanity checker — **not**
-  the `LamWF` inductive family with its `interp`, since we are not proving rules
-  sound in the kernel.
 - The **`DTr` derivation-provenance** mechanism (cheap, checker-independent) so an
   unsat core can be reported as e.g. "from `❰h₁❱`, `defeq 0 List.map`".
 
@@ -78,6 +71,9 @@ checker that is "slow on large input" (their words) — 6s to typecheck one
   practice (Lean's own `bv_decide`, lean-smt's Alethe replay) shows that
   external-solver-plus-certificate is a better cost/confidence tradeoff than a
   hand-verified reflective checker for the whole logic.
+- A separate **reified STLC intermediate representation**. The live path lowers
+  Lean `Expr`s directly to `SMT.Term`; an unused `CSort`/`CTerm` sketch was removed
+  rather than presenting an aspirational layer as part of the implementation.
 
 ---
 
@@ -210,9 +206,7 @@ Module map (⟢ = built & tested, ▷ = designed, □ = todo):
 | `Crush/Solver/Process.lean` | process mgmt, hard timeout, `unknown` | ⟢ |
 | `Crush/SMT/Sexp.lean` | s-expression parser | ⟢ |
 | `Crush/SMT/Result.lean` | unsat-core + model parsing | ⟢ |
-| `Crush/Reify/Term.lean` | `CTerm`/`CSort` IR (STLC, no `LamWF`) | ⟢ |
 | `Crush/Reify/Collect.lean` | hypothesis & goal collection | ⟢ |
-| `Crush/Reify/Reify.lean` | `Expr → CTerm`, atom allocation, `DTr` provenance | □ |
 | `Crush/Translation/Preprocess.lean` | proof-producing selected-definition normalization | ⟢ |
 | `Crush/Translation/Monomorphize.lean` | poly *lemma* → ground instances, saturating (datatype mono is in `Translate.lean`) | ⟢ |
 | `Crush/Translation/HOEncoding.lean` | HO encoding helpers (defunc ⟢, native ⟢, combinators □) | ⟢ |
@@ -1016,11 +1010,11 @@ sides of the property equal and closed by `rfl`. The whole tree has been removed
 
 Should a verified ledger be revived, the prerequisites — in dependency order — are:
 
-1. **An interpretation `⟦·⟧ : SMT.Term → Prop`** (and `CSort → Type`), the analogue of
-   lean-auto's `LamWF.interp`. Without it no obligation can be *stated*, only named.
-2. **Route the pipeline through the pure `CTerm` IR** (`Reify/Term.lean` exists but is
-   dead code; the live path is `Expr → SMT.Term` directly). A proof about a `CTerm`
-   layer is worthless if nothing runs that layer.
+1. **An interpretation `⟦·⟧ : SMT.Term → Prop`**, the analogue of lean-auto's
+   `LamWF.interp`. Without it no obligation can be *stated*, only named.
+2. **Introduce and route the pipeline through a pure typed reification IR.** The live
+   path is `Expr → SMT.Term` directly; a proof about a separate term layer is worthless
+   unless the implementation actually runs that layer.
 3. **Make the post-reification passes total.** A `partial def` has no unfold equations
    and is opaque to `decide`/`simp` (§10c), so nothing can be proved about it. This is
    feasible for passes over the finite IR, not for the `whnf`-driven reifier itself.
