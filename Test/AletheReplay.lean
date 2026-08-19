@@ -203,8 +203,61 @@ set_option crush.reconstruct "alethe"
 set_option maxHeartbeats 1000000
 set_option maxRecDepth 10000
 
+namespace ComparisonCoverage
+
+def UnsignedGreater {width : Nat} (x y : BitVec width) : Prop :=
+  x > y
+
+def UnsignedGreaterEqual {width : Nat} (x y : BitVec width) : Prop :=
+  x ≥ y
+
+@[crush_lower UnsignedGreater]
+def lowerUnsignedGreater : LoweringHandler := fun ctx => do
+  let #[_, x, y] := ctx.args | return none
+  return some (smt| (bvugt $(← ctx.emitTerm x) $(← ctx.emitTerm y)))
+
+@[crush_lower UnsignedGreaterEqual]
+def lowerUnsignedGreaterEqual : LoweringHandler := fun ctx => do
+  let #[_, x, y] := ctx.args | return none
+  return some (smt| (bvuge $(← ctx.emitTerm x) $(← ctx.emitTerm y)))
+
+def SignedGreater {width : Nat} (x y : BitVec width) : Prop :=
+  BitVec.slt y x
+
+def SignedGreaterEqual {width : Nat} (x y : BitVec width) : Prop :=
+  BitVec.sle y x
+
+@[crush_lower SignedGreater]
+def lowerSignedGreater : LoweringHandler := fun ctx => do
+  let #[_, x, y] := ctx.args | return none
+  return some (smt| (bvsgt $(← ctx.emitTerm x) $(← ctx.emitTerm y)))
+
+@[crush_lower SignedGreaterEqual]
+def lowerSignedGreaterEqual : LoweringHandler := fun ctx => do
+  let #[_, x, y] := ctx.args | return none
+  return some (smt| (bvsge $(← ctx.emitTerm x) $(← ctx.emitTerm y)))
+
+def TripleDistinct (x y z : Int) : Prop :=
+  x ≠ y ∧ x ≠ z ∧ y ≠ z
+
+@[crush_lower TripleDistinct]
+def lowerTripleDistinct : LoweringHandler := fun ctx => do
+  let #[x, y, z] := ctx.args | return none
+  return some
+    (smt| (distinct $(← ctx.emitTerm x) $(← ctx.emitTerm y) $(← ctx.emitTerm z)))
+
+end ComparisonCoverage
+
 theorem alethe_bitvec_xor (x y : BitVec 8) :
     (x ^^^ y) ^^^ y = x := by
+  crush
+
+theorem alethe_bitvec_negation (x : BitVec 4) :
+    -(-x) = x := by
+  crush
+
+theorem alethe_bitvec_bitwise (x y : BitVec 4) :
+    ~~~(x ||| y) = (~~~x &&& ~~~y) := by
   crush
 
 theorem alethe_bitvec_order (x : BitVec 8) :
@@ -247,6 +300,92 @@ theorem alethe_bitvec_unsigned_conversion (x : BitVec 8) :
     BitVec.ofNat 8 x.toNat = x := by
   crush
 
+theorem alethe_bitvec_unsigned_division (x : BitVec 4) :
+    x / 1 = x := by
+  crush
+
+theorem alethe_bitvec_unsigned_remainder (x : BitVec 4) :
+    x % 1 = 0 := by
+  crush
+
+theorem alethe_bitvec_signed_division (x : BitVec 3) :
+    BitVec.sdiv x 1 = x := by
+  crush
+
+theorem alethe_bitvec_signed_remainder (x : BitVec 4) :
+    BitVec.srem x 1 = 0 := by
+  crush
+
+theorem alethe_bitvec_unsigned_order (x y : BitVec 8) (h : x < y) :
+    x ≤ y := by
+  crush
+
+theorem alethe_bitvec_signed_order (x y : BitVec 3)
+    (h : BitVec.slt x y = true) :
+    BitVec.sle x y = true := by
+  crush
+
+theorem alethe_bitvec_power_multiplication (x : BitVec 8) :
+    (x * 3) - x = x + x := by
+  crush
+
+theorem alethe_bitvec_signed_modulo (x : BitVec 8) :
+    BitVec.smod x 1 = 0 := by
+  crush
+
+/--
+[crush.result] alethe certificate features: operators=[bvult
+-/
+#guard_msgs(trace, whitespace := lax, substring := true) in
+set_option trace.crush.result true in
+theorem alethe_bitvec_unsigned_strict_order (x y : BitVec 3) (h : x < y) :
+    x ≠ y := by
+  crush
+
+/--
+[crush.result] alethe certificate features: operators=[bvugt, not, bvuge
+-/
+#guard_msgs(trace, whitespace := lax, substring := true) in
+set_option trace.crush.result true in
+theorem alethe_bitvec_unsigned_order_aliases (x y : BitVec 3)
+    (hgt : ComparisonCoverage.UnsignedGreater x y) :
+    ComparisonCoverage.UnsignedGreaterEqual x y := by
+  crush
+
+/--
+[crush.result] alethe certificate features: operators=[bvsgt, not, bvsge
+-/
+#guard_msgs(trace, whitespace := lax, substring := true) in
+set_option trace.crush.result true in
+theorem alethe_bitvec_signed_order_aliases (x y : BitVec 3)
+    (hgt : ComparisonCoverage.SignedGreater x y) :
+    ComparisonCoverage.SignedGreaterEqual x y := by
+  crush
+
+/--
+[crush.result] alethe certificate features: operators=[distinct
+-/
+#guard_msgs(trace, whitespace := lax, substring := true) in
+set_option trace.crush.result true in
+theorem alethe_distinct (x y z : Int)
+    (h : ComparisonCoverage.TripleDistinct x y z) :
+    x ≠ z := by
+  crush
+
+#eval show Lean.CoreM Unit from do
+  for theoremName in [``alethe_bitvec_negation, ``alethe_bitvec_bitwise,
+      ``alethe_bitvec_unsigned_division, ``alethe_bitvec_unsigned_remainder,
+      ``alethe_bitvec_signed_division, ``alethe_bitvec_signed_remainder,
+      ``alethe_bitvec_unsigned_order, ``alethe_bitvec_signed_order,
+      ``alethe_bitvec_power_multiplication,
+      ``alethe_bitvec_signed_modulo, ``alethe_bitvec_unsigned_strict_order,
+      ``alethe_bitvec_unsigned_order_aliases, ``alethe_bitvec_signed_order_aliases,
+      ``alethe_distinct] do
+    let axioms ← Lean.collectAxioms theoremName
+    if axioms.contains ``Crush.crushSorry ||
+        axioms.any (·.toString.contains "._native.bv_decide.ax") then
+      throwError "`{theoremName}` escaped kernel-only Alethe reconstruction"
+
 end BitVectorReplay
 
 /-! ## Quantifiers and higher-order encoding -/
@@ -272,6 +411,11 @@ theorem alethe_nat_quantified (f : Nat → Nat)
 theorem alethe_bool_function (f : Bool → Bool)
     (h : ∀ x, f x = x) :
     f true = true := by
+  crush
+
+theorem alethe_exists (f : Int → Int)
+    (h : ∃ x, f x = 0) :
+    ∃ x, f x ≤ 0 := by
   crush
 
 theorem alethe_higher_order_defun (f g : Int → Int)
@@ -421,3 +565,61 @@ theorem alethe_only_function_chain (f g h : Int → Int) (a : Int)
   crush
 
 end Toggle
+
+/-! ## Optional native bit-vector reconstruction
+
+This option deliberately widens the reconstruction trust boundary to Lean's native code
+generator. The same goal fails under the default kernel-only policy and succeeds only when
+the option is enabled. -/
+
+section TrustedBvDecide
+set_option crush.backend "cvc5"
+set_option crush.timeout 30
+set_option crush.trust "reconstruct"
+set_option crush.reconstruct "core"
+
+/-- error: crush: solver reported `unsat`, but reconstruction failed -/
+#guard_msgs(error, substring := true) in
+example (a b : BitVec 64) :
+    (a &&& b) + (a ^^^ b) = a ||| b := by
+  crush
+
+set_option crush.reconstruct.trustBvDecide true in
+theorem trusted_bv_decide (a b : BitVec 64) :
+    (a &&& b) + (a ^^^ b) = a ||| b := by
+  crush
+
+#eval show Lean.CoreM Unit from do
+  let axioms ← Lean.collectAxioms ``trusted_bv_decide
+  unless axioms.any (·.toString.contains "._native.bv_decide.ax_") do
+    throwError "trusted bit-vector reconstruction did not record its native axiom"
+  if axioms.contains ``Crush.crushSorry then
+    throwError "trusted bit-vector reconstruction used the SMT trust axiom"
+
+end TrustedBvDecide
+
+/-! ## Optional general native reconstruction
+
+`native_decide` can execute arbitrary decision procedures, so this option has a broader
+trusted base than the bit-vector-specific fallback above. -/
+
+section TrustedNativeDecide
+set_option crush.backend "cvc5"
+set_option crush.timeout 30
+set_option crush.trust "reconstruct"
+set_option crush.reconstruct "core"
+
+set_option crush.reconstruct.trustNativeDecide true in
+theorem trusted_native_decide (a b : BitVec 8) :
+    (a &&& b) + (a ^^^ b) = a ||| b := by
+  crush
+
+#eval show Lean.CoreM Unit from do
+  let axioms ← Lean.collectAxioms ``trusted_native_decide
+  unless axioms.any (·.toString.contains "._native.native_decide.ax_") do
+    throwError "trusted native reconstruction did not record its native axiom"
+  if axioms.contains ``Crush.crushSorry ||
+      axioms.any (·.toString.contains "._native.bv_decide.ax_") then
+    throwError "trusted native reconstruction used an unintended trust path"
+
+end TrustedNativeDecide

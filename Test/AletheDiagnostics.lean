@@ -21,12 +21,12 @@ set_option crush.timeout 10
 
 /-!
 No `@[crush_alethe "divisible"]` decoder is registered in this module. The solver
-still emits a certificate, but replay must classify the first use of the custom
-operator as a term gap and identify the concrete proof step.
+still emits a certificate, but replay must reject the source assumption containing
+the custom operator before any derived step can use it.
 -/
 
 /--
-error: crush: Alethe replay failed with term-gap at step `t0` (rule `equiv_pos2`)
+error: crush: Alethe replay failed with term-gap at step `crush_fact_0`
 -/
 #guard_msgs(error, substring := true) in
 example (x : Int) (hx : MultipleOfFive x) :

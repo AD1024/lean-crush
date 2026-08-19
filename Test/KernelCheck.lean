@@ -114,6 +114,19 @@ run_meta do
     throwError "declined reconstruction left the original goal assigned"
 
 run_meta do
+  let value := mkNatLit 1
+  let expected ← mkEq value value
+  let goal ← mkFreshExprMVar expected
+  let accepted ← IO.mkRef true
+  discard <| Lean.Elab.Term.TermElabM.run' <| Lean.Elab.Tactic.run goal.mvarId! do
+    accepted.set (← tryReconstruct goal.mvarId! #[] #[
+      (← `(tactic| native_decide))])
+  if ← accepted.get then
+    throwError "strict reconstruction accepted a native-decision axiom"
+  if ← goal.mvarId!.isAssigned then
+    throwError "declined native reconstruction left the original goal assigned"
+
+run_meta do
   let goal ← mkFreshExprMVar (mkConst ``False)
   let accepted ← IO.mkRef true
   discard <| Lean.Elab.Term.TermElabM.run' <| Lean.Elab.Tactic.run goal.mvarId! do
@@ -121,6 +134,18 @@ run_meta do
       (← `(tactic| close_with_generated_axiom))])
   if ← accepted.get then
     throwError "reconstruction accepted a proof backed by a generated axiom"
+  if ← goal.mvarId!.isAssigned then
+    throwError "declined reconstruction left the original goal assigned"
+
+set_option crush.reconstruct.trustNativeDecide true in
+run_meta do
+  let goal ← mkFreshExprMVar (mkConst ``False)
+  let accepted ← IO.mkRef true
+  discard <| Lean.Elab.Term.TermElabM.run' <| Lean.Elab.Tactic.run goal.mvarId! do
+    accepted.set (← tryReconstruct goal.mvarId! #[] #[
+      (← `(tactic| close_with_generated_axiom))])
+  if ← accepted.get then
+    throwError "native trust accepted an unrelated generated axiom"
   if ← goal.mvarId!.isAssigned then
     throwError "declined reconstruction left the original goal assigned"
 

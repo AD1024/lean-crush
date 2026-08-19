@@ -93,6 +93,33 @@ Alethe replay requires cvc5 1.3 or newer.
 The core path works with any backend, but one of Lean's finishers must be able to
 re-prove the result from the selected unsat-core hypotheses.
 
+{optionDocs crush.reconstruct.trustBvDecide}
+
+This option preserves solver-proof reconstruction but expands its trusted base to
+Lean's native code generator, which `bv_decide` uses while checking an LRAT
+certificate. It does not permit arbitrary generated axioms. Accepted proofs expose
+the dependency as `_native.bv_decide.ax_*` under `#print axioms`.
+
+{optionDocs crush.reconstruct.trustNativeDecide}
+
+This broader fallback can execute arbitrary Lean decision procedures. It therefore
+trusts the native compiler and runtime, plus every executable definition reached
+while deciding the proposition. Accepted proofs expose an
+`_native.native_decide.ax_*` dependency under `#print axioms`.
+
+For example, core reconstruction can exhaust a finite symbolic domain:
+
+```lean
+set_option crush.backend "cvc5"
+set_option crush.trust "reconstruct"
+set_option crush.reconstruct "core"
+set_option crush.reconstruct.trustNativeDecide true
+
+example (a b : BitVec 8) :
+    (a &&& b) + (a ^^^ b) = a ||| b := by
+  crush
+```
+
 # Higher-Order Translation
 
 {optionDocs crush.ho.mode}

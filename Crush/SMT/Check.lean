@@ -244,9 +244,15 @@ where
         requireArity name args.size 2
         requireBoolArgs name args
         return some boolSort
-      | "=" | "distinct" =>
+      | "=" =>
         requireArity name args.size 2
         requireSame s!"arguments of `{name}`" args[0]! args[1]!
+        return some boolSort
+      | "distinct" =>
+        if args.size < 2 then
+          throw s!"`distinct` expects at least two arguments, got {args.size}"
+        for i in [1:args.size] do
+          requireSame "arguments of `distinct`" args[0]! args[i]!
         return some boolSort
       | "ite" =>
         requireArity name args.size 3
@@ -286,7 +292,8 @@ where
         requireArity name args.size 2
         return (← requireBvArgs name args).map fun width =>
           .app (.indexed "BitVec" #[.inr width]) #[]
-      | "bvult" | "bvule" | "bvugt" | "bvuge" | "bvslt" | "bvsle" =>
+      | "bvult" | "bvule" | "bvugt" | "bvuge"
+      | "bvslt" | "bvsle" | "bvsgt" | "bvsge" =>
         requireArity name args.size 2
         let _ ← requireBvArgs name args
         return some boolSort

@@ -209,6 +209,22 @@ register_option crush.reconstruct : ReconstructMode := {
             working on replay itself, where a silent fallback hides whether it worked."
 }
 
+register_option crush.reconstruct.trustBvDecide : Bool := {
+  defValue := false
+  descr := "Allow reconstruction tactics to use `bv_decide`. This trusts the native \
+            code generator used to check `bv_decide`'s LRAT certificate and records an \
+            auditable `_native.bv_decide.ax_*` dependency. Disabled by default, so \
+            reconstruction otherwise accepts only kernel-checkable generated declarations."
+}
+
+register_option crush.reconstruct.trustNativeDecide : Bool := {
+  defValue := false
+  descr := "Allow core reconstruction to use `native_decide`. This trusts Lean's native \
+            compiler, runtime, and the executable definitions reached by the decision \
+            procedure, and records an auditable `_native.native_decide.ax_*` dependency. \
+            Disabled by default."
+}
+
 register_option crush.profile : Bool := {
   defValue := false
   descr := "Log a per-phase wall-clock breakdown of the tactic (collect, normalize, \
@@ -248,6 +264,8 @@ structure Config where
   traceScript    : Bool      := false
   autoUnfold     : Bool      := true
   reconstruct    : ReconstructMode := .auto
+  trustBvDecide  : Bool      := false
+  trustNativeDecide : Bool   := false
   profile        : Bool      := false
   premises       : Bool      := false
   premiseMax     : Nat       := 32
@@ -275,6 +293,8 @@ def Config.ofOptions (opts : Options) : Config :=
     traceScript    := crush.trace.script.get opts
     autoUnfold     := crush.autoUnfold.get opts
     reconstruct    := crush.reconstruct.get opts
+    trustBvDecide  := crush.reconstruct.trustBvDecide.get opts
+    trustNativeDecide := crush.reconstruct.trustNativeDecide.get opts
     profile        := crush.profile.get opts
     premises       := crush.premises.get opts
     premiseMax     := crush.premises.max.get opts }

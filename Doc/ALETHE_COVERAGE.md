@@ -34,15 +34,15 @@ noticed and reclassified.
 
 | Fragment | Query translation | Alethe replay | Notes |
 |---|---:|---:|---|
-| Propositional logic | yes | replayed | Includes nested subproof assumptions |
+| Propositional logic | yes | replayed | Includes structural clauses and nested multi-assumption subproofs |
 | Uninterpreted functions and equality | yes | replayed | Includes congruence chains and defunctionalized application |
 | `Int` linear arithmetic | yes | replayed | |
 | `Int` nonlinear arithmetic | yes | replayed | Requires cvc5's DSL-rewrite proof granularity |
 | `Int` division and modulo | yes | replayed | Lean's zero-divisor behavior is guarded in the query |
 | `Nat` arithmetic | yes | replayed | Recovered from the nonnegative `Int` encoding |
-| Quantifiers | yes | replayed | `forall_inst`, `bind`, `sko_forall`, and `sko_ex` are covered |
+| Quantifiers | yes | replayed | Live tests cover `forall_inst`, `bind`, and `sko_forall`; the `sko_ex` handler is implemented but not emitted by current cvc5 probes |
 | Strings | partial | replayed | Length, append, empty, prefix, suffix, and containment |
-| Bit-vectors | partial | replayed | Arithmetic, comparisons, shifts, rotations, extraction, extension, concatenation, and unsigned integer conversions |
+| Bit-vectors | partial | replayed | Arithmetic, signed/unsigned comparisons, shifts, rotations, extraction, extension, concatenation, and unsigned integer conversions |
 | Signed bit-vector-to-`Int` | yes | no-certificate | cvc5 reports unsupported `sbv_to_int` |
 | Datatype injectivity | yes | replayed | |
 | Finite-datatype exhaustiveness | yes | no-certificate | cvc5 reports `DUMMY_SKOLEM` |
@@ -78,12 +78,24 @@ Pinned certificate fixtures make parser and decoder tests deterministic. Live cv
 tests catch changes in solver output. Both are needed: fixtures alone miss solver
 changes, while live tests alone can stop exercising an operator after a solver rewrite.
 
+## Replay Strategy
+
+Replay validates source assumptions before derived steps can consume them. Resolution,
+weakening, transitivity, excluded-middle clauses, conjunction projections, and
+`Iff` implication clauses use structural Lean proof terms. Remaining concrete steps use
+a small tactic portfolio and pass the kernel boundary before reuse. The assembled proof
+and any generated auxiliary declarations are checked again before goal assignment.
+
+Profiler-guided structural replay matters for bit-blasted certificates. On an isolated
+width-8 unsigned-comparison probe, it reduced replay from 5.50-5.59 seconds to
+1.09-1.13 seconds by avoiding repeated `grind` calls on propositional clauses.
+
 ## Work Queue
 
-1. Inventory operators, indexed operators, sorts, and rules in every live certificate.
-2. Add structured replay failures carrying the class, step id, rule, and offending
-   term.
-3. Re-run the no-certificate probes when the pinned cvc5 version changes.
+1. Add a live `sko_ex` regression if the pinned cvc5 version emits that rule.
+2. Re-run the no-certificate probes when the pinned cvc5 version changes.
+3. Inventory and pin newly observed operators, indexed operators, sorts, and rules as
+   translation theories expand.
 
 Arrays, finite-datatype exhaustiveness, signed bit-vector-to-integer conversion, and
 native higher-order proofs are skipped until cvc5 emits Alethe for them.

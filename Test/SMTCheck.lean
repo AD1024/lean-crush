@@ -86,3 +86,36 @@ private def fnB : SSort := .app (.symb "FnB") #[]
   | .ok () => pure ()
   | .error error =>
     throw <| IO.userError s!"recursive definition did not resolve sort aliases: {error}"
+
+#eval show IO Unit from do
+  let intSort : SSort := .app (.symb "Int") #[]
+  let script : Array Command := #[
+    .declFun "x" #[] intSort,
+    .declFun "y" #[] intSort,
+    .declFun "z" #[] intSort,
+    .assert (smt| (distinct x y z))]
+  match checkScript script with
+  | .ok () => pure ()
+  | .error error =>
+    throw <| IO.userError s!"valid variadic `distinct` failed: {error}"
+
+#eval show IO Unit from do
+  let script : Array Command := #[
+    .declFun "x" #[] (.app (.symb "Int") #[]),
+    .assert (smt| (distinct x))]
+  match checkScript script with
+  | .error error =>
+    unless error.message.contains "at least two" do
+      throw <| IO.userError s!"unexpected unary `distinct` error: {error}"
+  | .ok () => throw <| IO.userError "unary `distinct` was accepted"
+
+#eval show IO Unit from do
+  let bitVec3 : SSort := .app (.indexed "BitVec" #[.inr 3]) #[]
+  let script : Array Command := #[
+    .declFun "x" #[] bitVec3,
+    .declFun "y" #[] bitVec3,
+    .assert (smt| (and (bvsgt x y) (bvsge x y)))]
+  match checkScript script with
+  | .ok () => pure ()
+  | .error error =>
+    throw <| IO.userError s!"valid signed comparison aliases failed: {error}"

@@ -133,6 +133,23 @@ Equality splitting is attempted only when a quantified local rule already applie
 target. Its branches use `omega`, `simp_all`, `rfl`, and `decide`; global `grind` is
 intentionally excluded.
 
+## Alethe replay
+
+Alethe clauses retain their top-level literal boundaries; Boolean `or` inside one SMT
+literal is not flattened into the enclosing clause. Replay validates each named source
+assumption before derived steps can consume it.
+
+Structural proof construction runs before tactic search for resolution, weakening,
+transitivity, excluded-middle clauses, conjunction projection, and `Iff` implication
+clauses. Wide or multiply referenced resolution results are shared through checked
+auxiliary declarations. Only remaining theory-specific steps enter the tactic portfolio.
+
+This ordering is profiler-driven. On an isolated width-8 bit-vector comparison,
+structural replay reduced replay from 5.50-5.59 seconds to 1.09-1.13 seconds. Across two
+detailed-profile runs, `grind` fell from 196 calls and 5.94 seconds to 44 calls and
+0.21 seconds. The measured bottleneck was repeated tactic elaboration, not symbolic
+normalization, so this path remains in `MetaM` rather than adding a `SymM` boundary.
+
 ## Datatype splitting
 
 Constructor search is datatype-generic. It does not inspect names such as `Nat.succ`;

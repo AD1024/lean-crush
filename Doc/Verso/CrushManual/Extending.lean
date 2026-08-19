@@ -321,18 +321,29 @@ example (x y : Int) (h : x = y) :
   crush
 ```
 
-# Extending Alethe Term Decoding
+# Extending Alethe Reconstruction
 
-Translation and Alethe replay run in opposite directions.
-A custom lowering can emit a solver theory operator that the built-in inverse
+Alethe replay has two distinct layers:
+
+1. certificate terms are decoded back into Lean expressions;
+2. every certificate inference is proved from its replayed premises.
+
+`@[crush_alethe "operator"]` extends the first layer.
+It is needed when a custom lowering emits an SMT operator that the built-in
 decoder does not recognize.
-Trust mode needs no inverse, but `crush.reconstruct "alethe"` must map every
-certificate term back to Lean.
-Register that mapping with `@[crush_alethe "operator"]`:
+Trust mode needs no inverse, but checked Alethe replay must recover the Lean
+meaning of every certificate term.
+
+## Define the Inverse Decoder
+
+The following lowering emits the indexed SMT operator
+`((_ divisible 3) value)`.
+Its decoder accepts that form and the normalized ordinary application
+`(divisible 3 value)` that cvc5 may write in a certificate:
 
 ```lean
 open Lean Meta
-open Crush Crush.SMT
+open Crush Crush.Alethe Crush.SMT
 
 def MultipleOfThree (value : Int) : Prop :=
   value % 3 = 0
@@ -362,17 +373,136 @@ def decodeDivisible : AletheDecoder := fun ctx => do
     (← mkEq remainder (Lean.toExpr (0 : Int)))
 ```
 
-`ctx.indices` is empty for an ordinary application.
-For `((_ divisible 3) x)`, it contains the raw `3` index and `ctx.args`
-contains the decoded `x`.
-cvc5 may normalize that term to `(divisible 3 x)`, so the example accepts both
-forms.
+An `AletheDecoderContext` provides:
 
-Built-in theory decoders run first.
-Registered handlers run in priority order and may return `none` to defer.
-The decoder only restores a certificate term's Lean meaning.
-If cvc5 uses a theory-specific inference that Lean's step tactics cannot prove,
-add a checked reconstruction lemma or extend the replay rule support separately.
+* `ctx.head`, the ordinary or indexed operator name;
+* `ctx.indices`, the raw indexed-identifier payload;
+* `ctx.args`, the recursively decoded Lean arguments.
+
+Thus `((_ divisible 3) x)` supplies the raw `3` in `ctx.indices` and the
+decoded `x` in `ctx.args`.
+For `(divisible 3 x)`, `ctx.indices` is empty and both operands appear in
+`ctx.args`.
+
+Built-in theory decoders run before registered handlers.
+Multiple custom handlers for one operator run from higher to lower priority;
+write `high`, `low`, or a numeric priority after the operator string in the
+attribute.
+A handler should return `none` when it does not recognize a particular arity,
+index shape, or argument type so the next handler can try it.
+
+Crush instantiates metavariables in a returned expression and verifies that the
+expression is well-typed.
+The decoder author remains responsible for making the result the faithful
+inverse of the lowering.
+
+## Test the Decoder Directly
+
+A solver may simplify away an operator or change the shape used in a live
+certificate.
+Add a deterministic decoder fixture before testing replay.
+The following fixture checks registration and both certificate spellings from
+the example:
+
+```lean
+private def parseAletheTerm
+    (source : String) : MetaM Sexp := do
+  let some (term, rest) := parseSexp source
+    | throwError "failed to parse Alethe term `{source}`"
+  unless rest.trimAscii.isEmpty do
+    throwError "trailing input after Alethe term `{source}`"
+  return term
+
+private def assertDecoded
+    (symbols : Std.HashMap String Expr)
+    (source : String) (expected : Expr) : MetaM Unit := do
+  let decoders ← getAletheDecoders
+  let context : TermCtx := {
+    symbols
+    named := {}
+    decoders
+  }
+  let term ← parseAletheTerm source
+  let some actual ← toExpr? context 64 term
+    | throwError "failed to decode Alethe term `{source}`"
+  unless ← isDefEq actual expected do
+    throwError "decoder mismatch for `{source}`"
+
+run_meta do
+  unless ← hasAletheDecodersFor "divisible" do
+    throwError "the `divisible` decoder was not registered"
+  withLocalDeclD `x (mkConst ``Int) fun x => do
+    let remainder ←
+      mkAppM ``HMod.hMod #[x, Lean.toExpr (3 : Int)]
+    let expected ←
+      mkEq remainder (Lean.toExpr (0 : Int))
+    let symbols :=
+      ({} : Std.HashMap String Expr).insert "x" x
+    assertDecoded symbols "((_ divisible 3) x)" expected
+    assertDecoded symbols "(divisible 3 x)" expected
+```
+
+`getAletheDecoders` resolves the same priority-ordered registry used by replay.
+`TermCtx.symbols` supplies the Lean expressions corresponding to symbolic SMT
+atoms, while `toExpr?` exercises recursive term decoding around the custom
+operator.
+
+## Require Alethe in an Integration Test
+
+Run a symbolic theorem with cvc5 and Alethe-only reconstruction.
+Using `"auto"` here is insufficient because successful core-directed
+reconstruction could hide a broken decoder:
+
+```lean
+section
+
+set_option crush.backend "cvc5"
+set_option crush.trust "reconstruct"
+set_option crush.reconstruct "alethe"
+set_option crush.timeout 10
+
+theorem customDivisibilityReplay (x : Int)
+    (hx : MultipleOfThree x) :
+    ¬x % 3 ≠ 0 := by
+  crush
+
+#print axioms customDivisibilityReplay
+
+end
+```
+
+The theorem must elaborate without `Crush.crushSorry` in the `#print axioms`
+output.
+Use symbolic operands and a property that depends on the custom operator;
+closed computations may be discharged before the decoder is exercised.
+
+The complete executable version is available in
+[Test/AletheExtension.lean](https://github.com/AD1024/lean-crush/blob/main/Test/AletheExtension.lean).
+
+## Diagnose Replay Failures
+
+The first failure classification identifies the layer to address:
+
+* `term-gap` means a certificate term could not be converted to Lean. Add or
+  correct a `@[crush_alethe]` decoder for the reported operator and term.
+* `rule-gap` means the terms decoded, but Lean could not prove one concrete
+  inference from its replayed premises. A term decoder cannot fix this.
+* “did not emit an Alethe certificate” means cvc5 proved the query but could not
+  serialize the proof. No downstream decoder or replay rule can recover a
+  certificate that the solver did not produce.
+* `kernel-reject` or `replay-exception` indicates an invalid generated proof or
+  an implementation defect. Reduce the failing theorem and report the
+  certificate step.
+
+There is currently no public attribute for registering a custom Alethe
+inference-rule handler.
+A new theory-specific rule therefore requires an upstream checked
+implementation in `Crush/Solver/AletheReplay.lean`.
+As a downstream alternative, use `crush.reconstruct "auto"` and register domain
+lemmas with `@[crush_reconstruct]`; those lemmas extend the core-directed
+fallback, not Alethe step replay.
+In strict `crush.reconstruct "alethe"` mode, every required inference must be
+supported by Alethe replay itself.
 
 # Parameterized Sort Handlers
 

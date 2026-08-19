@@ -126,7 +126,7 @@ The shape → rung map:
 Kept as syntax rather than names so each is elaborated once, here, where a typo is
 a build error instead of a runtime "unknown tactic". -/
 def finisherTactics : CoreM (Array (TSyntax `tactic)) := do
-  return #[
+  let mut tactics := #[
     (← `(tactic| (intros; grind))),
     (← `(tactic| (intros; omega))),
     (← `(tactic| (intros; simp_all))),
@@ -136,6 +136,11 @@ def finisherTactics : CoreM (Array (TSyntax `tactic)) := do
     (← `(tactic| (intros; subst_vars; decide))),
     (← `(tactic| (intros; subst_vars; rfl))),
     (← `(tactic| (intros; simp_all; decide)))]
+  if crush.reconstruct.trustBvDecide.get (← getOptions) then
+    tactics := tactics.push (← `(tactic| (intros; bv_decide)))
+  if crush.reconstruct.trustNativeDecide.get (← getOptions) then
+    tactics := tactics.push (← `(tactic| native_decide +revert))
+  return tactics
 
 /-- Finishers for constructor branches, ordered from cheap normalization to saturation.
 

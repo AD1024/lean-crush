@@ -309,11 +309,15 @@ private def xor? (args : Array Expr) : MetaM (Option Expr) := do
 
 /-- Rebuild SMT's pairwise `distinct`. -/
 private def distinct? (args : Array Expr) : MetaM (Option Expr) := do
-  let mut result := mkConst ``True
+  let mut inequalities := #[]
   for i in [:args.size] do
     for j in [i + 1:args.size] do
       let neq ← mkAppM ``Not #[← mkEq args[i]! args[j]!]
-      result ← mkAppM ``And #[result, neq]
+      inequalities := inequalities.push neq
+  if inequalities.isEmpty then return some (mkConst ``True)
+  let mut result := inequalities.back!
+  for i in [1:inequalities.size] do
+    result ← mkAppM ``And #[inequalities[inequalities.size - 1 - i]!, result]
   return some result
 
 /-- Rebuild an SMT `ite`, lifting mixed Lean `Bool`/`Prop` branches to propositions. -/
@@ -732,16 +736,23 @@ where
       return some result
     uninterp as
 
-/-- A clause `(cl t₁ … tₙ)` as the Lean proposition it asserts: the disjunction of its
-literals, and `False` for the empty clause. -/
-def clauseToExpr? (ctx : TermCtx) (fuel : Nat) (lits : Array Sexp) : MetaM (Option Expr) := do
-  if lits.isEmpty then return some (mkConst ``False)
+/-- Decode the top-level literals of an Alethe clause without flattening Boolean `or`
+terms that occur inside a literal. -/
+def clauseLiteralsToExprs? (ctx : TermCtx) (fuel : Nat)
+    (lits : Array Sexp) : MetaM (Option (Array Expr)) := do
   let mut out := #[]
   for l in lits do
     let some e ← toExpr? ctx fuel l | return none
     -- Clause literals are formulas; a `Bool`-sorted one must be lifted before it can be
     -- a disjunct (Lean's `Or` takes `Prop`s).
-    out := out.push (← toProp e)
+    out := out.push (← instantiateMVars (← toProp e))
+  return some out
+
+/-- A clause `(cl t₁ … tₙ)` as the Lean proposition it asserts: the disjunction of its
+literals, and `False` for the empty clause. -/
+def clauseToExpr? (ctx : TermCtx) (fuel : Nat) (lits : Array Sexp) : MetaM (Option Expr) := do
+  let some out ← clauseLiteralsToExprs? ctx fuel lits | return none
+  if out.isEmpty then return some (mkConst ``False)
   let mut e := out.back!
   for i in [1:out.size] do
     e ← mkAppM ``Or #[out[out.size - 1 - i]!, e]

@@ -334,6 +334,14 @@ indexing, `set`/`setIfInBounds`/`set!`, `push`, `pop`, `swap`/
   higher-order proofs, and rejects certificates containing signed bitvector-to-`Int`
   conversion; automatic mode may still reconstruct these from the unsat core.
   `"reconstructOrTrust"` falls back to the axiom with a warning when both checked paths fail.
+  For bit-vector-heavy reconstruction, `crush.reconstruct.trustBvDecide true` enables
+  `bv_decide` as an explicit native-code-trusting fallback. The resulting theorem names an
+  auditable `_native.bv_decide.ax_*` dependency; the option is off by default, preserving
+  kernel-only reconstruction.
+  `crush.reconstruct.trustNativeDecide true` enables the broader `native_decide` fallback
+  for finite or computational goals. It trusts Lean's native compiler, runtime, and all
+  executable definitions reached by the decision procedure; accepted proofs expose an
+  `_native.native_decide.ax_*` dependency. This option is also off by default.
 - **Rough edges.** Indirectly recursive datatypes (`Rose` with a `List Rose` field) become an
   opaque sort; Alethe replay needs cvc5 ≥ 1.3.
 

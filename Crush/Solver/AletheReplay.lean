@@ -9,8 +9,7 @@ open Lean Meta Elab Tactic
 
 The core-directed finisher (`Crush/Solver/Reconstruct.lean`) hands the *whole* goal to one
 Lean tactic. That works surprisingly often, but fails when the argument needs a long chain
-of small inferences no tactic re-finds in one shot — a Boolean pigeonhole, an EUF conflict
-several congruences deep.
+of small inferences no tactic re-finds in one shot.
 
 An Alethe proof is exactly that chain, already found: cvc5 reports ~20–60 steps, each a
 *trivial* clause following from one or two earlier ones. So instead of re-searching, we
@@ -20,16 +19,11 @@ negated goal.
 
 ## Why this is sound regardless of rule coverage
 
-Every step is discharged by a Lean tactic into a real proof term the kernel checks, so the
-trusted base is unchanged: the kernel plus the tactics we invoke. The rule name is only a
-*hint* for which tactic to try first — a wrong guess makes a step fail, never succeed
-wrongly. Any step that cannot be replayed (unhandled rule, unmappable term, failing tactic)
-makes `replay?` return `none`, and the caller falls back to the finisher ladder.
-
-So this is `Doc/PLAN.md` §9 M4 phase 3 done per *step* rather than per *rule*: we do not
-prove each Alethe rule sound once and for all (lean-auto's reflective checker, ~12k lines),
-we let the kernel check the proof's concrete instances. That trades a soundness
-meta-theorem for per-call work, and needs no verified checker.
+Tactic-generated steps are kernel-checked before reuse. Structural resolution combines
+already-checked premises with Lean's logical constructors, and the complete replayed proof
+is kernel-checked before assignment. The rule name is only a *hint* for which tactic to try
+first: a wrong guess makes a step fail, never succeed wrongly. Any step that cannot be
+replayed makes `replay?` return `none`, and the caller falls back to the finisher ladder.
 
 ## Subproof blocks
 
@@ -207,11 +201,37 @@ private theorem stringIsEmptyEqDecide (value : String) :
     value.isEmpty = decide (value = "") := by
   rw [Bool.eq_iff_iff, String.isEmpty_iff, decide_eq_true_iff]
 
+private theorem stringAppendIsEmptyEqIff (left right : String) :
+    (left ++ right).isEmpty = (left.isEmpty && right.isEmpty) ↔
+      ((left ++ right = "") ↔ (left = "" ∧ right = "")) := by
+  rw [Bool.eq_iff_iff]
+  simp only [String.isEmpty_iff, Bool.and_eq_true]
+
 private theorem bitVecGetLsbDXor {width : Nat} (left right : BitVec width)
     (index : Nat) :
     (BitVec.xor left right).getLsbD index =
       Bool.xor (left.getLsbD index) (right.getLsbD index) :=
   BitVec.getLsbD_xor
+
+private theorem bitVecUltEqTrueIffLt {width : Nat} (left right : BitVec width) :
+    left.ult right = true ↔ left < right :=
+  BitVec.ult_iff_lt
+
+private theorem bitVecUleEqTrueIffLe {width : Nat} (left right : BitVec width) :
+    left.ule right = true ↔ left ≤ right :=
+  BitVec.ule_iff_le
+
+private theorem decideIffBoolEqTrue {predicate : Prop} {decision : Decidable predicate}
+    {value : Bool} (equal : @decide predicate decision = value) :
+    predicate ↔ value = true := by
+  rw [← @decide_eq_true_iff predicate decision]
+  exact Bool.eq_iff_iff.mp equal
+
+private theorem decideEqBoolOfIff {predicate : Prop} {decision : Decidable predicate}
+    {value : Bool} (equal : predicate ↔ value = true) :
+    @decide predicate decision = value := by
+  rw [Bool.eq_iff_iff, @decide_eq_true_iff predicate decision]
+  exact equal
 
 private theorem existsLtSucc {predicate : Nat → Prop} (bound : Nat) :
     (∃ index < bound + 1, predicate index) ↔
@@ -256,6 +276,135 @@ private theorem intAbsEq (left right : Int) :
   by_cases hl : left < 0 <;> by_cases hr : right < 0 <;>
     simp [hl, hr] <;> omega
 
+private def bitVecUnsignedLtBits : (width : Nat) → BitVec width → BitVec width → Prop
+  | 0, _, _ => False
+  | width + 1, left, right =>
+      (left.msb = right.msb ∧
+        bitVecUnsignedLtBits width (left.setWidth width) (right.setWidth width)) ∨
+      (left.msb = false ∧ right.msb = true)
+
+private theorem bitVecUnsignedLtBitsCorrect {width : Nat}
+    (left right : BitVec width) :
+    bitVecUnsignedLtBits width left right ↔ left.toNat < right.toNat := by
+  induction width with
+  | zero =>
+    simp [bitVecUnsignedLtBits, BitVec.toNat_of_zero_length]
+  | succ width ih =>
+    have leftValue :
+        left.toNat =
+          left.msb.toNat * 2 ^ width + (left.setWidth width).toNat := by
+      have decomposition :=
+        congrArg BitVec.toNat (BitVec.cons_msb_setWidth left)
+      rw [BitVec.toNat_cons'] at decomposition
+      simpa only [Nat.shiftLeft_eq, Nat.mul_comm] using decomposition.symm
+    have rightValue :
+        right.toNat =
+          right.msb.toNat * 2 ^ width + (right.setWidth width).toNat := by
+      have decomposition :=
+        congrArg BitVec.toNat (BitVec.cons_msb_setWidth right)
+      rw [BitVec.toNat_cons'] at decomposition
+      simpa only [Nat.shiftLeft_eq, Nat.mul_comm] using decomposition.symm
+    have leftBound := (left.setWidth width).isLt
+    have rightBound := (right.setWidth width).isLt
+    cases hl : left.msb <;> cases hr : right.msb
+    all_goals
+      simp only [bitVecUnsignedLtBits, hl, hr]
+      rw [ih, leftValue, rightValue]
+      simp [hl, hr] <;> omega
+
+private theorem bitVecUnsignedLtBitsBoolCorrect {width : Nat}
+    (left right : BitVec width) :
+    left.ult right = true ↔ bitVecUnsignedLtBits width left right := by
+  simpa [BitVec.ult_eq_decide] using
+    (bitVecUnsignedLtBitsCorrect left right).symm
+
+private theorem bitVecSignedLtBitsCorrect {width : Nat}
+    (left right : BitVec (width + 1)) :
+    left.slt right = true ↔
+      (left.msb = right.msb ∧
+        bitVecUnsignedLtBits width (left.setWidth width) (right.setWidth width)) ∨
+      (left.msb = true ∧ right.msb = false) := by
+  by_cases hsign : left.msb = right.msb
+  · rw [BitVec.slt_eq_ult_of_msb_eq hsign]
+    rw [BitVec.ult_eq_decide, decide_eq_true_iff, ← bitVecUnsignedLtBitsCorrect]
+    simp [bitVecUnsignedLtBits, hsign]
+  · rw [BitVec.slt_eq_not_ult_of_msb_neq hsign,
+      BitVec.ult_eq_msb_of_msb_neq hsign]
+    cases hl : left.msb <;> cases hr : right.msb <;> simp_all
+
+private theorem bitVecOfNatPowSubOne (width : Nat) :
+    BitVec.ofNat width (2 ^ width - 1) = BitVec.allOnes width := by
+  rw [← BitVec.toNat_inj, BitVec.toNat_ofNat, BitVec.toNat_allOnes]
+  apply Nat.mod_eq_of_lt
+  have positive := Nat.two_pow_pos width
+  omega
+
+private theorem bitVecUleOfNatPowSubOne {width : Nat} (value : BitVec width) :
+    value.ule (BitVec.ofNat width (2 ^ width - 1)) = true := by
+  rw [bitVecOfNatPowSubOne, BitVec.ule_eq_decide, decide_eq_true_iff]
+  have bound := value.isLt
+  simp
+  omega
+
+private theorem bitVecAndOfNatPowSubOne {width : Nat} (value : BitVec width) :
+    value &&& BitVec.ofNat width (2 ^ width - 1) = value := by
+  rw [bitVecOfNatPowSubOne]
+  exact BitVec.and_allOnes
+
+private theorem bitVecMulPowTwoEliminate {high shift : Nat}
+    (value : BitVec (high + 1 + shift)) :
+    value * BitVec.ofNat (high + 1 + shift) (2 ^ shift) =
+      BitVec.extractLsb high 0 value ++ 0#shift := by
+  have power :
+      BitVec.ofNat (high + 1 + shift) (2 ^ shift) =
+        BitVec.twoPow (high + 1 + shift) shift := by
+    apply BitVec.eq_of_toNat_eq
+    simp
+  rw [power, BitVec.mul_twoPow_eq_shiftLeft]
+  have remaining : high + 1 + shift - shift = high + 1 := by omega
+  have last : high + 1 - 1 = high := by omega
+  rw [BitVec.shiftLeft_eq_concat_of_lt (x := value) (n := shift) (by omega)]
+  apply BitVec.eq_of_toNat_eq
+  simp [BitVec.extractLsb'_eq_extractLsb, remaining, last]
+
+private theorem bitVecExtractSignEqFalse {width : Nat} (value : BitVec (width + 1)) :
+    BitVec.extractLsb' width 1 value = 0#1 ↔ value.msb = false := by
+  simp [BitVec.eq_of_getLsbD_eq_iff, BitVec.msb, BitVec.getMsbD_eq_getLsbD]
+
+private theorem bitVecExtractSignEqTrue {width : Nat} (value : BitVec (width + 1)) :
+    BitVec.extractLsb' width 1 value = 1#1 ↔ value.msb = true := by
+  simp [BitVec.eq_of_getLsbD_eq_iff, BitVec.msb, BitVec.getMsbD_eq_getLsbD]
+
+private theorem bitVecSmodEliminate {width : Nat}
+    (left right : BitVec (width + 1)) :
+    left.smod right =
+      let leftNonnegative := BitVec.extractLsb' width 1 left = 0#1
+      let rightNonnegative := BitVec.extractLsb' width 1 right = 0#1
+      let unsigned :=
+        (if leftNonnegative then left else -left).umod
+          (if rightNonnegative then right else -right)
+      if unsigned = 0#(width + 1) then
+        unsigned
+      else if leftNonnegative ∧ rightNonnegative then
+        unsigned
+      else if BitVec.extractLsb' width 1 left = 1#1 ∧ rightNonnegative then
+        -unsigned + right
+      else if leftNonnegative ∧ BitVec.extractLsb' width 1 right = 1#1 then
+        unsigned + right
+      else
+        -unsigned := by
+  cases hl : left.msb <;> cases hr : right.msb <;>
+    simp_all [BitVec.smod_eq, bitVecExtractSignEqFalse, bitVecExtractSignEqTrue,
+      BitVec.sub_eq_add_neg, BitVec.add_comm]
+
+private def bvDecideHint? : CoreM (Option (TSyntax `tactic)) := do
+  unless crush.reconstruct.trustBvDecide.get (← getOptions) do return none
+  return some (← `(tactic| bv_decide))
+
+private def sexpNat? : Sexp → Option Nat
+  | .atom value => value.toNat?
+  | _ => none
+
 /-- Alethe's `rare_rewrite` rule carries the concrete rewrite name as its first argument.
 Use that name to keep string-theory replay local to the relevant bridge theorem. -/
 private def rareRewriteHint? (args : Array Sexp) :
@@ -297,19 +446,66 @@ private def rareRewriteHint? (args : Array Sexp) :
     return some (← `(tactic| omega))
   | "arith-abs-eq" =>
     return some (← `(tactic| exact intAbsEq _ _))
+  | "bv-ule-max" =>
+    return some (← `(tactic| exact iff_true_intro (bitVecUleOfNatPowSubOne _)))
+  | "bv-mult-pow2-1" =>
+    let some shift := (args[6]?).bind sexpNat? | return none
+    let some high := (args[7]?).bind sexpNat? | return none
+    let shiftSyntax : TSyntax `term := ⟨Syntax.mkNumLit (toString shift)⟩
+    let highSyntax : TSyntax `term := ⟨Syntax.mkNumLit (toString high)⟩
+    return some
+      (← `(tactic| exact bitVecMulPowTwoEliminate
+          (high := $highSyntax) (shift := $shiftSyntax) _))
+  | "bv-smod-eliminate" =>
+    return some (← `(tactic| exact bitVecSmodEliminate _ _))
+  | "bv-sle-eliminate" =>
+    return some (← `(tactic| simp [BitVec.sle_eq_not_slt]))
+  | "bv-ule-eliminate" =>
+    return some (← `(tactic| simp [BitVec.ule_eq_not_ult]))
+  | "bv-lt-self" | "bv-ult-self" | "bv-ugt-self"
+  | "bv-slt-self" | "bv-sgt-self" =>
+    return some
+      (← `(tactic| simp [BitVec.ult_eq_decide, BitVec.slt_eq_decide]))
   | name =>
     if name.startsWith "bv-" then
-      return some (← `(tactic| bv_decide))
+      return ← bvDecideHint?
     return none
+
+private def structurallyReflexiveRelation (target : Expr) : Bool :=
+  if let some (left, right) := target.iff? then
+    left.consumeMData == right.consumeMData
+  else if let some (_, left, right) := target.eq? then
+    left.consumeMData == right.consumeMData
+  else
+    false
 
 /-- Tactic to try first for a given rule, where we have a good guess. Purely a performance
 hint — see the module comment on soundness. -/
-private def ruleHint? (rule : String) (args : Array Sexp) :
+private def ruleHint? (target : Expr) (rule : String) (args : Array Sexp) :
     CoreM (Option (TSyntax `tactic)) := do
   match rule with
+  | "assume" =>
+    return some (← `(tactic| first
+      | simpa only [bitVecUltEqTrueIffLt, bitVecUleEqTrueIffLe] using ‹_›
+      | exact mt (stringAppendIsEmptyEqIff _ _).mpr (by assumption)
+      | simpa [stringIsEmptyEqDecide, String.append_eq_empty_iff] using ‹_›
+      | simpa [BitVec.ult_eq_decide, BitVec.ule_eq_decide,
+          BitVec.slt_eq_decide, BitVec.sle_eq_decide] using ‹_›
+      | (dsimp at *
+         simp_all [BitVec.ult_eq_decide, BitVec.ule_eq_decide,
+           BitVec.slt_eq_decide, BitVec.sle_eq_decide])))
   | "refl" => return some (← `(tactic| rfl))
   | "evaluate" | "false" => return some (← `(tactic| decide))
-  | "cong" | "trans" => return some (← `(tactic| grind))
+  | "cong" =>
+    if structurallyReflexiveRelation target then
+      return some (← `(tactic| rfl))
+    return some (← `(tactic| first
+      | exact imp_congr Iff.rfl (by assumption)
+      | exact imp_congr (by assumption) Iff.rfl
+      | (apply imp_congr <;> assumption)
+      | (congr 1 <;> assumption)
+      | simp_all only))
+  | "trans" => return some (← `(tactic| grind))
   | "forall_inst" =>
     return some (← `(tactic| exact forallInstClause _ _))
   | "bind" => return some (← `(tactic| grind))
@@ -322,18 +518,32 @@ private def ruleHint? (rule : String) (args : Array Sexp) :
   | "and_neg" =>
     return some (← `(tactic| simp_all [Bool.xor_comm, Bool.xor_left_comm]))
   | "hole" =>
-    return some (← `(tactic| bv_decide))
-  | "aci_simp" | "bv_bitwise_slicing" =>
-    return some (← `(tactic| bv_decide))
+    return ← bvDecideHint?
+  | "aci_simp" =>
+    return some (← `(tactic| exact bitVecAndOfNatPowSubOne _))
+  | "bv_bitwise_slicing" =>
+    return ← bvDecideHint?
   | "rare_rewrite" => rareRewriteHint? args
-  | "resolution" => return some (← `(tactic| simp_all [stringIsEmptyEqDecide]))
-  | "not_or" | "or" | "and" | "equiv_pos2" | "contraction"
-  | "reordering" | "implies" | "implies_neg1" | "implies_neg2" | "subproof" =>
+  | "resolution" =>
+    return some (← `(tactic| first | grind | simp_all [stringIsEmptyEqDecide]))
+  | "not_or" | "or" | "and" | "and_intro" | "and_pos" | "or_pos" | "or_neg"
+  | "equiv1" | "equiv2" | "equiv_pos1" | "equiv_pos2" | "equiv_neg1" | "equiv_neg2"
+  | "xor_pos1" | "xor_pos2" | "xor_neg1" | "xor_neg2" | "ite1" | "ite2"
+  | "contraction" | "reordering" | "implies" | "implies_neg1" | "implies_neg2"
+  | "subproof" =>
     return some (← `(tactic| grind))
   | rule =>
     if rule.startsWith "bv_bitblast_step_" then
-      return some (← `(tactic| bv_decide))
+      return ← bvDecideHint?
     return none
+
+private partial def concreteNatValue? (value : Expr) : MetaM (Option Nat) := do
+  if let some value ← getNatValue? value then return some value
+  let value ← whnf value
+  if let some value ← getNatValue? value then return some value
+  if value.isAppOfArity ``Nat.succ 1 then
+    return (← concreteNatValue? value.getAppArgs[0]!).map (· + 1)
+  return none
 
 /-- Project a bit-vector equality into cvc5's conjunction of bit equalities. -/
 private partial def bitEqualityForward (index width : Nat) :
@@ -344,7 +554,16 @@ private partial def bitEqualityForward (index width : Nat) :
   let proveBit ← `(tacticSeq|
     have projected := congrArg (fun vector => vector.getLsbD $value) heq
     repeat' rw [bitVecGetLsbDXor] at projected
-    exact projected)
+    first
+    | exact projected
+    | simp only [BitVec.getLsbD_ofBoolListLE, List.getD] at projected
+      exact decideIffBoolEqTrue projected
+    | simp only [BitVec.getLsbD_ofBoolListLE, List.getD] at projected
+      exact (decideIffBoolEqTrue projected).symm
+    | simp only [BitVec.getLsbD_ofBoolListLE, List.getD] at projected
+      exact decideIffBoolEqTrue projected.symm
+    | simp only [BitVec.getLsbD_ofBoolListLE, List.getD] at projected
+      exact (decideIffBoolEqTrue projected.symm).symm)
   if index + 1 >= width then
     return proveBit
   let rest ← bitEqualityForward (index + 1) width
@@ -360,11 +579,26 @@ private partial def bitIndexCases (index width : Nat) :
     return ← `(tacticSeq| omega <;> done)
   let rest ← bitIndexCases (index + 1) width
   let value : TSyntax `term := ⟨Syntax.mkNumLit (toString index)⟩
+  let mut projection ← `(term| hbits)
+  for _ in [:index] do
+    projection ← `(term| ($projection).2)
+  if index + 1 < width then
+    projection ← `(term| ($projection).1)
   `(tacticSeq|
     by_cases hindex : i = $value
     · subst i
-      repeat' rw [bitVecGetLsbDXor]
-      grind
+      first
+      | exact $projection
+      | simp only [BitVec.getLsbD_ofBoolListLE, List.getD]
+        exact decideEqBoolOfIff $projection
+      | simp only [BitVec.getLsbD_ofBoolListLE, List.getD]
+        exact (decideEqBoolOfIff $projection).symm
+      | simp only [BitVec.getLsbD_ofBoolListLE, List.getD]
+        exact decideEqBoolOfIff ($projection).symm
+      | simp only [BitVec.getLsbD_ofBoolListLE, List.getD]
+        exact (decideEqBoolOfIff ($projection).symm).symm
+      | repeat' rw [bitVecGetLsbDXor]
+        grind
     · $rest:tacticSeq)
 
 /-- Concrete checker for cvc5's vector-equality-to-bits bridge. -/
@@ -373,11 +607,12 @@ private def bitVecEqualityHint? (target : Expr) : TacticM (Option (TSyntax `tact
   unless target.isAppOfArity ``Iff 2 do return none
   let equality := target.getAppArgs[0]!
   unless equality.isAppOfArity ``Eq 3 do return none
-  let type ← whnf equality.getAppArgs[0]!
+  let type ← whnf (← inferType equality.getAppArgs[1]!)
   let .app (.const ``BitVec _) widthExpr := type | return none
-  let some width ← getNatValue? widthExpr | return none
+  let some width ← concreteNatValue? widthExpr | return none
   let forward ← bitEqualityForward 0 width
   let cases ← bitIndexCases 0 width
+  let widthSyntax : TSyntax `term := ⟨Syntax.mkNumLit (toString width)⟩
   return some (← `(tactic|
     (constructor
      · intro heq
@@ -385,20 +620,22 @@ private def bitVecEqualityHint? (target : Expr) : TacticM (Option (TSyntax `tact
      · intro hbits
        apply BitVec.eq_of_getLsbD_eq
        intro i hi
+       have hbound : i < $widthSyntax := by exact hi
        ($cases:tacticSeq))))
 
 /-- Enumerate a concrete bit-vector width and prove each selected negation bit. -/
-private partial def bitVecNegCases (remaining : Nat) :
+private partial def bitVecNegCases (index width : Nat) :
     TacticM (TSyntax `Lean.Parser.Tactic.tacticSeq) := do
-  if remaining == 0 then
+  if index >= width then
     return ← `(tacticSeq| omega <;> done)
-  let rest ← bitVecNegCases (remaining - 1)
+  let rest ← bitVecNegCases (index + 1) width
+  let value : TSyntax `term := ⟨Syntax.mkNumLit (toString index)⟩
   `(tacticSeq|
-    cases i with
-    | zero =>
-      simp_all [BitVec.getLsbD_append, BitVec.getLsbD_neg, existsLtSucc,
-        Bool.xor_comm, Bool.xor_left_comm] <;> done
-    | succ i => $rest:tacticSeq)
+    by_cases hindex : i = $value
+    · subst i
+      rw [BitVec.neg_eq, BitVec.getLsbD_neg, BitVec.getLsbD_ofBoolListLE]
+      simp_all [existsLtSucc, Bool.xor_comm] <;> grind <;> done
+    · $rest:tacticSeq)
 
 /-- Prove cvc5's ripple-carry expansion of fixed-width bit-vector negation. -/
 private def bitVecNegationHint? (target : Expr) :
@@ -407,12 +644,77 @@ private def bitVecNegationHint? (target : Expr) :
   unless target.isAppOfArity ``Eq 3 do return none
   let type ← whnf target.getAppArgs[0]!
   let .app (.const ``BitVec _) widthExpr := type | return none
-  let some width ← getNatValue? widthExpr | return none
-  let cases ← bitVecNegCases width
+  let some width ← concreteNatValue? widthExpr | return none
+  let cases ← bitVecNegCases 0 width
   return some (← `(tactic|
     (apply BitVec.eq_of_getLsbD_eq
      intro i hi
      ($cases:tacticSeq))))
+
+private partial def bitVecExtractCases (index width : Nat) :
+    TacticM (TSyntax `Lean.Parser.Tactic.tacticSeq) := do
+  if index >= width then
+    return ← `(tacticSeq| omega <;> done)
+  let rest ← bitVecExtractCases (index + 1) width
+  let value : TSyntax `term := ⟨Syntax.mkNumLit (toString index)⟩
+  `(tacticSeq|
+    by_cases hindex : i = $value
+    · subst i
+      rw [BitVec.getLsbD_extractLsb, BitVec.getLsbD_ofBoolListLE]
+      simp [List.getD]
+    · $rest:tacticSeq)
+
+/-- Check cvc5's extraction circuit against Lean's indexed-bit semantics. -/
+private def bitVecExtractHint? (target : Expr) :
+    TacticM (Option (TSyntax `tactic)) := do
+  let target ← whnf target
+  unless target.isAppOfArity ``Eq 3 do return none
+  let type ← whnf (← inferType target.getAppArgs[1]!)
+  let .app (.const ``BitVec _) widthExpr := type | return none
+  let some width ← concreteNatValue? widthExpr | return none
+  let widthSyntax : TSyntax `term := ⟨Syntax.mkNumLit (toString width)⟩
+  let cases ← bitVecExtractCases 0 width
+  return some (← `(tactic|
+    (apply BitVec.eq_of_getLsbD_eq
+     intro i hi
+     have hbound : i < $widthSyntax := by exact hi
+     ($cases:tacticSeq))))
+
+/-- Prove cvc5's unrolled unsigned lexicographic comparison at any width. -/
+private def bitVecUnsignedLtHint? (target : Expr) :
+    TacticM (Option (TSyntax `tactic)) := do
+  let target ← whnf target
+  unless target.isAppOfArity ``Iff 2 do return none
+  let comparison := target.getAppArgs[0]!
+  unless comparison.isAppOfArity ``Eq 3 do return none
+  let ult := comparison.getAppArgs[1]!
+  unless ult.isAppOfArity ``BitVec.ult 3 do return none
+  let type ← whnf (← inferType ult.getAppArgs[1]!)
+  let .app (.const ``BitVec _) widthExpr := type | return none
+  let some width ← concreteNatValue? widthExpr | return none
+  let widthSyntax : TSyntax `term := ⟨Syntax.mkNumLit (toString width)⟩
+  return some (← `(tactic|
+    (rw [bitVecUnsignedLtBitsBoolCorrect (width := $widthSyntax)]
+     simp [bitVecUnsignedLtBits, BitVec.msb_eq_getLsbD_last])))
+
+/-- Prove cvc5's unrolled signed lexicographic comparison at any positive width. -/
+private def bitVecSignedLtHint? (target : Expr) :
+    TacticM (Option (TSyntax `tactic)) := do
+  let target ← whnf target
+  unless target.isAppOfArity ``Iff 2 do return none
+  let comparison := target.getAppArgs[0]!
+  unless comparison.isAppOfArity ``Eq 3 do return none
+  let slt := comparison.getAppArgs[1]!
+  unless slt.isAppOfArity ``BitVec.slt 3 do return none
+  let type ← whnf (← inferType slt.getAppArgs[1]!)
+  let .app (.const ``BitVec _) widthExpr := type | return none
+  let some width ← concreteNatValue? widthExpr | return none
+  if width == 0 then return none
+  let lowerWidth := width - 1
+  let widthSyntax : TSyntax `term := ⟨Syntax.mkNumLit (toString lowerWidth)⟩
+  return some (← `(tactic|
+    (rw [bitVecSignedLtBitsCorrect (width := $widthSyntax)]
+     simp [bitVecUnsignedLtBits, BitVec.msb_eq_getLsbD_last])))
 
 /-- Prove `target` from the proofs in `premises`, trying the rule's hinted tactic first.
 
@@ -420,7 +722,7 @@ Builds the implication `p₁ → … → pₙ → target`, abstracts exactly its
 proves the resulting closed proposition in an empty context, then applies it to those
 variables and the premise proofs. Thus a step tactic cannot inspect any ambient declaration
 that is absent from the step itself. -/
-private def proveStep (target : Expr) (premises : Array Expr) (rule : String)
+private def proveStepCore (target : Expr) (premises : Array Expr) (rule : String)
     (args : Array Sexp := #[]) :
     TacticM (Option Expr) := do
   let hypTypes ← premises.mapM fun p => do instantiateMVars (← inferType p)
@@ -433,18 +735,27 @@ private def proveStep (target : Expr) (premises : Array Expr) (rule : String)
       bitVecEqualityHint? target
     else if rule == "bv_bitblast_step_bvneg" then
       bitVecNegationHint? target
+    else if rule == "bv_bitblast_step_extract" then
+      bitVecExtractHint? target
+    else if rule == "bv_bitblast_step_bvult" then
+      bitVecUnsignedLtHint? target
+    else if rule == "bv_bitblast_step_bvslt" then
+      bitVecSignedLtHint? target
     else
-      ruleHint? rule args
+      ruleHint? target rule args
   let isStringRewrite :=
     rule == "rare_rewrite" &&
       match args[0]? with
       | some (Sexp.str name) => name.startsWith "str-"
       | _ => false
-  let hinted := match hint with | some t => #[t] | none => #[]
+  let mut hinted := match hint with | some t => #[t] | none => #[]
+  if rule == "aci_simp" || rule == "bv_bitblast_step_bvequal" ||
+      rule == "bv_bitblast_step_bvneg" || rule == "bv_bitblast_step_extract" ||
+      rule == "bv_bitblast_step_bvult" || rule == "bv_bitblast_step_bvslt" then
+    if let some native ← bvDecideHint? then
+      hinted := hinted.push native
   let fallbacks ← stepTactics
-  let tactics :=
-    if isStringRewrite || rule == "bv_bitblast_step_bvneg" then hinted
-    else hinted ++ fallbacks
+  let tactics := if isStringRewrite then hinted else hinted ++ fallbacks
   for tac in tactics do
     let saved ← saveState
     let snapshot ← KernelCheckSnapshot.capture
@@ -455,27 +766,28 @@ private def proveStep (target : Expr) (premises : Array Expr) (rule : String)
           Tactic.withoutRecover (evalTactic (← `(tactic| (intros; $tac))))
       if gs.isEmpty then
         let assigned ← instantiateMVars mv
-        if rule == "bv_bitblast_step_bvneg" && assigned.hasMVar then
-          for mvarId in (← getMVars assigned) do
-            trace[crush.result] "Alethe bvneg unresolved metavariable {mvarId}: \
-              {← instantiateMVars (← mvarId.getType)}"
         let proof := mkAppN (mkAppN assigned stepParams) premises
         let proof ← kernelCheckProofWithParams snapshot checkParams target proof
         return some proof
-      if rule == "bv_bitblast_step_bvneg" then
-        let remaining ← gs.mapM fun goal => do instantiateMVars (← goal.getType)
-        trace[crush.result] "Alethe bvneg proof left goals: {remaining}"
       restoreState saved
-    catch e =>
-      if rule == "bv_bitblast_step_bvneg" then
-        trace[crush.result] "Alethe bvneg proof failed: {e.toMessageData}"
+    catch _ =>
       restoreState saved
   return none
 
+private def proveStep (target : Expr) (premises : Array Expr) (rule : String)
+    (args : Array Sexp := #[]) :
+    TacticM (Option Expr) :=
+  proveStepCore target premises rule args
+
 private structure ClauseProof where
   proof : Expr
+  clause : Expr
   literals : Array Expr
   deriving Inhabited
+
+private def unitClauseProof (proof : Expr) : MetaM ClauseProof := do
+  let clause ← instantiateMVars (← inferType proof)
+  return { proof, clause, literals := #[clause] }
 
 private structure ResolutionCandidate where
   left : Nat
@@ -485,13 +797,22 @@ private structure ResolutionCandidate where
   result : Array Expr
   score : Nat
 
-private partial def flattenClause (clause : Expr) : Array Expr :=
-  let clause := clause.consumeMData
-  if clause.isConstOf ``False then #[]
-  else if clause.isAppOfArity ``Or 2 then
-    flattenClause clause.getAppArgs[0]! ++ flattenClause clause.getAppArgs[1]!
-  else
-    #[clause]
+private structure BinaryResolutionCandidate where
+  leftPivot : Nat
+  rightPivot : Nat
+  result : Array Expr
+  score : Nat
+
+private def wideResolutionThreshold : Nat := 8
+
+private def premiseReferenceCounts (commands : Array Command) :
+    Std.HashMap String Nat := Id.run do
+  let mut counts : Std.HashMap String Nat := {}
+  for command in commands do
+    if let .step _ _ _ premises _ _ := command then
+      for premise in premises do
+        counts := counts.insert premise (counts.getD premise 0 + 1)
+  return counts
 
 private def mkClause (literals : Array Expr) : MetaM Expr := do
   if literals.isEmpty then return mkConst ``False
@@ -500,15 +821,49 @@ private def mkClause (literals : Array Expr) : MetaM Expr := do
     clause ← mkAppM ``Or #[literals[literals.size - 1 - i]!, clause]
   return clause
 
-private def sameLiteral (left right : Expr) : MetaM Bool :=
-  isDefEq left right
+private partial def sameLiteral (left right : Expr) (fuel : Nat := 16) : MetaM Bool := do
+  let left := left.consumeMData
+  let right := right.consumeMData
+  if left == right then return true
+  if fuel == 0 then return false
+  let left ← whnf left
+  let right ← whnf right
+  if left.consumeMData == right.consumeMData then return true
+  match left.consumeMData, right.consumeMData with
+  | .app .., .app .. =>
+    let leftArgs := left.getAppArgs
+    let rightArgs := right.getAppArgs
+    unless leftArgs.size == rightArgs.size &&
+        left.getAppFn.consumeMData == right.getAppFn.consumeMData do
+      return false
+    for i in [:leftArgs.size] do
+      unless ← sameLiteral leftArgs[i]! rightArgs[i]! (fuel - 1) do
+        return false
+    return true
+  | .forallE _ leftDomain leftBody _, .forallE _ rightDomain rightBody _ =>
+    unless ← sameLiteral leftDomain rightDomain (fuel - 1) do
+      return false
+    if leftBody.consumeMData == rightBody.consumeMData then return true
+    withLocalDeclD `x leftDomain fun x =>
+      sameLiteral (leftBody.instantiate1 x) (rightBody.instantiate1 x) (fuel - 1)
+  | _, _ => return false
 
 private def complementary (left right : Expr) : MetaM Bool := do
   if left.isAppOfArity ``Not 1 then
-    return ← sameLiteral left.getAppArgs[0]! right
+    if ← sameLiteral left.getAppArgs[0]! right then return true
   if right.isAppOfArity ``Not 1 then
     return ← sameLiteral left right.getAppArgs[0]!
   return false
+
+private def contradictionProof? (left leftProof right rightProof : Expr) :
+    MetaM (Option Expr) := do
+  if left.isAppOfArity ``Not 1 then
+    if ← sameLiteral left.getAppArgs[0]! right then
+      return some (mkApp leftProof rightProof)
+  if right.isAppOfArity ``Not 1 then
+    if ← sameLiteral left right.getAppArgs[0]! then
+      return some (mkApp rightProof leftProof)
+  return none
 
 private def containsLiteral (literals : Array Expr) (literal : Expr) : MetaM Bool := do
   for existing in literals do
@@ -536,127 +891,339 @@ private def clauseSubset (left right : Array Expr) : MetaM Bool := do
   return true
 
 /-- Inject a proof of one literal into a right-associated clause containing it. -/
-private partial def injectLiteral (target literal proof : Expr) : MetaM (Option Expr) := do
+private partial def injectLiteral (target : Expr) (targetLiterals : Array Expr)
+    (literal proof : Expr) : MetaM (Option Expr) := do
+  let some first := targetLiterals[0]? | return none
+  if targetLiterals.size == 1 then
+    if ← sameLiteral literal first then return some proof
+    return none
   let target := target.consumeMData
-  if target.isAppOfArity ``Or 2 then
-    let left := target.getAppArgs[0]!
-    let right := target.getAppArgs[1]!
-    if ← sameLiteral literal left then
-      return some (mkApp3 (mkConst ``Or.inl) left right proof)
-    let some rightProof ← injectLiteral right literal proof | return none
-    return some (mkApp3 (mkConst ``Or.inr) left right rightProof)
-  if ← sameLiteral literal target then return some proof
+  unless target.isAppOfArity ``Or 2 do return none
+  let left := target.getAppArgs[0]!
+  let right := target.getAppArgs[1]!
+  if ← sameLiteral literal first then
+    return some (mkApp3 (mkConst ``Or.inl) left right proof)
+  let some rightProof ←
+      injectLiteral right (targetLiterals.extract 1 targetLiterals.size) literal proof
+    | return none
+  return some (mkApp3 (mkConst ``Or.inr) left right rightProof)
+
+private partial def projectConjunct? (conjunction proof literal : Expr) :
+    MetaM (Option Expr) := do
+  if ← sameLiteral conjunction literal then return some proof
+  let conjunction := conjunction.consumeMData
+  unless conjunction.isAppOfArity ``And 2 do return none
+  let left := conjunction.getAppArgs[0]!
+  let right := conjunction.getAppArgs[1]!
+  let leftProof := mkApp3 (mkConst ``And.left) left right proof
+  if let some result ← projectConjunct? left leftProof literal then
+    return some result
+  let rightProof := mkApp3 (mkConst ``And.right) left right proof
+  projectConjunct? right rightProof literal
+
+private partial def injectProposition? (target proposition proof : Expr) :
+    MetaM (Option Expr) := do
+  if ← sameLiteral target proposition then return some proof
+  let target := target.consumeMData
+  unless target.isAppOfArity ``Or 2 do return none
+  let left := target.getAppArgs[0]!
+  let right := target.getAppArgs[1]!
+  if let some leftProof ← injectProposition? left proposition proof then
+    return some (mkApp3 (mkConst ``Or.inl) left right leftProof)
+  let some rightProof ← injectProposition? right proposition proof | return none
+  return some (mkApp3 (mkConst ``Or.inr) left right rightProof)
+
+private def excludedMiddleClause? (antecedent target : Expr)
+    (positive : Expr → MetaM (Option (Expr × Expr))) : MetaM (Option Expr) := do
+  let notAntecedent ← mkAppM ``Not #[antecedent]
+  let positiveBranch? ← withLocalDeclD `hpos antecedent fun hpos => do
+    let some (proposition, proof) ← positive hpos | return none
+    let some result ← injectProposition? target proposition proof | return none
+    return some (← mkLambdaFVars #[hpos] result)
+  let some positiveBranch := positiveBranch? | return none
+  let negativeBranch? ← withLocalDeclD `hneg notAntecedent fun hneg => do
+    let some result ← injectProposition? target notAntecedent hneg | return none
+    return some (← mkLambdaFVars #[hneg] result)
+  let some negativeBranch := negativeBranch? | return none
+  let cases ← mkAppM ``Classical.em #[antecedent]
+  return some (mkApp6 (mkConst ``Or.elim)
+    antecedent notAntecedent target cases positiveBranch negativeBranch)
+
+private def proveProjectionClause? (target : Expr) (targetLiterals : Array Expr) :
+    MetaM (Option Expr) := do
+  for negative in targetLiterals do
+    let negative := negative.consumeMData
+    unless negative.isAppOfArity ``Not 1 do continue
+    let antecedent := negative.getAppArgs[0]!
+    let proof? ← excludedMiddleClause? antecedent target fun hpos => do
+      for literal in targetLiterals do
+        if let some proof ← projectConjunct? antecedent hpos literal then
+          return some (literal, proof)
+      return some (antecedent, hpos)
+    if let some proof := proof? then return some proof
   return none
 
-/-- Eliminate every literal of a clause into a common target. -/
-private partial def eliminateClause (clause proof target : Expr)
+private def proveIffClause? (target : Expr) (premise : ClauseProof) :
+    MetaM (Option Expr) := do
+  let some (left, right) := premise.clause.iff? | return none
+  let forward? ← excludedMiddleClause? left target fun hleft =>
+    return some (right, mkApp4 (mkConst ``Iff.mp) left right premise.proof hleft)
+  if let some proof := forward? then return some proof
+  excludedMiddleClause? right target fun hright =>
+    return some (left, mkApp4 (mkConst ``Iff.mpr) left right premise.proof hright)
+
+/-- Eliminate the exact top-level literals of a right-associated clause. -/
+private partial def eliminateClause (clause : Expr) (literals : Array Expr)
+    (proof target : Expr)
     (onLiteral : Expr → Expr → MetaM (Option Expr)) : MetaM (Option Expr) := do
+  if literals.isEmpty then
+    if clause.consumeMData.isConstOf ``False then
+      return some (mkApp2 (mkConst ``False.elim [Level.zero]) target proof)
+    return none
+  if literals.size == 1 then
+    return ← onLiteral literals[0]! proof
   let clause := clause.consumeMData
-  if clause.isAppOfArity ``Or 2 then
-    let left := clause.getAppArgs[0]!
-    let right := clause.getAppArgs[1]!
-    let leftProof? ← withLocalDeclD `hleft left fun hleft => do
-      let some result ← eliminateClause left hleft target onLiteral | return none
-      return some (← mkLambdaFVars #[hleft] result)
-    let some leftProof := leftProof? | return none
-    let rightProof? ← withLocalDeclD `hright right fun hright => do
-      let some result ← eliminateClause right hright target onLiteral | return none
-      return some (← mkLambdaFVars #[hright] result)
-    let some rightProof := rightProof? | return none
-    return some (mkApp6 (mkConst ``Or.elim) left right target proof leftProof rightProof)
-  onLiteral clause proof
+  unless clause.isAppOfArity ``Or 2 do return none
+  let left := clause.getAppArgs[0]!
+  let right := clause.getAppArgs[1]!
+  let leftProof? ← withLocalDeclD `hleft left fun hleft => do
+    let some result ← onLiteral literals[0]! hleft | return none
+    return some (← mkLambdaFVars #[hleft] result)
+  let some leftProof := leftProof? | return none
+  let rightProof? ← withLocalDeclD `hright right fun hright => do
+    let some result ← eliminateClause right
+        (literals.extract 1 literals.size) hright target onLiteral
+      | return none
+    return some (← mkLambdaFVars #[hright] result)
+  let some rightProof := rightProof? | return none
+  return some (mkApp6 (mkConst ``Or.elim) left right target proof leftProof rightProof)
 
 /-- Weaken a clause by reordering its literals or adding alternatives. -/
-private def weakenClause (source proof target : Expr) : MetaM (Option Expr) := do
-  if source.consumeMData.isConstOf ``False then
-    return some (mkApp2 (mkConst ``False.elim [Level.zero]) target proof)
-  eliminateClause source proof target fun literal literalProof =>
-    injectLiteral target literal literalProof
+private def weakenClause (source : Expr) (sourceLiterals : Array Expr) (proof : Expr)
+    (target : Expr) (targetLiterals : Array Expr) : MetaM (Option Expr) := do
+  eliminateClause source sourceLiterals proof target fun literal literalProof =>
+    injectLiteral target targetLiterals literal literalProof
 
 /-- Construct one binary propositional-resolution proof without invoking a tactic. -/
-private def resolveClauses (leftClause rightClause target leftProof rightProof
+private def resolveClauses (leftClause : Expr) (leftLiterals : Array Expr)
+    (rightClause : Expr) (rightLiterals : Array Expr)
+    (target : Expr) (targetLiterals : Array Expr) (leftProof rightProof
     leftPivot rightPivot : Expr) : MetaM (Option Expr) := do
-  eliminateClause leftClause leftProof target fun leftLiteral leftLiteralProof => do
+  eliminateClause leftClause leftLiterals leftProof target
+      fun leftLiteral leftLiteralProof => do
     if ← sameLiteral leftLiteral leftPivot then
-      eliminateClause rightClause rightProof target fun rightLiteral rightLiteralProof => do
+      eliminateClause rightClause rightLiterals rightProof target
+          fun rightLiteral rightLiteralProof => do
         if ← sameLiteral rightLiteral rightPivot then
-          let falseProof :=
-            if leftPivot.isAppOfArity ``Not 1 then
-              mkApp leftLiteralProof rightLiteralProof
-            else
-              mkApp rightLiteralProof leftLiteralProof
+          let some falseProof ← contradictionProof?
+              leftLiteral leftLiteralProof rightLiteral rightLiteralProof
+            | return none
           return some (mkApp2 (mkConst ``False.elim [Level.zero]) target falseProof)
-        injectLiteral target rightLiteral rightLiteralProof
+        injectLiteral target targetLiterals rightLiteral rightLiteralProof
     else
-      injectLiteral target leftLiteral leftLiteralProof
+      injectLiteral target targetLiterals leftLiteral leftLiteralProof
+
+private def bestBinaryResolution? (left right target : Array Expr) :
+    MetaM (Option BinaryResolutionCandidate) := do
+  let mut best : Option BinaryResolutionCandidate := none
+  for leftIndex in [:left.size] do
+    for rightIndex in [:right.size] do
+      unless ← complementary left[leftIndex]! right[rightIndex]! do
+        continue
+      let result ← resolveAt left right leftIndex rightIndex
+      let mut foreign := 0
+      for literal in result do
+        unless ← containsLiteral target literal do foreign := foreign + 1
+      let candidate := {
+        leftPivot := leftIndex
+        rightPivot := rightIndex
+        result
+        score := foreign * 1024 + result.size
+      }
+      if best.all (candidate.score < ·.score) then
+        best := some candidate
+  return best
 
 private def bestResolution? (pool : Array ClauseProof) (target : Array Expr) :
     MetaM (Option ResolutionCandidate) := do
   let mut best : Option ResolutionCandidate := none
   for i in [:pool.size] do
     for j in [i + 1:pool.size] do
-      for leftIndex in [:pool[i]!.literals.size] do
-        for rightIndex in [:pool[j]!.literals.size] do
-          unless ← complementary
-              pool[i]!.literals[leftIndex]! pool[j]!.literals[rightIndex]! do
-            continue
-          let result ← resolveAt
-            pool[i]!.literals pool[j]!.literals leftIndex rightIndex
-          let mut foreign := 0
-          for literal in result do
-            unless ← containsLiteral target literal do foreign := foreign + 1
-          let candidate := {
-            left := i
-            right := j
-            leftPivot := leftIndex
-            rightPivot := rightIndex
-            result
-            score := foreign * 1024 + result.size
-          }
-          if best.all (candidate.score < ·.score) then
-            best := some candidate
+      let some binary ← bestBinaryResolution?
+          pool[i]!.literals pool[j]!.literals target | continue
+      let candidate := {
+        left := i
+        right := j
+        leftPivot := binary.leftPivot
+        rightPivot := binary.rightPivot
+        result := binary.result
+        score := binary.score
+      }
+      if best.all (candidate.score < ·.score) then
+        best := some candidate
   return best
 
-/-- Replay a wide resolution node as a sequence of checked binary resolutions. -/
-private def proveResolutionStep (target : Expr) (premises : Array Expr) :
+private def weakenClauseProof? (target : Expr) (targetLiterals : Array Expr)
+    (entry : ClauseProof) :
     TacticM (Option Expr) := do
-  let snapshot ← KernelCheckSnapshot.capture
-  let targetLiterals := flattenClause target
-  let mut pool := #[]
-  for proof in premises do
-    let type ← instantiateMVars (← inferType proof)
-    pool := pool.push { proof, literals := flattenClause type }
+  unless ← clauseSubset entry.literals targetLiterals do return none
+  let some proof ← weakenClause entry.clause entry.literals entry.proof
+      target targetLiterals | return none
+  return some proof
+
+/-- Resolve premises in certificate order when cvc5 emits a linear resolution node. -/
+private def proveOrderedResolutionStep? (target : Expr)
+    (targetLiterals : Array Expr) (premises : Array ClauseProof) :
+    TacticM (Option Expr) := do
+  let some first := premises[0]? | return none
+  let mut current := first
+  if let some proof ← weakenClauseProof? target targetLiterals current then
+    return some proof
+  for i in [1:premises.size] do
+    let next := premises[i]!
+    let some candidate ←
+        bestBinaryResolution? current.literals next.literals targetLiterals
+      | return none
+    let intermediate ← mkClause candidate.result
+    let some proof ← resolveClauses current.clause current.literals
+        next.clause next.literals intermediate candidate.result current.proof next.proof
+        current.literals[candidate.leftPivot]! next.literals[candidate.rightPivot]!
+      | return none
+    current := { proof, clause := intermediate, literals := candidate.result }
+    if let some proof ← weakenClauseProof? target targetLiterals current then
+      return some proof
+  return none
+
+/-- Replay a resolution node structurally when its clause graph is small or linear. -/
+private def proveResolutionStep (target : Expr) (targetLiterals : Array Expr)
+    (premises : Array ClauseProof) :
+    TacticM (Option Expr) := do
+  let mut pool := premises
+  if pool.size >= wideResolutionThreshold then
+    if let some proof ←
+        proveOrderedResolutionStep? target targetLiterals pool then
+      return some proof
+    return none
   while !pool.isEmpty do
     for entry in pool do
-      if ← clauseSubset entry.literals targetLiterals then
-        let source ← instantiateMVars (← inferType entry.proof)
-        if let some proof ← weakenClause source entry.proof target then
-          return some (← kernelCheckProof snapshot target proof)
+      if let some proof ← weakenClauseProof? target targetLiterals entry then
+        return some proof
     if pool.size < 2 then break
     let some candidate ← bestResolution? pool targetLiterals | break
     let intermediate ← mkClause candidate.result
     let left := pool[candidate.left]!
     let right := pool[candidate.right]!
-    let leftClause ← instantiateMVars (← inferType left.proof)
-    let rightClause ← instantiateMVars (← inferType right.proof)
-    let some proof ← resolveClauses leftClause rightClause intermediate
-        left.proof right.proof
+    let some proof ← resolveClauses left.clause left.literals right.clause right.literals
+        intermediate candidate.result left.proof right.proof
         left.literals[candidate.leftPivot]! right.literals[candidate.rightPivot]!
       | break
-    let proof ← kernelCheckProof snapshot intermediate proof
     let mut next := #[]
     for i in [:pool.size] do
       unless i == candidate.left || i == candidate.right do
         next := next.push pool[i]!
-    pool := next.push { proof, literals := candidate.result }
+    pool := next.push { proof, clause := intermediate, literals := candidate.result }
   return none
 
 /-- Replay a clause permutation or contraction by structural weakening. -/
-private def proveWeakeningStep (target premise : Expr) : TacticM (Option Expr) := do
+private def proveWeakeningStep (target : Expr) (targetLiterals : Array Expr)
+    (premise : ClauseProof) : TacticM (Option Expr) := do
   let snapshot ← KernelCheckSnapshot.capture
-  let source ← instantiateMVars (← inferType premise)
-  let some proof ← weakenClause source premise target | return none
+  let some proof ← weakenClause premise.clause premise.literals premise.proof
+      target targetLiterals | return none
   return some (← kernelCheckProof snapshot target proof)
+
+private structure RelationView where
+  isIff : Bool
+  carrier : Expr
+  left : Expr
+  right : Expr
+  deriving Inhabited
+
+private structure RelationProof where
+  view : RelationView
+  proof : Expr
+  deriving Inhabited
+
+private def relationView? (type : Expr) : Option RelationView :=
+  if let some (left, right) := type.iff? then
+    some { isIff := true, carrier := mkSort .zero, left, right }
+  else if let some (carrier, left, right) := type.eq? then
+    some { isIff := false, carrier, left, right }
+  else
+    none
+
+private def relationProof? (entry : ClauseProof) : Option RelationProof :=
+  (relationView? entry.clause).map fun view => { view, proof := entry.proof }
+
+private def reverseRelation (relation : RelationProof) : MetaM RelationProof := do
+  let view := relation.view
+  let proof ←
+    if view.isIff then
+      pure (mkApp3 (mkConst ``Iff.symm) view.left view.right relation.proof)
+    else
+      let level ← getLevel view.carrier
+      pure (mkApp4 (mkConst ``Eq.symm [level])
+        view.carrier view.left view.right relation.proof)
+  return {
+    view := { view with left := view.right, right := view.left }
+    proof
+  }
+
+private def composeRelations (left right : RelationProof) :
+    MetaM (Option RelationProof) := do
+  unless left.view.isIff == right.view.isIff do return none
+  unless ← sameLiteral left.view.right right.view.left do return none
+  unless left.view.isIff || (← sameLiteral left.view.carrier right.view.carrier) do
+    return none
+  let proof ←
+    if left.view.isIff then
+      pure (mkApp5 (mkConst ``Iff.trans)
+        left.view.left left.view.right right.view.right left.proof right.proof)
+    else
+      let level ← getLevel left.view.carrier
+      pure (mkApp6 (mkConst ``Eq.trans [level])
+        left.view.carrier left.view.left left.view.right right.view.right
+        left.proof right.proof)
+  return some {
+    view := { left.view with right := right.view.right }
+    proof
+  }
+
+private def proveTransStep? (target : Expr) (premises : Array ClauseProof) :
+    MetaM (Option Expr) := do
+  let some targetView := relationView? target | return none
+  let mut relations := #[]
+  let mut allRelations := #[]
+  for premise in premises do
+    let some relation := relationProof? premise | return none
+    allRelations := allRelations.push relation
+    unless ← sameLiteral relation.view.left relation.view.right do
+      relations := relations.push relation
+  if relations.isEmpty then relations := allRelations
+  let some first := relations[0]? | return none
+  let mut current := first
+  for i in [1:relations.size] do
+    let next := relations[i]!
+    let next ←
+      if ← sameLiteral current.view.right next.view.left then
+        pure next
+      else if ← sameLiteral current.view.right next.view.right then
+        reverseRelation next
+      else
+        return none
+    let some composed ← composeRelations current next | return none
+    current := composed
+  if current.view.isIff != targetView.isIff then return none
+  if !targetView.isIff &&
+      !(← sameLiteral current.view.carrier targetView.carrier) then
+    return none
+  if (← sameLiteral current.view.left targetView.left) &&
+      (← sameLiteral current.view.right targetView.right) then
+    return some current.proof
+  if (← sameLiteral current.view.left targetView.right) &&
+      (← sameLiteral current.view.right targetView.left) then
+    return some (← reverseRelation current).proof
+  return none
 
 /-- Replay a parsed Alethe proof into a Lean proof of `False`.
 
@@ -671,7 +1238,8 @@ partial def replay (proof : AletheProof) (rawSexps : Array Sexp)
   let decoders ← getAletheDecoders
   let ctx : TermCtx := { symbols, named, decoders }
   let failureRef ← IO.mkRef none
-  match ← go failureRef ctx facts proof.commands 0 {} #[] with
+  let referenceCounts := premiseReferenceCounts proof.commands
+  match ← go failureRef ctx facts proof.commands referenceCounts 0 {} #[] with
   | some proof => return .ok proof
   | none =>
     let failure ← failureRef.get
@@ -683,7 +1251,8 @@ where
   first empty clause reached. -/
   go (failureRef : ReplayFailureRef) (ctx : TermCtx)
       (facts : Std.HashMap String Expr) (cmds : Array Command)
-      (i : Nat) (env : Std.HashMap String Expr) (scopedProofs : Array Expr) :
+      (referenceCounts : Std.HashMap String Nat)
+      (i : Nat) (env : Std.HashMap String ClauseProof) (scopedProofs : Array Expr) :
       TacticM (Option Expr) := do
     let mut i := i
     let mut env := env
@@ -691,19 +1260,45 @@ where
       match cmds[i] with
       | .assume id term =>
         -- A top-level assumption is one of our asserted facts, so its Lean proof is already
-        -- in hand. Unnamed encoding axioms are accepted only when Lean can prove their
-        -- translated statement in an empty context; an unused, untranslatable axiom may be
-        -- skipped because no later step can consume it without a proof.
+        -- in hand. Decode its asserted SMT formula and check the semantic bridge from the
+        -- source fact before adding it to the clause environment. Unnamed encoding axioms
+        -- are accepted only when Lean can prove their translated statement in an empty
+        -- context; an unused, untranslatable axiom may be skipped because no later step can
+        -- consume it without a proof.
         match facts.get? id with
-        | some proof =>
-          env := env.insert id proof
+        | some sourceProof =>
+          let some target ← toExpr? ctx 64 term
+            | rememberFailure failureRef {
+                kind := .termGap
+                stepId := some id
+                term := some term
+                detail := "selected SMT assumption could not be decoded" }
+              return none
+          let target ← toPropM target
+          let sourceType ← instantiateMVars (← inferType sourceProof)
+          let proof? ←
+            if ← isDefEqGuarded sourceType target then
+              pure (some sourceProof)
+            else
+              proveStep target #[sourceProof] "assume"
+          let some proof := proof?
+            | trace[crush.result] "alethe replay: assumption bridge failed at {id}; \
+                source: {sourceType}; target: {target}"
+              rememberFailure failureRef {
+                kind := .ruleGap
+                stepId := some id
+                term := some term
+                detail := "decoded SMT assumption was not derivable from its Lean source fact" }
+              return none
+          let proof := mkApp2 (mkConst ``id [Level.zero]) target proof
+          env := env.insert id { proof, clause := target, literals := #[target] }
         | none =>
           match ← toExpr? ctx 64 term with
           | some target =>
             let target ← toPropM target
             if let some proof ←
                 (proveStep target #[] "assume" : TacticM (Option Expr)) then
-              env := env.insert id proof
+              env := env.insert id (← unitClauseProof proof)
             else
               trace[crush.result] "alethe replay: skipped unproved encoding assumption {id}"
           | none =>
@@ -711,23 +1306,24 @@ where
                                  assumption {id}"
         i := i + 1
       | .anchor .. =>
-        let some (stepId, closeClause, pf, next) ←
-            replayAnchor failureRef ctx facts cmds i env scopedProofs
+        let some (stepId, pf, next) ←
+            replayAnchor failureRef ctx facts cmds referenceCounts i env scopedProofs
           | return none
         env := env.insert stepId pf
-        if closeClause.isEmpty then
+        if pf.literals.isEmpty then
           trace[crush.result] "alethe replay: succeeded at {stepId}"
-          return some pf
+          return some pf.proof
         i := next
       | .step id clause rule premises args _ =>
         let some pf ←
-            replayStep failureRef ctx env scopedProofs id clause rule premises args
+            replayStep failureRef ctx referenceCounts env scopedProofs
+              id clause rule premises args
           | return none
         env := env.insert id pf
         -- The empty clause is `False`: the refutation is complete.
         if clause.isEmpty then
           trace[crush.result] "alethe replay: succeeded at {id}"
-          return some pf
+          return some pf.proof
         i := i + 1
     trace[crush.result] "alethe replay: declined (no empty-clause step)"
     rememberFailure failureRef {
@@ -737,11 +1333,12 @@ where
 
   /-- Replay one ordinary derived step from the proofs currently in scope. -/
   replayStep (failureRef : ReplayFailureRef) (ctx : TermCtx)
-      (env : Std.HashMap String Expr) (scopedProofs : Array Expr)
+      (referenceCounts : Std.HashMap String Nat)
+      (env : Std.HashMap String ClauseProof) (scopedProofs : Array Expr)
       (id : String)
       (clause : Array Sexp) (rule : String) (premises : Array String)
-      (args : Array Sexp) : TacticM (Option Expr) := do
-    let some target ← clauseToExpr? ctx 64 clause
+      (args : Array Sexp) : TacticM (Option ClauseProof) := do
+    let some targetLiterals ← clauseLiteralsToExprs? ctx 64 clause
       | trace[crush.result] "alethe replay: declined (untranslatable clause at {id}: \
                              {clause})"
         rememberFailure failureRef {
@@ -751,7 +1348,8 @@ where
           term := some (clauseSexp clause)
           detail := "certificate clause could not be decoded as a Lean proposition" }
         return none
-    let mut prems := #[]
+    let target ← mkClause targetLiterals
+    let mut premiseProofs : Array ClauseProof := #[]
     for premise in premises do
       let some pf := env.get? premise
         | trace[crush.result] "alethe replay: declined (missing premise {premise} of {id})"
@@ -762,14 +1360,28 @@ where
             term := some (clauseSexp clause)
             detail := s!"referenced premise `{premise}` has no replayed proof" }
           return none
-      prems := prems.push pf
-    let proof? ←
-      if rule == "resolution" && prems.size > 1 then
-        match ← proveResolutionStep target prems with
+      premiseProofs := premiseProofs.push pf
+    let prems := premiseProofs.map (·.proof)
+    let structural? ←
+      if premiseProofs.isEmpty then
+        proveProjectionClause? target targetLiterals
+      else if premiseProofs.size == 1 then
+        proveIffClause? target premiseProofs[0]!
+      else
+        pure none
+    let proof? ← match structural? with
+    | some proof => pure (some proof)
+    | none =>
+      if rule == "trans" then
+        match ← proveTransStep? target premiseProofs with
+        | some proof => pure (some proof)
+        | none => proveStep target prems rule args
+      else if rule == "resolution" && prems.size > 1 then
+        match ← proveResolutionStep target targetLiterals premiseProofs with
         | some proof => pure (some proof)
         | none => proveStep target prems rule args
       else if (rule == "reordering" || rule == "contraction") && prems.size == 1 then
-        match ← proveWeakeningStep target prems[0]! with
+        match ← proveWeakeningStep target targetLiterals premiseProofs[0]! with
         | some proof => pure (some proof)
         | none => proveStep target prems rule args
       else
@@ -793,13 +1405,22 @@ where
           term := some (clauseSexp clause)
           detail := "Lean could not prove this concrete inference from its replayed premises" }
         return none
-    return some pf
+    let pf ←
+      if rule == "resolution" &&
+          (referenceCounts.getD id 0 > 1 ||
+            premiseProofs.size >= wideResolutionThreshold) then
+        mkAuxTheorem target pf (zetaDelta := true)
+          (kind? := some `crushAletheStep)
+      else
+        pure pf
+    return some { proof := pf, clause := target, literals := targetLiterals }
 
   /-- Replay an anchored subproof or binder congruence and return its closed proof. -/
   replayAnchor (failureRef : ReplayFailureRef) (ctx : TermCtx)
       (facts : Std.HashMap String Expr) (cmds : Array Command)
-      (index : Nat) (env : Std.HashMap String Expr) (scopedProofs : Array Expr) :
-      TacticM (Option (String × Array Sexp × Expr × Nat)) := do
+      (referenceCounts : Std.HashMap String Nat)
+      (index : Nat) (env : Std.HashMap String ClauseProof) (scopedProofs : Array Expr) :
+      TacticM (Option (String × ClauseProof × Nat)) := do
     let some (.anchor stepId anchorArgs) := cmds[index]?
       | rememberFailure failureRef {
           kind := .malformedCertificate
@@ -820,7 +1441,7 @@ where
           detail := "anchor close is not an Alethe step" }
         return none
     let (assumptions, bodyStart) := collectAssumptions cmds (index + 1) close
-    let some conclusion ← clauseToExpr? ctx 64 closeClause
+    let some conclusionLiterals ← clauseLiteralsToExprs? ctx 64 closeClause
       | trace[crush.result] "alethe replay: declined (untranslatable anchored \
                              conclusion {stepId})"
         rememberFailure failureRef {
@@ -830,6 +1451,7 @@ where
           term := some (clauseSexp closeClause)
           detail := "anchored conclusion could not be decoded as a Lean proposition" }
         return none
+    let conclusion ← mkClause conclusionLiterals
     let pf? ←
       if closeRule == "subproof" then
         let localIds := assumptions.map (·.1)
@@ -844,7 +1466,7 @@ where
             term := some (clauseSexp closeClause)
             detail := "subproof discharge list does not match its local assumptions" }
           return none
-        let rec bindAssumptions (j : Nat) (innerEnv : Std.HashMap String Expr)
+        let rec bindAssumptions (j : Nat) (innerEnv : Std.HashMap String ClauseProof)
             (locals : Array Expr) : TacticM (Option Expr) := do
           if h : j < assumptions.size then
             let (localId, localTerm) := assumptions[j]
@@ -859,12 +1481,14 @@ where
                   detail := "local subproof assumption could not be decoded" }
                 return none
             let hypTy ← toPropM hypTy
-            withLocalDeclD (`hsub ++ localId.toName) hypTy fun hlocal =>
-              bindAssumptions (j + 1) (innerEnv.insert localId hlocal)
+            withLocalDeclD (`hsub ++ localId.toName) hypTy fun hlocal => do
+              let localProof : ClauseProof :=
+                { proof := hlocal, clause := hypTy, literals := #[hypTy] }
+              bindAssumptions (j + 1) (innerEnv.insert localId localProof)
                 (locals.push hlocal)
           else
             let some body ← goInner failureRef ctx facts cmds bodyStart close innerEnv
-                (scopedProofs ++ locals)
+                referenceCounts (scopedProofs ++ locals)
               | trace[crush.result] "alethe replay: declined (subproof {stepId} body)"
                 return none
             let implication ← mkLambdaFVars locals body
@@ -909,7 +1533,8 @@ where
             applyAnchorAssignments failureRef innerCtx stepId closeRule anchorArgs
                 fun assignedCtx => do
               let some body ←
-                  goInner failureRef assignedCtx facts cmds bodyStart close env scopedProofs
+                  goInner failureRef assignedCtx facts cmds bodyStart close env
+                    referenceCounts scopedProofs
                 | trace[crush.result] "alethe replay: declined (bind anchor {stepId} body)"
                   return none
               let generalized ← mkLambdaFVars locals body
@@ -938,7 +1563,8 @@ where
         applyAnchorAssignments failureRef ctx stepId closeRule anchorArgs
             fun assignedCtx => do
           let some body ←
-              goInner failureRef assignedCtx facts cmds bodyStart close env scopedProofs
+              goInner failureRef assignedCtx facts cmds bodyStart close env
+                referenceCounts scopedProofs
             | trace[crush.result] "alethe replay: declined ({closeRule} anchor \
                                    {stepId} body)"
               return none
@@ -962,13 +1588,17 @@ where
           term := some (clauseSexp closeClause)
           detail := "Lean could not discharge the anchored conclusion" }
         return none
-    return some (stepId, closeClause, pf, close + 1)
+    return some
+      (stepId, { proof := pf, clause := conclusion, literals := conclusionLiterals },
+        close + 1)
 
   /-- Replay a subproof block's steps, `[from, upto)`, returning the proof of the last one
   (the block's inner conclusion). -/
   goInner (failureRef : ReplayFailureRef) (ctx : TermCtx)
       (facts : Std.HashMap String Expr) (cmds : Array Command)
-      («from» upto : Nat) (env : Std.HashMap String Expr) (scopedProofs : Array Expr) :
+      («from» upto : Nat) (env : Std.HashMap String ClauseProof)
+      (referenceCounts : Std.HashMap String Nat)
+      (scopedProofs : Array Expr) :
       TacticM (Option Expr) := do
     let mut i := «from»
     let mut env := env
@@ -976,8 +1606,8 @@ where
     while i < upto do
       match cmds[i]! with
       | .anchor .. =>
-        let some (stepId, _, pf, next) ←
-            replayAnchor failureRef ctx facts cmds i env scopedProofs
+        let some (stepId, pf, next) ←
+            replayAnchor failureRef ctx facts cmds referenceCounts i env scopedProofs
           | return none
         if next > upto then
           trace[crush.result] "alethe replay: declined (nested subproof {stepId} \
@@ -988,14 +1618,15 @@ where
             detail := "nested subproof crosses its parent boundary" }
           return none
         env := env.insert stepId pf
-        last := some pf
+        last := some pf.proof
         i := next
       | .step id clause rule premises args _ =>
         let some pf ←
-            replayStep failureRef ctx env scopedProofs id clause rule premises args
+            replayStep failureRef ctx referenceCounts env scopedProofs
+              id clause rule premises args
           | return none
         env := env.insert id pf
-        last := some pf
+        last := some pf.proof
         i := i + 1
       | .assume id _ =>
         trace[crush.result] "alethe replay: declined (stray local assumption {id})"
