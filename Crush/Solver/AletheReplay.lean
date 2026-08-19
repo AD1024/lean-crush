@@ -41,8 +41,10 @@ outer proof environment.
 
 ## Known limits
 
-A `hole` step, an unmappable term, or a concrete inference that the checked tactic
-portfolio cannot prove makes replay decline and fall back to core reconstruction.
+An unmappable term or a concrete inference that the checked tactic portfolio cannot
+prove makes replay decline and fall back to core reconstruction. A solver `hole` is
+treated like any other untrusted rule name: it is usable only when Lean independently
+proves its concrete clause.
 -/
 
 namespace Crush.Alethe
@@ -259,12 +261,19 @@ private def ruleHint? (rule : String) (args : Array Sexp) :
     return some (← `(tactic| grind [intAbs]))
   | "and_neg" =>
     return some (← `(tactic| simp_all [Bool.xor_comm, Bool.xor_left_comm]))
+  | "hole" =>
+    return some (← `(tactic| bv_decide))
+  | "aci_simp" | "bv_bitwise_slicing" =>
+    return some (← `(tactic| bv_decide))
   | "rare_rewrite" => rareRewriteHint? args
   | "resolution" => return some (← `(tactic| simp_all [stringIsEmptyEqDecide]))
   | "not_or" | "or" | "and" | "equiv_pos2" | "contraction"
   | "reordering" | "implies" | "implies_neg1" | "implies_neg2" | "subproof" =>
     return some (← `(tactic| grind))
-  | _ => return none
+  | rule =>
+    if rule.startsWith "bv_bitblast_step_" then
+      return some (← `(tactic| bv_decide))
+    return none
 
 /-- Project a bit-vector equality into cvc5's conjunction of bit equalities. -/
 private partial def bitEqualityForward (index width : Nat) :
@@ -619,9 +628,6 @@ where
       (id : String)
       (clause : Array Sexp) (rule : String) (premises : Array String)
       (args : Array Sexp) : TacticM (Option Expr) := do
-    if rule == "hole" then
-      trace[crush.result] "alethe replay: declined (hole step {id})"
-      return none
     let some target ← clauseToExpr? ctx 64 clause
       | trace[crush.result] "alethe replay: declined (untranslatable clause at {id}: \
                              {clause})"

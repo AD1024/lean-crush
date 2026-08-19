@@ -118,6 +118,19 @@ private def bitVecAtom? (atom : String) : Option (Nat × Nat) := do
 private def mkBitVecLit (width value : Nat) : Expr :=
   mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit width) (mkNatLit value)
 
+/-- The statically known width of a reconstructed bit-vector expression. -/
+private def bitVecWidth? (value : Expr) : MetaM (Option Nat) := do
+  let type ← whnf (← inferType value)
+  let .app (.const ``BitVec _) width := type | return none
+  getNatValue? (← whnf width)
+
+/-- A nonnegative concrete index printed as either an SMT integer or a Lean natural. -/
+private def indexValue? (value : Expr) : MetaM (Option Nat) := do
+  if let some natural ← getNatValue? value then return some natural
+  let some integer ← getIntValue? value | return none
+  if integer < 0 then return none
+  return some integer.toNat
+
 /-- Lean counterpart of SMT-LIB `str.substr`, whose indices count codepoints. -/
 def stringSubstr (s : String) (start count : Int) : String :=
   if start < 0 then ""
@@ -338,6 +351,38 @@ private def bitVecApp? (head : String) (args : Array Expr) : MetaM (Option Expr)
   | "bvsle", 2 => mkAppChecked? ``BitVec.sle args
   | "bvsgt", 2 => mkAppChecked? ``BitVec.slt #[args[1]!, args[0]!]
   | "bvsge", 2 => mkAppChecked? ``BitVec.sle #[args[1]!, args[0]!]
+  | "bvshl", 2 =>
+    let shift ← mkAppM ``BitVec.toNat #[args[1]!]
+    mkAppChecked? ``BitVec.shiftLeft #[args[0]!, shift]
+  | "bvlshr", 2 =>
+    let shift ← mkAppM ``BitVec.toNat #[args[1]!]
+    mkAppChecked? ``BitVec.ushiftRight #[args[0]!, shift]
+  | "bvashr", 2 =>
+    let shift ← mkAppM ``BitVec.toNat #[args[1]!]
+    mkAppChecked? ``BitVec.sshiftRight #[args[0]!, shift]
+  | "concat", 2 => mkAppChecked? ``BitVec.append args
+  | "bv2nat", 1 | "ubv_to_int", 1 =>
+    let value ← mkAppM ``BitVec.toNat args
+    return some (mkApp (mkConst ``Int.ofNat) value)
+  | "sbv_to_int", 1 => mkAppChecked? ``BitVec.toInt args
+  | "rotate_left", 2 | "rotate_right", 2 =>
+    let some amount ← indexValue? args[0]! | return none
+    let operation :=
+      if head == "rotate_left" then ``BitVec.rotateLeft else ``BitVec.rotateRight
+    mkAppChecked? operation #[args[1]!, mkNatLit amount]
+  | "extract", 3 =>
+    let some high ← indexValue? args[0]! | return none
+    let some low ← indexValue? args[1]! | return none
+    mkAppChecked? ``BitVec.extractLsb #[mkNatLit high, mkNatLit low, args[2]!]
+  | "zero_extend", 2 | "sign_extend", 2 =>
+    let some amount ← indexValue? args[0]! | return none
+    let some width ← bitVecWidth? args[1]! | return none
+    let operation :=
+      if head == "zero_extend" then ``BitVec.zeroExtend else ``BitVec.signExtend
+    mkAppChecked? operation #[mkNatLit (width + amount), args[1]!]
+  | "int2bv", 2 | "int_to_bv", 2 =>
+    let some width ← indexValue? args[0]! | return none
+    mkAppChecked? ``BitVec.ofInt #[mkNatLit width, args[1]!]
   | _, _ => return none
 
 /-- Replace the concrete index in a cvc5 bit-blast expression by a marker. -/
@@ -483,9 +528,7 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
       return some (mkBitVecLit width value)
     if head == "@bvsize" && args.size == 1 then
       let some value ← toExpr? ctx (fuel - 1) args[0]! | return none
-      let type ← whnf (← inferType value)
-      let .app (.const ``BitVec _) width := type | return none
-      let some width ← getNatValue? width | return none
+      let some width ← bitVecWidth? value | return none
       return some (Lean.toExpr (Int.ofNat width))
     if head == "_" && args.size == 2 then
       let some (Sexp.atom valueName) := args[0]? | return none
@@ -564,29 +607,76 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
       | some result => return some result
       | none => uninterp as
 where
-  /-- Translate cvc5's indexed `@bit_of` operator. -/
+  /-- Translate indexed bit-vector operators used in cvc5 certificates. -/
   indexedApp (ident args : Array Sexp) : MetaM (Option Expr) := do
-    if ident.size == 3 && ident[0]? == some (.atom "_") &&
-        ident[1]? == some (.atom "@bit_of") && args.size == 1 then
+    unless ident[0]? == some (.atom "_") do return none
+    let some (Sexp.atom head) := ident[1]? | return none
+    let mut values := #[]
+    for arg in args do
+      let some value ← toExpr? ctx (fuel - 1) arg | return none
+      values := values.push value
+    match head, ident.size, values.size with
+    | "@bit_of", 3, 1 =>
       let some (Sexp.atom index) := ident[2]? | return none
       let some index := index.toNat? | return none
-      let some value ← toExpr? ctx (fuel - 1) args[0]! | return none
-      return ← mkAppChecked? ``BitVec.getLsbD #[value, mkNatLit index]
-    return none
+      mkAppChecked? ``BitVec.getLsbD #[values[0]!, mkNatLit index]
+    | "rotate_left", 3, 1 | "rotate_right", 3, 1 =>
+      let some (Sexp.atom amount) := ident[2]? | return none
+      let some amount := amount.toNat? | return none
+      let operation :=
+        if head == "rotate_left" then ``BitVec.rotateLeft else ``BitVec.rotateRight
+      mkAppChecked? operation #[values[0]!, mkNatLit amount]
+    | "extract", 4, 1 =>
+      let some (Sexp.atom high) := ident[2]? | return none
+      let some (Sexp.atom low) := ident[3]? | return none
+      let some high := high.toNat? | return none
+      let some low := low.toNat? | return none
+      mkAppChecked? ``BitVec.extractLsb #[mkNatLit high, mkNatLit low, values[0]!]
+    | "zero_extend", 3, 1 | "sign_extend", 3, 1 =>
+      let some (Sexp.atom amount) := ident[2]? | return none
+      let some amount := amount.toNat? | return none
+      let some width ← bitVecWidth? values[0]! | return none
+      let operation :=
+        if head == "zero_extend" then ``BitVec.zeroExtend else ``BitVec.signExtend
+      mkAppChecked? operation #[mkNatLit (width + amount), values[0]!]
+    | "int2bv", 3, 1 | "int_to_bv", 3, 1 =>
+      let some (Sexp.atom width) := ident[2]? | return none
+      let some width := width.toNat? | return none
+      mkAppChecked? ``BitVec.ofInt #[mkNatLit width, values[0]!]
+    | _, _, _ => return none
 
-  /-- Recover a bit-vector expression from cvc5's little-endian `@bbterm` when every
-  position has the same structural bitwise pattern. -/
+  /-- Recover a bit-vector expression from cvc5's little-endian `@bbterm`. -/
   bitBlastTerm (args : Array Sexp) : MetaM (Option Expr) := do
     if args.isEmpty then return some (mkBitVecLit 0 0)
-    let some first := expandNamed? ctx fuel args[0]! | return none
-    let some pattern := normalizeBitPattern? 0 first | return none
-    for i in [1:args.size] do
-      let some arg := expandNamed? ctx fuel args[i]! | return none
-      unless normalizeBitPattern? i arg == some pattern do return none
-    let some result ← bitPatternExpr pattern | return none
-    let type ← whnf (← inferType result)
-    let .app (.const ``BitVec _) width := type | return none
-    unless (← getNatValue? width) == some args.size do return none
+    let mut literal := 0
+    let mut allLiteral := true
+    for i in [:args.size] do
+      match args[i]! with
+      | .atom "true" => literal := literal + 2 ^ i
+      | .atom "false" => pure ()
+      | _ => allLiteral := false
+    if allLiteral then return some (mkBitVecLit args.size literal)
+    let patternResult ← (do
+      let some first := expandNamed? ctx fuel args[0]! | return none
+      let some pattern := normalizeBitPattern? 0 first | return none
+      for i in [1:args.size] do
+        let some arg := expandNamed? ctx fuel args[i]! | return none
+        unless normalizeBitPattern? i arg == some pattern do return none
+      let some result ← bitPatternExpr pattern | return none
+      unless (← bitVecWidth? result) == some args.size do return none
+      return some result)
+    if let some result := patternResult then return some result
+    let mut bits := #[]
+    for arg in args do
+      let some bit ← toExpr? ctx (fuel - 1) arg | return none
+      let some bit ← boolArgument? bit | return none
+      bits := bits.push bit
+    let some result ← mkAppChecked? ``BitVec.ofBool #[bits[0]!] | return none
+    let mut result := result
+    for index in [1:bits.size] do
+      let some high ← mkAppChecked? ``BitVec.ofBool #[bits[index]!] | return none
+      let some appended ← mkAppChecked? ``BitVec.append #[high, result] | return none
+      result := appended
     return some result
 
   /-- Translate a normalized bit pattern as a whole-vector operation. -/

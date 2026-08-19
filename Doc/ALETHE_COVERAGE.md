@@ -42,7 +42,8 @@ noticed and reclassified.
 | `Nat` arithmetic | yes | replayed | Recovered from the nonnegative `Int` encoding |
 | Quantifiers | yes | replayed | `forall_inst`, `bind`, `sko_forall`, and `sko_ex` are covered |
 | Strings | partial | replayed | Length, append, empty, prefix, suffix, and containment |
-| Bit-vectors | partial | partial | Arithmetic, bitwise operations, and comparisons replay; structural operators are being audited |
+| Bit-vectors | partial | replayed | Arithmetic, comparisons, shifts, rotations, extraction, extension, concatenation, and unsigned integer conversions |
+| Signed bit-vector-to-`Int` | yes | no-certificate | cvc5 reports unsupported `sbv_to_int` |
 | Datatype injectivity | yes | replayed | |
 | Finite-datatype exhaustiveness | yes | no-certificate | cvc5 reports `DUMMY_SKOLEM` |
 | Finite arrays | yes | no-certificate | cvc5 reports `DUMMY_SKOLEM` |
@@ -81,13 +82,11 @@ changes, while live tests alone can stop exercising an operator after a solver r
 1. Inventory operators, indexed operators, sorts, and rules in every live certificate.
 2. Add structured replay failures carrying the class, step id, rule, and offending
    term.
-3. Audit bit-vector shifts, rotations, extraction, extension, concatenation, and
-   integer conversions. Implement only operators observed in serializable certificates.
-4. Add an inverse-decoder extension hook corresponding to user-defined lowering hooks.
-5. Re-run the no-certificate probes when the pinned cvc5 version changes.
+3. Add an inverse-decoder extension hook corresponding to user-defined lowering hooks.
+4. Re-run the no-certificate probes when the pinned cvc5 version changes.
 
-Arrays, finite-datatype exhaustiveness, and native higher-order proofs are skipped until
-cvc5 emits Alethe for them.
+Arrays, finite-datatype exhaustiveness, signed bit-vector-to-integer conversion, and
+native higher-order proofs are skipped until cvc5 emits Alethe for them.
 
 ## Future Theory Priorities
 

@@ -298,7 +298,8 @@ indexing, `set`/`setIfInBounds`/`set!`, `push`, `pop`, `swap`/
 - **Reconstruction is narrower than solving.** Under `crush.trust "reconstruct"`, some goals
   the solver proves cannot be replayed as a Lean proof. In particular, cvc5 1.3 does not emit
   Alethe certificates for finite-datatype exhaustiveness, finite-array reasoning, or native
-  higher-order proofs; automatic mode may still reconstruct these from the unsat core.
+  higher-order proofs, and rejects certificates containing signed bitvector-to-`Int`
+  conversion; automatic mode may still reconstruct these from the unsat core.
   `"reconstructOrTrust"` falls back to the axiom with a warning when both checked paths fail.
 - **Rough edges.** Indirectly recursive datatypes (`Rose` with a `List Rose` field) become an
   opaque sort; Alethe replay needs cvc5 ≥ 1.3.

@@ -80,6 +80,8 @@ SMT can prove datatype cardinality, finite-array, native higher-order, or long
 theory combinations that the current replay and finisher set cannot reproduce.
 cvc5 1.3 does not emit Alethe certificates for the first three classes, so
 `crush.reconstruct "auto"` must use the core-directed path for them.
+It also rejects Alethe certificates containing signed bitvector-to-`Int`
+conversion.
 
 Available choices are:
 

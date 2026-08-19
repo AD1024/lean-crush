@@ -211,6 +211,42 @@ theorem alethe_bitvec_order (x : BitVec 8) :
     x ≤ 255 := by
   crush
 
+theorem alethe_bitvec_shift_left (x : BitVec 8) :
+    (x <<< 1) &&& 1 = 0 := by
+  crush
+
+theorem alethe_bitvec_logical_shift (x : BitVec 8) :
+    (x >>> 1) <<< 1 = x &&& 0xfe := by
+  crush
+
+theorem alethe_bitvec_arithmetic_shift (x : BitVec 8) :
+    BitVec.sshiftRight x 0 = x := by
+  crush
+
+theorem alethe_bitvec_rotate (x : BitVec 8) :
+    BitVec.rotateRight (BitVec.rotateLeft x 3) 3 = x := by
+  crush
+
+theorem alethe_bitvec_extract (x : BitVec 8) :
+    BitVec.extractLsb' 0 8 x = x := by
+  crush
+
+theorem alethe_bitvec_zero_extend (x : BitVec 8) :
+    BitVec.extractLsb' 0 8 (BitVec.setWidth 12 x) = x := by
+  crush
+
+theorem alethe_bitvec_sign_extend (x : BitVec 8) :
+    BitVec.setWidth 8 (BitVec.signExtend 12 x) = x := by
+  crush
+
+theorem alethe_bitvec_concat (x : BitVec 8) (y : BitVec 4) :
+    BitVec.extractLsb' 0 4 (x ++ y) = y := by
+  crush
+
+theorem alethe_bitvec_unsigned_conversion (x : BitVec 8) :
+    BitVec.ofNat 8 x.toNat = x := by
+  crush
+
 end BitVectorReplay
 
 /-! ## Quantifiers and higher-order encoding -/
@@ -285,8 +321,9 @@ end Declines
 
 cvc5 1.3.4 proves each goal unsatisfiable, but its `(get-proof)` response is an error:
 finite datatype and array proofs contain `DUMMY_SKOLEM`, while native higher-order proofs
-contain higher-order elements. These are solver certificate-generation limitations, not
-replay-rule gaps, and Alethe-only mode must fail rather than trust the verdict. -/
+contain higher-order elements and signed bit-vector conversion contains `sbv_to_int`.
+These are solver certificate-generation limitations, not replay-rule gaps, and Alethe-only
+mode must fail rather than trust the verdict. -/
 
 section NoCertificate
 set_option crush.backend "cvc5"
@@ -304,6 +341,12 @@ example (w x y z : Three) :
 #guard_msgs(error, substring := true) in
 example (a : Array Int) (i : Nat) (v : Int) (h : i < a.size) :
     (a.set! i v)[i]! = v := by
+  crush
+
+/-- error: crush: cvc5 did not emit an Alethe certificate -/
+#guard_msgs(error, substring := true) in
+example (x : BitVec 8) :
+    BitVec.ofInt 8 x.toInt = x := by
   crush
 
 set_option crush.ho.mode "native" in
