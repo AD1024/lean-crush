@@ -641,6 +641,9 @@ mutual
     let sort := SSort.app (.symb sortName) #[]
     let aKey := appKey ty
     let appName ← TranslateM.symbolForStructural aKey s!"app_{sortName}"
+    TranslateM.recordSymbolExpr sortName ty
+    let appHead ← withLocalDeclD `fn ty fun fn => mkLambdaFVars #[fn] fn
+    TranslateM.recordSymbolExpr appName appHead
     if !(← declaredSort sortName) then
       markSortDeclared sortName
       TranslateM.emitCommand (.declSort sortName 0)
@@ -759,12 +762,15 @@ mutual
     let st ← get
     let captures := (collectFVars lam).filter fun fid =>
       st.boundVars.contains fid || st.funVars.contains fid
+    let replayHead ← mkLambdaFVars (captures.map mkFVar) lam
     if let some existing ← TranslateM.structuralSymbol? key then
+      TranslateM.recordSymbolExpr existing replayHead
       -- Already declared: rebuild the application from the recorded captures.
       let capArgs ← captures.mapM fun fid => emitTerm (.fvar fid)
       return if capArgs.isEmpty then .const existing
              else .app (.symb existing) capArgs
     let cloName ← TranslateM.symbolForStructural key "clo"
+    TranslateM.recordSymbolExpr cloName replayHead
     let capSorts ← captures.mapM fun fid => do emitSort (← fid.getType)
     let (arrowSort, _) ← declareArrowSort lamTy
     TranslateM.emitCommand (.declFun cloName capSorts arrowSort)

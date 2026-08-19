@@ -179,6 +179,79 @@ def formatCounterexample (modelText : String) (st : TranslateState) :
                       describe any Lean value."
   return body
 
+private def reconstructionCandidates (goal : MVarId) (proofs : Array Expr) :
+    TacticM (Array Name) := goal.withContext do
+  let saved ← saveState
+  try
+    let mut excluded : Std.HashSet Name := {}
+    for proof in proofs do
+      if let .const name _ := proof.getAppFn then
+        excluded := excluded.insert name
+    let suggestions ← Lean.LibrarySuggestions.select goal {
+      maxSuggestions := 16
+      caller := some "crush-reconstruct"
+      filter := fun name => do
+        if name == `Crush.crushSorry then return false
+        let some info := (← getEnv).find? name | return false
+        isProp info.type
+    }
+    restoreState saved
+    let mut candidates : Array Name := #[]
+    for suggestion in suggestions do
+      if candidates.size >= 6 then break
+      unless excluded.contains suggestion.name || candidates.contains suggestion.name do
+        candidates := candidates.push suggestion.name
+    return candidates
+  catch _ =>
+    restoreState saved
+    return #[]
+
+private def reconstructionFailureDetails (goal : MVarId) (st : TranslateState)
+    (coreIds : Array Nat) (proofs : Array Expr)
+    (manualHints : Array (Expr × String)) : TacticM MessageData := goal.withContext do
+  let mut seenCore : Std.HashSet Nat := {}
+  let mut coreLines : Array MessageData := #[]
+  for id in coreIds do
+    if seenCore.contains id then continue
+    seenCore := seenCore.insert id
+    let some source := st.facts[id]? | continue
+    let proposition : MessageData ←
+      match source.prop with
+      | some prop => pure m!"{← ppExpr (← instantiateMVars prop)}"
+      | none => pure m!"<proposition unavailable>"
+    coreLines := coreLines.push m!"- {source.descr}: {proposition}"
+  let mut proofLines : Array MessageData := #[]
+  let mut seenTypes : Std.HashSet Expr := {}
+  for proof in proofs do
+    try
+      let type ← instantiateMVars (← inferType proof)
+      unless seenTypes.contains type do
+        seenTypes := seenTypes.insert type
+        proofLines := proofLines.push m!"- {← ppExpr type}"
+    catch _ => pure ()
+  let mut otherLines : Array MessageData := #[]
+  for source in st.facts do
+    if otherLines.size >= 6 then break
+    if seenCore.contains source.id || source.proof.isNone then continue
+    let proposition : MessageData ←
+      match source.prop with
+      | some prop => pure m!"{← ppExpr (← instantiateMVars prop)}"
+      | none => pure m!"<proposition unavailable>"
+    otherLines := otherLines.push m!"- {source.descr}: {proposition}"
+  let candidates ← reconstructionCandidates goal proofs
+  let candidateLines := candidates.map fun name => m!"- {name}"
+  let manualLines := manualHints.map fun (_, descr) => m!"- {descr}"
+  let showLines (lines : Array MessageData) : MessageData :=
+    indentD <| if lines.isEmpty then m!"(none)"
+    else MessageData.joinSep lines.toList "\n"
+  let renderSection (title : String) (lines : Array MessageData) : MessageData :=
+    m!"{title}:" ++ showLines lines
+  return renderSection "SMT core assertions" coreLines ++ m!"\n" ++
+    renderSection "Lean facts supplied to reconstruction" proofLines ++ m!"\n" ++
+    renderSection "Explicit reconstruction hints" manualLines ++ m!"\n" ++
+    renderSection "Other selected facts outside the core" otherLines ++ m!"\n" ++
+    renderSection "Candidate library lemmas (best effort)" candidateLines
+
 /-- Try to close `goal` by replaying the solver's proof certificate
 (`Crush/Solver/AletheReplay.lean`).
 
@@ -194,6 +267,9 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
   if cfg.reconstruct == .core then return false
   if proofSexps.isEmpty then return false
   let some proof := Alethe.parseProofSexps proofSexps | return false
+  let features := proof.features
+  trace[crush.result] "alethe certificate features: operators={features.operators}, \
+    indexed={features.indexedOperators}, sorts={features.sorts}, rules={features.rules}"
   goal.withContext do
     let saved ← saveState
     let snapshot ← KernelCheckSnapshot.capture
@@ -256,8 +332,14 @@ private def closeFromSelectedFacts (goal : MVarId) (facts : Array Fact) : Tactic
     return false
 
 /-- The core driver, given a resolved goal, config, and collected hints. -/
-def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit :=
+def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
+    (reconstructionHints : Array (Expr × String) := #[])
+    (reconstructionFinisher? : Option (TSyntax `tactic) := none) : TacticM Unit :=
   goal.withContext do
+  let forceAlethe := cfg.trust != .trust && cfg.reconstruct == .alethe
+  if cfg.reconstruct == .alethe && cfg.backend != .cvc5 then
+    throwError "crush: `crush.reconstruct alethe` requires the cvc5 backend, but \
+                `crush.backend` is `{cfg.backend}`"
   -- `native` HO mode needs cvc5, or `none` when the script is only being emitted.
   -- z3 prints "ignoring unsupported logic" and then chokes on the function sorts,
   -- so fall back to the portable encoding rather than sending it an invalid query.
@@ -281,7 +363,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
   trace[crush] "selected {collected.selectedPremises} library premise(s)"
   -- `backend = none` is an emission/debugging mode, so it must still produce the script
   -- even when Lean can close the goal without consulting a solver.
-  if cfg.backend != .none then
+  if cfg.backend != .none && !forceAlethe then
     if ← closeFromSelectedFacts goal collected.facts then
       trace[crush.result] "goal is one of the selected facts; skipped SMT"
       if cfg.profile then logInfo prof.report
@@ -393,6 +475,10 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
       -- finishing tactic re-proves the goal from just those. On success the solver
       -- leaves the trusted computing base — it was only a search heuristic.
       let coreProofs := coreHypotheses st coreIds
+      let mut reconstructionProofs := coreProofs
+      for (proof, _) in reconstructionHints do
+        unless reconstructionProofs.contains proof do
+          reconstructionProofs := reconstructionProofs.push proof
       trace[crush.result] "reconstructing from core: {coreDescriptions st coreIds}"
       -- Certificate replay first (unless `crush.reconstruct core` opts out): it closes
       -- goals the single-shot ladder cannot (long chains of trivial steps — Boolean
@@ -407,11 +493,23 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
       -- `alethe` mode deliberately has no fallback: it is for working on replay itself,
       -- where the ladder silently closing the goal would hide whether replay worked.
       if cfg.reconstruct == .alethe then
-        throwError m!"crush: `crush.reconstruct alethe` is set and the solver's Alethe \
-                      certificate could not be replayed. Set `crush.reconstruct` to \
-                      \"auto\" to fall back to the core-directed finishers, or enable \
-                      `trace.crush.result` to see which step declined."
-      let (ok, prof') ← prof.time "reconstruct" (tryReconstruct goal coreProofs (← finisherTactics))
+        if let some reason := Alethe.proofError? proofSexps then
+          throwError m!"crush: cvc5 did not emit an Alethe certificate: {reason}. \
+                        Set `crush.reconstruct` to \"auto\" to use core-directed \
+                        reconstruction instead."
+        else if proofSexps.isEmpty then
+          throwError "crush: cvc5 did not return an Alethe certificate. Set \
+                      `crush.reconstruct` to \"auto\" to use core-directed \
+                      reconstruction instead."
+        else
+          throwError m!"crush: `crush.reconstruct alethe` is set and the solver's Alethe \
+                        certificate could not be replayed. Set `crush.reconstruct` to \
+                        \"auto\" to fall back to the core-directed finishers, or enable \
+                        `trace.crush.result` to see which step declined."
+      let (ok, prof') ←
+        prof.time "reconstruct"
+          (tryReconstruct goal reconstructionProofs (← finisherTactics)
+            reconstructionFinisher?)
       prof := prof'
       if ok then
         trace[crush.result] "reconstruction succeeded; no axiom used"
@@ -419,17 +517,26 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
       else if cfg.trust == .reconstructOrTrust then
         logWarning m!"crush: solver reported `unsat`, but no finishing tactic could \
                       replay it from the {coreProofs.size} core \
-                      hypothes{if coreProofs.size == 1 then "is" else "es"}; \
+                      hypothes{if coreProofs.size == 1 then "is" else "es"} and \
+                      {reconstructionHints.size} reconstruction \
+                      hint{if reconstructionHints.size == 1 then "" else "s"}; \
                       closing with the `crushSorry` axiom (trusting the solver). \
                       Set `crush.trust` to `reconstruct` to make this an error."
         let goalType ← goal.getType
         goal.assign (mkApp (mkConst ``crushSorry) goalType)
         if cfg.profile then logInfo prof.report
       else
+        let details ← reconstructionFailureDetails
+          goal st coreIds reconstructionProofs reconstructionHints
         throwError m!"crush: solver reported `unsat`, but reconstruction failed — no \
                       finishing tactic could replay it from the core \
-                      ({coreDescriptions st coreIds}). Set `crush.trust` to \
-                      \"reconstructOrTrust\" to accept the solver's verdict anyway."
+                      ({coreDescriptions st coreIds}).\n{details}\n\
+                      Add reconstruction-only facts \
+                      with `crush ... with [lemma, h]`, or provide a checked finisher \
+                      with `crush ... using (simp_all [definitions]; omega)`. Enable \
+                      `trace.crush.reconstruct` for failed proof-search steps, or set \
+                      `crush.trust` to \"reconstructOrTrust\" to accept the solver's \
+                      verdict anyway."
   | .sat modelText =>
     -- The verdict is about the encoding, which is incomplete in places, so the message
     -- reports a model rather than claiming the Lean goal is false.
@@ -445,7 +552,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {}) : TacticM Unit
 /-! ## Tactic syntax and the hint grammar
 
 ```
-crush [h₁, …, hₙ, *] u[f₁, …] d[g₁, …]
+crush [h₁, …, hₙ, *] u[f₁, …] d[g₁, …] with [r₁, …] using <tactic>
 ```
 
 * bare `crush` — assert every local `Prop` hypothesis plus the negated goal;
@@ -457,6 +564,9 @@ crush [h₁, …, hₙ, *] u[f₁, …] d[g₁, …]
 * `u[f, …]` — unfold: add each `f`'s equation lemmas (`getEqnsFor?`);
 * `d[f, …]` — definitional equality: add each `f`'s unfold equation
   (`getUnfoldEqnFor?`, the `f x = body` form).
+* `with [r, …]` — make proof terms available only to checked reconstruction;
+* `using <tactic>` — try a user finisher on the original goal with only the isolated
+  unsat-core reconstruction context. The resulting proof is kernel-checked.
 
 The grammar mirrors lean-auto's so the muscle memory transfers. -/
 
@@ -465,9 +575,12 @@ syntax crushHints := ("[" crushHintElem,* "]")?
 syntax crushUnfolds := "u[" ident,* "]"
 syntax crushDefeqs := "d[" ident,* "]"
 syntax crushUOrD := crushUnfolds <|> crushDefeqs
+syntax crushReconstructionHints := "with" "[" term,* "]"
+syntax crushReconstructionFinisher := "using" tacticSeq
 
 /-- `crush` tactic. See the module comment for the hint grammar. -/
-syntax (name := crushTac) "crush" crushHints (ppSpace crushUOrD)* : tactic
+syntax (name := crushTac) "crush" crushHints (ppSpace crushUOrD)*
+  (ppSpace crushReconstructionHints)? (ppSpace crushReconstructionFinisher)? : tactic
 
 /-- Resolve an `ident` hint to the constant name it names, erroring helpfully. -/
 private def resolveHintConst (i : TSyntax `ident) : TacticM Name := do
@@ -530,21 +643,68 @@ private def parseHintList (goal : MVarId) (stx : TSyntax ``crushHints) :
     return (terms, allHyps, allHyps, false)
   | _ => throwUnsupportedSyntax
 
+private def parseReconstructionHints (goal : MVarId)
+    (stx? : Option (TSyntax ``crushReconstructionHints)) :
+    TacticM (Array (Expr × String)) := goal.withContext do
+  let some stx := stx? | return #[]
+  let `(crushReconstructionHints| with [ $[$terms],* ]) := stx
+    | throwUnsupportedSyntax
+  let mut hints : Array (Expr × String) := #[]
+  for term in terms do
+    let proof ← Term.elabTerm term none
+    Term.synthesizeSyntheticMVarsNoPostponing
+    let proof ← instantiateMVars proof
+    let proof ←
+      if proof.hasExprMVar || proof.hasLevelMVar then
+        pure (← abstractMVars proof (levels := false)).expr
+      else
+        pure proof
+    let type ← instantiateMVars (← inferType proof)
+    let descr := (term.raw.reprint.getD "hint").trimAscii.toString
+    unless ← isProp type do
+      throwError "crush: reconstruction hint {descr} has type `{type}`, which is not a \
+                  `Prop`; only proof terms can be used for reconstruction."
+    if proof.getUsedConstants.contains `Crush.crushSorry then
+      throwError "crush: reconstruction hint {descr} depends on `Crush.crushSorry`, \
+                  which is forbidden in checked reconstruction."
+    hints := hints.push (proof, descr)
+  return hints
+
+private def parseReconstructionFinisher
+    (stx? : Option (TSyntax ``crushReconstructionFinisher)) :
+    TacticM (Option (TSyntax `tactic)) := do
+  let some stx := stx? | return none
+  let `(crushReconstructionFinisher| using $seq:tacticSeq) := stx
+    | throwUnsupportedSyntax
+  return some (← `(tactic| ($seq:tacticSeq)))
+
 @[tactic crushTac]
 def evalCrush : Tactic := fun stx => do
+  let `(tactic|
+      crush $hintsStx:crushHints $[$uordStxs:crushUOrD]*
+        $[$reconstructionHintsStx:crushReconstructionHints]?
+        $[$reconstructionFinisherStx:crushReconstructionFinisher]?) := stx
+    | throwUnsupportedSyntax
   let cfg := Config.ofOptions (← getOptions)
   let goal ← getMainGoal
   -- Intro any leading binders so ∀-goals become closed props under hypotheses.
   let (_, goal) ← goal.intros
   replaceMainGoal [goal]
   -- Parse the hint grammar: `crush <hints> <uord>*`.
-  let hintsStx : TSyntax ``crushHints := ⟨stx[1]⟩
-  let uordStxs := stx[2].getArgs.map (⟨·⟩ : Syntax → TSyntax ``crushUOrD)
   let (terms, allHyps, instantiateHyps, allowPremiseSelection) ←
     parseHintList goal hintsStx
   let eqnLemmas ← parseUOrDs uordStxs
+  let reconstructionHints ←
+    parseReconstructionHints goal reconstructionHintsStx
+  let reconstructionFinisher? ←
+    parseReconstructionFinisher reconstructionFinisherStx
+  if cfg.trust == .trust &&
+      (!reconstructionHints.isEmpty || reconstructionFinisher?.isSome) then
+    throwError "crush: `with [...]` and `using` customize checked reconstruction, but \
+                `crush.trust` is set to \"trust\". Set it to \"reconstruct\" or \
+                \"reconstructOrTrust\" for this invocation."
   let hints : Hints := {
     terms, eqnLemmas, allHyps, instantiateHyps, allowPremiseSelection }
-  runCrush goal cfg hints
+  runCrush goal cfg hints reconstructionHints reconstructionFinisher?
 
 end Crush

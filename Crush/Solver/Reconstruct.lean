@@ -1138,7 +1138,8 @@ time out.
 
 Returns `true` if the goal was closed; leaves `goal` untouched otherwise. -/
 def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
-    (finishers : Array (TSyntax `tactic)) : TacticM Bool :=
+    (finishers : Array (TSyntax `tactic))
+    (manualFinisher? : Option (TSyntax `tactic) := none) : TacticM Bool :=
   goal.withContext do
     let snapshot ← KernelCheckSnapshot.capture
     let goalType ← instantiateMVars (← goal.getType)
@@ -1150,6 +1151,32 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
     -- context through metavariable creation.
     let params ← collectProofParams #[target]
     let closedTarget ← mkForallFVars params target
+    if let some tac := manualFinisher? then
+      let saved ← saveState
+      try
+        trace[crush.reconstruct] "trying manual finisher: {tac}"
+        let ambientLCtx ← getLCtx
+        let paramIds := params.foldl (init := ({} : FVarIdSet))
+          fun ids param => ids.insert param.fvarId!
+        let restrictedLCtx := params.foldl (init := ({} : LocalContext)) fun lctx param =>
+          match ambientLCtx.find? param.fvarId! with
+          | some decl => lctx.addDecl decl
+          | none => lctx
+        let restrictedInsts := (← getLocalInstances).filter fun inst =>
+          paramIds.contains inst.fvar.fvarId!
+        let mv ← withLCtx restrictedLCtx restrictedInsts do mkFreshExprMVar target
+        let (_, manualGoal) ← mv.mvarId!.introN coreProofs.size
+        let gs ← Tactic.run manualGoal (evalTactic tac)
+        if gs.isEmpty then
+          let assigned ← instantiateMVars mv
+          let proof := mkAppN assigned coreProofs
+          goal.assign (← kernelCheckProof snapshot goalType proof)
+          return true
+        trace[crush.reconstruct] "manual finisher left goals: {← gs.mapM (·.getType)}"
+        restoreState saved
+      catch e =>
+        trace[crush.reconstruct] "manual finisher declined: {e.toMessageData}"
+        restoreState saved
     -- Try conclusion-indexed domain rules before the general tactic ladder. This path is
     -- especially important for nonlinear or datatype-specific bridges: `grind` may spend
     -- the whole command budget without discovering a theorem the user explicitly
@@ -1198,6 +1225,7 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
           let proof := mkAppN (mkAppN assigned params) coreProofs
           goal.assign (← kernelCheckProof snapshot goalType proof)
           return true
+        trace[crush.reconstruct] "finisher left goals: {← gs.mapM (·.getType)}"
         restoreState saved
       catch e =>
         trace[crush.reconstruct] "finisher declined: {e.toMessageData}"

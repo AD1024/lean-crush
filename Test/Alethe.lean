@@ -92,3 +92,7 @@ partial proof it might treat as valid. -/
 /-- info: true -/
 #guard_msgs in
 #eval (parseProof errorReply).isNone
+
+/-- info: some "Proof unsupported by Alethe: contains operator DUMMY_SKOLEM" -/
+#guard_msgs in
+#eval proofError? (parseSexps errorReply)

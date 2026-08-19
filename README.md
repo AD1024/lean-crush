@@ -205,7 +205,9 @@ proof from it takes one of two routes:
 - **replaying the solver's proof** — cvc5 can emit its refutation as a certificate, and
   lean-crush walks it one inference at a time, proving each in Lean. Since the solver
   already found the argument, each step is small, which reaches goals no single Lean tactic
-  cracks in one shot.
+  cracks in one shot. Replay covers propositional logic, EUF, integer and Nat arithmetic,
+  strings, bitvectors, datatype injectivity, quantified formulas, and defunctionalized
+  higher-order terms, including nested Alethe subproof blocks.
 - **reconstructing from the unsat core** — the solver reports which few hypotheses actually
   mattered, and a Lean tactic redoes the argument from just those. This needs no
   certificate, so it works with any backend.
@@ -294,8 +296,10 @@ indexing, `set`/`setIfInBounds`/`set!`, `push`, `pop`, `swap`/
 - **A goal is only as strong as its premises.** A missing premise makes the query unprovable,
   which surfaces as a *timeout* — so check the goal actually follows before blaming the solver.
 - **Reconstruction is narrower than solving.** Under `crush.trust "reconstruct"`, some goals
-  the solver proves cannot be replayed as a Lean proof (nonlinear arithmetic, datatype
-  pigeonhole) and `crush` fails; `"reconstructOrTrust"` falls back to the axiom with a warning.
+  the solver proves cannot be replayed as a Lean proof. In particular, cvc5 1.3 does not emit
+  Alethe certificates for finite-datatype exhaustiveness, finite-array reasoning, or native
+  higher-order proofs; automatic mode may still reconstruct these from the unsat core.
+  `"reconstructOrTrust"` falls back to the axiom with a warning when both checked paths fail.
 - **Rough edges.** Indirectly recursive datatypes (`Rose` with a `List Rose` field) become an
   opaque sort; Alethe replay needs cvc5 ≥ 1.3.
 

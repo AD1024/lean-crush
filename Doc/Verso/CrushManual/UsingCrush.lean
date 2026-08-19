@@ -169,6 +169,9 @@ Use `crush.trust "reconstruct"` when every result must be represented by a Lean
 term checked by the kernel.
 With cvc5, automatic reconstruction first tries Alethe certificate replay and
 then the core-directed finisher ladder.
+Alethe replay covers propositional logic, EUF, integer and Nat arithmetic,
+strings, bitvectors, datatype injectivity, quantified formulas, and
+defunctionalized higher-order terms, including nested subproof blocks.
 With Z3 or Bitwuzla, the core-directed path is available.
 
 Use `crush.trust "reconstructOrTrust"` when reconstruction is preferred but a

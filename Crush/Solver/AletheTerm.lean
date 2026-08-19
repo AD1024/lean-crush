@@ -71,9 +71,199 @@ structure TermCtx where
   /-- Alethe-bound variables (from `forall`/`choice` binders) in scope. -/
   locals  : Std.HashMap String Expr := {}
 
-/-- Numeric literal, if `s` is one. Alethe prints integers bare and negatives as
-`(- n)`, which the caller handles as an application. -/
-private def natLit? (s : String) : Option Nat := s.toNat?
+/-- Expand Alethe `:named` references while preserving the surrounding term shape. -/
+private partial def expandNamed? (ctx : TermCtx) (fuel : Nat) (term : Sexp) :
+    Option Sexp := do
+  if fuel == 0 then failure
+  match term with
+  | .atom name =>
+    if name.startsWith "@" then
+      match ctx.named.get? name with
+      | some value => expandNamed? ctx (fuel - 1) (stripAnnots value)
+      | none => return term
+    else
+      return term
+  | .list parts =>
+    return .list (← parts.mapM fun part => expandNamed? ctx (fuel - 1) part)
+  | .str _ => return term
+
+/-- Integer literal, if `s` is one. cvc5 uses both `(- n)` and signed atoms such as `-1`
+in Alethe certificates. -/
+private def intLit? (s : String) : Option Int := s.toInt?
+
+/-- Parse an unsigned numeral in the given radix. -/
+private def parseRadix? (radix : Nat) (digits : String) : Option Nat := do
+  let mut value := 0
+  for char in digits.toList do
+    let digit ←
+      if char.isDigit then some (char.toNat - '0'.toNat)
+      else if 'a' ≤ char && char ≤ 'f' then some (char.toNat - 'a'.toNat + 10)
+      else if 'A' ≤ char && char ≤ 'F' then some (char.toNat - 'A'.toNat + 10)
+      else none
+    if digit ≥ radix then failure
+    value := value * radix + digit
+  return value
+
+/-- A binary or hexadecimal SMT bit-vector atom. -/
+private def bitVecAtom? (atom : String) : Option (Nat × Nat) := do
+  if atom.startsWith "#b" then
+    let digits := (atom.drop 2).toString
+    return (digits.length, ← parseRadix? 2 digits)
+  if atom.startsWith "#x" then
+    let digits := (atom.drop 2).toString
+    return (4 * digits.length, ← parseRadix? 16 digits)
+  none
+
+/-- Construct a bit-vector literal. -/
+private def mkBitVecLit (width value : Nat) : Expr :=
+  mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit width) (mkNatLit value)
+
+/-- Lean counterpart of SMT-LIB `str.substr`, whose indices count codepoints. -/
+def stringSubstr (s : String) (start count : Int) : String :=
+  if start < 0 then ""
+  else ((s.drop start.toNat).take count.toNat).copy
+
+/-- Apply trailing instance arguments left unapplied after the explicit arguments. -/
+private partial def applyTrailingInstances (e : Expr) : MetaM Expr := do
+  let type ← whnf (← inferType e)
+  match type with
+  | .forallE _ domain _ binderInfo =>
+    if binderInfo.isInstImplicit then
+      applyTrailingInstances (mkApp e (← synthInstance domain))
+    else
+      return e
+  | _ =>
+    return e
+
+/-- Build a fully applied Lean constant and reject ill-typed applications. -/
+private def mkAppChecked? (name : Name) (args : Array Expr) : MetaM (Option Expr) := do
+  try
+    let e ← applyTrailingInstances (← mkAppM name args)
+    let e ← instantiateMVars e
+    let _ ← inferType e
+    return some e
+  catch _ =>
+    return none
+
+/-- Rebuild `String.contains` with the same canonical dependent searcher dictionaries
+accepted by the string lowering. Lean cannot infer the searcher family from the two value
+arguments alone when this application is assembled with `mkAppM`. -/
+private def stringContains? (value pattern : Expr) : MetaM (Option Expr) := do
+  try
+    let searcher :=
+      mkApp
+        (mkConst ``String.Slice.Pattern.ForwardSliceSearcher.instToForwardSearcher_1)
+        pattern
+    let e := mkAppN (mkConst ``String.contains) #[
+      mkConst ``String,
+      mkConst ``String.Slice.Pattern.ForwardSliceSearcher,
+      mkConst ``String.Slice.Pattern.ForwardSliceSearcher.instIteratorIdSearchStep,
+      mkConst
+        ``String.Slice.Pattern.ForwardSliceSearcher.instIteratorLoopIdSearchStep [.zero],
+      value,
+      pattern,
+      searcher]
+    let _ ← inferType e
+    return some e
+  catch _ =>
+    return none
+
+/-- SMT string concatenation is variadic. Fold it left so cvc5's flattened
+`(str.++ a b c)` matches the binary Lean term `(a ++ b) ++ c`. -/
+private def stringAppend? (args : Array Expr) : MetaM (Option Expr) := do
+  if args.isEmpty then return some (Lean.toExpr "")
+  let mut result := args[0]!
+  for i in [1:args.size] do
+    let some next ← mkAppChecked? ``HAppend.hAppend #[result, args[i]!]
+      | return none
+    result := next
+  return some result
+
+/-- Fold an n-ary arithmetic application using Lean's binary operation. -/
+private def foldArithmetic? (op : Name) (args : Array Expr) (unit : Int) :
+    MetaM (Option Expr) := do
+  if args.isEmpty then return some (Lean.toExpr unit)
+  let mut result := args[0]!
+  for i in [1:args.size] do
+    let some next ← mkAppChecked? op #[result, args[i]!]
+      | return none
+    result := next
+  return some result
+
+/-- Keep source-level `Nat` terms at `Nat` when cvc5 prints their nonnegative SMT
+integer constants without type information. -/
+private def alignNatNumerals (args : Array Expr) : MetaM (Array Expr) := do
+  let types ← args.mapM fun arg => do whnf (← inferType arg)
+  unless types.any (·.isConstOf ``Nat) do return args
+  let mut aligned := #[]
+  for (arg, type) in args.zip types do
+    if type.isConstOf ``Int then
+      let some value ← getIntValue? arg | return args
+      if value < 0 then return args
+      aligned := aligned.push (mkNatLit value.toNat)
+    else
+      aligned := aligned.push arg
+  return aligned
+
+/-- Integer absolute value used by cvc5's nonlinear-arithmetic certificates. -/
+def intAbs (value : Int) : Int :=
+  if value < 0 then -value else value
+
+private def symbolValue (value : Expr) : MetaM Expr := do
+  let type ← whnf (← inferType value)
+  if type.isConstOf ``Nat then
+    return mkApp (mkConst ``Int.ofNat) value
+  return value
+
+/-- Recover a source `Nat` argument from its SMT integer representation. -/
+private def natArgument? (arg : Expr) : MetaM (Option Expr) := do
+  let type ← whnf (← inferType arg)
+  if type.isConstOf ``Nat then return some arg
+  unless type.isConstOf ``Int do return none
+  if arg.isAppOfArity ``Int.ofNat 1 then
+    return some arg.getAppArgs[0]!
+  if let some value ← getIntValue? arg then
+    if value < 0 then return none
+    return some (mkNatLit value.toNat)
+  return some (mkApp (mkConst ``Int.toNat) arg)
+
+/-- Recover a source `Bool` argument from an SMT formula. -/
+private def boolArgument? (arg : Expr) : MetaM (Option Expr) := do
+  let type ← whnf (← inferType arg)
+  if type.isConstOf ``Bool then return some arg
+  unless type.isProp do return none
+  if arg.isConstOf ``True then return some (mkConst ``Bool.true)
+  if arg.isConstOf ``False then return some (mkConst ``Bool.false)
+  let decision := mkApp (mkConst ``Classical.propDecidable) arg
+  return some (mkApp2 (mkConst ``decide) arg decision)
+
+/-- Align SMT integer arguments with source-level `Nat` domains before applying a
+recorded Lean function. -/
+private partial def alignFunctionArgs (fn : Expr) (args : Array Expr) :
+    MetaM (Option (Array Expr)) := do
+  go (← inferType fn) 0 #[]
+where
+  go (type : Expr) (index : Nat) (aligned : Array Expr) :
+      MetaM (Option (Array Expr)) := do
+    if index == args.size then return some aligned
+    match ← whnf type with
+    | .forallE _ domain body .default =>
+      let domain ← whnf domain
+      let arg : Expr ←
+        if domain.isConstOf ``Nat then do
+          let candidate ← natArgument? args[index]!
+          pure (candidate.getD args[index]!)
+        else if domain.isConstOf ``Bool then do
+          let candidate ← boolArgument? args[index]!
+          pure (candidate.getD args[index]!)
+        else
+          pure args[index]!
+      unless ← isDefEq domain (← inferType arg) do return none
+      go (body.instantiate1 arg) (index + 1) (aligned.push arg)
+    | .forallE _ domain body _ =>
+      let implicit ← mkFreshExprMVar domain
+      go (body.instantiate1 implicit) index aligned
+    | _ => return none
 
 /-- Coerce a term into a `Prop`, for a position where SMT expects a formula.
 
@@ -85,6 +275,89 @@ private def toProp (e : Expr) : MetaM Expr := do
   if ty.isProp then return e
   else if ty.isConstOf ``Bool then mkEq e (mkConst ``Bool.true)
   else return e
+
+/-- Rebuild SMT's overloaded Boolean xor at either Lean's `Bool` or `Prop` level. -/
+private def xor? (args : Array Expr) : MetaM (Option Expr) := do
+  if args.isEmpty then return some (mkConst ``False)
+  let argTypes ← args.mapM fun arg => do whnf (← inferType arg)
+  if argTypes.all (·.isConstOf ``Bool) then
+    let mut result := args[0]!
+    for arg in args.extract 1 args.size do
+      result ← mkAppM ``Bool.xor #[result, arg]
+    return some result
+  let props ← args.mapM toProp
+  let mut result := props[0]!
+  for prop in props.extract 1 props.size do
+    result ← mkAppM ``Not #[← mkAppM ``Iff #[result, prop]]
+  return some result
+
+/-- Rebuild SMT's pairwise `distinct`. -/
+private def distinct? (args : Array Expr) : MetaM (Option Expr) := do
+  let mut result := mkConst ``True
+  for i in [:args.size] do
+    for j in [i + 1:args.size] do
+      let neq ← mkAppM ``Not #[← mkEq args[i]! args[j]!]
+      result ← mkAppM ``And #[result, neq]
+  return some result
+
+/-- Rebuild an SMT `ite`, lifting mixed Lean `Bool`/`Prop` branches to propositions. -/
+private def ite? (condition thenBranch elseBranch : Expr) : MetaM (Option Expr) := do
+  let condition ← toProp condition
+  let thenType ← whnf (← inferType thenBranch)
+  let elseType ← whnf (← inferType elseBranch)
+  let (thenBranch, elseBranch) ←
+    if thenType.isProp != elseType.isProp &&
+        (thenType.isProp || thenType.isConstOf ``Bool) &&
+        (elseType.isProp || elseType.isConstOf ``Bool) then
+      pure (← toProp thenBranch, ← toProp elseBranch)
+    else
+      pure (thenBranch, elseBranch)
+  mkAppChecked? ``ite #[condition, thenBranch, elseBranch]
+
+/-- Rebuild a source-level bit-vector theory application. -/
+private def bitVecApp? (head : String) (args : Array Expr) : MetaM (Option Expr) := do
+  match head, args.size with
+  | "bvadd", 2 => mkAppChecked? ``BitVec.add args
+  | "bvsub", 2 => mkAppChecked? ``BitVec.sub args
+  | "bvmul", 2 => mkAppChecked? ``BitVec.mul args
+  | "bvand", 2 => mkAppChecked? ``BitVec.and args
+  | "bvor", 2 => mkAppChecked? ``BitVec.or args
+  | "bvxor", 2 => mkAppChecked? ``BitVec.xor args
+  | "bvnot", 1 => mkAppChecked? ``BitVec.not args
+  | "bvneg", 1 => mkAppChecked? ``BitVec.neg args
+  | "bvudiv", 2 => mkAppChecked? ``BitVec.udiv args
+  | "bvurem", 2 => mkAppChecked? ``BitVec.umod args
+  | "bvsdiv", 2 => mkAppChecked? ``BitVec.sdiv args
+  | "bvsrem", 2 => mkAppChecked? ``BitVec.srem args
+  | "bvsmod", 2 => mkAppChecked? ``BitVec.smod args
+  | "bvult", 2 => mkAppChecked? ``BitVec.ult args
+  | "bvule", 2 => mkAppChecked? ``BitVec.ule args
+  | "bvugt", 2 => mkAppChecked? ``BitVec.ult #[args[1]!, args[0]!]
+  | "bvuge", 2 => mkAppChecked? ``BitVec.ule #[args[1]!, args[0]!]
+  | "bvslt", 2 => mkAppChecked? ``BitVec.slt args
+  | "bvsle", 2 => mkAppChecked? ``BitVec.sle args
+  | "bvsgt", 2 => mkAppChecked? ``BitVec.slt #[args[1]!, args[0]!]
+  | "bvsge", 2 => mkAppChecked? ``BitVec.sle #[args[1]!, args[0]!]
+  | _, _ => return none
+
+/-- Replace the concrete index in a cvc5 bit-blast expression by a marker. -/
+private partial def normalizeBitPattern? (index : Nat) (term : Sexp) : Option Sexp := do
+  let .list parts := term | failure
+  if let some (Sexp.list ident) := parts[0]? then
+    if ident.size == 3 && ident[0]? == some (.atom "_") &&
+        ident[1]? == some (.atom "@bit_of") then
+      let some (Sexp.atom actual) := ident[2]? | failure
+      if actual.toNat? != some index || parts.size != 2 then failure
+      return .list #[
+        .list #[.atom "_", .atom "@bit_of", .atom "#"],
+        parts[1]!]
+  let some (Sexp.atom head) := parts[0]? | failure
+  unless head == "xor" || head == "and" || head == "or" || head == "not" do
+    failure
+  let mut normalized := #[Sexp.atom head]
+  for arg in parts.extract 1 parts.size do
+    normalized := normalized.push (← normalizeBitPattern? index arg)
+  return .list normalized
 
 /-- Binary SMT-LIB theory operators, mapped to the Lean constant to apply. `=` and `=>` are
 handled separately (`=` is `Iff` on `Prop`-sorted operands; `=>` is a Lean arrow). -/
@@ -106,7 +379,16 @@ def sortToType? (ctx : TermCtx) : Sexp → MetaM (Option Expr)
   | .atom "Bool" => return some (mkConst ``Bool)
   | .atom "String" => return some (mkConst ``String)
   | .atom s => return ctx.symbols.get? s
-  | _ => return none
+  | .list parts => do
+    if parts.size == 3 && parts[0]? == some (.atom "_") &&
+        parts[1]? == some (.atom "BitVec") then
+      match parts[2]? with
+      | some (Sexp.atom width) => do
+        let some width := width.toNat? | return none
+        return some (mkApp (mkConst ``BitVec) (mkNatLit width))
+      | _ => return none
+    return none
+  | .str _ => return none
 
 /-- Translate an Alethe term to the Lean term it denotes, or `none` if any part of it
 cannot be mapped. Operators are matched by their SMT-LIB names and rebuilt with the
@@ -115,7 +397,7 @@ recursion through `:named` indirection, which a malformed proof could otherwise 
 partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr) := do
   if fuel == 0 then return none
   match s with
-  | .str _ => return none
+  | .str value => return some (Lean.toExpr value)
   | .atom a =>
     -- A `:named` reference expands to its definition.
     if a.startsWith "@" then
@@ -126,11 +408,15 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
     else if a == "false" then return some (mkConst ``False)
     -- An Alethe-bound variable, then a translated symbol, then a numeral.
     else if let some e := ctx.locals.get? a then return some e
-    else if let some e := ctx.symbols.get? a then return some e
-    else if let some n := natLit? a then
-      return some (← mkAppOptM ``OfNat.ofNat #[some (mkConst ``Int), some (mkNatLit n), none])
+    else if let some e := ctx.symbols.get? a then return some (← symbolValue e)
+    else if let some (width, value) := bitVecAtom? a then
+      return some (mkBitVecLit width value)
+    else if let some i := intLit? a then
+      return some (Lean.toExpr i)
     else return none
   | .list xs =>
+    if let some (Sexp.list ident) := xs[0]? then
+      return ← indexedApp ident (xs.extract 1 xs.size)
     let some (Sexp.atom head) := xs[0]? | return none
     let args := xs.extract 1 xs.size
     -- Quantifiers bind variables, so they are handled before the argument pass (which
@@ -160,6 +446,54 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
             goBinders (i + 1) { ctx with locals := ctx.locals.insert vname v }
               (fvars.push v)
       return ← goBinders 0 ctx #[]
+    if head == "choice" then
+      let some (Sexp.list binders) := args[0]? | return none
+      let some body := args[1]? | return none
+      let some (Sexp.list bind) := binders[0]? | return none
+      if binders.size != 1 then return none
+      let some (Sexp.atom vname) := bind[0]? | return none
+      let some sortSexp := bind[1]? | return none
+      let some ty ← sortToType? ctx sortSexp | return none
+      return ← withLocalDeclD (Name.mkSimple vname) ty fun v => do
+        let localCtx := { ctx with locals := ctx.locals.insert vname v }
+        let some predicate ← toExpr? localCtx (fuel - 1) body | return none
+        let predicate ← mkLambdaFVars #[v] (← toProp predicate)
+        mkAppChecked? ``Classical.epsilon #[predicate]
+    if head == "let" then
+      let some (Sexp.list bindings) := args[0]? | return none
+      let some body := args[1]? | return none
+      let mut localCtx := ctx
+      let mut values : Array (String × Expr) := #[]
+      for binding in bindings do
+        let Sexp.list pair := binding | return none
+        let some (Sexp.atom name) := pair[0]? | return none
+        let some value := pair[1]? | return none
+        let some value ← toExpr? ctx (fuel - 1) value | return none
+        values := values.push (name, value)
+      for (name, value) in values do
+        localCtx := { localCtx with locals := localCtx.locals.insert name value }
+      return ← toExpr? localCtx (fuel - 1) body
+    if head == "@bbterm" then
+      return ← bitBlastTerm args
+    if head == "@bv" && args.size == 2 then
+      let some (Sexp.atom value) := args[0]? | return none
+      let some (Sexp.atom width) := args[1]? | return none
+      let some value := value.toNat? | return none
+      let some width := width.toNat? | return none
+      return some (mkBitVecLit width value)
+    if head == "@bvsize" && args.size == 1 then
+      let some value ← toExpr? ctx (fuel - 1) args[0]! | return none
+      let type ← whnf (← inferType value)
+      let .app (.const ``BitVec _) width := type | return none
+      let some width ← getNatValue? width | return none
+      return some (Lean.toExpr (Int.ofNat width))
+    if head == "_" && args.size == 2 then
+      let some (Sexp.atom valueName) := args[0]? | return none
+      let some (Sexp.atom widthName) := args[1]? | return none
+      unless valueName.startsWith "bv" do return none
+      let some value := (valueName.drop 2).toString.toNat? | return none
+      let some width := widthName.toNat? | return none
+      return some (mkBitVecLit width value)
     -- Translate all arguments; any untranslatable argument fails the whole term.
     let mkArgs : MetaM (Option (Array Expr)) := do
       let mut out := #[]
@@ -167,9 +501,8 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
         let some e ← toExpr? ctx (fuel - 1) a | return none
         out := out.push e
       return some out
-    -- `ite` needs a `Decidable` instance to rebuild; declined for now.
-    if head == "ite" then return none
     let some as ← mkArgs | return none
+    let as ← alignNatNumerals as
     -- Right-nested n-ary connective, matching how the translator flattens `∨`/`∧`. The
     -- operands sit in formula positions, so each is lifted to `Prop` first.
     let nary (c : Name) (unit : Expr) : MetaM Expr := do
@@ -196,12 +529,89 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
     | "and", _ => return some (← nary ``And (mkConst ``True))
     | "=>", 2  => return some (← mkArrow (← toProp as[0]!) (← toProp as[1]!))
     | "-", 1   => return some (← mkAppM ``Neg.neg #[as[0]!])
+    | "-", _   =>
+      if as.size < 2 then return none
+      foldArithmetic? ``HSub.hSub as 0
+    | "+", _ => foldArithmetic? ``HAdd.hAdd as 0
+    | "*", _ => foldArithmetic? ``HMul.hMul as 1
+    | "div", 2 => mkAppChecked? ``HDiv.hDiv as
+    | "mod", 2 => mkAppChecked? ``HMod.hMod as
+    | "abs", 1 => mkAppChecked? ``intAbs as
+    | "int.pow2", 1 => do
+      let some exponent ← getIntValue? as[0]! | return none
+      if exponent < 0 then return none
+      return some (Lean.toExpr (Int.ofNat (2 ^ exponent.toNat)))
+    | "xor", _ => xor? as
+    | "distinct", _ => distinct? as
+    | "ite", 3 => ite? as[0]! as[1]! as[2]!
+    | "str.++", _ => stringAppend? as
+    | "str.len", 1 => do
+      let some length ← mkAppChecked? ``String.length as | return none
+      return some (mkApp (mkConst ``Int.ofNat) length)
+    | "str.prefixof", 2 => mkAppChecked? ``String.isPrefixOf as
+    | "str.suffixof", 2 => mkAppChecked? ``String.endsWith #[as[1]!, as[0]!]
+    | "str.contains", 2 => stringContains? as[0]! as[1]!
+    | "str.substr", 3 => mkAppChecked? ``stringSubstr as
     | _, 2 =>
       match binOp? head with
       | some c => return some (← mkAppM c #[as[0]!, as[1]!])
-      | none   => uninterp as
-    | _, _ => uninterp as
+      | none =>
+        match ← bitVecApp? head as with
+        | some result => return some result
+        | none => uninterp as
+    | _, _ =>
+      match ← bitVecApp? head as with
+      | some result => return some result
+      | none => uninterp as
 where
+  /-- Translate cvc5's indexed `@bit_of` operator. -/
+  indexedApp (ident args : Array Sexp) : MetaM (Option Expr) := do
+    if ident.size == 3 && ident[0]? == some (.atom "_") &&
+        ident[1]? == some (.atom "@bit_of") && args.size == 1 then
+      let some (Sexp.atom index) := ident[2]? | return none
+      let some index := index.toNat? | return none
+      let some value ← toExpr? ctx (fuel - 1) args[0]! | return none
+      return ← mkAppChecked? ``BitVec.getLsbD #[value, mkNatLit index]
+    return none
+
+  /-- Recover a bit-vector expression from cvc5's little-endian `@bbterm` when every
+  position has the same structural bitwise pattern. -/
+  bitBlastTerm (args : Array Sexp) : MetaM (Option Expr) := do
+    if args.isEmpty then return some (mkBitVecLit 0 0)
+    let some first := expandNamed? ctx fuel args[0]! | return none
+    let some pattern := normalizeBitPattern? 0 first | return none
+    for i in [1:args.size] do
+      let some arg := expandNamed? ctx fuel args[i]! | return none
+      unless normalizeBitPattern? i arg == some pattern do return none
+    let some result ← bitPatternExpr pattern | return none
+    let type ← whnf (← inferType result)
+    let .app (.const ``BitVec _) width := type | return none
+    unless (← getNatValue? width) == some args.size do return none
+    return some result
+
+  /-- Translate a normalized bit pattern as a whole-vector operation. -/
+  bitPatternExpr (pattern : Sexp) : MetaM (Option Expr) := do
+    let .list parts := pattern | return none
+    if let some (Sexp.list ident) := parts[0]? then
+      if ident.size == 3 && ident[0]? == some (.atom "_") &&
+          ident[1]? == some (.atom "@bit_of") && ident[2]? == some (.atom "#") &&
+          parts.size == 2 then
+        return ← toExpr? ctx (fuel - 1) parts[1]!
+      return none
+    let some (Sexp.atom head) := parts[0]? | return none
+    let mut operands := #[]
+    for arg in parts.extract 1 parts.size do
+      let some operand ← bitPatternExpr arg | return none
+      operands := operands.push operand
+    let vectorHead :=
+      match head with
+      | "xor" => "bvxor"
+      | "and" => "bvand"
+      | "or" => "bvor"
+      | "not" => "bvnot"
+      | _ => head
+    bitVecApp? vectorHead operands
+
   /-- An uninterpreted symbol applied to translated arguments: rebuild `head args…`.
   A mis-rebuilt (ill-typed) application is rejected rather than returned. -/
   uninterp (as : Array Expr) : MetaM (Option Expr) := do
@@ -209,9 +619,10 @@ where
     let some (Sexp.atom head) := xs[0]? | return none
     let some fn := ctx.symbols.get? head | return none
     try
-      let e ← mkAppM' fn as
+      let some args ← alignFunctionArgs fn as | return none
+      let e ← mkAppM' fn args
       let _ ← inferType e
-      return some e
+      return some (← symbolValue e)
     catch _ => return none
 
 /-- A clause `(cl t₁ … tₙ)` as the Lean proposition it asserts: the disjunction of its

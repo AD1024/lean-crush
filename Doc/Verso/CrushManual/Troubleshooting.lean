@@ -76,8 +76,10 @@ decision points without dumping the whole query.
 # Reconstruction Fails After Unsat
 
 Solving and proof reconstruction have different capabilities.
-SMT can prove nonlinear arithmetic, datatype cardinality arguments, or long
+SMT can prove datatype cardinality, finite-array, native higher-order, or long
 theory combinations that the current replay and finisher set cannot reproduce.
+cvc5 1.3 does not emit Alethe certificates for the first three classes, so
+`crush.reconstruct "auto"` must use the core-directed path for them.
 
 Available choices are:
 

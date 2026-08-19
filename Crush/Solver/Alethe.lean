@@ -137,6 +137,25 @@ def parseCommand (s : Sexp) : Option Command :=
     | _ => none
   | _ => none
 
+/-- Find cvc5's explanation for refusing to serialize a proof in Alethe format. -/
+private partial def proofErrorIn? : Sexp → Option String
+  | .list xs => Id.run do
+    match xs[0]?, xs[1]? with
+    | some (Sexp.atom "error"), some (Sexp.str message) => return some message
+    | _, _ =>
+      for item in xs do
+        if let some message := proofErrorIn? item then
+          return some message
+      return none
+  | _ => none
+
+/-- cvc5's proof-generation error, if the response contains one. -/
+def proofError? (tops : Array Sexp) : Option String := Id.run do
+  for top in tops do
+    if let some message := proofErrorIn? top then
+      return some message
+  return none
+
 /-- Structure an Alethe proof out of already-parsed solver output.
 
 The output begins with the `unsat` status line and then a single parenthesized list
@@ -149,12 +168,7 @@ datatype-exhaustiveness goals).
 Takes parsed S-expressions, which the caller shares with the `:named` term table
 replay builds from the same certificate. -/
 def parseProofSexps (tops : Array Sexp) : Option AletheProof := Id.run do
-  -- cvc5 emits the proof as one big list of commands. An `(error …)` list means no
-  -- proof; detect it so the caller can fall back rather than mis-parse.
-  for top in tops do
-    if let .list xs := top then
-      if let some (Sexp.atom "error") := xs[0]? then
-        return none
+  if (proofError? tops).isSome then return none
   -- Find the command list: the list whose elements parse as commands. In practice
   -- there is exactly one, the proof body.
   for top in tops do
@@ -196,5 +210,146 @@ def AletheProof.rules (p : AletheProof) : Array String := Id.run do
         seen := seen.insert rule
         out := out.push rule
   return out
+
+/-- Theory features occurring in certificate terms. Indexed operators retain their
+base name separately so coverage does not depend on a particular width or index. -/
+structure CertificateFeatures where
+  operators        : Array String := #[]
+  indexedOperators : Array String := #[]
+  sorts            : Array String := #[]
+  rules            : Array String := #[]
+  deriving Inhabited, Repr
+
+private structure FeatureCollector where
+  operators        : Array String := #[]
+  operatorSet      : Std.HashSet String := {}
+  indexedOperators : Array String := #[]
+  indexedSet       : Std.HashSet String := {}
+  sorts            : Array String := #[]
+  sortSet          : Std.HashSet String := {}
+
+private def FeatureCollector.addOperator
+    (collector : FeatureCollector) (name : String) : FeatureCollector :=
+  if collector.operatorSet.contains name then collector
+  else { collector with
+    operators := collector.operators.push name
+    operatorSet := collector.operatorSet.insert name }
+
+private def FeatureCollector.addIndexed
+    (collector : FeatureCollector) (name : String) : FeatureCollector :=
+  if collector.indexedSet.contains name then collector
+  else { collector with
+    indexedOperators := collector.indexedOperators.push name
+    indexedSet := collector.indexedSet.insert name }
+
+private def FeatureCollector.addSort
+    (collector : FeatureCollector) (name : String) : FeatureCollector :=
+  if collector.sortSet.contains name then collector
+  else { collector with
+    sorts := collector.sorts.push name
+    sortSet := collector.sortSet.insert name }
+
+private partial def collectSortFeature
+    (sort : Sexp) (collector : FeatureCollector) : FeatureCollector :=
+  match sort with
+  | .atom name => collector.addSort name
+  | .str _ => collector
+  | .list parts =>
+    match parts[0]? with
+    | some (Sexp.atom "_") =>
+      match parts[1]? with
+      | some (Sexp.atom name) => collector.addSort name
+      | _ => collector
+    | some (Sexp.atom name) =>
+      (parts.extract 1 parts.size).foldl
+        (fun current part => collectSortFeature part current)
+        (collector.addSort name)
+    | _ => parts.foldl (fun current part => collectSortFeature part current) collector
+
+private partial def collectTermFeatures
+    (term : Sexp) (collector : FeatureCollector) : FeatureCollector :=
+  match term with
+  | .atom _ | .str _ => collector
+  | .list parts =>
+    match parts[0]? with
+    | none => collector
+    | some (Sexp.list ident) =>
+      let collector :=
+        if ident[0]? == some (.atom "_") then
+          match ident[1]? with
+          | some (Sexp.atom name) => collector.addIndexed name
+          | _ => collector
+        else collector
+      (parts.extract 1 parts.size).foldl
+        (fun current arg => collectTermFeatures arg current) collector
+    | some (Sexp.atom head) =>
+      if head == "!" then
+        match parts[1]? with
+        | some body => collectTermFeatures body collector
+        | none => collector
+      else if head == "forall" || head == "exists" || head == "choice" ||
+          head == "lambda" then
+        let collector := collector.addOperator head
+        let collector :=
+          match parts[1]? with
+          | some (Sexp.list binders) =>
+            binders.foldl (fun current binder =>
+              match binder with
+              | .list pair =>
+                match pair[1]? with
+                | some sort => collectSortFeature sort current
+                | none => current
+              | _ => current) collector
+          | _ => collector
+        match parts[2]? with
+        | some body => collectTermFeatures body collector
+        | none => collector
+      else if head == "let" then
+        let collector := collector.addOperator head
+        let collector :=
+          match parts[1]? with
+          | some (Sexp.list bindings) =>
+            bindings.foldl (fun current binding =>
+              match binding with
+              | .list pair =>
+                match pair[1]? with
+                | some value => collectTermFeatures value current
+                | none => current
+              | _ => current) collector
+          | _ => collector
+        match parts[2]? with
+        | some body => collectTermFeatures body collector
+        | none => collector
+      else
+        let collector :=
+          if head == "_" || head.startsWith ":" then collector
+          else collector.addOperator head
+        (parts.extract 1 parts.size).foldl
+          (fun current arg => collectTermFeatures arg current) collector
+    | some _ =>
+      parts.foldl (fun current part => collectTermFeatures part current) collector
+
+/-- Inventory the operators, indexed operators, sorts, and rules that occur in a
+parsed certificate. This is diagnostic data, not a replay allowlist. -/
+def AletheProof.features (proof : AletheProof) : CertificateFeatures := Id.run do
+  let mut collector : FeatureCollector := {}
+  for command in proof.commands do
+    match command with
+    | .assume _ term =>
+      collector := collectTermFeatures term collector
+    | .step _ clause _ _ args _ =>
+      for term in clause do
+        collector := collectTermFeatures term collector
+      for arg in args do
+        collector := collectTermFeatures arg collector
+    | .anchor _ args =>
+      for arg in args do
+        collector := collectTermFeatures arg collector
+  return {
+    operators := collector.operators
+    indexedOperators := collector.indexedOperators
+    sorts := collector.sorts
+    rules := proof.rules
+  }
 
 end Crush.Alethe

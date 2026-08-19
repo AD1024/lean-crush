@@ -33,6 +33,8 @@ private def ensureComplete (label : String) (e : Expr) : MetaM Unit := do
     throwError "crush: {label} contains `sorry`"
   if e.hasMVar then
     throwError "crush: {label} contains unresolved metavariables"
+  if e.getUsedConstants.contains `Crush.crushSorry then
+    throwError "crush: {label} depends on `Crush.crushSorry`"
 
 /-- Collect the local declarations needed to close `exprs`, without scanning unrelated
 entries in the ambient context. Visible let values contribute dependencies; nondependent
