@@ -587,6 +587,15 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
       let some exponent ← getIntValue? as[0]! | return none
       if exponent < 0 then return none
       return some (Lean.toExpr (Int.ofNat (2 ^ exponent.toNat)))
+    | "int.ispow2", 1 => do
+      let some value ← getIntValue? as[0]! | return none
+      if value ≤ 0 then return none
+      let holds : Bool := decide value.toNat.isPowerOfTwo
+      return some (mkConst (if holds then ``True else ``False))
+    | "int.log2", 1 => do
+      let some value ← getIntValue? as[0]! | return none
+      if value ≤ 0 then return none
+      return some (Lean.toExpr (Int.ofNat value.toNat.log2))
     | "xor", _ => xor? as
     | "distinct", _ => distinct? as
     | "ite", 3 => ite? as[0]! as[1]! as[2]!
@@ -676,13 +685,8 @@ where
       let some bit ← toExpr? ctx (fuel - 1) arg | return none
       let some bit ← boolArgument? bit | return none
       bits := bits.push bit
-    let some result ← mkAppChecked? ``BitVec.ofBool #[bits[0]!] | return none
-    let mut result := result
-    for index in [1:bits.size] do
-      let some high ← mkAppChecked? ``BitVec.ofBool #[bits[index]!] | return none
-      let some appended ← mkAppChecked? ``BitVec.append #[high, result] | return none
-      result := appended
-    return some result
+    let list ← mkListLit (mkConst ``Bool) bits.toList
+    mkAppChecked? ``BitVec.ofBoolListLE #[list]
 
   /-- Translate a normalized bit pattern as a whole-vector operation. -/
   bitPatternExpr (pattern : Sexp) : MetaM (Option Expr) := do

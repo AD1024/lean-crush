@@ -213,6 +213,18 @@ private theorem bitVecGetLsbDXor {width : Nat} (left right : BitVec width)
       Bool.xor (left.getLsbD index) (right.getLsbD index) :=
   BitVec.getLsbD_xor
 
+private theorem existsLtSucc {predicate : Nat → Prop} (bound : Nat) :
+    (∃ index < bound + 1, predicate index) ↔
+      predicate bound ∨ ∃ index < bound, predicate index := by
+  constructor
+  · rintro ⟨index, less, holds⟩
+    by_cases equal : index = bound
+    · exact Or.inl (equal ▸ holds)
+    · exact Or.inr ⟨index, by omega, holds⟩
+  · rintro (holds | ⟨index, less, holds⟩)
+    · exact ⟨bound, by omega, holds⟩
+    · exact ⟨index, by omega, holds⟩
+
 private theorem forallIffAtCounterexample {α : Sort u} [Nonempty α] (predicate : α → Prop) :
     (∀ x, predicate x) ↔
       predicate (Classical.epsilon fun x => ¬predicate x) := by
@@ -375,6 +387,33 @@ private def bitVecEqualityHint? (target : Expr) : TacticM (Option (TSyntax `tact
        intro i hi
        ($cases:tacticSeq))))
 
+/-- Enumerate a concrete bit-vector width and prove each selected negation bit. -/
+private partial def bitVecNegCases (remaining : Nat) :
+    TacticM (TSyntax `Lean.Parser.Tactic.tacticSeq) := do
+  if remaining == 0 then
+    return ← `(tacticSeq| omega <;> done)
+  let rest ← bitVecNegCases (remaining - 1)
+  `(tacticSeq|
+    cases i with
+    | zero =>
+      simp_all [BitVec.getLsbD_append, BitVec.getLsbD_neg, existsLtSucc,
+        Bool.xor_comm, Bool.xor_left_comm] <;> done
+    | succ i => $rest:tacticSeq)
+
+/-- Prove cvc5's ripple-carry expansion of fixed-width bit-vector negation. -/
+private def bitVecNegationHint? (target : Expr) :
+    TacticM (Option (TSyntax `tactic)) := do
+  let target ← whnf target
+  unless target.isAppOfArity ``Eq 3 do return none
+  let type ← whnf target.getAppArgs[0]!
+  let .app (.const ``BitVec _) widthExpr := type | return none
+  let some width ← getNatValue? widthExpr | return none
+  let cases ← bitVecNegCases width
+  return some (← `(tactic|
+    (apply BitVec.eq_of_getLsbD_eq
+     intro i hi
+     ($cases:tacticSeq))))
+
 /-- Prove `target` from the proofs in `premises`, trying the rule's hinted tactic first.
 
 Builds the implication `p₁ → … → pₙ → target`, abstracts exactly its free variables,
@@ -392,6 +431,8 @@ private def proveStep (target : Expr) (premises : Array Expr) (rule : String)
   let hint ←
     if rule == "bv_bitblast_step_bvequal" then
       bitVecEqualityHint? target
+    else if rule == "bv_bitblast_step_bvneg" then
+      bitVecNegationHint? target
     else
       ruleHint? rule args
   let isStringRewrite :=
@@ -401,7 +442,9 @@ private def proveStep (target : Expr) (premises : Array Expr) (rule : String)
       | _ => false
   let hinted := match hint with | some t => #[t] | none => #[]
   let fallbacks ← stepTactics
-  let tactics := if isStringRewrite then hinted else hinted ++ fallbacks
+  let tactics :=
+    if isStringRewrite || rule == "bv_bitblast_step_bvneg" then hinted
+    else hinted ++ fallbacks
   for tac in tactics do
     let saved ← saveState
     let snapshot ← KernelCheckSnapshot.capture
@@ -412,11 +455,20 @@ private def proveStep (target : Expr) (premises : Array Expr) (rule : String)
           Tactic.withoutRecover (evalTactic (← `(tactic| (intros; $tac))))
       if gs.isEmpty then
         let assigned ← instantiateMVars mv
+        if rule == "bv_bitblast_step_bvneg" && assigned.hasMVar then
+          for mvarId in (← getMVars assigned) do
+            trace[crush.result] "Alethe bvneg unresolved metavariable {mvarId}: \
+              {← instantiateMVars (← mvarId.getType)}"
         let proof := mkAppN (mkAppN assigned stepParams) premises
         let proof ← kernelCheckProofWithParams snapshot checkParams target proof
         return some proof
+      if rule == "bv_bitblast_step_bvneg" then
+        let remaining ← gs.mapM fun goal => do instantiateMVars (← goal.getType)
+        trace[crush.result] "Alethe bvneg proof left goals: {remaining}"
       restoreState saved
-    catch _ =>
+    catch e =>
+      if rule == "bv_bitblast_step_bvneg" then
+        trace[crush.result] "Alethe bvneg proof failed: {e.toMessageData}"
       restoreState saved
   return none
 
@@ -854,12 +906,14 @@ where
                 { innerCtx with locals := innerCtx.locals.insert name bound }
                 (locals.push bound)
           else
-            let some body ←
-                goInner failureRef innerCtx facts cmds bodyStart close env scopedProofs
-              | trace[crush.result] "alethe replay: declined (bind anchor {stepId} body)"
-                return none
-            let generalized ← mkLambdaFVars locals body
-            proveStep conclusion (#[generalized] ++ scopedProofs) "bind"
+            applyAnchorAssignments failureRef innerCtx stepId closeRule anchorArgs
+                fun assignedCtx => do
+              let some body ←
+                  goInner failureRef assignedCtx facts cmds bodyStart close env scopedProofs
+                | trace[crush.result] "alethe replay: declined (bind anchor {stepId} body)"
+                  return none
+              let generalized ← mkLambdaFVars locals body
+              proveStep conclusion (#[generalized] ++ scopedProofs) "bind"
         bindVariables 0 ctx #[]
       else if closeRule == "sko_forall" || closeRule == "sko_ex" then
         unless assumptions.isEmpty && discharge.isEmpty do
@@ -881,48 +935,14 @@ where
             rule := some closeRule
             detail := "Skolem anchor contains no assignment" }
           return none
-        let rec applyAssignments (j : Nat) (innerCtx : TermCtx) :
-            TacticM (Option Expr) := do
-          if h : j < assignments.size then
-            let (name, sort, valueTerm) := assignments[j]
-            let some expectedType ← sortToType? innerCtx sort
-              | trace[crush.result] "alethe replay: declined (unknown assignment sort {sort})"
-                rememberFailure failureRef {
-                  kind := .termGap
-                  stepId := some stepId
-                  rule := some closeRule
-                  term := some sort
-                  detail := s!"sort of assignment `{name}` could not be decoded" }
-                return none
-            let some value ← toExpr? innerCtx 64 valueTerm
-              | trace[crush.result] "alethe replay: declined (untranslatable assignment \
-                                     for {name})"
-                rememberFailure failureRef {
-                  kind := .termGap
-                  stepId := some stepId
-                  rule := some closeRule
-                  term := some valueTerm
-                  detail := s!"value of assignment `{name}` could not be decoded" }
-                return none
-            unless ← isDefEq expectedType (← inferType value) do
-              trace[crush.result] "alethe replay: declined (ill-typed assignment for {name})"
-              rememberFailure failureRef {
-                kind := .termGap
-                stepId := some stepId
-                rule := some closeRule
-                term := some valueTerm
-                detail := s!"value of assignment `{name}` has the wrong Lean type" }
+        applyAnchorAssignments failureRef ctx stepId closeRule anchorArgs
+            fun assignedCtx => do
+          let some body ←
+              goInner failureRef assignedCtx facts cmds bodyStart close env scopedProofs
+            | trace[crush.result] "alethe replay: declined ({closeRule} anchor \
+                                   {stepId} body)"
               return none
-            applyAssignments (j + 1)
-              { innerCtx with locals := innerCtx.locals.insert name value }
-          else
-            let some body ←
-                goInner failureRef innerCtx facts cmds bodyStart close env scopedProofs
-              | trace[crush.result] "alethe replay: declined ({closeRule} anchor \
-                                     {stepId} body)"
-                return none
-            proveStep conclusion (#[body] ++ scopedProofs) closeRule
-        applyAssignments 0 ctx
+          proveStep conclusion (#[body] ++ scopedProofs) closeRule
       else
         trace[crush.result] "alethe replay: declined (unsupported anchor rule \
                              `{closeRule}` at {stepId})"
@@ -1029,6 +1049,47 @@ where
         if binder.size == 2 then
           assignments := assignments.push (name, sort, value)
     return assignments
+
+  /-- Apply the explicit substitutions carried by bind and Skolem anchors. -/
+  applyAnchorAssignments {α : Type} (failureRef : ReplayFailureRef)
+      (ctx : TermCtx) (stepId rule : String) (args : Array Sexp)
+      (onDone : TermCtx → TacticM (Option α)) : TacticM (Option α) := do
+    let assignments := anchorAssignments args
+    let rec go (index : Nat) (ctx : TermCtx) : TacticM (Option α) := do
+      if h : index < assignments.size then
+        let (name, sort, valueTerm) := assignments[index]
+        let some expectedType ← sortToType? ctx sort
+          | trace[crush.result] "alethe replay: declined (unknown assignment sort {sort})"
+            rememberFailure failureRef {
+              kind := .termGap
+              stepId := some stepId
+              rule := some rule
+              term := some sort
+              detail := s!"sort of assignment `{name}` could not be decoded" }
+            return none
+        let some value ← toExpr? ctx 64 valueTerm
+          | trace[crush.result] "alethe replay: declined (untranslatable assignment \
+                                 for {name})"
+            rememberFailure failureRef {
+              kind := .termGap
+              stepId := some stepId
+              rule := some rule
+              term := some valueTerm
+              detail := s!"value of assignment `{name}` could not be decoded" }
+            return none
+        unless ← isDefEq expectedType (← inferType value) do
+          trace[crush.result] "alethe replay: declined (ill-typed assignment for {name})"
+          rememberFailure failureRef {
+            kind := .termGap
+            stepId := some stepId
+            rule := some rule
+            term := some valueTerm
+            detail := s!"value of assignment `{name}` has the wrong Lean type" }
+          return none
+        go (index + 1) { ctx with locals := ctx.locals.insert name value }
+      else
+        onDone ctx
+    go 0 ctx
 
   /-- Index of the step that closes `stepId`, at or after `from`. -/
   findClose (cmds : Array Command) («from» : Nat) (stepId : String) : Option Nat := Id.run do

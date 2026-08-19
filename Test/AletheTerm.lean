@@ -24,6 +24,13 @@ private def assertTermType (source : String) (expected : Expr) : MetaM Unit := d
   unless ← isDefEq actual expected do
     throwError "Alethe term `{source}` has type `{actual}`, expected `{expected}`"
 
+private def assertTermEq (source : String) (expected : Expr) : MetaM Unit := do
+  let term ← parseTerm source
+  let some value ← toExpr? ({ symbols := {}, named := {} } : TermCtx) 64 term
+    | throwError "failed to decode Alethe term `{source}`"
+  unless ← isDefEq value expected do
+    throwError "Alethe term `{source}` decoded as `{value}`, expected `{expected}`"
+
 private def bitVecType (width : Nat) : Expr :=
   mkApp (mkConst ``BitVec) (mkNatLit width)
 
@@ -43,3 +50,6 @@ run_meta do
   assertTermType "((_ int_to_bv 8) 1)" bv8
   assertTermType "(ubv_to_int #x01)" (mkConst ``Int)
   assertTermType "(@bbterm false true)" (bitVecType 2)
+  assertTermEq "(int.ispow2 8)" (mkConst ``True)
+  assertTermEq "(int.ispow2 6)" (mkConst ``False)
+  assertTermEq "(int.log2 8)" (Lean.toExpr (3 : Int))
