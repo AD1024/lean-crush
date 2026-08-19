@@ -252,6 +252,39 @@ applications, numerals, Booleans, and strings use SMT-LIB syntax; `$term` splice
 existing `Crush.SMT.Term`. The result is still the typed SMT term representation, not
 an unchecked string.
 
+When a custom lowering emits an SMT operator that Alethe replay does not know,
+register its inverse with `@[crush_alethe "operator"]`. The handler receives
+recursively decoded Lean arguments and the raw payload of an indexed identifier:
+
+```lean
+def MultipleOfThree (x : Int) : Prop := x % 3 = 0
+
+@[crush_lower MultipleOfThree]
+def lowerMultipleOfThree : Crush.LoweringHandler := fun ctx => do
+  let #[x] := ctx.args | return none
+  return some (.app (.indexed "divisible" #[.inr 3]) #[← ctx.emitTerm x])
+
+@[crush_alethe "divisible"]
+def decodeDivisible : Crush.AletheDecoder := fun ctx => do
+  let pair? :=
+    match ctx.indices, ctx.args with
+    | #[.atom n], #[value] =>
+      n.toInt?.map fun n => (Lean.toExpr n, value)
+    | #[], #[divisor, value] => some (divisor, value)
+    | _, _ => none
+  let some (divisor, value) := pair? | return none
+  let remainder ← Lean.Meta.mkAppM ``HMod.hMod #[value, divisor]
+  return some (← Lean.Meta.mkEq remainder (Lean.toExpr (0 : Int)))
+```
+
+Built-in decoders retain precedence; multiple custom decoders for the same
+operator use `high`/`low` or numeric priorities and may return `none` to defer.
+This hook restores the Lean meaning of certificate terms. If cvc5 introduces a
+nontrivial proof rule for the operator, checked replay may additionally need a
+`@[crush_reconstruct]` lemma or built-in rule hint. See
+[`Test/AletheExtension.lean`](Test/AletheExtension.lean) for an Alethe-only
+end-to-end example.
+
 Array-backed operations can reuse Crush's finite Array representation instead of
 reimplementing its length/data encoding:
 

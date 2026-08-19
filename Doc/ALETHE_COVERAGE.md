@@ -49,6 +49,7 @@ noticed and reclassified.
 | Finite arrays | yes | no-certificate | cvc5 reports `DUMMY_SKOLEM` |
 | Defunctionalized higher-order terms | yes | replayed | |
 | Native higher-order terms | cvc5 only | no-certificate | cvc5 reports unsupported higher-order proof elements |
+| User-defined operators | user-defined | replayed | `@[crush_alethe "operator"]` supplies ordinary and indexed inverse decoding |
 
 ## Coverage Tests
 
@@ -82,8 +83,7 @@ changes, while live tests alone can stop exercising an operator after a solver r
 1. Inventory operators, indexed operators, sorts, and rules in every live certificate.
 2. Add structured replay failures carrying the class, step id, rule, and offending
    term.
-3. Add an inverse-decoder extension hook corresponding to user-defined lowering hooks.
-4. Re-run the no-certificate probes when the pinned cvc5 version changes.
+3. Re-run the no-certificate probes when the pinned cvc5 version changes.
 
 Arrays, finite-datatype exhaustiveness, signed bit-vector-to-integer conversion, and
 native higher-order proofs are skipped until cvc5 emits Alethe for them.

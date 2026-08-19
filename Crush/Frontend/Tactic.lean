@@ -252,6 +252,10 @@ private def reconstructionFailureDetails (goal : MVarId) (st : TranslateState)
     renderSection "Other selected facts outside the core" otherLines ++ m!"\n" ++
     renderSection "Candidate library lemmas (best effort)" candidateLines
 
+private inductive ProofReplayAttempt where
+  | success
+  | declined (failure : Option Alethe.ReplayFailure)
+
 /-- Try to close `goal` by replaying the solver's proof certificate
 (`Crush/Solver/AletheReplay.lean`).
 
@@ -260,24 +264,24 @@ The certificate refutes the *negated* goal, so the shape is a proof by contradic
 to the certificate's assumption for the negated goal (the thing being refuted, so it has no
 Lean proof of its own), and replay produces the `False`.
 
-Returns `false`, leaving `goal` untouched, whenever anything is missing or a step cannot be
-replayed — so the caller falls back to the finisher ladder. -/
+Returns a structured decline, leaving `goal` untouched, whenever anything is missing or a
+step cannot be replayed, so the caller can report it or use the finisher ladder. -/
 def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
-    (proofSexps : Array SMT.Sexp) : TacticM Bool := do
-  if cfg.reconstruct == .core then return false
-  if proofSexps.isEmpty then return false
-  let some proof := Alethe.parseProofSexps proofSexps | return false
+    (proofSexps : Array SMT.Sexp) : TacticM ProofReplayAttempt := do
+  if cfg.reconstruct == .core then return .declined none
+  if proofSexps.isEmpty then return .declined none
+  let some proof := Alethe.parseProofSexps proofSexps | return .declined none
   let features := proof.features
   trace[crush.result] "alethe certificate features: operators={features.operators}, \
     indexed={features.indexedOperators}, sorts={features.sorts}, rules={features.rules}"
   goal.withContext do
     let saved ← saveState
     let snapshot ← KernelCheckSnapshot.capture
-    try
-      -- `byContradiction` gives us `¬G` as a hypothesis and `False` as the goal.
-      let goalType ← instantiateMVars (← goal.getType)
-      let negGoal ← mkAppM ``Not #[goalType]
-      let res ← withLocalDeclD `hneg negGoal fun hneg => do
+    -- `byContradiction` gives us `¬G` as a hypothesis and `False` as the goal.
+    let goalType ← instantiateMVars (← goal.getType)
+    let negGoal ← mkAppM ``Not #[goalType]
+    let replayed : Except Alethe.ReplayFailure Expr ← try
+      withLocalDeclD `hneg negGoal fun hneg => do
         -- Map each `crush_fact_<n>` assumption to a Lean proof: a real hypothesis for an
         -- asserted fact, and the freshly-introduced `¬G` for the negated goal.
         let mut facts : Std.HashMap String Expr := {}
@@ -290,23 +294,33 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
             let proof := src.negationTransform.map (fun transform => mkApp transform hneg)
               |>.getD hneg
             facts := facts.insert name proof
-        let some falseProof ← Alethe.replay? proof proofSexps facts st.nameToExpr
-          | return none
-        return some (← mkLambdaFVars #[hneg] falseProof)
-      match res with
-      | none =>
-        restoreState saved
-        return false
-      | some lam =>
+        match ← Alethe.replay proof proofSexps facts st.nameToExpr with
+        | .ok falseProof => return .ok (← mkLambdaFVars #[hneg] falseProof)
+        | .error failure => return .error failure
+    catch e =>
+      let detail ← e.toMessageData.toString
+      pure (.error {
+        kind := .replayException
+        detail } : Except Alethe.ReplayFailure Expr)
+    match replayed with
+    | .error failure =>
+      trace[crush.result] "alethe replay: declined ({failure.toMessageData})"
+      restoreState saved
+      return .declined (some failure)
+    | .ok lam =>
+      try
         -- Assemble `byContradiction (fun hneg => falseProof)` and hand it to the kernel.
         let pf ← mkAppOptM ``Classical.byContradiction #[some goalType, some lam]
         goal.assign (← kernelCheckProof snapshot goalType pf)
-        return true
-    catch e =>
-      trace[crush.result] "alethe replay: declined during final kernel validation \
-                           ({e.toMessageData})"
-      restoreState saved
-      return false
+        return .success
+      catch e =>
+        let detail ← e.toMessageData.toString
+        let failure : Alethe.ReplayFailure := {
+          kind := .kernelReject
+          detail }
+        trace[crush.result] "alethe replay: declined ({failure.toMessageData})"
+        restoreState saved
+        return .declined (some failure)
 
 /-- Close a goal that is already one of the selected facts.
 
@@ -484,12 +498,17 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
       -- goals the single-shot ladder cannot (long chains of trivial steps — Boolean
       -- pigeonhole, deep EUF conflicts) because the chain is already found. A step it
       -- cannot replay falls through to the ladder below.
-      let (replayed, prof') ← prof.time "replay" (tryProofReplay goal cfg st proofSexps)
+      let (replayAttempt, prof') ←
+        prof.time "replay" (tryProofReplay goal cfg st proofSexps)
       prof := prof'
-      if replayed then
+      if let .success := replayAttempt then
         trace[crush.result] "proof replay succeeded; no axiom used"
         if cfg.profile then logInfo prof.report
         return
+      let replayFailure? :=
+        match replayAttempt with
+        | .success => none
+        | .declined failure => failure
       -- `alethe` mode deliberately has no fallback: it is for working on replay itself,
       -- where the ladder silently closing the goal would hide whether replay worked.
       if cfg.reconstruct == .alethe then
@@ -501,6 +520,10 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
           throwError "crush: cvc5 did not return an Alethe certificate. Set \
                       `crush.reconstruct` to \"auto\" to use core-directed \
                       reconstruction instead."
+        else if let some failure := replayFailure? then
+          throwError m!"crush: Alethe replay failed with {failure.toMessageData}. \
+                        Set `crush.reconstruct` to \"auto\" to fall back to the \
+                        core-directed finishers."
         else
           throwError m!"crush: `crush.reconstruct alethe` is set and the solver's Alethe \
                         certificate could not be replayed. Set `crush.reconstruct` to \

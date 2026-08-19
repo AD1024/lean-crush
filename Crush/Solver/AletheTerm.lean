@@ -1,5 +1,6 @@
 import Lean
 import Crush.SMT.Sexp
+import Crush.Solver.AletheAttr
 import Crush.Translation.Monad
 open Lean Meta
 
@@ -70,6 +71,8 @@ structure TermCtx where
   named   : Std.HashMap String Sexp
   /-- Alethe-bound variables (from `forall`/`choice` binders) in scope. -/
   locals  : Std.HashMap String Expr := {}
+  /-- User inverse decoders, resolved once for this replay. -/
+  decoders : AletheDecoderRegistry := {}
 
 /-- Expand Alethe `:named` references while preserving the surrounding term shape. -/
 private partial def expandNamed? (ctx : TermCtx) (fuel : Nat) (term : Sexp) :
@@ -601,11 +604,11 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
       | none =>
         match ← bitVecApp? head as with
         | some result => return some result
-        | none => uninterp as
+        | none => extensionOrUninterp head #[] as
     | _, _ =>
       match ← bitVecApp? head as with
       | some result => return some result
-      | none => uninterp as
+      | none => extensionOrUninterp head #[] as
 where
   /-- Translate indexed bit-vector operators used in cvc5 certificates. -/
   indexedApp (ident args : Array Sexp) : MetaM (Option Expr) := do
@@ -615,7 +618,7 @@ where
     for arg in args do
       let some value ← toExpr? ctx (fuel - 1) arg | return none
       values := values.push value
-    match head, ident.size, values.size with
+    let builtin ← match head, ident.size, values.size with
     | "@bit_of", 3, 1 =>
       let some (Sexp.atom index) := ident[2]? | return none
       let some index := index.toNat? | return none
@@ -643,7 +646,9 @@ where
       let some (Sexp.atom width) := ident[2]? | return none
       let some width := width.toNat? | return none
       mkAppChecked? ``BitVec.ofInt #[mkNatLit width, values[0]!]
-    | _, _, _ => return none
+    | _, _, _ => pure none
+    if let some result := builtin then return some result
+    runAletheDecoders ctx.decoders head (ident.extract 2 ident.size) values
 
   /-- Recover a bit-vector expression from cvc5's little-endian `@bbterm`. -/
   bitBlastTerm (args : Array Sexp) : MetaM (Option Expr) := do
@@ -714,6 +719,14 @@ where
       let _ ← inferType e
       return some (← symbolValue e)
     catch _ => return none
+
+  /-- Give user decoders first refusal over an otherwise unsupported operator,
+  then try the emitted-symbol map used for ordinary uninterpreted functions. -/
+  extensionOrUninterp (head : String) (indices : Array Sexp) (as : Array Expr) :
+      MetaM (Option Expr) := do
+    if let some result ← runAletheDecoders ctx.decoders head indices as then
+      return some result
+    uninterp as
 
 /-- A clause `(cl t₁ … tₙ)` as the Lean proposition it asserts: the disjunction of its
 literals, and `False` for the empty clause. -/

@@ -53,6 +53,54 @@ open Crush.SMT
 
 universe u
 
+/-- The stage at which checked Alethe replay declined. -/
+inductive ReplayFailureClass where
+  | termGap
+  | ruleGap
+  | malformedCertificate
+  | kernelReject
+  | replayException
+  deriving BEq, Inhabited, Repr
+
+def ReplayFailureClass.label : ReplayFailureClass → String
+  | .termGap => "term-gap"
+  | .ruleGap => "rule-gap"
+  | .malformedCertificate => "malformed-certificate"
+  | .kernelReject => "kernel-reject"
+  | .replayException => "replay-exception"
+
+/-- Actionable information about the first concrete point where replay declined. -/
+structure ReplayFailure where
+  kind : ReplayFailureClass
+  stepId : Option String := none
+  rule : Option String := none
+  term : Option Sexp := none
+  detail : String
+  deriving Inhabited, Repr
+
+def ReplayFailure.toMessageData (failure : ReplayFailure) : MessageData :=
+  let location :=
+    match failure.stepId, failure.rule with
+    | some step, some rule => m!" at step `{step}` (rule `{rule}`)"
+    | some step, none => m!" at step `{step}`"
+    | none, some rule => m!" for rule `{rule}`"
+    | none, none => m!""
+  let term :=
+    match failure.term with
+    | some term => m!"; certificate term: {term}"
+    | none => m!""
+  m!"{failure.kind.label}{location}: {failure.detail}{term}"
+
+private abbrev ReplayFailureRef := IO.Ref (Option ReplayFailure)
+
+private def rememberFailure (ref : ReplayFailureRef) (failure : ReplayFailure) :
+    TacticM Unit := do
+  if (← ref.get).isNone then
+    ref.set (some failure)
+
+private def clauseSexp (literals : Array Sexp) : Sexp :=
+  .list (#[.atom "cl"] ++ literals)
+
 /-- Tactics tried on a step, in order. The rule name only selects which goes *first*; all
 are tried, so an unrecognized rule still gets a chance.
 
@@ -561,20 +609,28 @@ private def proveWeakeningStep (target premise : Expr) : TacticM (Option Expr) :
 /-- Replay a parsed Alethe proof into a Lean proof of `False`.
 
 `facts` maps a `crush_fact_<n>` assumption id to the Lean proof of that hypothesis (from
-`TranslateState.facts`); `symbols` is the emitted-symbol → Lean-term map. `none` the moment
-any step cannot be replayed. -/
-partial def replay? (proof : AletheProof) (rawSexps : Array Sexp)
+`TranslateState.facts`); `symbols` is the emitted-symbol → Lean-term map. -/
+partial def replay (proof : AletheProof) (rawSexps : Array Sexp)
     (facts : Std.HashMap String Expr) (symbols : Std.HashMap String Expr) :
-    TacticM (Option Expr) := do
+    TacticM (Except ReplayFailure Expr) := do
   -- Collected from the *unstripped* text: the parser drops the annotations, which is
   -- exactly what `@p_k` references need.
   let named := rawSexps.foldl (fun acc s => collectNamed s acc) {}
-  let ctx : TermCtx := { symbols, named }
-  go ctx facts proof.commands 0 {} #[]
+  let decoders ← getAletheDecoders
+  let ctx : TermCtx := { symbols, named, decoders }
+  let failureRef ← IO.mkRef none
+  match ← go failureRef ctx facts proof.commands 0 {} #[] with
+  | some proof => return .ok proof
+  | none =>
+    let failure ← failureRef.get
+    return .error (failure.getD {
+      kind := .malformedCertificate
+      detail := "certificate contains no replayable empty clause" })
 where
   /-- Replay `cmds` from index `i` under proof environment `env`, returning the proof of the
   first empty clause reached. -/
-  go (ctx : TermCtx) (facts : Std.HashMap String Expr) (cmds : Array Command)
+  go (failureRef : ReplayFailureRef) (ctx : TermCtx)
+      (facts : Std.HashMap String Expr) (cmds : Array Command)
       (i : Nat) (env : Std.HashMap String Expr) (scopedProofs : Array Expr) :
       TacticM (Option Expr) := do
     let mut i := i
@@ -604,7 +660,7 @@ where
         i := i + 1
       | .anchor .. =>
         let some (stepId, closeClause, pf, next) ←
-            replayAnchor ctx facts cmds i env scopedProofs
+            replayAnchor failureRef ctx facts cmds i env scopedProofs
           | return none
         env := env.insert stepId pf
         if closeClause.isEmpty then
@@ -612,7 +668,8 @@ where
           return some pf
         i := next
       | .step id clause rule premises args _ =>
-        let some pf ← replayStep ctx env scopedProofs id clause rule premises args
+        let some pf ←
+            replayStep failureRef ctx env scopedProofs id clause rule premises args
           | return none
         env := env.insert id pf
         -- The empty clause is `False`: the refutation is complete.
@@ -621,21 +678,37 @@ where
           return some pf
         i := i + 1
     trace[crush.result] "alethe replay: declined (no empty-clause step)"
+    rememberFailure failureRef {
+      kind := .malformedCertificate
+      detail := "certificate contains no empty-clause step" }
     return none
 
   /-- Replay one ordinary derived step from the proofs currently in scope. -/
-  replayStep (ctx : TermCtx) (env : Std.HashMap String Expr) (scopedProofs : Array Expr)
+  replayStep (failureRef : ReplayFailureRef) (ctx : TermCtx)
+      (env : Std.HashMap String Expr) (scopedProofs : Array Expr)
       (id : String)
       (clause : Array Sexp) (rule : String) (premises : Array String)
       (args : Array Sexp) : TacticM (Option Expr) := do
     let some target ← clauseToExpr? ctx 64 clause
       | trace[crush.result] "alethe replay: declined (untranslatable clause at {id}: \
                              {clause})"
+        rememberFailure failureRef {
+          kind := .termGap
+          stepId := some id
+          rule := some rule
+          term := some (clauseSexp clause)
+          detail := "certificate clause could not be decoded as a Lean proposition" }
         return none
     let mut prems := #[]
     for premise in premises do
       let some pf := env.get? premise
         | trace[crush.result] "alethe replay: declined (missing premise {premise} of {id})"
+          rememberFailure failureRef {
+            kind := .malformedCertificate
+            stepId := some id
+            rule := some rule
+            term := some (clauseSexp clause)
+            detail := s!"referenced premise `{premise}` has no replayed proof" }
           return none
       prems := prems.push pf
     let proof? ←
@@ -658,27 +731,52 @@ where
         else
           proveStep target (prems ++ scopedProofs) rule args
     let some pf := proof?
-      | trace[crush.result] "alethe replay: declined (rule `{rule}` at {id} not \
-                             replayed; target: {target})"
+      | let premiseTypes ← prems.mapM fun premise => inferType premise
+        trace[crush.result] "alethe replay: declined (rule `{rule}` at {id} not \
+                             replayed; target: {target}; premises: {premiseTypes})"
+        rememberFailure failureRef {
+          kind := .ruleGap
+          stepId := some id
+          rule := some rule
+          term := some (clauseSexp clause)
+          detail := "Lean could not prove this concrete inference from its replayed premises" }
         return none
     return some pf
 
   /-- Replay an anchored subproof or binder congruence and return its closed proof. -/
-  replayAnchor (ctx : TermCtx) (facts : Std.HashMap String Expr) (cmds : Array Command)
+  replayAnchor (failureRef : ReplayFailureRef) (ctx : TermCtx)
+      (facts : Std.HashMap String Expr) (cmds : Array Command)
       (index : Nat) (env : Std.HashMap String Expr) (scopedProofs : Array Expr) :
       TacticM (Option (String × Array Sexp × Expr × Nat)) := do
     let some (.anchor stepId anchorArgs) := cmds[index]?
-      | return none
+      | rememberFailure failureRef {
+          kind := .malformedCertificate
+          detail := s!"command {index} was expected to be an anchor" }
+        return none
     let some close := findClose cmds (index + 1) stepId
       | trace[crush.result] "alethe replay: declined (anchor {stepId} unclosed)"
+        rememberFailure failureRef {
+          kind := .malformedCertificate
+          stepId := some stepId
+          detail := "anchor has no matching closing step" }
         return none
     let .step _ closeClause closeRule _ _ discharge := cmds[close]!
       | trace[crush.result] "alethe replay: declined (invalid close for anchor {stepId})"
+        rememberFailure failureRef {
+          kind := .malformedCertificate
+          stepId := some stepId
+          detail := "anchor close is not an Alethe step" }
         return none
     let (assumptions, bodyStart) := collectAssumptions cmds (index + 1) close
     let some conclusion ← clauseToExpr? ctx 64 closeClause
       | trace[crush.result] "alethe replay: declined (untranslatable anchored \
                              conclusion {stepId})"
+        rememberFailure failureRef {
+          kind := .termGap
+          stepId := some stepId
+          rule := some closeRule
+          term := some (clauseSexp closeClause)
+          detail := "anchored conclusion could not be decoded as a Lean proposition" }
         return none
     let pf? ←
       if closeRule == "subproof" then
@@ -687,6 +785,12 @@ where
             discharge.all localIds.contains && localIds.all discharge.contains do
           trace[crush.result] "alethe replay: declined (subproof {stepId} discharges \
                                {discharge}, but binds {localIds})"
+          rememberFailure failureRef {
+            kind := .malformedCertificate
+            stepId := some stepId
+            rule := some closeRule
+            term := some (clauseSexp closeClause)
+            detail := "subproof discharge list does not match its local assumptions" }
           return none
         let rec bindAssumptions (j : Nat) (innerEnv : Std.HashMap String Expr)
             (locals : Array Expr) : TacticM (Option Expr) := do
@@ -695,13 +799,19 @@ where
             let some hypTy ← toExpr? ctx 64 localTerm
               | trace[crush.result] "alethe replay: declined (untranslatable local assume \
                                      {localId})"
+                rememberFailure failureRef {
+                  kind := .termGap
+                  stepId := some localId
+                  rule := some closeRule
+                  term := some localTerm
+                  detail := "local subproof assumption could not be decoded" }
                 return none
             let hypTy ← toPropM hypTy
             withLocalDeclD (`hsub ++ localId.toName) hypTy fun hlocal =>
               bindAssumptions (j + 1) (innerEnv.insert localId hlocal)
                 (locals.push hlocal)
           else
-            let some body ← goInner ctx facts cmds bodyStart close innerEnv
+            let some body ← goInner failureRef ctx facts cmds bodyStart close innerEnv
                 (scopedProofs ++ locals)
               | trace[crush.result] "alethe replay: declined (subproof {stepId} body)"
                 return none
@@ -711,10 +821,20 @@ where
       else if closeRule == "bind" then
         unless assumptions.isEmpty && discharge.isEmpty do
           trace[crush.result] "alethe replay: declined (bind anchor {stepId} has assumptions)"
+          rememberFailure failureRef {
+            kind := .malformedCertificate
+            stepId := some stepId
+            rule := some closeRule
+            detail := "binder anchor unexpectedly contains local assumptions" }
           return none
         let binders := bindDeclarations anchorArgs
         if binders.isEmpty then
           trace[crush.result] "alethe replay: declined (bind anchor {stepId} has no binders)"
+          rememberFailure failureRef {
+            kind := .malformedCertificate
+            stepId := some stepId
+            rule := some closeRule
+            detail := "binder anchor contains no binder declarations" }
           return none
         let rec bindVariables (j : Nat) (innerCtx : TermCtx)
             (locals : Array Expr) : TacticM (Option Expr) := do
@@ -722,13 +842,20 @@ where
             let (name, sort) := binders[j]
             let some type ← sortToType? innerCtx sort
               | trace[crush.result] "alethe replay: declined (unknown bind sort {sort})"
+                rememberFailure failureRef {
+                  kind := .termGap
+                  stepId := some stepId
+                  rule := some closeRule
+                  term := some sort
+                  detail := "binder sort could not be decoded as a Lean type" }
                 return none
             withLocalDeclD name.toName type fun bound =>
               bindVariables (j + 1)
                 { innerCtx with locals := innerCtx.locals.insert name bound }
                 (locals.push bound)
           else
-            let some body ← goInner innerCtx facts cmds bodyStart close env scopedProofs
+            let some body ←
+                goInner failureRef innerCtx facts cmds bodyStart close env scopedProofs
               | trace[crush.result] "alethe replay: declined (bind anchor {stepId} body)"
                 return none
             let generalized ← mkLambdaFVars locals body
@@ -738,11 +865,21 @@ where
         unless assumptions.isEmpty && discharge.isEmpty do
           trace[crush.result] "alethe replay: declined ({closeRule} anchor {stepId} \
                                has assumptions)"
+          rememberFailure failureRef {
+            kind := .malformedCertificate
+            stepId := some stepId
+            rule := some closeRule
+            detail := "Skolem anchor unexpectedly contains local assumptions" }
           return none
         let assignments := anchorAssignments anchorArgs
         if assignments.isEmpty then
           trace[crush.result] "alethe replay: declined ({closeRule} anchor {stepId} \
                                has no assignment)"
+          rememberFailure failureRef {
+            kind := .malformedCertificate
+            stepId := some stepId
+            rule := some closeRule
+            detail := "Skolem anchor contains no assignment" }
           return none
         let rec applyAssignments (j : Nat) (innerCtx : TermCtx) :
             TacticM (Option Expr) := do
@@ -750,18 +887,37 @@ where
             let (name, sort, valueTerm) := assignments[j]
             let some expectedType ← sortToType? innerCtx sort
               | trace[crush.result] "alethe replay: declined (unknown assignment sort {sort})"
+                rememberFailure failureRef {
+                  kind := .termGap
+                  stepId := some stepId
+                  rule := some closeRule
+                  term := some sort
+                  detail := s!"sort of assignment `{name}` could not be decoded" }
                 return none
             let some value ← toExpr? innerCtx 64 valueTerm
               | trace[crush.result] "alethe replay: declined (untranslatable assignment \
                                      for {name})"
+                rememberFailure failureRef {
+                  kind := .termGap
+                  stepId := some stepId
+                  rule := some closeRule
+                  term := some valueTerm
+                  detail := s!"value of assignment `{name}` could not be decoded" }
                 return none
             unless ← isDefEq expectedType (← inferType value) do
               trace[crush.result] "alethe replay: declined (ill-typed assignment for {name})"
+              rememberFailure failureRef {
+                kind := .termGap
+                stepId := some stepId
+                rule := some closeRule
+                term := some valueTerm
+                detail := s!"value of assignment `{name}` has the wrong Lean type" }
               return none
             applyAssignments (j + 1)
               { innerCtx with locals := innerCtx.locals.insert name value }
           else
-            let some body ← goInner innerCtx facts cmds bodyStart close env scopedProofs
+            let some body ←
+                goInner failureRef innerCtx facts cmds bodyStart close env scopedProofs
               | trace[crush.result] "alethe replay: declined ({closeRule} anchor \
                                      {stepId} body)"
                 return none
@@ -770,15 +926,28 @@ where
       else
         trace[crush.result] "alethe replay: declined (unsupported anchor rule \
                              `{closeRule}` at {stepId})"
+        rememberFailure failureRef {
+          kind := .ruleGap
+          stepId := some stepId
+          rule := some closeRule
+          term := some (clauseSexp closeClause)
+          detail := "anchor rule is not supported by the replay engine" }
         return none
     let some pf := pf?
       | trace[crush.result] "alethe replay: declined (anchor {stepId} discharge)"
+        rememberFailure failureRef {
+          kind := .ruleGap
+          stepId := some stepId
+          rule := some closeRule
+          term := some (clauseSexp closeClause)
+          detail := "Lean could not discharge the anchored conclusion" }
         return none
     return some (stepId, closeClause, pf, close + 1)
 
   /-- Replay a subproof block's steps, `[from, upto)`, returning the proof of the last one
   (the block's inner conclusion). -/
-  goInner (ctx : TermCtx) (facts : Std.HashMap String Expr) (cmds : Array Command)
+  goInner (failureRef : ReplayFailureRef) (ctx : TermCtx)
+      (facts : Std.HashMap String Expr) (cmds : Array Command)
       («from» upto : Nat) (env : Std.HashMap String Expr) (scopedProofs : Array Expr) :
       TacticM (Option Expr) := do
     let mut i := «from»
@@ -787,23 +956,33 @@ where
     while i < upto do
       match cmds[i]! with
       | .anchor .. =>
-        let some (stepId, _, pf, next) ← replayAnchor ctx facts cmds i env scopedProofs
+        let some (stepId, _, pf, next) ←
+            replayAnchor failureRef ctx facts cmds i env scopedProofs
           | return none
         if next > upto then
           trace[crush.result] "alethe replay: declined (nested subproof {stepId} \
                                crosses its parent boundary)"
+          rememberFailure failureRef {
+            kind := .malformedCertificate
+            stepId := some stepId
+            detail := "nested subproof crosses its parent boundary" }
           return none
         env := env.insert stepId pf
         last := some pf
         i := next
       | .step id clause rule premises args _ =>
-        let some pf ← replayStep ctx env scopedProofs id clause rule premises args
+        let some pf ←
+            replayStep failureRef ctx env scopedProofs id clause rule premises args
           | return none
         env := env.insert id pf
         last := some pf
         i := i + 1
       | .assume id _ =>
         trace[crush.result] "alethe replay: declined (stray local assumption {id})"
+        rememberFailure failureRef {
+          kind := .malformedCertificate
+          stepId := some id
+          detail := "local assumption does not immediately follow an anchor" }
         return none
     return last
 
@@ -869,5 +1048,11 @@ where
     if ty.isProp then return e
     else if ty.isConstOf ``Bool then mkEq e (mkConst ``Bool.true)
     else return e
+
+/-- Compatibility wrapper for callers interested only in replay success. -/
+def replay? (proof : AletheProof) (rawSexps : Array Sexp)
+    (facts : Std.HashMap String Expr) (symbols : Std.HashMap String Expr) :
+    TacticM (Option Expr) := do
+  return (← replay proof rawSexps facts symbols).toOption
 
 end Crush.Alethe

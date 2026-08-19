@@ -321,6 +321,59 @@ example (x y : Int) (h : x = y) :
   crush
 ```
 
+# Extending Alethe Term Decoding
+
+Translation and Alethe replay run in opposite directions.
+A custom lowering can emit a solver theory operator that the built-in inverse
+decoder does not recognize.
+Trust mode needs no inverse, but `crush.reconstruct "alethe"` must map every
+certificate term back to Lean.
+Register that mapping with `@[crush_alethe "operator"]`:
+
+```lean
+open Lean Meta
+open Crush Crush.SMT
+
+def MultipleOfThree (value : Int) : Prop :=
+  value % 3 = 0
+
+@[crush_lower MultipleOfThree]
+def lowerMultipleOfThree : LoweringHandler := fun ctx => do
+  let #[value] := ctx.args | return none
+  return some
+    (.app (.indexed "divisible" #[.inr 3])
+      #[← ctx.emitTerm value])
+
+@[crush_alethe "divisible"]
+def decodeDivisible : AletheDecoder := fun ctx => do
+  let pair? :=
+    match ctx.indices, ctx.args with
+    | #[Sexp.atom index], #[value] =>
+      index.toInt?.map fun divisor =>
+        (Lean.toExpr divisor, value)
+    | #[], #[divisor, value] =>
+      some (divisor, value)
+    | _, _ => none
+  let some (divisor, value) := pair?
+    | return none
+  let remainder ← mkAppM ``HMod.hMod
+    #[value, divisor]
+  return some
+    (← mkEq remainder (Lean.toExpr (0 : Int)))
+```
+
+`ctx.indices` is empty for an ordinary application.
+For `((_ divisible 3) x)`, it contains the raw `3` index and `ctx.args`
+contains the decoded `x`.
+cvc5 may normalize that term to `(divisible 3 x)`, so the example accepts both
+forms.
+
+Built-in theory decoders run first.
+Registered handlers run in priority order and may return `none` to defer.
+The decoder only restores a certificate term's Lean meaning.
+If cvc5 uses a theory-specific inference that Lean's step tactics cannot prove,
+add a checked reconstruction lemma or extend the replay rule support separately.
+
 # Parameterized Sort Handlers
 
 `@[crush_translate_sort]` is the sort-level counterpart to
