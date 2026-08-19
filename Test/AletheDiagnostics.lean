@@ -20,7 +20,7 @@ set_option crush.reconstruct "alethe"
 set_option crush.timeout 10
 
 /-!
-No `@[crush_alethe "divisible"]` decoder is registered in this module. The solver
+No inverse replay term is registered for `divisible` in this module. The solver
 still emits a certificate, but replay must reject the source assumption containing
 the custom operator before any derived step can use it.
 -/

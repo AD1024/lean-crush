@@ -17,7 +17,7 @@ import Crush.Translation.Translate
 import Crush.Translation.DefaultLowerings
 import Crush.Solver.Process
 import Crush.Solver.Alethe
-import Crush.Solver.AletheAttr
+import Crush.Solver.ReplayAttr
 import Crush.Solver.AletheTerm
 import Crush.Solver.AletheReplay
 import Crush.Solver.Reconstruct

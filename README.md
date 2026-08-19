@@ -252,9 +252,8 @@ applications, numerals, Booleans, and strings use SMT-LIB syntax; `$term` splice
 existing `Crush.SMT.Term`. The result is still the typed SMT term representation, not
 an unchecked string.
 
-When a custom lowering emits an SMT operator that Alethe replay does not know,
-register its inverse with `@[crush_alethe "operator"]`. The handler receives
-recursively decoded Lean arguments and the raw payload of an indexed identifier:
+When a custom lowering emits an SMT operator that checked replay does not know,
+register its inverse with the replay DSL:
 
 ```lean
 def MultipleOfThree (x : Int) : Prop := x % 3 = 0
@@ -264,24 +263,33 @@ def lowerMultipleOfThree : Crush.LoweringHandler := fun ctx => do
   let #[x] := ctx.args | return none
   return some (.app (.indexed "divisible" #[.inr 3]) #[← ctx.emitTerm x])
 
-@[crush_alethe "divisible"]
-def decodeDivisible : Crush.AletheDecoder := fun ctx => do
-  let pair? :=
-    match ctx.indices, ctx.args with
-    | #[.atom n], #[value] =>
-      n.toInt?.map fun n => (Lean.toExpr n, value)
-    | #[], #[divisor, value] => some (divisor, value)
-    | _, _ => none
-  let some (divisor, value) := pair? | return none
-  let remainder ← Lean.Meta.mkAppM ``HMod.hMod #[value, divisor]
-  return some (← Lean.Meta.mkEq remainder (Lean.toExpr (0 : Int)))
+register_crush_replay term <<
+  ((_ divisible (int divisor)) (term value : Int)) |
+  (divisible (term divisor : Int) (term value : Int)) =>
+    value % divisor = 0
+>>
 ```
 
-Built-in decoders retain precedence; multiple custom decoders for the same
-operator use `high`/`low` or numeric priorities and may return `none` to defer.
-This hook restores the Lean meaning of certificate terms. If cvc5 introduces a
-nontrivial proof rule for the operator, checked replay may additionally need a
-`@[crush_reconstruct]` lemma or built-in rule hint. See
+The two patterns accept indexed SMT-LIB and cvc5's normalized ordinary form.
+`term`, `nat`, `int`, `string`, `atom`, `sexp`, `sort`, and `prop` introduce
+typed Lean names for the right-hand side; `_` matches one item and a final `..`
+matches the remainder. Alternatives must bind the same names.
+
+Certificate inference rules are extensible in the same style:
+
+```lean
+register_crush_replay rule low <<
+  (my_arithmetic_rule (term x : Int) (term y : Int) ..) =>
+    by omega
+>>
+```
+
+The tactic sees only the replayed premises, its captures, and the step target.
+Every proof and generated auxiliary declaration is kernel-checked. Add `high`,
+`low`, or a numeric priority after `term` or `rule` when handlers overlap.
+For dynamic matching, use `@[crush_replay "operator"]` on a
+`Crush.ReplayTermHandler` or `@[crush_replay_rule "rule"]` on a
+`Crush.ReplayRuleHandler`; returning `none` defers to the next handler. See
 [`Test/AletheExtension.lean`](Test/AletheExtension.lean) for an Alethe-only
 end-to-end example.
 

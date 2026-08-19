@@ -1,6 +1,6 @@
 import Lean
 import Crush.SMT.Sexp
-import Crush.Solver.AletheAttr
+import Crush.Solver.ReplayAttr
 import Crush.Translation.Monad
 open Lean Meta
 
@@ -71,8 +71,8 @@ structure TermCtx where
   named   : Std.HashMap String Sexp
   /-- Alethe-bound variables (from `forall`/`choice` binders) in scope. -/
   locals  : Std.HashMap String Expr := {}
-  /-- User inverse decoders, resolved once for this replay. -/
-  decoders : AletheDecoderRegistry := {}
+  /-- Inverse term handlers, resolved once for this replay. -/
+  decoders : ReplayTermRegistry := {}
 
 /-- Expand Alethe `:named` references while preserving the surrounding term shape. -/
 private partial def expandNamed? (ctx : TermCtx) (fuel : Nat) (term : Sexp) :
@@ -661,7 +661,7 @@ where
       mkAppChecked? ``BitVec.ofInt #[mkNatLit width, values[0]!]
     | _, _, _ => pure none
     if let some result := builtin then return some result
-    runAletheDecoders ctx.decoders head (ident.extract 2 ident.size) values
+    runReplayTermHandlers ctx.decoders head (ident.extract 2 ident.size) values
 
   /-- Recover a bit-vector expression from cvc5's little-endian `@bbterm`. -/
   bitBlastTerm (args : Array Sexp) : MetaM (Option Expr) := do
@@ -732,7 +732,7 @@ where
   then try the emitted-symbol map used for ordinary uninterpreted functions. -/
   extensionOrUninterp (head : String) (indices : Array Sexp) (as : Array Expr) :
       MetaM (Option Expr) := do
-    if let some result ← runAletheDecoders ctx.decoders head indices as then
+    if let some result ← runReplayTermHandlers ctx.decoders head indices as then
       return some result
     uninterp as
 

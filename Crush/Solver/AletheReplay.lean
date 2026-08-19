@@ -95,6 +95,12 @@ private def rememberFailure (ref : ReplayFailureRef) (failure : ReplayFailure) :
 private def clauseSexp (literals : Array Sexp) : Sexp :=
   .list (#[.atom "cl"] ++ literals)
 
+private def replayToProp (e : Expr) : MetaM Expr := do
+  let type ← whnf (← inferType e)
+  if type.isProp then return e
+  if type.isConstOf ``Bool then return ← mkEq e (mkConst ``Bool.true)
+  return e
+
 /-- Tactics tried on a step, in order. The rule name only selects which goes *first*; all
 are tried, so an unrecognized rule still gets a chance.
 
@@ -401,141 +407,172 @@ private def bvDecideHint? : CoreM (Option (TSyntax `tactic)) := do
   unless crush.reconstruct.trustBvDecide.get (← getOptions) do return none
   return some (← `(tactic| bv_decide))
 
-private def sexpNat? : Sexp → Option Nat
-  | .atom value => value.toNat?
-  | _ => none
+register_crush_replay rule low <<
+  (rare_rewrite "str-prefixof-elim" ..) =>
+    by exact stringPrefixIffSubstr _ _
+>>
 
-/-- Alethe's `rare_rewrite` rule carries the concrete rewrite name as its first argument.
-Use that name to keep string-theory replay local to the relevant bridge theorem. -/
-private def rareRewriteHint? (args : Array Sexp) :
-    CoreM (Option (TSyntax `tactic)) := do
-  let some (Sexp.str name) := args[0]? | return none
-  match name with
-  | "str-prefixof-elim" =>
-    return some (← `(tactic| exact stringPrefixIffSubstr _ _))
-  | "str-suffixof-elim" =>
-    return some (← `(tactic| exact stringSuffixAppendIffSubstr _ _))
-  | "str-substr-full-eq" =>
-    return some (← `(tactic| exact stringSubstrFull _))
-  | "str-substr-concat1" =>
-    return some
-      (← `(tactic| rw [stringSubstrAppendPrefix, stringSubstrFull]))
-  | "str-substr-concat2" =>
-    return some
-      (← `(tactic| rw [stringSubstrAppendSuffix, Int.sub_self, stringSubstrFull]))
-  | "str-contains-refl" =>
-    return some (← `(tactic| simp only [stringContainsSelf]))
-  | "str-contains-concat-find" =>
-    return some (← `(tactic| simp only [stringContainsAppend]))
-  | "str-len-concat-rec" =>
-    return some (← `(tactic| exact stringIntLengthAppend _ _))
-  | "str-len-eq-zero-base" =>
-    return some (← `(tactic| exact stringIntLengthEqZeroIff _))
-  | "str-len-eq-zero-concat-rec" =>
-    return some (← `(tactic| exact stringIntLengthAppendEqZeroIff _ _))
-  | "str-concat-unify" =>
-    return some
-      (← `(tactic| simp only [String.append_assoc, String.append_left_inj,
-                              String.append_right_inj]))
-  | "str-concat-unify-base" =>
-    return some
-      (← `(tactic| simp only [stringEqAppendSelfIff, stringEqSelfAppendIff]))
-  | "bool-eq-true" | "bool-double-not-elim" | "eq-refl" | "eq-symm" =>
-    return some (← `(tactic| grind))
-  | "arith-geq-norm1-int" =>
-    return some (← `(tactic| omega))
-  | "arith-abs-eq" =>
-    return some (← `(tactic| exact intAbsEq _ _))
-  | "bv-ule-max" =>
-    return some (← `(tactic| exact iff_true_intro (bitVecUleOfNatPowSubOne _)))
-  | "bv-mult-pow2-1" =>
-    let some shift := (args[6]?).bind sexpNat? | return none
-    let some high := (args[7]?).bind sexpNat? | return none
-    let shiftSyntax : TSyntax `term := ⟨Syntax.mkNumLit (toString shift)⟩
-    let highSyntax : TSyntax `term := ⟨Syntax.mkNumLit (toString high)⟩
-    return some
-      (← `(tactic| exact bitVecMulPowTwoEliminate
-          (high := $highSyntax) (shift := $shiftSyntax) _))
-  | "bv-smod-eliminate" =>
-    return some (← `(tactic| exact bitVecSmodEliminate _ _))
-  | "bv-sle-eliminate" =>
-    return some (← `(tactic| simp [BitVec.sle_eq_not_slt]))
-  | "bv-ule-eliminate" =>
-    return some (← `(tactic| simp [BitVec.ule_eq_not_ult]))
-  | "bv-lt-self" | "bv-ult-self" | "bv-ugt-self"
-  | "bv-slt-self" | "bv-sgt-self" =>
-    return some
-      (← `(tactic| simp [BitVec.ult_eq_decide, BitVec.slt_eq_decide]))
-  | name =>
-    if name.startsWith "bv-" then
-      return ← bvDecideHint?
-    return none
+register_crush_replay rule low <<
+  (rare_rewrite "str-suffixof-elim" ..) =>
+    by exact stringSuffixAppendIffSubstr _ _
+>>
 
-private def structurallyReflexiveRelation (target : Expr) : Bool :=
-  if let some (left, right) := target.iff? then
-    left.consumeMData == right.consumeMData
-  else if let some (_, left, right) := target.eq? then
-    left.consumeMData == right.consumeMData
-  else
-    false
+register_crush_replay rule low <<
+  (rare_rewrite "str-substr-full-eq" ..) =>
+    by exact stringSubstrFull _
+>>
 
-/-- Tactic to try first for a given rule, where we have a good guess. Purely a performance
-hint — see the module comment on soundness. -/
-private def ruleHint? (target : Expr) (rule : String) (args : Array Sexp) :
-    CoreM (Option (TSyntax `tactic)) := do
-  match rule with
-  | "assume" =>
-    return some (← `(tactic| first
-      | simpa only [bitVecUltEqTrueIffLt, bitVecUleEqTrueIffLe] using ‹_›
-      | exact mt (stringAppendIsEmptyEqIff _ _).mpr (by assumption)
-      | simpa [stringIsEmptyEqDecide, String.append_eq_empty_iff] using ‹_›
-      | simpa [BitVec.ult_eq_decide, BitVec.ule_eq_decide,
-          BitVec.slt_eq_decide, BitVec.sle_eq_decide] using ‹_›
-      | (dsimp at *
-         simp_all [BitVec.ult_eq_decide, BitVec.ule_eq_decide,
-           BitVec.slt_eq_decide, BitVec.sle_eq_decide])))
-  | "refl" => return some (← `(tactic| rfl))
-  | "evaluate" | "false" => return some (← `(tactic| decide))
-  | "cong" =>
-    if structurallyReflexiveRelation target then
-      return some (← `(tactic| rfl))
-    return some (← `(tactic| first
+register_crush_replay rule low <<
+  (rare_rewrite "str-substr-concat1" ..) =>
+    by rw [stringSubstrAppendPrefix, stringSubstrFull]
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "str-substr-concat2" ..) =>
+    by rw [stringSubstrAppendSuffix, Int.sub_self, stringSubstrFull]
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "str-contains-refl" ..) =>
+    by simp only [stringContainsSelf]
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "str-contains-concat-find" ..) =>
+    by simp only [stringContainsAppend]
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "str-len-concat-rec" ..) =>
+    by exact stringIntLengthAppend _ _
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "str-len-eq-zero-base" ..) =>
+    by exact stringIntLengthEqZeroIff _
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "str-len-eq-zero-concat-rec" ..) =>
+    by exact stringIntLengthAppendEqZeroIff _ _
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "str-concat-unify" ..) =>
+    by
+      simp only [String.append_assoc, String.append_left_inj,
+        String.append_right_inj]
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "str-concat-unify-base" ..) =>
+    by simp only [stringEqAppendSelfIff, stringEqSelfAppendIff]
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "bool-eq-true" ..) |
+  (rare_rewrite "bool-double-not-elim" ..) |
+  (rare_rewrite "eq-refl" ..) |
+  (rare_rewrite "eq-symm" ..) =>
+    by grind
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "arith-geq-norm1-int" ..) => by omega
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "arith-abs-eq" ..) => by exact intAbsEq _ _
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "bv-ule-max" ..) =>
+    by exact iff_true_intro (bitVecUleOfNatPowSubOne _)
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "bv-mult-pow2-1" _ _ _ _ _ (nat shift) (nat high) ..) =>
+    by
+      exact bitVecMulPowTwoEliminate
+        (high := high) (shift := shift) _
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "bv-smod-eliminate" ..) =>
+    by exact bitVecSmodEliminate _ _
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "bv-sle-eliminate" ..) =>
+    by simp [BitVec.sle_eq_not_slt]
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "bv-ule-eliminate" ..) =>
+    by simp [BitVec.ule_eq_not_ult]
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "bv-lt-self" ..) |
+  (rare_rewrite "bv-ult-self" ..) |
+  (rare_rewrite "bv-ugt-self" ..) |
+  (rare_rewrite "bv-slt-self" ..) |
+  (rare_rewrite "bv-sgt-self" ..) =>
+    by simp [BitVec.ult_eq_decide, BitVec.slt_eq_decide]
+>>
+
+register_crush_replay rule low <<
+  (refl ..) => by rfl
+>>
+
+register_crush_replay rule low <<
+  (evaluate ..) | (false ..) => by decide
+>>
+
+register_crush_replay rule low <<
+  (cong ..) =>
+    by
+      first
+      | rfl
       | exact imp_congr Iff.rfl (by assumption)
       | exact imp_congr (by assumption) Iff.rfl
       | (apply imp_congr <;> assumption)
       | (congr 1 <;> assumption)
-      | simp_all only))
-  | "trans" => return some (← `(tactic| grind))
-  | "forall_inst" =>
-    return some (← `(tactic| exact forallInstClause _ _))
-  | "bind" => return some (← `(tactic| grind))
-  | "sko_forall" =>
-    return some (← `(tactic| simp_all only [forallIffAtCounterexample]))
-  | "sko_ex" =>
-    return some (← `(tactic| simp_all only [existsIffAtWitness]))
-  | "la_mult_abs_comparison" =>
-    return some (← `(tactic| grind [intAbs]))
-  | "and_neg" =>
-    return some (← `(tactic| simp_all [Bool.xor_comm, Bool.xor_left_comm]))
-  | "hole" =>
-    return ← bvDecideHint?
-  | "aci_simp" =>
-    return some (← `(tactic| exact bitVecAndOfNatPowSubOne _))
-  | "bv_bitwise_slicing" =>
-    return ← bvDecideHint?
-  | "rare_rewrite" => rareRewriteHint? args
-  | "resolution" =>
-    return some (← `(tactic| first | grind | simp_all [stringIsEmptyEqDecide]))
-  | "not_or" | "or" | "and" | "and_intro" | "and_pos" | "or_pos" | "or_neg"
-  | "equiv1" | "equiv2" | "equiv_pos1" | "equiv_pos2" | "equiv_neg1" | "equiv_neg2"
-  | "xor_pos1" | "xor_pos2" | "xor_neg1" | "xor_neg2" | "ite1" | "ite2"
-  | "contraction" | "reordering" | "implies" | "implies_neg1" | "implies_neg2"
-  | "subproof" =>
-    return some (← `(tactic| grind))
-  | rule =>
-    if rule.startsWith "bv_bitblast_step_" then
-      return ← bvDecideHint?
-    return none
+      | simp_all only
+>>
+
+register_crush_replay rule low <<
+  (forall_inst ..) => by exact forallInstClause _ _
+>>
+
+register_crush_replay rule low <<
+  (la_mult_abs_comparison ..) => by grind [intAbs]
+>>
+
+register_crush_replay rule low <<
+  (and_neg ..) =>
+    by simp_all [Bool.xor_comm, Bool.xor_left_comm]
+>>
+
+register_crush_replay rule low <<
+  (aci_simp ..) => by exact bitVecAndOfNatPowSubOne _
+>>
+
+register_crush_replay rule low <<
+  (resolution ..) =>
+    by first | grind | simp_all [stringIsEmptyEqDecide]
+>>
+
+register_crush_replay rule low <<
+  (not_or ..) | (or ..) | (and ..) | (and_intro ..) |
+  (and_pos ..) | (or_pos ..) | (or_neg ..) |
+  (equiv1 ..) | (equiv2 ..) | (equiv_pos1 ..) |
+  (equiv_pos2 ..) | (equiv_neg1 ..) | (equiv_neg2 ..) |
+  (xor_pos1 ..) | (xor_pos2 ..) | (xor_neg1 ..) |
+  (xor_neg2 ..) | (ite1 ..) | (ite2 ..) | (implies ..) |
+  (implies_neg1 ..) | (implies_neg2 ..) =>
+    by grind
+>>
 
 private partial def concreteNatValue? (value : Expr) : MetaM (Option Nat) := do
   if let some value ← getNatValue? value then return some value
@@ -716,6 +753,68 @@ private def bitVecSignedLtHint? (target : Expr) :
     (rw [bitVecSignedLtBitsCorrect (width := $widthSyntax)]
      simp [bitVecUnsignedLtBits, BitVec.msb_eq_getLsbD_last])))
 
+@[crush_replay_rule "bv_bitblast_step_bvequal" low]
+private def replayBitVecEquality : ReplayRuleHandler := fun ctx => do
+  let some tactic ← bitVecEqualityHint? ctx.target | return none
+  ctx.runTacticWithScopeFallback tactic
+
+@[crush_replay_rule "bv_bitblast_step_bvneg" low]
+private def replayBitVecNegation : ReplayRuleHandler := fun ctx => do
+  let some tactic ← bitVecNegationHint? ctx.target | return none
+  ctx.runTacticWithScopeFallback tactic
+
+@[crush_replay_rule "bv_bitblast_step_extract" low]
+private def replayBitVecExtract : ReplayRuleHandler := fun ctx => do
+  let some tactic ← bitVecExtractHint? ctx.target | return none
+  ctx.runTacticWithScopeFallback tactic
+
+@[crush_replay_rule "bv_bitblast_step_bvult" low]
+private def replayBitVecUnsignedLt : ReplayRuleHandler := fun ctx => do
+  let some tactic ← bitVecUnsignedLtHint? ctx.target | return none
+  ctx.runTacticWithScopeFallback tactic
+
+@[crush_replay_rule "bv_bitblast_step_bvslt" low]
+private def replayBitVecSignedLt : ReplayRuleHandler := fun ctx => do
+  let some tactic ← bitVecSignedLtHint? ctx.target | return none
+  ctx.runTacticWithScopeFallback tactic
+
+@[crush_replay_rule low]
+private def replayTrustedBitVecRule : ReplayRuleHandler := fun ctx => do
+  let rareBitVec :=
+    ctx.rule == "rare_rewrite" &&
+      match ctx.args[0]? with
+      | some (Sexp.str name) => name.startsWith "bv-"
+      | _ => false
+  let applicable :=
+    rareBitVec || ctx.rule == "hole" || ctx.rule == "aci_simp" ||
+      ctx.rule == "bv_bitwise_slicing" ||
+      ctx.rule.startsWith "bv_bitblast_step_"
+  unless applicable do return none
+  let some tactic ← bvDecideHint? | return none
+  ctx.runTacticWithScopeFallback tactic
+
+private def protocolHint? (rule : String) :
+    CoreM (Option (TSyntax `tactic)) := do
+  match rule with
+  | "assume" =>
+    return some (← `(tactic| first
+      | simpa only [bitVecUltEqTrueIffLt, bitVecUleEqTrueIffLe] using ‹_›
+      | exact mt (stringAppendIsEmptyEqIff _ _).mpr (by assumption)
+      | simpa [stringIsEmptyEqDecide, String.append_eq_empty_iff] using ‹_›
+      | simpa [BitVec.ult_eq_decide, BitVec.ule_eq_decide,
+          BitVec.slt_eq_decide, BitVec.sle_eq_decide] using ‹_›
+      | (dsimp at *
+         simp_all [BitVec.ult_eq_decide, BitVec.ule_eq_decide,
+           BitVec.slt_eq_decide, BitVec.sle_eq_decide])))
+  | "bind" | "subproof" =>
+    return some (← `(tactic| grind))
+  | "sko_forall" =>
+    return some (← `(tactic| simp_all only [forallIffAtCounterexample]))
+  | "sko_ex" =>
+    return some (← `(tactic| simp_all only [existsIffAtWitness]))
+  | _ =>
+    return none
+
 /-- Prove `target` from the proofs in `premises`, trying the rule's hinted tactic first.
 
 Builds the implication `p₁ → … → pₙ → target`, abstracts exactly its free variables,
@@ -723,39 +822,17 @@ proves the resulting closed proposition in an empty context, then applies it to 
 variables and the premise proofs. Thus a step tactic cannot inspect any ambient declaration
 that is absent from the step itself. -/
 private def proveStepCore (target : Expr) (premises : Array Expr) (rule : String)
-    (args : Array Sexp := #[]) :
+    (_args : Array Sexp := #[]) :
     TacticM (Option Expr) := do
   let hypTypes ← premises.mapM fun p => do instantiateMVars (← inferType p)
   let impl := hypTypes.foldr (fun ty acc => mkForall `h .default ty acc) target
   let stepParams ← collectProofParams #[impl]
   let checkParams ← collectProofParams (premises.push impl)
   let closedImpl ← instantiateMVars (← mkForallFVars stepParams impl)
-  let hint ←
-    if rule == "bv_bitblast_step_bvequal" then
-      bitVecEqualityHint? target
-    else if rule == "bv_bitblast_step_bvneg" then
-      bitVecNegationHint? target
-    else if rule == "bv_bitblast_step_extract" then
-      bitVecExtractHint? target
-    else if rule == "bv_bitblast_step_bvult" then
-      bitVecUnsignedLtHint? target
-    else if rule == "bv_bitblast_step_bvslt" then
-      bitVecSignedLtHint? target
-    else
-      ruleHint? target rule args
-  let isStringRewrite :=
-    rule == "rare_rewrite" &&
-      match args[0]? with
-      | some (Sexp.str name) => name.startsWith "str-"
-      | _ => false
-  let mut hinted := match hint with | some t => #[t] | none => #[]
-  if rule == "aci_simp" || rule == "bv_bitblast_step_bvequal" ||
-      rule == "bv_bitblast_step_bvneg" || rule == "bv_bitblast_step_extract" ||
-      rule == "bv_bitblast_step_bvult" || rule == "bv_bitblast_step_bvslt" then
-    if let some native ← bvDecideHint? then
-      hinted := hinted.push native
+  let hint ← protocolHint? rule
+  let hinted := match hint with | some t => #[t] | none => #[]
   let fallbacks ← stepTactics
-  let tactics := if isStringRewrite then hinted else hinted ++ fallbacks
+  let tactics := hinted ++ fallbacks
   for tac in tactics do
     let saved ← saveState
     let snapshot ← KernelCheckSnapshot.capture
@@ -779,11 +856,7 @@ private def proveStep (target : Expr) (premises : Array Expr) (rule : String)
     TacticM (Option Expr) :=
   proveStepCore target premises rule args
 
-private structure ClauseProof where
-  proof : Expr
-  clause : Expr
-  literals : Array Expr
-  deriving Inhabited
+private abbrev ClauseProof := Crush.ReplayClause
 
 private def unitClauseProof (proof : Expr) : MetaM ClauseProof := do
   let clause ← instantiateMVars (← inferType proof)
@@ -1126,11 +1199,9 @@ private def proveResolutionStep (target : Expr) (targetLiterals : Array Expr)
 
 /-- Replay a clause permutation or contraction by structural weakening. -/
 private def proveWeakeningStep (target : Expr) (targetLiterals : Array Expr)
-    (premise : ClauseProof) : TacticM (Option Expr) := do
-  let snapshot ← KernelCheckSnapshot.capture
-  let some proof ← weakenClause premise.clause premise.literals premise.proof
-      target targetLiterals | return none
-  return some (← kernelCheckProof snapshot target proof)
+    (premise : ClauseProof) : MetaM (Option Expr) :=
+  weakenClause premise.clause premise.literals premise.proof
+    target targetLiterals
 
 private structure RelationView where
   isIff : Bool
@@ -1189,6 +1260,66 @@ private def composeRelations (left right : RelationProof) :
     proof
   }
 
+private def relationAsEquality (relation : RelationProof) :
+    MetaM RelationProof := do
+  if !relation.view.isIff then return relation
+  return {
+    view := {
+      isIff := false
+      carrier := mkSort .zero
+      left := relation.view.left
+      right := relation.view.right
+    }
+    proof := mkApp3 (mkConst ``propext)
+      relation.view.left relation.view.right relation.proof
+  }
+
+private def sameCongruenceTerm (left right : Expr) : Bool :=
+  left.consumeMData == right.consumeMData
+
+private partial def synthesizeCongruenceEquality
+    (left right : Expr) (relations : Array RelationProof)
+    (fuel : Nat := 64) : MetaM (Option Expr) := do
+  let left := left.consumeMData
+  let right := right.consumeMData
+  if sameCongruenceTerm left right then
+    return some (← mkEqRefl left)
+  for relation in relations do
+    if sameCongruenceTerm left relation.view.left &&
+        sameCongruenceTerm right relation.view.right then
+      return some relation.proof
+    if sameCongruenceTerm left relation.view.right &&
+        sameCongruenceTerm right relation.view.left then
+      return some (← reverseRelation relation).proof
+  if fuel == 0 then return none
+  let .app leftFn leftArg := left | return none
+  let .app rightFn rightArg := right | return none
+  let some functionProof ←
+      synthesizeCongruenceEquality leftFn rightFn relations (fuel - 1)
+    | return none
+  let some argumentProof ←
+      synthesizeCongruenceEquality leftArg rightArg relations (fuel - 1)
+    | return none
+  try
+    return some (← mkCongr functionProof argumentProof)
+  catch _ =>
+    return none
+
+private def proveCongruenceStep? (target : Expr)
+    (premises : Array ClauseProof) : MetaM (Option Expr) := do
+  let some targetView := relationView? target | return none
+  let mut relations := #[]
+  for premise in premises do
+    let some relation := relationProof? premise | return none
+    relations := relations.push (← relationAsEquality relation)
+  let some equality ← synthesizeCongruenceEquality
+      targetView.left targetView.right relations
+    | return none
+  if targetView.isIff then
+    return some (mkApp3 (mkConst ``Eq.to_iff)
+      targetView.left targetView.right equality)
+  return some equality
+
 private def proveTransStep? (target : Expr) (premises : Array ClauseProof) :
     MetaM (Option Expr) := do
   let some targetView := relationView? target | return none
@@ -1197,7 +1328,7 @@ private def proveTransStep? (target : Expr) (premises : Array ClauseProof) :
   for premise in premises do
     let some relation := relationProof? premise | return none
     allRelations := allRelations.push relation
-    unless ← sameLiteral relation.view.left relation.view.right do
+    unless sameCongruenceTerm relation.view.left relation.view.right do
       relations := relations.push relation
   if relations.isEmpty then relations := allRelations
   let some first := relations[0]? | return none
@@ -1235,11 +1366,13 @@ partial def replay (proof : AletheProof) (rawSexps : Array Sexp)
   -- Collected from the *unstripped* text: the parser drops the annotations, which is
   -- exactly what `@p_k` references need.
   let named := rawSexps.foldl (fun acc s => collectNamed s acc) {}
-  let decoders ← getAletheDecoders
+  let decoders ← getReplayTermHandlers
+  let replayRules ← getReplayRuleHandlers
   let ctx : TermCtx := { symbols, named, decoders }
   let failureRef ← IO.mkRef none
   let referenceCounts := premiseReferenceCounts proof.commands
-  match ← go failureRef ctx facts proof.commands referenceCounts 0 {} #[] with
+  match ← go failureRef ctx replayRules facts proof.commands
+      referenceCounts 0 {} #[] with
   | some proof => return .ok proof
   | none =>
     let failure ← failureRef.get
@@ -1250,6 +1383,7 @@ where
   /-- Replay `cmds` from index `i` under proof environment `env`, returning the proof of the
   first empty clause reached. -/
   go (failureRef : ReplayFailureRef) (ctx : TermCtx)
+      (replayRules : ReplayRuleRegistry)
       (facts : Std.HashMap String Expr) (cmds : Array Command)
       (referenceCounts : Std.HashMap String Nat)
       (i : Nat) (env : Std.HashMap String ClauseProof) (scopedProofs : Array Expr) :
@@ -1274,7 +1408,7 @@ where
                 term := some term
                 detail := "selected SMT assumption could not be decoded" }
               return none
-          let target ← toPropM target
+          let target ← replayToProp target
           let sourceType ← instantiateMVars (← inferType sourceProof)
           let proof? ←
             if ← isDefEqGuarded sourceType target then
@@ -1295,7 +1429,7 @@ where
         | none =>
           match ← toExpr? ctx 64 term with
           | some target =>
-            let target ← toPropM target
+            let target ← replayToProp target
             if let some proof ←
                 (proveStep target #[] "assume" : TacticM (Option Expr)) then
               env := env.insert id (← unitClauseProof proof)
@@ -1307,7 +1441,8 @@ where
         i := i + 1
       | .anchor .. =>
         let some (stepId, pf, next) ←
-            replayAnchor failureRef ctx facts cmds referenceCounts i env scopedProofs
+            replayAnchor failureRef ctx replayRules facts cmds
+              referenceCounts i env scopedProofs
           | return none
         env := env.insert stepId pf
         if pf.literals.isEmpty then
@@ -1316,7 +1451,7 @@ where
         i := next
       | .step id clause rule premises args _ =>
         let some pf ←
-            replayStep failureRef ctx referenceCounts env scopedProofs
+            replayStep failureRef ctx replayRules referenceCounts env scopedProofs
               id clause rule premises args
           | return none
         env := env.insert id pf
@@ -1333,6 +1468,7 @@ where
 
   /-- Replay one ordinary derived step from the proofs currently in scope. -/
   replayStep (failureRef : ReplayFailureRef) (ctx : TermCtx)
+      (replayRules : ReplayRuleRegistry)
       (referenceCounts : Std.HashMap String Nat)
       (env : Std.HashMap String ClauseProof) (scopedProofs : Array Expr)
       (id : String)
@@ -1362,6 +1498,19 @@ where
           return none
       premiseProofs := premiseProofs.push pf
     let prems := premiseProofs.map (·.proof)
+    let replayContext : ReplayRuleContext := {
+      stepId := id
+      rule
+      target
+      targetLiterals
+      premises := premiseProofs
+      args
+      scopedProofs
+      decodeTerm := toExpr? ctx 64
+      decodeSort := sortToType? ctx
+      toProp := replayToProp
+    }
+    let snapshot ← KernelCheckSnapshot.capture
     let structural? ←
       if premiseProofs.isEmpty then
         proveProjectionClause? target targetLiterals
@@ -1369,23 +1518,31 @@ where
         proveIffClause? target premiseProofs[0]!
       else
         pure none
-    let proof? ← match structural? with
+    let structural? ← match structural? with
     | some proof => pure (some proof)
     | none =>
-      if rule == "trans" then
-        match ← proveTransStep? target premiseProofs with
-        | some proof => pure (some proof)
-        | none => proveStep target prems rule args
-      else if rule == "resolution" && prems.size > 1 then
-        match ← proveResolutionStep target targetLiterals premiseProofs with
-        | some proof => pure (some proof)
-        | none => proveStep target prems rule args
-      else if (rule == "reordering" || rule == "contraction") && prems.size == 1 then
-        match ← proveWeakeningStep target targetLiterals premiseProofs[0]! with
-        | some proof => pure (some proof)
-        | none => proveStep target prems rule args
+      if rule == "cong" then
+        proveCongruenceStep? target premiseProofs
+      else if rule == "trans" then
+        proveTransStep? target premiseProofs
+      else if rule == "resolution" && premiseProofs.size > 1 then
+        proveResolutionStep target targetLiterals premiseProofs
+      else if (rule == "reordering" || rule == "contraction") &&
+          premiseProofs.size == 1 then
+        proveWeakeningStep target targetLiterals premiseProofs[0]!
       else
-        proveStep target prems rule args
+        pure none
+    let structural? ← match structural? with
+    | some proof => do
+      pure (some (← kernelCheckProof snapshot target proof))
+    | none =>
+      pure none
+    let proof? ← match structural? with
+    | some proof => pure (some proof)
+    | none => runReplayRuleHandlers replayRules replayContext
+    let proof? ← match proof? with
+    | some proof => pure (some proof)
+    | none => proveStep target prems rule args
     let proof? ←
       match proof? with
       | some proof => pure (some proof)
@@ -1417,6 +1574,7 @@ where
 
   /-- Replay an anchored subproof or binder congruence and return its closed proof. -/
   replayAnchor (failureRef : ReplayFailureRef) (ctx : TermCtx)
+      (replayRules : ReplayRuleRegistry)
       (facts : Std.HashMap String Expr) (cmds : Array Command)
       (referenceCounts : Std.HashMap String Nat)
       (index : Nat) (env : Std.HashMap String ClauseProof) (scopedProofs : Array Expr) :
@@ -1480,15 +1638,15 @@ where
                   term := some localTerm
                   detail := "local subproof assumption could not be decoded" }
                 return none
-            let hypTy ← toPropM hypTy
+            let hypTy ← replayToProp hypTy
             withLocalDeclD (`hsub ++ localId.toName) hypTy fun hlocal => do
               let localProof : ClauseProof :=
                 { proof := hlocal, clause := hypTy, literals := #[hypTy] }
               bindAssumptions (j + 1) (innerEnv.insert localId localProof)
                 (locals.push hlocal)
           else
-            let some body ← goInner failureRef ctx facts cmds bodyStart close innerEnv
-                referenceCounts (scopedProofs ++ locals)
+            let some body ← goInner failureRef ctx replayRules facts cmds
+                bodyStart close innerEnv referenceCounts (scopedProofs ++ locals)
               | trace[crush.result] "alethe replay: declined (subproof {stepId} body)"
                 return none
             let implication ← mkLambdaFVars locals body
@@ -1533,8 +1691,8 @@ where
             applyAnchorAssignments failureRef innerCtx stepId closeRule anchorArgs
                 fun assignedCtx => do
               let some body ←
-                  goInner failureRef assignedCtx facts cmds bodyStart close env
-                    referenceCounts scopedProofs
+                  goInner failureRef assignedCtx replayRules facts cmds
+                    bodyStart close env referenceCounts scopedProofs
                 | trace[crush.result] "alethe replay: declined (bind anchor {stepId} body)"
                   return none
               let generalized ← mkLambdaFVars locals body
@@ -1563,8 +1721,8 @@ where
         applyAnchorAssignments failureRef ctx stepId closeRule anchorArgs
             fun assignedCtx => do
           let some body ←
-              goInner failureRef assignedCtx facts cmds bodyStart close env
-                referenceCounts scopedProofs
+              goInner failureRef assignedCtx replayRules facts cmds
+                bodyStart close env referenceCounts scopedProofs
             | trace[crush.result] "alethe replay: declined ({closeRule} anchor \
                                    {stepId} body)"
               return none
@@ -1595,6 +1753,7 @@ where
   /-- Replay a subproof block's steps, `[from, upto)`, returning the proof of the last one
   (the block's inner conclusion). -/
   goInner (failureRef : ReplayFailureRef) (ctx : TermCtx)
+      (replayRules : ReplayRuleRegistry)
       (facts : Std.HashMap String Expr) (cmds : Array Command)
       («from» upto : Nat) (env : Std.HashMap String ClauseProof)
       (referenceCounts : Std.HashMap String Nat)
@@ -1607,7 +1766,8 @@ where
       match cmds[i]! with
       | .anchor .. =>
         let some (stepId, pf, next) ←
-            replayAnchor failureRef ctx facts cmds referenceCounts i env scopedProofs
+            replayAnchor failureRef ctx replayRules facts cmds
+              referenceCounts i env scopedProofs
           | return none
         if next > upto then
           trace[crush.result] "alethe replay: declined (nested subproof {stepId} \
@@ -1622,7 +1782,7 @@ where
         i := next
       | .step id clause rule premises args _ =>
         let some pf ←
-            replayStep failureRef ctx referenceCounts env scopedProofs
+            replayStep failureRef ctx replayRules referenceCounts env scopedProofs
               id clause rule premises args
           | return none
         env := env.insert id pf
@@ -1733,13 +1893,6 @@ where
           return some i
       i := i + 1
     return none
-
-  /-- `AletheTerm.toProp` is private; this mirrors it for the local-assumption type. -/
-  toPropM (e : Expr) : TacticM Expr := do
-    let ty ← whnf (← inferType e)
-    if ty.isProp then return e
-    else if ty.isConstOf ``Bool then mkEq e (mkConst ``Bool.true)
-    else return e
 
 /-- Compatibility wrapper for callers interested only in replay success. -/
 def replay? (proof : AletheProof) (rawSexps : Array Sexp)
