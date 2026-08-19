@@ -49,7 +49,7 @@ noticed and reclassified.
 | Finite arrays | yes | no-certificate | cvc5 reports `DUMMY_SKOLEM` |
 | Defunctionalized higher-order terms | yes | replayed | |
 | Native higher-order terms | cvc5 only | no-certificate | cvc5 reports unsupported higher-order proof elements |
-| User-defined operators | user-defined | replayed | `@[crush_alethe "operator"]` supplies ordinary and indexed inverse decoding |
+| User-defined operators | user-defined | replayed | `register_crush_replay term` or `@[crush_replay "operator"]` supplies ordinary and indexed inverse decoding |
 
 ## Coverage Tests
 

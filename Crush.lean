@@ -16,9 +16,6 @@ import Crush.Translation.Instantiate
 import Crush.Translation.Translate
 import Crush.Translation.DefaultLowerings
 import Crush.Solver.Process
-import Crush.Solver.Alethe
-import Crush.Solver.ReplayAttr
-import Crush.Solver.AletheTerm
 import Crush.Solver.AletheReplay
 import Crush.Solver.Reconstruct
 import Crush.Frontend.Tactic
@@ -37,8 +34,9 @@ This root module re-exports the public API. `import Crush` gives you:
   (`Crush.Translation.Attr`, `Crush.SMT.Quote`, `Crush.Translation.Builtins`),
 * the `@[crush_reconstruct]` attribute for extending checked proof replay
   (`Crush.Solver.ReconstructAttr`),
-* the `@[crush_alethe]` attribute for decoding custom SMT operators during
-  Alethe replay (`Crush.Solver.AletheAttr`),
+* `register_crush_replay`, `@[crush_replay]`, and
+  `@[crush_replay_rule]` for extending checked Alethe replay
+  (`Crush.Solver.AletheReplay`),
 * all `crush.*` `set_option`s (`Crush.Frontend.Config`).
 
 See `README.md` and `Doc/PLAN.md` for the architecture and roadmap.

@@ -449,10 +449,6 @@ Returning `none` delegates to the next handler.
 `runTactic` uses only ordinary premises; `runTacticWithScopeFallback` retries
 with enclosing subproof facts when the certificate rule requires them.
 
-`@[crush_alethe]`, `AletheDecoder`, and the old decoder registry names remain
-as deprecated compatibility aliases.
-New code should use the replay names.
-
 ## Test Term Decoding
 
 A solver may simplify away an operator or change the shape used in a live

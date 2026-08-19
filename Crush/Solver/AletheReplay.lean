@@ -1,4 +1,5 @@
 import Crush.Solver.Alethe
+import Crush.Solver.ReplayAttr
 import Crush.Solver.AletheTerm
 import Crush.Solver.KernelCheck
 import Crush.Translation.Monad

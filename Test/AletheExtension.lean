@@ -67,14 +67,6 @@ register_crush_replay rule <<
 private def invalidReplayRule : ReplayRuleHandler := fun _ =>
   return some (mkConst ``True.intro)
 
-/-!
-warning: `crush_alethe` is deprecated; use `crush_replay`
--/
-#guard_msgs(warning, substring := true) in
-@[crush_alethe "test_legacy_replay"]
-def legacyReplayHandler : ReplayTermHandler := fun _ =>
-  return none
-
 private def parseTerm (source : String) : MetaM Sexp := do
   let some (term, rest) := parseSexp source
     | throwError "failed to parse Alethe term `{source}`"
@@ -94,8 +86,6 @@ private def assertDecoded (symbols : Std.HashMap String Expr)
 run_meta do
   unless ← hasReplayTermHandlersFor "divisible" do
     throwError "the `divisible` replay handler was not registered"
-  unless ← hasReplayTermHandlersFor "test_legacy_replay" do
-    throwError "the compatibility replay handler was not registered"
   let termHandlers ← getReplayTermHandlers
   let some prioritizedTerm ←
       runReplayTermHandlers termHandlers "test_term_priority" #[] #[]

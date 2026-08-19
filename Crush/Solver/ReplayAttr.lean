@@ -35,12 +35,6 @@ abbrev ReplayTermHandler := ReplayTermContext → MetaM (Option Expr)
 
 instance : TypeName ReplayTermHandler := unsafe (TypeName.mk _ ``ReplayTermHandler)
 
-@[deprecated ReplayTermContext (since := "2026-08-19")]
-abbrev AletheDecoderContext := ReplayTermContext
-
-@[deprecated ReplayTermHandler (since := "2026-08-19")]
-abbrev AletheDecoder := ReplayTermHandler
-
 /-- Serializable metadata for one operator-indexed term handler. -/
 private structure ReplayTermEntry where
   head : String
@@ -1100,35 +1094,5 @@ elab_rules : command
         body
         priority
       }
-
-/-! ## Compatibility -/
-
-syntax (name := crushAletheAttr) "crush_alethe " str (ppSpace prio)? : attr
-
-initialize registerBuiltinAttribute {
-  name := `crushAletheAttr
-  descr := "Deprecated alias for `crush_replay`."
-  applicationTime := .afterCompilation
-  add := fun declName stx _ => do
-    logWarningAt stx "`crush_alethe` is deprecated; use `crush_replay`"
-    registerReplayTermHandler "crush_alethe" declName stx
-}
-
-@[deprecated ReplayTermRegistry (since := "2026-08-19")]
-abbrev AletheDecoderRegistry := ReplayTermRegistry
-
-@[deprecated getReplayTermHandlers (since := "2026-08-19")]
-def getAletheDecoders : MetaM ReplayTermRegistry :=
-  getReplayTermHandlers
-
-@[deprecated hasReplayTermHandlersFor (since := "2026-08-19")]
-def hasAletheDecodersFor (head : String) : CoreM Bool :=
-  hasReplayTermHandlersFor head
-
-@[deprecated runReplayTermHandlers (since := "2026-08-19")]
-def runAletheDecoders (registry : ReplayTermRegistry)
-    (head : String) (indices : Array Sexp) (args : Array Expr) :
-    MetaM (Option Expr) :=
-  runReplayTermHandlers registry head indices args
 
 end Crush
