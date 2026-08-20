@@ -28,7 +28,7 @@ MAX_HEARTBEATS="${MAX_HEARTBEATS:-1000000}"
 MAX_RECURSION_DEPTH="${MAX_RECURSION_DEPTH:-1000000}"
 GRIND_SPLITS="${GRIND_SPLITS:-20}"
 DUPER_MAX_HEARTBEATS="${DUPER_MAX_HEARTBEATS:-20000}"
-DUPER_FILE_CPU_SECONDS="${DUPER_FILE_CPU_SECONDS:-60}"
+DUPER_FILE_CPU_SECONDS="${DUPER_FILE_CPU_SECONDS:-0}"
 RUN_AUTO="${RUN_AUTO:-true}"
 RUN_CRUSH="${RUN_CRUSH:-true}"
 RUN_DUPER="${RUN_DUPER:-false}"
@@ -590,73 +590,6 @@ write_reports() {
     }
   ' "$RESULTS" > "$FILE_SUMMARY"
 
-  awk -F '\t' -v repeats="$REPEATS" '
-    BEGIN {
-      OFS = "\t"
-      left[1] = "auto";  right[1] = "crush-portfolio"
-      left[2] = "auto";  right[2] = "duper"
-      left[3] = "duper"; right[3] = "crush-portfolio"
-      left[4] = "grind"; right[4] = "crush-portfolio"
-      left[5] = "auto";  right[5] = "grind"
-      left[6] = "duper"; right[6] = "grind"
-      print "suite", "left_backend", "right_backend", "shared_vcs",
-            "left_only", "right_only", "both_solved", "neither_solved",
-            "left_mean_ms", "right_mean_ms"
-    }
-    NR > 1 {
-      vc = $1 SUBSEP $4 SUBSEP $5
-      run = vc SUBSEP $2 SUBSEP $3
-      runSeen[run] = 1
-      runMs[run] += $9
-      if ($7 != "pass") runFailed[run] = 1
-      suites[$1] = 1
-    }
-    END {
-      for (run in runSeen) {
-        split(run, p, SUBSEP)
-        vc = p[1] SUBSEP p[2] SUBSEP p[3]
-        backend = p[4]
-        key = vc SUBSEP backend
-        runs[key]++
-        totalMs[key] += runMs[run]
-        if (!runFailed[run]) passRuns[key]++
-        vcs[vc] = 1
-      }
-      for (vc in vcs) {
-        split(vc, p, SUBSEP)
-        suite = p[1]
-        for (pair = 1; pair <= 6; pair++) {
-          leftKey = vc SUBSEP left[pair]
-          rightKey = vc SUBSEP right[pair]
-          if (runs[leftKey] != repeats || runs[rightKey] != repeats) continue
-          resultKey = suite SUBSEP pair
-          shared[resultKey]++
-          leftSolved = passRuns[leftKey] == repeats
-          rightSolved = passRuns[rightKey] == repeats
-          if (leftSolved && !rightSolved) leftOnly[resultKey]++
-          if (!leftSolved && rightSolved) rightOnly[resultKey]++
-          if (!leftSolved && !rightSolved) neither[resultKey]++
-          if (leftSolved && rightSolved) {
-            both[resultKey]++
-            leftMs[resultKey] += totalMs[leftKey] / repeats
-            rightMs[resultKey] += totalMs[rightKey] / repeats
-          }
-        }
-      }
-      for (suite in suites) {
-        for (pair = 1; pair <= 6; pair++) {
-          resultKey = suite SUBSEP pair
-          if (!shared[resultKey]) continue
-          leftMean = both[resultKey] ? leftMs[resultKey] / both[resultKey] : 0
-          rightMean = both[resultKey] ? rightMs[resultKey] / both[resultKey] : 0
-          printf "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%.1f\t%.1f\n",
-            suite, left[pair], right[pair], shared[resultKey],
-            leftOnly[resultKey], rightOnly[resultKey], both[resultKey],
-            neither[resultKey], leftMean, rightMean
-        }
-      }
-    }
-  ' "$RESULTS" > "$COMPARISON"
 }
 
 if ! is_true "$RUN_AUTO" && ! is_true "$RUN_CRUSH" && ! is_true "$RUN_DUPER" &&
@@ -765,8 +698,9 @@ if ! python3 "$SCRIPT_DIR/benchmark-report.py" \
     --measurements "$MEASUREMENTS" --profiles "$PROFILES" --out-dir "$OUT_DIR"; then
   die "failed to generate measurement reports"
 fi
-printf '\nPLean summary:\n'
-column -t -s $'\t' "$SUMMARY" 2>/dev/null || cat "$SUMMARY"
+printf '\nAll-VC headline summary:\n'
+column -t -s $'\t' "$OUT_DIR/headline-summary.tsv" 2>/dev/null ||
+  cat "$OUT_DIR/headline-summary.tsv"
 printf '\nMatched-VC comparison:\n'
 column -t -s $'\t' "$COMPARISON" 2>/dev/null || cat "$COMPARISON"
 printf '\nReconstruction coverage:\n'
@@ -779,3 +713,11 @@ printf '\nAlethe replay scaling:\n'
 column -t -s $'\t' "$OUT_DIR/alethe-replay-scaling-summary.tsv" 2>/dev/null ||
   cat "$OUT_DIR/alethe-replay-scaling-summary.tsv"
 printf '\nResults: %s\n' "$OUT_DIR"
+
+missing_headline="$(
+  awk -F '\t' 'NR > 1 { missing += $8 } END { print missing + 0 }' \
+    "$OUT_DIR/headline-summary.tsv"
+)"
+if [[ "$missing_headline" -gt 0 ]]; then
+  die "$missing_headline headline VC attempt(s) are missing"
+fi

@@ -442,6 +442,12 @@ if ! python3 "$script_dir/benchmark-report.py" \
   exit 1
 fi
 
+printf '\nAll-VC headline summary:\n'
+column -t -s $'\t' "$out_dir/headline-summary.tsv" 2>/dev/null ||
+  cat "$out_dir/headline-summary.tsv"
+printf '\nMatched-VC comparison:\n'
+column -t -s $'\t' "$out_dir/comparison.tsv" 2>/dev/null ||
+  cat "$out_dir/comparison.tsv"
 printf '\nReconstruction coverage:\n'
 column -t -s $'\t' "$out_dir/reconstruction-summary.tsv" 2>/dev/null ||
   cat "$out_dir/reconstruction-summary.tsv"
@@ -452,3 +458,13 @@ printf '\nAlethe replay scaling:\n'
 column -t -s $'\t' "$out_dir/alethe-replay-scaling-summary.tsv" 2>/dev/null ||
   cat "$out_dir/alethe-replay-scaling-summary.tsv"
 printf '\nResults: %s\n' "$out_dir"
+
+missing_headline="$(
+  awk -F '\t' 'NR > 1 { missing += $8 } END { print missing + 0 }' \
+    "$out_dir/headline-summary.tsv"
+)"
+if [[ "$missing_headline" -gt 0 ]]; then
+  printf 'error: %s headline VC attempt(s) are missing\n' \
+    "$missing_headline" >&2
+  exit 1
+fi

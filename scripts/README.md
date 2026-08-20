@@ -16,7 +16,9 @@ written under `BenchmarkResults/`.
 | `plot-benchmarks.py` | Renders normalized reports as Markdown tables and SVG figures |
 
 The latest recorded results and exact tested revisions are in
-[`BENCHMARKS.md`](../BENCHMARKS.md).
+[`BENCHMARKS.md`](../BENCHMARKS.md). The machine-readable inputs for the
+published 2026-08-20 figures and baseline comparison are retained in
+[`BenchmarkResults/recorded/2026-08-20`](../BenchmarkResults/recorded/2026-08-20).
 
 ## Prerequisites
 
@@ -50,30 +52,31 @@ REPEATS=1 \
 TIMEOUT=5 \
 DUPER_TIMEOUT=5 \
 SOLVER=cvc5 \
+CRUSH_MODES=verify \
 MAX_HEARTBEATS=1000000 \
 MAX_RECURSION_DEPTH=1000000 \
 OUT_DIR="$PWD/BenchmarkResults/corpora-reproduction" \
 scripts/benchmark-corpora.sh
 ```
 
-`TIMEOUT` is the solver timeout for each query. `MAX_HEARTBEATS` is the Lean
-budget applied independently to each recorded VC. The generated enclosing
-declaration is uncapped; the harness reports an error if a backend heartbeat
-still aborts Loom's surrounding tactic traversal. `MAX_RECURSION_DEPTH`
-applies uniformly to every generated Lean process and is recorded in
-`metadata.tsv`.
+`TIMEOUT` is the solver timeout for each query. `MAX_HEARTBEATS` is a separate
+Lean budget for each recorded VC. Generated Loom and Velvet files enumerate
+their VCs with one worker, record every backend success or failure, and admit
+failed goals only inside the temporary benchmark source so one failure cannot
+suppress later VCs. The enclosing declaration is uncapped.
+`MAX_RECURSION_DEPTH` applies uniformly to every generated Lean process and is
+recorded in `metadata.tsv`.
 
-This is the configuration used for the recorded table. It produces known
-truncation warnings for some Velvet files and exits nonzero after writing all
-reports. `matched-summary.tsv` still contains the valid 355-VC intersection
-used by the headline comparison. Use `MAX_HEARTBEATS=0` for a new run where
-complete enumeration is more important than matching the recorded bounds.
-The harness records any truncation in `runs.tsv` and rejects raw partial totals.
+The command runs the four headline backends: Auto, Duper, trusted Crush, and
+`grind`. `CRUSH_MODES=verify` selects `crush.trust = "trust"` and does not
+perform proof reconstruction. The script writes partial diagnostics but exits
+nonzero if a lane is truncated or lacks any VC from the fixed workload.
 
 For performance measurements, use multiple repeats:
 
 ```sh
-REPEATS=3 MAX_HEARTBEATS=0 scripts/benchmark-corpora.sh
+REPEATS=3 CRUSH_MODES=verify MAX_HEARTBEATS=0 \
+  scripts/benchmark-corpora.sh
 ```
 
 Select corpora or backends with `RUN_*` variables:
@@ -115,6 +118,7 @@ Useful overrides include:
 | `OUT_DIR` | timestamped directory | Result location |
 | `DUPER_TIMEOUT` | `5` | Duper saturation limit per portfolio instance |
 | `CRUSH_MODES` | `verify core alethe portfolio` | Crush measurement lanes |
+| `HAMMER_PROFILES` | derived from enabled backends | Explicit LeanHammer profiles |
 | `MAX_RECURSION_DEPTH` | `1000000` | Lean recursion limit for generated files |
 | `USE_MATHLIB_CACHE` | `true` | Fetch Mathlib build artifacts |
 | `CRUSH_PROFILE` | `true` | Include Crush phase profiling and report records |
@@ -139,19 +143,19 @@ sequential `auto`-then-Duper fallback. Set `PROFILES` to run selected lanes.
 
 ## PLean
 
-Run all three published PLean lanes:
+Run all four PLean headline lanes:
 
 ```sh
 RUN_DUPER=true \
 REPEATS=1 \
 SOLVER=cvc5 \
 TIMEOUT=5 \
+CRUSH_MODES=verify \
 MAX_HEARTBEATS=1000000 \
-CRUSH_TRUST=trust \
 CRUSH_INST_FUEL=0 \
 DUPER_TIMEOUT=1 \
 DUPER_MAX_HEARTBEATS=20000 \
-DUPER_FILE_CPU_SECONDS=60 \
+DUPER_FILE_CPU_SECONDS=0 \
 OUT_DIR="$PWD/BenchmarkResults/plean-reproduction" \
 scripts/benchmark-plean.sh
 ```
@@ -166,16 +170,16 @@ Override the corresponding `PLEAN_*_REPO_URL`, `PLEAN_*_REV`, or
 
 `MAX_HEARTBEATS` defaults to `1000000` for auto and Crush.
 The PLean Duper lane uses `DUPER_TIMEOUT=1` and
-`DUPER_MAX_HEARTBEATS=20000`, plus a
-`DUPER_FILE_CPU_SECONDS=60` limit on each generated Lean file. One million
-heartbeats made the first file run for over 40 minutes, while `200000` still
-exceeded 18 minutes. This is a bounded stress-test lane, not an equal-resource
-timing comparison. Set `DUPER_FILE_CPU_SECONDS=0` to remove the file limit.
+`DUPER_MAX_HEARTBEATS=20000`. `DUPER_FILE_CPU_SECONDS=0` leaves the file
+uncapped so every obligation receives an attempt. A positive value is useful
+for bounded diagnostics, but a capped file may leave VCs `missing`; such a run
+cannot produce a valid all-VC headline comparison and exits nonzero after
+writing its reports.
 Set `PREPARE_TREES=false` only when all selected override trees and their
 dependencies are already built.
 
-The Duper lane is opt-in because five of the nine PLean files reach that CPU
-limit. Each file runs in a separate process, so all nine are attempted:
+The Duper lane is opt-in because it is substantially slower than the other
+lanes. To run only Duper on the full workload:
 
 ```sh
 RUN_AUTO=false \
@@ -183,36 +187,37 @@ RUN_CRUSH=false \
 RUN_DUPER=true \
 DUPER_TIMEOUT=1 \
 DUPER_MAX_HEARTBEATS=20000 \
-DUPER_FILE_CPU_SECONDS=60 \
+DUPER_FILE_CPU_SECONDS=0 \
 REPEATS=1 \
 OUT_DIR="$PWD/BenchmarkResults/plean-duper-stress" \
 scripts/benchmark-plean.sh
 ```
 
 The focused command writes only Duper results. Use the all-lanes command above
-to generate the PLean auto/Duper/Crush rows in `comparison.tsv`.
+to generate a fixed-denominator PLean headline table and the pairwise
+Crush-versus-baseline rows in `comparison.tsv`.
 
 The PLean harness disables registered manual proofs in temporary generated
-sources so both backends attempt every VC. It excludes incomplete
+sources so every backend receives the same VCs. It excludes incomplete
 `Paxos.lean`; override `PLEAN_CASES` to select a space-separated file list.
 
 ## Outputs
 
-All harnesses write the normalized measurement and profiling reports. The
-corpus and PLean harnesses also retain their original comparison reports:
+All harnesses write normalized measurement, profiling, coverage, and comparison
+reports:
 
 | File | Contents |
 |---|---|
 | `metadata.tsv` | Revisions, toolchains, solver configuration, and dirty state |
 | `results.tsv` | Per-VC status, failure category, and tactic-local time |
 | `runs.tsv` | Per-file wall time, exit status, and VC count; corpus runs also record truncation |
-| `summary.tsv` | Coverage and aggregate attempted-VC timing |
-| `matched-summary.tsv` | Corpus-only coverage and timing on the three-backend VC intersection |
-| `comparison.tsv` | Pairwise results and means for VCs matched across each available backend pair |
+| `summary.tsv` | Legacy raw-record aggregate emitted by the host harness |
+| `headline-summary.tsv` | Auto, Duper, trusted Crush, and `grind` coverage over one fixed all-VC denominator |
+| `comparison.tsv` | Pairwise matched-VC outcomes for Crush versus one baseline at a time |
 | `file-summary.tsv` | PLean-only per-file coverage and timing |
 | `measurements.tsv` | Normalized per-VC status and tactic-local time |
 | `profile-events.tsv` | Normalized Crush outcomes, replay failures, phases, and numeric metrics |
-| `coverage-summary.tsv` | Coverage and timing grouped by suite and lane |
+| `coverage-summary.tsv` | All-lane coverage over a fixed suite denominator, including attempted, failed, and missing counts |
 | `reconstruction-summary.tsv` | Verified VCs reconstructed by Core, Alethe, and the portfolio |
 | `reconstruction-failures.tsv` | Reconstruction failures grouped by reported cause |
 | `outcome-summary.tsv` | Crush outcomes and replay statuses grouped by suite and lane |
@@ -230,6 +235,19 @@ R-squared, milliseconds per 100 commands, and milliseconds per KiB only when
 at least two successful VCs have nonzero size and time variance. Repeated runs
 are preserved in the detailed file and averaged per VC before fitting, so they
 do not over-weight one obligation.
+
+In `headline-summary.tsv`, `total_vcs` is the fixed number of VC occurrences in
+the corpus and is identical for every backend. `attempted_vcs` counts VCs with
+a complete backend record. `failed_vcs` counts attempted but unsolved VCs.
+`missing_vcs` counts corpus VCs for which the backend produced no complete
+attempt record; missing VCs count as unsolved in `pass_pct` and are excluded
+from timing statistics.
+
+In `comparison.tsv`, `matched_vcs` is the exact VC-identity intersection for
+the named baseline and Crush. `baseline_only_solved`, `crush_only_solved`,
+`both_solved`, and `neither_solved` partition that intersection. The two timing
+means include only `both_solved` VCs. There are no baseline-versus-baseline
+rows.
 
 ## Tables and Figures
 
@@ -253,10 +271,10 @@ The command writes:
 
 | File | Contents |
 |---|---|
-| `tables.md` | Coverage, reconstruction, failure, phase, and scaling tables |
+| `tables.md` | All-VC backend comparison, pairwise matched-VC, reconstruction, failure, phase, and scaling tables |
 | `coverage.svg` | Solved VCs by corpus and lane |
 | `reconstruction.svg` | Core, Alethe, and portfolio reconstruction among verified VCs |
-| `reconstruction-failures.svg` | Counts grouped by reported failure mode |
+| `reconstruction-failures.svg` | One failure-mode pie chart per corpus |
 | `phase-breakdown.svg` | Stacked profiler-accounted time by Crush phase |
 | `alethe-replay-scaling.svg` | Successful replay time against parsed command count |
 
@@ -265,17 +283,17 @@ replays span several orders of magnitude. Pass `--replay-axis linear` for a
 linear axis. In either view, the annotation and dashed line report the
 least-squares fit in the original linear units.
 
-The Verso manual publishes a checked-in snapshot of the SVGs. Refresh it from
-the result directories used for `BENCHMARKS.md`:
+The Verso manual publishes a checked-in snapshot of the SVGs. Reproduce that
+exact snapshot from the retained result directories:
 
 ```sh
 python3 scripts/plot-benchmarks.py \
-  BenchmarkResults/corpora-reproduction \
-  BenchmarkResults/leanhammer-reproduction \
-  BenchmarkResults/plean-reproduction \
+  BenchmarkResults/recorded/2026-08-20/figures/corpora \
+  BenchmarkResults/recorded/2026-08-20/figures/leanhammer \
+  BenchmarkResults/recorded/2026-08-20/figures/plean \
   --out-dir Doc/Verso/figures \
   --skip-tables
 ```
 
-Do not compare raw totals when branch-specific sources emit different goals or
-a run is marked truncated. Use `comparison.tsv` for matched-VC comparisons.
+Use `headline-summary.tsv` for all-VC coverage. Use `comparison.tsv` only for
+pairwise analysis of exact VCs shared by Crush and one baseline.

@@ -18,6 +18,22 @@ RECONSTRUCTION_LANES = (
     "crush-portfolio",
 )
 
+HEADLINE_COLUMNS = [
+    "suite",
+    "backend",
+    "lane",
+    "total_vcs",
+    "attempted_vcs",
+    "solved_vcs",
+    "failed_vcs",
+    "missing_vcs",
+    "pass_pct",
+    "total_ms",
+    "mean_ms",
+    "min_ms",
+    "max_ms",
+]
+
 
 def read_tsv(path: Path) -> list[dict[str, str]]:
     if not path.exists():
@@ -44,6 +60,13 @@ def grouped_attempts(
 
 def all_pass(rows: list[dict[str, str]]) -> bool:
     return bool(rows) and all(row["status"] == "pass" for row in rows)
+
+
+def mean_milliseconds(rows: list[dict[str, str]]) -> float:
+    values = [
+        float(row["milliseconds"]) for row in rows if row["milliseconds"]
+    ]
+    return sum(values) / len(values) if values else 0.0
 
 
 def parse_numeric_map(value: str) -> dict[str, int]:
@@ -130,30 +153,135 @@ def coverage_rows(
     by_lane: dict[tuple[str, str], list[list[dict[str, str]]]] = defaultdict(list)
     for (suite, lane, _), rows in attempts.items():
         by_lane[(suite, lane)].append(rows)
+    suite_totals: dict[str, int] = defaultdict(int)
+    for (suite, _), vcs in by_lane.items():
+        suite_totals[suite] = max(suite_totals[suite], len(vcs))
     output: list[list[object]] = []
     for (suite, lane), vcs in sorted(by_lane.items()):
         solved = sum(all_pass(rows) for rows in vcs)
         attempted = len(vcs)
-        elapsed = [
-            float(row["milliseconds"])
-            for rows in vcs
-            for row in rows
-            if row["milliseconds"]
-        ]
+        total_vcs = suite_totals[suite]
+        elapsed = [mean_milliseconds(rows) for rows in vcs]
         output.append(
             [
                 suite,
                 lane,
+                total_vcs,
                 attempted,
                 solved,
                 attempted - solved,
-                f"{100.0 * solved / attempted:.1f}" if attempted else "0.0",
+                total_vcs - attempted,
+                f"{100.0 * solved / total_vcs:.1f}" if total_vcs else "0.0",
                 f"{sum(elapsed):.3f}",
-                f"{sum(elapsed) / len(elapsed):.3f}" if elapsed else "0.000",
+                f"{sum(elapsed) / attempted:.3f}" if attempted else "0.000",
                 f"{min(elapsed):.3f}" if elapsed else "0.000",
                 f"{max(elapsed):.3f}" if elapsed else "0.000",
             ]
         )
+    return output
+
+
+def canonical_crush_lane(suite: str, lanes: set[str]) -> Optional[str]:
+    for lane in ("crush-verify", "crush-portfolio", "crush-only"):
+        if lane in lanes:
+            return lane
+    return None
+
+
+def headline_lane_map(suite: str, lanes: set[str]) -> list[tuple[str, str]]:
+    selected: list[tuple[str, str]] = []
+    if suite == "leanhammer":
+        candidates = (
+            ("auto", "auto-duper"),
+            ("duper", "duper-only"),
+        )
+        grind_lane = "grind-only"
+    else:
+        candidates = (
+            ("auto", "auto"),
+            ("duper", "duper"),
+        )
+        grind_lane = "grind"
+    for backend, lane in candidates:
+        if lane in lanes:
+            selected.append((backend, lane))
+    crush_lane = canonical_crush_lane(suite, lanes)
+    if crush_lane is not None:
+        selected.append(("crush", crush_lane))
+    if grind_lane in lanes:
+        selected.append(("grind", grind_lane))
+    return selected
+
+
+def headline_rows(coverage: list[list[object]]) -> list[list[object]]:
+    indexed = {(str(row[0]), str(row[1])): row for row in coverage}
+    lanes_by_suite: dict[str, set[str]] = defaultdict(set)
+    for suite, lane in indexed:
+        lanes_by_suite[suite].add(lane)
+    output: list[list[object]] = []
+    for suite, lanes in sorted(lanes_by_suite.items()):
+        for backend, lane in headline_lane_map(suite, lanes):
+            row = indexed[(suite, lane)]
+            output.append([suite, backend, lane, *row[2:]])
+    return output
+
+
+def comparison_rows(
+    attempts: dict[tuple[str, str, str], list[dict[str, str]]]
+) -> list[list[object]]:
+    lanes_by_suite: dict[str, set[str]] = defaultdict(set)
+    vcs_by_lane: dict[
+        tuple[str, str], dict[str, list[dict[str, str]]]
+    ] = defaultdict(dict)
+    for (suite, lane, vc), rows in attempts.items():
+        lanes_by_suite[suite].add(lane)
+        vcs_by_lane[(suite, lane)][vc] = rows
+
+    output: list[list[object]] = []
+    for suite, lanes in sorted(lanes_by_suite.items()):
+        crush_lane = canonical_crush_lane(suite, lanes)
+        if crush_lane is None:
+            continue
+        for backend, baseline_lane in headline_lane_map(suite, lanes):
+            if backend == "crush":
+                continue
+            baseline = vcs_by_lane[(suite, baseline_lane)]
+            crush = vcs_by_lane[(suite, crush_lane)]
+            matched = sorted(set(baseline) & set(crush))
+            baseline_only = 0
+            crush_only = 0
+            both = 0
+            neither = 0
+            baseline_ms = 0.0
+            crush_ms = 0.0
+            for vc in matched:
+                baseline_solved = all_pass(baseline[vc])
+                crush_solved = all_pass(crush[vc])
+                if baseline_solved and crush_solved:
+                    both += 1
+                    baseline_ms += mean_milliseconds(baseline[vc])
+                    crush_ms += mean_milliseconds(crush[vc])
+                elif baseline_solved:
+                    baseline_only += 1
+                elif crush_solved:
+                    crush_only += 1
+                else:
+                    neither += 1
+            output.append(
+                [
+                    suite,
+                    backend,
+                    baseline_lane,
+                    crush_lane,
+                    len(matched),
+                    baseline_only,
+                    crush_only,
+                    both,
+                    neither,
+                    f"{baseline_ms / both:.3f}" if both else "0.000",
+                    f"{crush_ms / both:.3f}" if both else "0.000",
+                ]
+            )
     return output
 
 
@@ -388,21 +516,46 @@ def main() -> None:
     attempts = grouped_attempts(measurements)
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
+    coverage = coverage_rows(attempts)
     write_tsv(
         args.out_dir / "coverage-summary.tsv",
         [
             "suite",
             "lane",
+            "total_vcs",
             "attempted_vcs",
             "solved_vcs",
             "failed_vcs",
+            "missing_vcs",
             "pass_pct",
             "total_ms",
             "mean_ms",
             "min_ms",
             "max_ms",
         ],
-        coverage_rows(attempts),
+        coverage,
+    )
+    write_tsv(
+        args.out_dir / "headline-summary.tsv",
+        HEADLINE_COLUMNS,
+        headline_rows(coverage),
+    )
+    write_tsv(
+        args.out_dir / "comparison.tsv",
+        [
+            "suite",
+            "baseline",
+            "baseline_lane",
+            "crush_lane",
+            "matched_vcs",
+            "baseline_only_solved",
+            "crush_only_solved",
+            "both_solved",
+            "neither_solved",
+            "baseline_mean_ms",
+            "crush_mean_ms",
+        ],
+        comparison_rows(attempts),
     )
     write_tsv(
         args.out_dir / "reconstruction-summary.tsv",

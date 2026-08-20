@@ -15,11 +15,13 @@ csv.field_size_limit(sys.maxsize)
 
 LANE_LABELS = {
     "auto": "Auto",
+    "auto-duper": "Auto + Duper",
     "duper": "Duper",
+    "duper-only": "Duper",
     "grind": "grind",
     "grind-only": "grind",
     "crush-only": "Crush (Z3)",
-    "crush-verify": "Crush verify",
+    "crush-verify": "Crush (trusted SMT)",
     "crush-core": "Core",
     "crush-alethe": "Alethe",
     "crush-portfolio": "Portfolio",
@@ -27,7 +29,9 @@ LANE_LABELS = {
 
 LANE_ORDER = (
     "auto",
+    "auto-duper",
     "duper",
+    "duper-only",
     "crush-only",
     "crush-verify",
     "crush-core",
@@ -39,7 +43,9 @@ LANE_ORDER = (
 
 LANE_COLORS = {
     "auto": "#597A91",
+    "auto-duper": "#597A91",
     "duper": "#B55B45",
+    "duper-only": "#B55B45",
     "crush-only": "#0B504A",
     "crush-verify": "#178078",
     "crush-core": "#DD7A45",
@@ -69,6 +75,30 @@ FAILURE_COLORS = (
     "#476A8A",
     "#7B7653",
 )
+
+FAILURE_MODE_ORDER = (
+    "certificate-error",
+    "certificate-error+core-failed",
+    "core-failed",
+    "not-attempted",
+    "rule-gap",
+    "solver-sat",
+    "solver-unknown",
+    "tactic",
+    "term-gap",
+)
+
+FAILURE_MODE_COLORS = {
+    "certificate-error": "#A4433E",
+    "certificate-error+core-failed": "#D27645",
+    "core-failed": "#D6A73A",
+    "not-attempted": "#557A75",
+    "rule-gap": "#476A8A",
+    "solver-sat": "#7B7653",
+    "solver-unknown": "#80546B",
+    "tactic": "#B7684B",
+    "term-gap": "#3D7C83",
+}
 
 INK = "#1B2927"
 MUTED = "#64716E"
@@ -225,6 +255,34 @@ def circle(x: float, y: float, radius: float, fill: str, tooltip: str) -> str:
     )
 
 
+def pie_sector(
+    x: float,
+    y: float,
+    radius: float,
+    start_angle: float,
+    end_angle: float,
+    fill: str,
+    tooltip: str,
+) -> str:
+    angle = end_angle - start_angle
+    if angle >= 2 * math.pi - 1e-9:
+        return circle(x, y, radius, fill, tooltip)
+    start_x = x + radius * math.cos(start_angle)
+    start_y = y + radius * math.sin(start_angle)
+    end_x = x + radius * math.cos(end_angle)
+    end_y = y + radius * math.sin(end_angle)
+    large_arc = 1 if angle > math.pi else 0
+    path = (
+        f"M {x:.2f} {y:.2f} L {start_x:.2f} {start_y:.2f} "
+        f"A {radius:.2f} {radius:.2f} 0 {large_arc} 1 "
+        f"{end_x:.2f} {end_y:.2f} Z"
+    )
+    return (
+        f'<path d="{path}" fill="{fill}" stroke="{PAPER}" stroke-width="1.5">'
+        f"<title>{xml(tooltip)}</title></path>"
+    )
+
+
 def write_svg(path: Path, elements: list[str]) -> None:
     path.write_text("\n".join([*elements, "</svg>", ""]), encoding="utf-8")
 
@@ -272,14 +330,14 @@ def plot_coverage(rows: list[dict[str, str]], path: Path) -> None:
         width,
         height,
         "Verification coverage",
-        "Solved verification conditions as a percentage of attempted conditions.",
+        "Solved verification conditions as a percentage of the fixed corpus workload.",
     )
     elements.append(text(42, 42, "Verification coverage", "title"))
     elements.append(
         text(
             42,
             66,
-            "Solved VCs / attempted VCs; higher is better",
+            "Solved VCs / all corpus VCs; higher is better",
             "subtitle",
         )
     )
@@ -306,6 +364,7 @@ def plot_coverage(rows: list[dict[str, str]], path: Path) -> None:
         for lane_index, lane in enumerate(available):
             row = indexed[(suite, lane)]
             percentage = float(row["pass_pct"])
+            total_vcs = row.get("total_vcs", row["attempted_vcs"])
             x = group_start + lane_index * (bar_width + 5)
             y = top + chart_height * (1.0 - percentage / 100.0)
             elements.append(
@@ -322,7 +381,7 @@ def plot_coverage(rows: list[dict[str, str]], path: Path) -> None:
                 text(
                     x + bar_width / 2,
                     max(top - 5, y - 7),
-                    f'{row["solved_vcs"]}/{row["attempted_vcs"]}',
+                    f'{row["solved_vcs"]}/{total_vcs}',
                     "value",
                     "middle",
                 )
@@ -419,91 +478,138 @@ def plot_reconstruction(rows: list[dict[str, str]], path: Path) -> None:
     write_svg(path, elements)
 
 
-def plot_failures(rows: list[dict[str, str]], path: Path) -> None:
-    rows = sorted(
-        rows,
-        key=lambda row: (
-            row["suite"],
-            lane_sort_key(row["lane"]),
-            row["failure_mode"],
+def plot_failures(
+    rows: list[dict[str, str]],
+    reconstruction: list[dict[str, str]],
+    path: Path,
+) -> None:
+    suites = sorted(row["suite"] for row in reconstruction)
+    failure_modes = sorted(
+        {row["failure_mode"] for row in rows},
+        key=lambda mode: (
+            FAILURE_MODE_ORDER.index(mode)
+            if mode in FAILURE_MODE_ORDER
+            else len(FAILURE_MODE_ORDER),
+            mode,
         ),
     )
-    failure_modes = sorted({row["failure_mode"] for row in rows})
     colors = {
-        mode: FAILURE_COLORS[index % len(FAILURE_COLORS)]
+        mode: FAILURE_MODE_COLORS.get(
+            mode, FAILURE_COLORS[index % len(FAILURE_COLORS)]
+        )
         for index, mode in enumerate(failure_modes)
     }
-    width = 1160
+    counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for row in rows:
+        counts[row["suite"]][row["failure_mode"]] += int(row["vcs"])
+
+    width = 1260
+    columns = 3
+    panel_rows = max(1, math.ceil(len(suites) / columns))
+    legend_entries = [
+        (mode.replace("+", " + ").replace("-", " "), colors[mode])
+        for mode in failure_modes
+    ]
     legend_lines = max(
         1,
         math.ceil(
-            sum(45 + len(mode) * 7 for mode in failure_modes) / 1040
+            sum(45 + len(label) * 7 for label, _ in legend_entries) / 1120
         ),
     )
-    top = 104.0 + legend_lines * 24
-    row_height = 30.0
-    height = int(top + len(rows) * row_height + 64)
-    left, right = 340.0, 68.0
-    chart_width = width - left - right
-    maximum = max((int(row["vcs"]) for row in rows), default=1)
-    axis_max = max(1, maximum)
+    top = 112.0 + legend_lines * 24
+    panel_height = 270.0
+    height = int(top + panel_rows * panel_height + 68)
     elements = svg_open(
         width,
         height,
         "Proof reconstruction failure modes",
-        "Counts of verified conditions that each reconstruction lane did not reconstruct.",
+        "One pie per corpus showing strict-lane failure records by reported cause.",
     )
     elements.append(text(42, 42, "Proof reconstruction failure modes", "title"))
     elements.append(
         text(
             42,
             66,
-            "Verified VCs grouped by the reported reconstruction failure",
+            "One pie per corpus; slices aggregate Core, Alethe, and Portfolio records",
             "subtitle",
         )
     )
-    draw_legend(
-        elements,
-        [(mode, colors[mode]) for mode in failure_modes],
-        42,
-        98,
-        width - 84,
-    )
+    if legend_entries:
+        draw_legend(elements, legend_entries, 42, 98, width - 84)
 
-    for index, row in enumerate(rows):
-        y = top + index * row_height
-        count = int(row["vcs"])
-        elements.append(
-            text(
-                left - 14,
-                y + 18,
-                (
-                    f'{row["suite"]} / {label_lane(row["lane"])} / '
-                    f'{row["failure_mode"]}'
-                ),
-                "label",
-                "end",
+    panel_width = (width - 80.0) / columns
+    radius = 88.0
+    for index, suite in enumerate(suites):
+        row = index // columns
+        column = index % columns
+        center_x = 40.0 + (column + 0.5) * panel_width
+        panel_top = top + row * panel_height
+        center_y = panel_top + 126.0
+        suite_counts = counts[suite]
+        total = sum(suite_counts.values())
+        elements.append(text(center_x, panel_top + 18, suite, "label", "middle"))
+
+        if total == 0:
+            elements.append(
+                circle(
+                    center_x,
+                    center_y,
+                    radius,
+                    "#E6E1D7",
+                    f"{suite}: no reconstruction failure records",
+                )
             )
-        )
+            elements.append(text(center_x, center_y + 5, "0", "label", "middle"))
+            summary = "no failure records"
+        else:
+            start_angle = -math.pi / 2
+            for mode in failure_modes:
+                count = suite_counts.get(mode, 0)
+                if count == 0:
+                    continue
+                share = count / total
+                end_angle = start_angle + 2 * math.pi * share
+                label = mode.replace("+", " + ").replace("-", " ")
+                elements.append(
+                    pie_sector(
+                        center_x,
+                        center_y,
+                        radius,
+                        start_angle,
+                        end_angle,
+                        colors[mode],
+                        f"{suite}: {label}: {count} ({share:.1%})",
+                    )
+                )
+                if share >= 0.06:
+                    middle = (start_angle + end_angle) / 2
+                    elements.append(
+                        text(
+                            center_x + radius * 0.62 * math.cos(middle),
+                            center_y + radius * 0.62 * math.sin(middle) + 4,
+                            count,
+                            "value",
+                            "middle",
+                        )
+                    )
+                start_angle = end_angle
+            summary = f"{total} failure records"
         elements.append(
-            rect(
-                left,
-                y + 4,
-                chart_width * count / axis_max,
-                19,
-                colors[row["failure_mode"]],
-                3,
-            )
+            text(center_x, center_y + radius + 26, summary, "axis", "middle")
         )
-        elements.append(
-            text(
-                left + chart_width * count / axis_max + 8,
-                y + 18,
-                count,
-                "value",
-            )
+
+    elements.append(
+        text(
+            width / 2,
+            height - 24,
+            (
+                "A verified VC may contribute one record per strict lane; "
+                "not attempted remains a separate outcome."
+            ),
+            "subtitle",
+            "middle",
         )
-    elements.append(line(left, top - 4, left, top + len(rows) * row_height, "axis-line"))
+    )
     write_svg(path, elements)
 
 
@@ -807,6 +913,8 @@ def scaling_summary_rows(
 def write_tables(
     path: Path,
     result_dirs: list[Path],
+    headline: list[dict[str, str]],
+    comparisons: list[dict[str, str]],
     coverage: list[dict[str, str]],
     reconstruction: list[dict[str, str]],
     failures: list[dict[str, str]],
@@ -818,15 +926,137 @@ def write_tables(
         stream.write("Generated from:\n\n")
         for result_dir in result_dirs:
             stream.write(f"- `{result_dir}`\n")
+        if headline:
+            stream.write("\n## Backend Comparison\n\n")
+            stream.write(
+                "Each corpus has one fixed total for every backend. "
+                "`Crush` is the `crush-verify` lane, which trusts the SMT "
+                "verdict and does not reconstruct a Lean proof. `Attempted` "
+                "counts VCs with a complete backend record; `Failed` counts "
+                "attempted but unsolved VCs; and `Missing` counts corpus VCs "
+                "without a complete attempt record. Missing VCs count as "
+                "unsolved for coverage and are excluded from timing "
+                "statistics.\n\n"
+            )
+            write_markdown_table(
+                stream,
+                [
+                    "Corpus",
+                    "Backend",
+                    "Lane",
+                    "Solved / total",
+                    "Attempted",
+                    "Failed",
+                    "Missing",
+                    "Coverage",
+                    "Total (ms)",
+                    "Mean (ms)",
+                    "Min (ms)",
+                    "Max (ms)",
+                ],
+                (
+                    [
+                        row["suite"],
+                        row["backend"],
+                        label_lane(row["lane"]),
+                        f'{row["solved_vcs"]} / {row["total_vcs"]}',
+                        row["attempted_vcs"],
+                        row["failed_vcs"],
+                        row["missing_vcs"],
+                        f'{row["pass_pct"]}%',
+                        row["total_ms"],
+                        row["mean_ms"],
+                        row["min_ms"],
+                        row["max_ms"],
+                    ]
+                    for row in sorted(
+                        headline,
+                        key=lambda item: (
+                            item["suite"],
+                            ("auto", "duper", "crush", "grind").index(
+                                item["backend"]
+                            ),
+                        ),
+                    )
+                ),
+            )
+        if comparisons:
+            stream.write("## Pairwise Matched VCs\n\n")
+            stream.write(
+                "`Matched` counts exact VC identities attempted by both the "
+                "named baseline and Crush. The four outcome columns partition "
+                "that matched set. Timing means include only VCs solved by "
+                "both lanes, so failures do not create artificial speedups. "
+                "Rows compare Crush with one baseline; baselines are not "
+                "compared with each other.\n\n"
+            )
+            write_markdown_table(
+                stream,
+                [
+                    "Corpus",
+                    "Baseline",
+                    "Baseline lane",
+                    "Crush lane",
+                    "Matched",
+                    "Baseline only",
+                    "Crush only",
+                    "Both",
+                    "Neither",
+                    "Baseline mean (ms)",
+                    "Crush mean (ms)",
+                ],
+                (
+                    [
+                        row["suite"],
+                        row["baseline"],
+                        label_lane(row["baseline_lane"]),
+                        label_lane(row["crush_lane"]),
+                        row["matched_vcs"],
+                        row["baseline_only_solved"],
+                        row["crush_only_solved"],
+                        row["both_solved"],
+                        row["neither_solved"],
+                        row["baseline_mean_ms"],
+                        row["crush_mean_ms"],
+                    ]
+                    for row in sorted(
+                        comparisons,
+                        key=lambda item: (item["suite"], item["baseline"]),
+                    )
+                ),
+            )
         stream.write("\n## Verification Coverage\n\n")
+        stream.write(
+            "`Total` is the fixed number of VC occurrences in the corpus. "
+            "`Attempted` counts VCs with a complete backend record; `Failed` "
+            "counts attempted but unsolved VCs; and `Missing` counts corpus VCs "
+            "without a complete attempt record. Missing VCs count as unsolved "
+            "for coverage and are excluded from timing statistics.\n\n"
+        )
         write_markdown_table(
             stream,
-            ["Corpus", "Lane", "Solved / attempted", "Coverage", "Total (ms)", "Mean (ms)"],
+            [
+                "Corpus",
+                "Lane",
+                "Solved / total",
+                "Attempted",
+                "Failed",
+                "Missing",
+                "Coverage",
+                "Total (ms)",
+                "Mean (ms)",
+            ],
             (
                 [
                     row["suite"],
                     label_lane(row["lane"]),
-                    f'{row["solved_vcs"]} / {row["attempted_vcs"]}',
+                    (
+                        f'{row["solved_vcs"]} / '
+                        f'{row.get("total_vcs", row["attempted_vcs"])}'
+                    ),
+                    row["attempted_vcs"],
+                    row["failed_vcs"],
+                    row.get("missing_vcs", "0"),
                     f'{row["pass_pct"]}%',
                     row["total_ms"],
                     row["mean_ms"],
@@ -955,6 +1185,16 @@ def main() -> None:
         ("suite", "lane"),
         "coverage-summary.tsv",
     )
+    headline = unique_rows(
+        read_tsv(args.result_dirs, "headline-summary.tsv"),
+        ("suite", "backend"),
+        "headline-summary.tsv",
+    )
+    comparisons = unique_rows(
+        read_tsv(args.result_dirs, "comparison.tsv"),
+        ("suite", "baseline"),
+        "comparison.tsv",
+    )
     reconstruction = unique_rows(
         read_tsv(args.result_dirs, "reconstruction-summary.tsv"),
         ("suite",),
@@ -972,7 +1212,17 @@ def main() -> None:
     )
     scaling = read_tsv(args.result_dirs, "alethe-replay-scaling.tsv")
 
-    if not any((coverage, reconstruction, failures, phases, scaling)):
+    if not any(
+        (
+            headline,
+            comparisons,
+            coverage,
+            reconstruction,
+            failures,
+            phases,
+            scaling,
+        )
+    ):
         raise SystemExit("no normalized benchmark reports found")
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -981,6 +1231,8 @@ def main() -> None:
         write_tables(
             args.out_dir / "tables.md",
             args.result_dirs,
+            headline,
+            comparisons,
             coverage,
             reconstruction,
             failures,
@@ -996,9 +1248,9 @@ def main() -> None:
         path = args.out_dir / "reconstruction.svg"
         plot_reconstruction(reconstruction, path)
         generated.append(path)
-    if failures:
+    if reconstruction:
         path = args.out_dir / "reconstruction-failures.svg"
-        plot_failures(failures, path)
+        plot_failures(failures, reconstruction, path)
         generated.append(path)
     if phases:
         path = args.out_dir / "phase-breakdown.svg"

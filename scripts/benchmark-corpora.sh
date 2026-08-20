@@ -24,6 +24,7 @@ VELVET_CRUSH_TREE="${VELVET_CRUSH_TREE:-}"
 VELVET_DUPER_TREE="${VELVET_DUPER_TREE:-}"
 
 HAMMER_REF="${HAMMER_REF:-df4dd13671412591d678eada250b04c030fd4d40}"
+HAMMER_PROFILES="${HAMMER_PROFILES:-}"
 LOOM_AUTO_REF="${LOOM_AUTO_REF:-78928abc9054b31d0bea85985496490baae95244}"
 LOOM_CRUSH_REF="${LOOM_CRUSH_REF:-ec16b95ff8bbd047248de031cabd3160847e4b1b}"
 LOOM_DUPER_REF="${LOOM_DUPER_REF:-616f9cd8db660dcd74a1c92b0d19bb50420e1c59}"
@@ -62,7 +63,6 @@ RESULTS="$OUT_DIR/results.tsv"
 RUNS="$OUT_DIR/runs.tsv"
 METADATA="$OUT_DIR/metadata.tsv"
 SUMMARY="$OUT_DIR/summary.tsv"
-MATCHED_SUMMARY="$OUT_DIR/matched-summary.tsv"
 COMPARISON="$OUT_DIR/comparison.tsv"
 MEASUREMENTS="$OUT_DIR/measurements.tsv"
 PROFILES="$OUT_DIR/profile-events.tsv"
@@ -352,7 +352,6 @@ private def runCorpusBench : TacticM Unit := Lean.withCurrHeartbeats do
         |>.replace "\n" " "
       let goalHash := hash goalText
       let proofName := (← Term.getDeclName?).getD `anonymous
-      let vc := goalHash
       let saved <- saveState
       let start <- IO.monoMsNow
       try
@@ -360,14 +359,18 @@ private def runCorpusBench : TacticM Unit := Lean.withCurrHeartbeats do
         unless (← getUnsolvedGoals).isEmpty do
           throwError "backend returned without closing the goal"
         let elapsed := (← IO.monoMsNow) - start
-        IO.println s!"CORPUS_BENCH\t{proofName}\t{vc}\t{goalHash}\tpass\t-\t{elapsed}\t-\t{goalText}"
+        IO.println s!"CORPUS_BENCH\t{proofName}\t-\t{goalHash}\tpass\t-\t{elapsed}\t-\t{goalText}"
       catch ex =>
         let elapsed := (← IO.monoMsNow) - start
         let msg := (← ex.toMessageData.toString)
           |>.replace "\t" " "
           |>.replace "\n" " "
         saved.restore
-        IO.println s!"CORPUS_BENCH\t{proofName}\t{vc}\t{goalHash}\tfail\t{corpusBenchCategory msg}\t{elapsed}\t{msg}\t{goalText}"
+        IO.println s!"CORPUS_BENCH\t{proofName}\t-\t{goalHash}\tfail\t{corpusBenchCategory msg}\t{elapsed}\t{msg}\t{goalText}"
+        let goal <- getMainGoal
+        let proof <- mkSorry (← goal.getType) true
+        goal.assign proof
+        replaceMainGoal []
 
 syntax "corpus_bench_solver" : tactic
 
@@ -393,8 +396,10 @@ write_benchmark_file() {
 
   tail -n "+$((last_import + 1))" "$source" |
     sed -E \
-      -e 's/loom_solve_async!?([[:space:]]+[0-9]+)?/loom_solve/g' \
-      -e 's/loom_solve[!?]/loom_solve/g' \
+      -e 's/loom_solve_async!?([[:space:]]+[0-9]+)?/corpus_bench_goals/g' \
+      -e 's/loom_solve[!?]/corpus_bench_goals/g' \
+      -e 's/loom_solve/corpus_bench_goals/g' \
+      -e 's/corpus_bench_goals/loom_solve_async 1/g' \
       -e 's/[[:space:]]*<;>[[:space:]]*try[[:space:]]+loom_crush//g' \
       -e 's/[[:space:]]*<;>[[:space:]]*try[[:space:]]+loom_auto//g' \
       -e 's/[[:space:]]*<;>[[:space:]]*try[[:space:]]+loom_duper//g' \
@@ -454,16 +459,17 @@ append_records() {
   awk -v suite="$suite" -v backend="$backend" -v ref="$ref" \
       -v commit="$commit" -v toolchain="$toolchain" -v repeat="$repeat" \
       -v file="$file" -v measurements="$MEASUREMENTS" '
-    BEGIN { FS = OFS = "\t" }
+    BEGIN { FS = OFS = "\t"; occurrence = 0 }
     {
       marker = index($0, "CORPUS_BENCH\t")
       if (marker == 0) next
       line = substr($0, marker)
       split(line, result, "\t")
+      occurrence++
       print suite, backend, ref, commit, toolchain, repeat, file,
-            result[2], result[3], result[4], result[5], result[6],
+            result[2], occurrence, result[4], result[5], result[6],
             result[7], result[8], result[9]
-      vcKey = file "|" result[2] "|" result[4]
+      vcKey = file "|" occurrence "|" result[4]
       print suite, backend, repeat, vcKey, result[5], result[6],
             result[7], result[8] >> measurements
     }
@@ -479,7 +485,7 @@ append_profile_records() {
 
   awk -v suite="$suite" -v lane="$backend" -v repeat="$repeat" \
       -v file="$file" -v profiles="$PROFILES" '
-    BEGIN { FS = OFS = "\t"; pending = 0 }
+    BEGIN { FS = OFS = "\t"; pending = 0; occurrence = 0 }
     {
       profileMarker = index($0, "CRUSH_PROFILE\t")
       if (profileMarker > 0) {
@@ -500,7 +506,8 @@ append_profile_records() {
       if (resultMarker == 0) next
       line = substr($0, resultMarker)
       split(line, result, "\t")
-      vcKey = file "|" result[2] "|" result[4]
+      occurrence++
+      vcKey = file "|" occurrence "|" result[4]
       for (i = 1; i <= pending; i++) {
         print suite, lane, repeat, vcKey, declaration[i], profileHash[i],
               outcome[i], replay[i], detail[i], totalNanos[i], phases[i],
@@ -637,133 +644,6 @@ write_reports() {
     }
   ' "$RESULTS" > "$SUMMARY"
 
-  awk -F '\t' -v repeats="$REPEATS" '
-    BEGIN {
-      OFS = "\t"
-      backend[1] = "auto"
-      backend[2] = "duper"
-      backend[3] = "crush-portfolio"
-      print "suite", "backend", "attempted", "passed", "failed", "pass_pct",
-            "total_ms", "mean_ms", "min_ms", "max_ms"
-    }
-    NR > 1 {
-      vc = $1 SUBSEP $7 SUBSEP $8 SUBSEP $9 SUBSEP $10
-      run = vc SUBSEP $2 SUBSEP $6
-      runSeen[run] = 1
-      runMs[run] += $13
-      if ($11 != "pass") runFailed[run] = 1
-    }
-    END {
-      for (run in runSeen) {
-        split(run, p, SUBSEP)
-        vc = p[1] SUBSEP p[2] SUBSEP p[3] SUBSEP p[4] SUBSEP p[5]
-        key = vc SUBSEP p[6]
-        runs[key]++
-        totalMs[key] += runMs[run]
-        if (!runFailed[run]) passRuns[key]++
-        vcs[vc] = 1
-      }
-      for (vc in vcs) {
-        autoKey = vc SUBSEP "auto"
-        duperKey = vc SUBSEP "duper"
-        crushKey = vc SUBSEP "crush-portfolio"
-        if (runs[autoKey] != repeats || runs[duperKey] != repeats ||
-            runs[crushKey] != repeats) continue
-        split(vc, p, SUBSEP)
-        suite = p[1]
-        for (i = 1; i <= 3; i++) {
-          name = backend[i]
-          sourceKey = vc SUBSEP name
-          resultKey = suite SUBSEP name
-          elapsed = totalMs[sourceKey] / repeats
-          attempted[resultKey]++
-          total[resultKey] += elapsed
-          if (!(resultKey in minimum) || elapsed < minimum[resultKey])
-            minimum[resultKey] = elapsed
-          if (!(resultKey in maximum) || elapsed > maximum[resultKey])
-            maximum[resultKey] = elapsed
-          if (passRuns[sourceKey] == repeats) passed[resultKey]++
-        }
-      }
-      for (resultKey in attempted) {
-        split(resultKey, p, SUBSEP)
-        failed = attempted[resultKey] - passed[resultKey]
-        pct = 100 * passed[resultKey] / attempted[resultKey]
-        printf "%s\t%s\t%d\t%d\t%d\t%.1f\t%.1f\t%.1f\t%.1f\t%.1f\n",
-          p[1], p[2], attempted[resultKey], passed[resultKey], failed, pct,
-          total[resultKey], total[resultKey] / attempted[resultKey],
-          minimum[resultKey], maximum[resultKey]
-      }
-    }
-  ' "$RESULTS" > "$MATCHED_SUMMARY"
-
-  awk -F '\t' -v repeats="$REPEATS" '
-    BEGIN {
-      OFS = "\t"
-      left[1] = "auto";  right[1] = "crush-portfolio"
-      left[2] = "auto";  right[2] = "duper"
-      left[3] = "duper"; right[3] = "crush-portfolio"
-      left[4] = "grind"; right[4] = "crush-portfolio"
-      left[5] = "auto";  right[5] = "grind"
-      left[6] = "duper"; right[6] = "grind"
-      print "suite", "left_backend", "right_backend", "shared_vcs",
-            "left_only", "right_only", "both_solved", "neither_solved",
-            "left_mean_ms", "right_mean_ms"
-    }
-    NR > 1 {
-      vc = $1 SUBSEP $7 SUBSEP $8 SUBSEP $9 SUBSEP $10
-      run = vc SUBSEP $2 SUBSEP $6
-      runSeen[run] = 1
-      runMs[run] += $13
-      if ($11 != "pass") runFailed[run] = 1
-      suites[$1] = 1
-    }
-    END {
-      for (run in runSeen) {
-        split(run, p, SUBSEP)
-        vc = p[1] SUBSEP p[2] SUBSEP p[3] SUBSEP p[4] SUBSEP p[5]
-        backend = p[6]
-        key = vc SUBSEP backend
-        runs[key]++
-        totalMs[key] += runMs[run]
-        if (!runFailed[run]) passRuns[key]++
-        vcs[vc] = 1
-      }
-      for (vc in vcs) {
-        split(vc, p, SUBSEP)
-        suite = p[1]
-        for (pair = 1; pair <= 6; pair++) {
-          leftKey = vc SUBSEP left[pair]
-          rightKey = vc SUBSEP right[pair]
-          if (runs[leftKey] != repeats || runs[rightKey] != repeats) continue
-          resultKey = suite SUBSEP pair
-          shared[resultKey]++
-          leftSolved = passRuns[leftKey] == repeats
-          rightSolved = passRuns[rightKey] == repeats
-          if (leftSolved && !rightSolved) leftOnly[resultKey]++
-          if (!leftSolved && rightSolved) rightOnly[resultKey]++
-          if (!leftSolved && !rightSolved) neither[resultKey]++
-          if (leftSolved && rightSolved) {
-            both[resultKey]++
-            leftMs[resultKey] += totalMs[leftKey] / repeats
-            rightMs[resultKey] += totalMs[rightKey] / repeats
-          }
-        }
-      }
-      for (suite in suites) {
-        for (pair = 1; pair <= 6; pair++) {
-          resultKey = suite SUBSEP pair
-          if (!shared[resultKey]) continue
-          leftMean = both[resultKey] ? leftMs[resultKey] / both[resultKey] : 0
-          rightMean = both[resultKey] ? rightMs[resultKey] / both[resultKey] : 0
-          printf "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%.1f\t%.1f\n",
-            suite, left[pair], right[pair], shared[resultKey],
-            leftOnly[resultKey], rightOnly[resultKey], both[resultKey],
-            neither[resultKey], leftMean, rightMean
-        }
-      }
-    }
-  ' "$RESULTS" > "$COMPARISON"
 }
 
 check_repo "$CRUSH_ROOT" "lean-crush"
@@ -932,7 +812,28 @@ printf 'suite\tlane\trepeat\tvc_key\tdeclaration\tgoal_hash\toutcome\treplay\tde
 if is_true "$RUN_LEANHAMMER"; then
   printf 'Running LeanHammer focused suite\n'
   hammer_out="$OUT_DIR/leanhammer"
+  if [[ -z "$HAMMER_PROFILES" ]]; then
+    hammer_profiles=()
+    if is_true "$RUN_AUTO"; then
+      hammer_profiles+=("auto-duper")
+    fi
+    if is_true "$RUN_DUPER"; then
+      hammer_profiles+=("duper-only")
+    fi
+    if is_true "$RUN_CRUSH"; then
+      for lane in "${CRUSH_LANES[@]}"; do
+        hammer_profiles+=("$lane")
+      done
+    fi
+    if is_true "$RUN_GRIND"; then
+      hammer_profiles+=("grind-only")
+    fi
+    HAMMER_PROFILES="${hammer_profiles[*]}"
+  fi
   if HAMMER_REPO="$HAMMER_REPO" REPEATS="$REPEATS" OUT_DIR="$hammer_out" \
+      PROFILES="$HAMMER_PROFILES" \
+      SOLVER="$SOLVER" TIMEOUT="$TIMEOUT" DUPER_TIMEOUT="$DUPER_TIMEOUT" \
+      MAX_HEARTBEATS="$MAX_HEARTBEATS" CRUSH_PROFILE="$CRUSH_PROFILE" \
       MAX_RECURSION_DEPTH="$MAX_RECURSION_DEPTH" \
       "$CRUSH_ROOT/scripts/benchmark-leanhammer.sh" \
       > "$OUT_DIR/leanhammer.log" 2>&1; then
@@ -1121,10 +1022,9 @@ if ! python3 "$SCRIPT_DIR/benchmark-report.py" \
   die "failed to generate measurement reports"
 fi
 
-printf '\nCorpus summary:\n'
-column -t -s $'\t' "$SUMMARY" 2>/dev/null || cat "$SUMMARY"
-printf '\nThree-way matched summary:\n'
-column -t -s $'\t' "$MATCHED_SUMMARY" 2>/dev/null || cat "$MATCHED_SUMMARY"
+printf '\nAll-VC headline summary:\n'
+column -t -s $'\t' "$OUT_DIR/headline-summary.tsv" 2>/dev/null ||
+  cat "$OUT_DIR/headline-summary.tsv"
 printf '\nMatched-VC comparison:\n'
 column -t -s $'\t' "$COMPARISON" 2>/dev/null || cat "$COMPARISON"
 printf '\nReconstruction coverage:\n'
@@ -1140,4 +1040,12 @@ printf '\nResults: %s\n' "$OUT_DIR"
 
 if [[ "$TRUNCATED_RUNS" -gt 0 ]]; then
   die "$TRUNCATED_RUNS benchmark run(s) were truncated before all VCs were emitted"
+fi
+
+missing_headline="$(
+  awk -F '\t' 'NR > 1 { missing += $8 } END { print missing + 0 }' \
+    "$OUT_DIR/headline-summary.tsv"
+)"
+if [[ "$missing_headline" -gt 0 ]]; then
+  die "$missing_headline headline VC attempt(s) are missing"
 fi
