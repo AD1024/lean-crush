@@ -21,14 +21,18 @@ REPEATS="${REPEATS:-1}"
 SOLVER="${SOLVER:-cvc5}"
 TIMEOUT="${TIMEOUT:-5}"
 DUPER_TIMEOUT="${DUPER_TIMEOUT:-1}"
-CRUSH_TRUST="${CRUSH_TRUST:-trust}"
+CRUSH_MODES="${CRUSH_MODES:-verify core alethe portfolio}"
+CRUSH_PROFILE="${CRUSH_PROFILE:-true}"
 CRUSH_INST_FUEL="${CRUSH_INST_FUEL:-0}"
 MAX_HEARTBEATS="${MAX_HEARTBEATS:-1000000}"
+MAX_RECURSION_DEPTH="${MAX_RECURSION_DEPTH:-100000}"
+GRIND_SPLITS="${GRIND_SPLITS:-20}"
 DUPER_MAX_HEARTBEATS="${DUPER_MAX_HEARTBEATS:-20000}"
 DUPER_FILE_CPU_SECONDS="${DUPER_FILE_CPU_SECONDS:-60}"
 RUN_AUTO="${RUN_AUTO:-true}"
 RUN_CRUSH="${RUN_CRUSH:-true}"
 RUN_DUPER="${RUN_DUPER:-false}"
+RUN_GRIND="${RUN_GRIND:-true}"
 USE_MATHLIB_CACHE="${USE_MATHLIB_CACHE:-true}"
 PREPARE_TREES="${PREPARE_TREES:-true}"
 OUT_DIR="${OUT_DIR:-$CRUSH_ROOT/BenchmarkResults/plean-$(date +%Y%m%d-%H%M%S)}"
@@ -40,6 +44,8 @@ METADATA="$OUT_DIR/metadata.tsv"
 SUMMARY="$OUT_DIR/summary.tsv"
 FILE_SUMMARY="$OUT_DIR/file-summary.tsv"
 COMPARISON="$OUT_DIR/comparison.tsv"
+MEASUREMENTS="$OUT_DIR/measurements.tsv"
+PROFILES="$OUT_DIR/profile-events.tsv"
 WORKTREES=()
 PROVISIONED_TREE=""
 
@@ -67,6 +73,37 @@ die() {
 is_true() {
   [[ "$1" == "true" ]]
 }
+
+is_crush_lane() {
+  [[ "$1" == crush-* ]]
+}
+
+crush_lane_trust() {
+  case "$1" in
+    crush-verify) printf 'trust\n' ;;
+    crush-core|crush-alethe|crush-portfolio) printf 'reconstruct\n' ;;
+    *) printf '%s\n' '-' ;;
+  esac
+}
+
+crush_lane_reconstruct() {
+  case "$1" in
+    crush-core) printf 'core\n' ;;
+    crush-alethe) printf 'alethe\n' ;;
+    crush-verify|crush-portfolio) printf 'auto\n' ;;
+    *) printf '%s\n' '-' ;;
+  esac
+}
+
+CRUSH_LANES=()
+if is_true "$RUN_CRUSH"; then
+  for mode in $CRUSH_MODES; do
+    case "$mode" in
+      verify|core|alethe|portfolio) CRUSH_LANES+=("crush-$mode") ;;
+      *) die "unknown Crush measurement mode: $mode" ;;
+    esac
+  done
+fi
 
 cleanup() {
   local entry repo path
@@ -138,6 +175,7 @@ prepare_tree() {
 write_prelude() {
   local output="$1"
   local backend="$2"
+  local trust reconstruct
 
   if [[ "$backend" == "auto" ]]; then
     cat >> "$output" <<EOF
@@ -150,15 +188,53 @@ macro "#plean_bench_pverify " name:ident : command =>
     set_option pverify.profile true in
     #pverify \$name)
 EOF
-  elif [[ "$backend" == "crush" ]]; then
+  elif is_crush_lane "$backend"; then
+    trust="$(crush_lane_trust "$backend")"
+    reconstruct="$(crush_lane_reconstruct "$backend")"
     cat >> "$output" <<EOF
 
 macro "#plean_bench_pverify " name:ident : command =>
   \`(command|
     set_option crush.backend "$SOLVER" in
     set_option crush.timeout $TIMEOUT in
-    set_option crush.trust "$CRUSH_TRUST" in
+    set_option crush.trust "$trust" in
+    set_option crush.reconstruct "$reconstruct" in
     set_option crush.inst.fuel $CRUSH_INST_FUEL in
+    set_option crush.profile $CRUSH_PROFILE in
+    set_option crush.profile.machine true in
+    set_option pverify.cache false in
+    set_option pverify.profile true in
+    #pverify \$name)
+EOF
+  elif [[ "$backend" == "grind" ]]; then
+    cat >> "$output" <<EOF
+
+syntax "plean_bench_grind" : tactic
+
+elab_rules : tactic
+  | \`(tactic| plean_bench_grind) => withMainContext do
+      let key ← PLean.currentObligationKey
+      let start ← IO.monoNanosNow
+      try
+        evalTactic (← \`(tactic| grind (splits := $GRIND_SPLITS)))
+        let elapsed := (← IO.monoNanosNow) - start
+        liftM (m := IO) (PLean.Verify.Profile.modifyRow key fun row =>
+          { row with smtCrush := row.smtCrush + elapsed })
+      catch error =>
+        let elapsed := (← IO.monoNanosNow) - start
+        liftM (m := IO) (PLean.Verify.Profile.modifyRow key fun row =>
+          { row with smtCrush := row.smtCrush + elapsed })
+        throw error
+
+macro_rules
+  | \`(tactic| pverify_smt) => \`(tactic| plean_bench_grind)
+  | \`(tactic| pverify_structural_smt) => \`(tactic| plean_bench_grind)
+  | \`(tactic| pverify_close_chain) => \`(tactic| plean_bench_grind)
+  | \`(tactic| pverify_close_chain_smt_first) =>
+      \`(tactic| plean_bench_grind)
+
+macro "#plean_bench_pverify " name:ident : command =>
+  \`(command|
     set_option pverify.cache false in
     set_option pverify.profile true in
     #pverify \$name)
@@ -188,7 +264,7 @@ elab "#plean_bench_report" : command => do
     IO.println s!"PLEAN_TIME\t{row.obligation}\t{nanos}"
 
 EOF
-  elif [[ "$backend" == "crush" ]]; then
+  elif is_crush_lane "$backend"; then
     cat >> "$output" <<'EOF'
 
 open Lean Elab Command
@@ -199,6 +275,17 @@ elab "#plean_bench_report" : command => do
     let nanos := row.cachePp + row.cacheHash + row.cacheFs +
       row.cacheClose + row.smtPrep + row.smtCrush
     IO.println s!"PLEAN_TIME\t{row.obligation}\t{nanos}"
+
+EOF
+  elif [[ "$backend" == "grind" ]]; then
+    cat >> "$output" <<'EOF'
+
+open Lean Elab Command
+
+elab "#plean_bench_report" : command => do
+  let profile <- liftM (PLean.Verify.Profile.stateRef.get : IO _)
+  for row in profile.rows do
+    IO.println s!"PLEAN_TIME\t{row.obligation}\t{row.smtCrush}"
 
 EOF
   else
@@ -259,7 +346,7 @@ record_metadata() {
   local backend="$1"
   local tree="$2"
   local commit toolchain dirty diff_hash crush_commit duper_commit crush_dirty
-  local max_heartbeats file_cpu_seconds
+  local max_heartbeats file_cpu_seconds trust reconstruct
   commit="$(git -C "$tree" rev-parse HEAD)"
   toolchain="$(tr -d '\r\n' < "$tree/lean-toolchain")"
   dirty="false"
@@ -277,7 +364,7 @@ record_metadata() {
     dirty="true"
     diff_hash="$(git -C "$tree" diff --binary | shasum -a 256 | awk '{print $1}')"
   fi
-  if [[ "$backend" == "crush" ]]; then
+  if is_crush_lane "$backend"; then
     crush_commit="$(git -C "$CRUSH_ROOT" rev-parse HEAD)"
     if [[ -n "$(git -C "$CRUSH_ROOT" status --porcelain -- \
         . ':(exclude)BenchmarkResults')" ]]; then
@@ -287,11 +374,14 @@ record_metadata() {
   if [[ "$backend" == "duper" ]]; then
     duper_commit="$(git -C "$tree/.lake/packages/Duper" rev-parse HEAD)"
   fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  trust="$(crush_lane_trust "$backend")"
+  reconstruct="$(crush_lane_reconstruct "$backend")"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$backend" "$commit" "$toolchain" "$dirty" "$diff_hash" "$SOLVER" \
-    "$TIMEOUT" "$DUPER_TIMEOUT" "$max_heartbeats" "$file_cpu_seconds" \
-    "$CRUSH_TRUST" "$CRUSH_INST_FUEL" "$crush_commit" "$duper_commit" \
-    "$crush_dirty" "$tree" >> "$METADATA"
+    "$TIMEOUT" "$DUPER_TIMEOUT" "$max_heartbeats" "$MAX_RECURSION_DEPTH" \
+    "$file_cpu_seconds" "$trust" "$reconstruct" "$CRUSH_INST_FUEL" \
+    "$crush_commit" "$duper_commit" "$crush_dirty" "$tree" "$CRUSH_PROFILE" \
+    >> "$METADATA"
 }
 
 append_markers() {
@@ -299,7 +389,8 @@ append_markers() {
   local repeat="$2"
   local file="$3"
   local log="$4"
-  awk -v backend="$backend" -v repeat="$repeat" -v file="$file" '
+  awk -v backend="$backend" -v repeat="$repeat" -v file="$file" \
+      -v measurements="$MEASUREMENTS" '
     BEGIN { FS = " "; OFS = "\t" }
     {
       if (index($0, "[SMT]") > 0) passed[$2] = 1
@@ -318,9 +409,35 @@ append_markers() {
         category = passed[name] ? "-" : "tactic"
         printf "plean\t%s\t%s\t%s\t%s\t-\t%s\t%s\t%.3f\tfalse\t-\t-\n",
           backend, repeat, file, name, status, category, nanos[name] / 1000000
+        vcKey = file "|" name
+        printf("plean\t%s\t%s\t%s\t%s\t%s\t%.3f\t-\n",
+          backend, repeat, vcKey, status, category,
+          nanos[name] / 1000000) >> measurements
       }
     }
   ' "$log" >> "$RESULTS"
+}
+
+append_profile_records() {
+  local backend="$1"
+  local repeat="$2"
+  local file="$3"
+  local log="$4"
+
+  awk -v lane="$backend" -v repeat="$repeat" -v file="$file" \
+      -v profiles="$PROFILES" '
+    BEGIN { FS = OFS = "\t" }
+    {
+      marker = index($0, "CRUSH_PROFILE\t")
+      if (marker == 0) next
+      line = substr($0, marker)
+      split(line, profile, "\t")
+      vcKey = file "|" profile[3]
+      print "plean", lane, repeat, vcKey, profile[3], profile[4],
+            profile[5], profile[6], profile[7], profile[8], profile[9],
+            profile[10] >> profiles
+    }
+  ' "$log"
 }
 
 append_synthetic_records() {
@@ -351,9 +468,13 @@ append_synthetic_records() {
     if [[ "$i" -le "$synthetic_pass" ]]; then
       printf 'plean\t%s\t%s\t%s\tpre_smt_%s\t-\tpass\t-\t0\ttrue\tclosed before backend timing\t-\n' \
         "$backend" "$repeat" "$file" "$i" >> "$RESULTS"
+      printf 'plean\t%s\t%s\t%s|pre_smt_%s\tpass\t-\t0\tclosed before backend timing\n' \
+        "$backend" "$repeat" "$file" "$i" >> "$MEASUREMENTS"
     else
       printf 'plean\t%s\t%s\t%s\tunmeasured_%s\t-\tfail\ttactic\t0\ttrue\tno backend timing record\t-\n' \
         "$backend" "$repeat" "$file" "$i" >> "$RESULTS"
+      printf 'plean\t%s\t%s\t%s|unmeasured_%s\tfail\ttactic\t0\tno backend timing record\n' \
+        "$backend" "$repeat" "$file" "$i" >> "$MEASUREMENTS"
     fi
   done
 }
@@ -375,9 +496,10 @@ run_file() {
   fi
   printf '%-5s run %s: %s\n' "$backend" "$repeat" "$file"
   started="$(date +%s)"
-  if [[ "$backend" == "crush" ]]; then
+  if is_crush_lane "$backend"; then
     "$CRUSH_ROOT/scripts/with-local-crush.sh" "$tree" \
       "-DmaxHeartbeats=$max_heartbeats" \
+      "-DmaxRecDepth=$MAX_RECURSION_DEPTH" \
       "-Dpverify.cache=false" "$generated" > "$log" 2>&1
   elif [[ "$backend" == "duper" && "$DUPER_FILE_CPU_SECONDS" -gt 0 ]]; then
     (
@@ -385,16 +507,19 @@ run_file() {
       cd "$tree"
       lake env lean \
         "-DmaxHeartbeats=$max_heartbeats" \
+        "-DmaxRecDepth=$MAX_RECURSION_DEPTH" \
         "-Dpverify.cache=false" "$generated"
     ) > "$log" 2>&1
   else
     (cd "$tree" && lake env lean \
       "-DmaxHeartbeats=$max_heartbeats" \
+      "-DmaxRecDepth=$MAX_RECURSION_DEPTH" \
       "-Dpverify.cache=false" "$generated") > "$log" 2>&1
   fi
   exit_code=$?
   elapsed="$(( $(date +%s) - started ))"
   append_markers "$backend" "$repeat" "$file" "$log"
+  append_profile_records "$backend" "$repeat" "$file" "$log"
   append_synthetic_records "$backend" "$repeat" "$file" "$log"
   total="$(sed -nE 's/.*: ([0-9]+) obligations from.*/\1/p' "$log" | tail -n 1)"
   cpu_limited="false"
@@ -468,9 +593,12 @@ write_reports() {
   awk -F '\t' -v repeats="$REPEATS" '
     BEGIN {
       OFS = "\t"
-      left[1] = "auto";  right[1] = "crush"
+      left[1] = "auto";  right[1] = "crush-portfolio"
       left[2] = "auto";  right[2] = "duper"
-      left[3] = "duper"; right[3] = "crush"
+      left[3] = "duper"; right[3] = "crush-portfolio"
+      left[4] = "grind"; right[4] = "crush-portfolio"
+      left[5] = "auto";  right[5] = "grind"
+      left[6] = "duper"; right[6] = "grind"
       print "suite", "left_backend", "right_backend", "shared_vcs",
             "left_only", "right_only", "both_solved", "neither_solved",
             "left_mean_ms", "right_mean_ms"
@@ -497,7 +625,7 @@ write_reports() {
       for (vc in vcs) {
         split(vc, p, SUBSEP)
         suite = p[1]
-        for (pair = 1; pair <= 3; pair++) {
+        for (pair = 1; pair <= 6; pair++) {
           leftKey = vc SUBSEP left[pair]
           rightKey = vc SUBSEP right[pair]
           if (runs[leftKey] != repeats || runs[rightKey] != repeats) continue
@@ -516,7 +644,7 @@ write_reports() {
         }
       }
       for (suite in suites) {
-        for (pair = 1; pair <= 3; pair++) {
+        for (pair = 1; pair <= 6; pair++) {
           resultKey = suite SUBSEP pair
           if (!shared[resultKey]) continue
           leftMean = both[resultKey] ? leftMs[resultKey] / both[resultKey] : 0
@@ -531,13 +659,14 @@ write_reports() {
   ' "$RESULTS" > "$COMPARISON"
 }
 
-if ! is_true "$RUN_AUTO" && ! is_true "$RUN_CRUSH" && ! is_true "$RUN_DUPER"; then
+if ! is_true "$RUN_AUTO" && ! is_true "$RUN_CRUSH" && ! is_true "$RUN_DUPER" &&
+    ! is_true "$RUN_GRIND"; then
   die "at least one backend must be enabled"
 fi
 
 mkdir -p "$OUT_DIR/logs"
 
-if is_true "$RUN_CRUSH"; then
+if is_true "$RUN_CRUSH" || is_true "$RUN_GRIND"; then
   printf 'Building local Crush\n'
   if ! (cd "$CRUSH_ROOT" && lake build Crush) \
       > "$OUT_DIR/build-crush.log" 2>&1; then
@@ -560,7 +689,7 @@ if is_true "$RUN_AUTO"; then
   fi
 fi
 
-if is_true "$RUN_CRUSH"; then
+if is_true "$RUN_CRUSH" || is_true "$RUN_GRIND"; then
   if [[ -z "$PLEAN_CRUSH_TREE" ]]; then
     if [[ -z "$PLEAN_CRUSH_REV" ]]; then
       die "set PLEAN_CRUSH_TREE, or publish the PLean Crush adaptation and set PLEAN_CRUSH_REV"
@@ -593,13 +722,20 @@ fi
 
 printf 'suite\tbackend\trepeat\tfile\tproof\tgoal_hash\tstatus\tcategory\tmilliseconds\tsynthetic\tmessage\tgoal\n' > "$RESULTS"
 printf 'suite\tbackend\trepeat\tfile\texit_code\twall_seconds\tvc_count\tcpu_limited\tmessage\n' > "$RUNS"
-printf 'backend\tcommit\ttoolchain\tdirty\tdiff_sha256\tsolver\ttimeout\tduper_timeout\tmax_heartbeats\tfile_cpu_seconds\tcrush_trust\tcrush_inst_fuel\tcrush_commit\tduper_commit\tcrush_dirty\ttree\n' > "$METADATA"
+printf 'backend\tcommit\ttoolchain\tdirty\tdiff_sha256\tsolver\ttimeout\tduper_timeout\tmax_heartbeats\tmax_rec_depth\tfile_cpu_seconds\tcrush_trust\tcrush_reconstruct\tcrush_inst_fuel\tcrush_commit\tduper_commit\tcrush_dirty\ttree\tcrush_profile\n' > "$METADATA"
+printf 'suite\tlane\trepeat\tvc_key\tstatus\tcategory\tmilliseconds\tmessage\n' > "$MEASUREMENTS"
+printf 'suite\tlane\trepeat\tvc_key\tdeclaration\tgoal_hash\toutcome\treplay\tdetail\ttotal_nanos\tphases\tmetrics\n' > "$PROFILES"
 
 if is_true "$RUN_AUTO"; then
   record_metadata "auto" "$PLEAN_AUTO_TREE"
 fi
 if is_true "$RUN_CRUSH"; then
-  record_metadata "crush" "$PLEAN_CRUSH_TREE"
+  for lane in "${CRUSH_LANES[@]}"; do
+    record_metadata "$lane" "$PLEAN_CRUSH_TREE"
+  done
+fi
+if is_true "$RUN_GRIND"; then
+  record_metadata "grind" "$PLEAN_CRUSH_TREE"
 fi
 if is_true "$RUN_DUPER"; then
   record_metadata "duper" "$PLEAN_DUPER_TREE"
@@ -611,7 +747,12 @@ for repeat in $(seq 1 "$REPEATS"); do
       run_file "auto" "$PLEAN_AUTO_TREE" "$repeat" "$file"
     fi
     if is_true "$RUN_CRUSH"; then
-      run_file "crush" "$PLEAN_CRUSH_TREE" "$repeat" "$file"
+      for lane in "${CRUSH_LANES[@]}"; do
+        run_file "$lane" "$PLEAN_CRUSH_TREE" "$repeat" "$file"
+      done
+    fi
+    if is_true "$RUN_GRIND"; then
+      run_file "grind" "$PLEAN_CRUSH_TREE" "$repeat" "$file"
     fi
     if is_true "$RUN_DUPER"; then
       run_file "duper" "$PLEAN_DUPER_TREE" "$repeat" "$file"
@@ -620,8 +761,21 @@ for repeat in $(seq 1 "$REPEATS"); do
 done
 
 write_reports
+if ! python3 "$SCRIPT_DIR/benchmark-report.py" \
+    --measurements "$MEASUREMENTS" --profiles "$PROFILES" --out-dir "$OUT_DIR"; then
+  die "failed to generate measurement reports"
+fi
 printf '\nPLean summary:\n'
 column -t -s $'\t' "$SUMMARY" 2>/dev/null || cat "$SUMMARY"
 printf '\nMatched-VC comparison:\n'
 column -t -s $'\t' "$COMPARISON" 2>/dev/null || cat "$COMPARISON"
+printf '\nReconstruction coverage:\n'
+column -t -s $'\t' "$OUT_DIR/reconstruction-summary.tsv" 2>/dev/null ||
+  cat "$OUT_DIR/reconstruction-summary.tsv"
+printf '\nReconstruction failures:\n'
+column -t -s $'\t' "$OUT_DIR/reconstruction-failures.tsv" 2>/dev/null ||
+  cat "$OUT_DIR/reconstruction-failures.tsv"
+printf '\nAlethe replay scaling:\n'
+column -t -s $'\t' "$OUT_DIR/alethe-replay-scaling-summary.tsv" 2>/dev/null ||
+  cat "$OUT_DIR/alethe-replay-scaling-summary.tsv"
 printf '\nResults: %s\n' "$OUT_DIR"

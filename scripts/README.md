@@ -1,8 +1,10 @@
 # Benchmark Scripts
 
-The benchmark harnesses compare lean-auto, Duper, and the local lean-crush
-build. Generated sources, logs, metadata, per-VC measurements, and summaries
-are written under `BenchmarkResults/`.
+The benchmark harnesses compare lean-auto, Duper, `grind`, and the local
+lean-crush build. Crush is measured separately in trusted-verification,
+core-reconstruction, Alethe-replay, and portfolio-reconstruction lanes.
+Generated sources, logs, metadata, per-VC measurements, and summaries are
+written under `BenchmarkResults/`.
 
 | Script | Benchmarks |
 |---|---|
@@ -47,8 +49,8 @@ REPEATS=1 \
 TIMEOUT=5 \
 DUPER_TIMEOUT=5 \
 SOLVER=cvc5 \
-CRUSH_TRUST=reconstruct \
 MAX_HEARTBEATS=1000000 \
+MAX_RECURSION_DEPTH=100000 \
 OUT_DIR="$PWD/BenchmarkResults/corpora-reproduction" \
 scripts/benchmark-corpora.sh
 ```
@@ -56,7 +58,9 @@ scripts/benchmark-corpora.sh
 `TIMEOUT` is the solver timeout for each query. `MAX_HEARTBEATS` is the Lean
 budget applied independently to each recorded VC. The generated enclosing
 declaration is uncapped; the harness reports an error if a backend heartbeat
-still aborts Loom's surrounding tactic traversal.
+still aborts Loom's surrounding tactic traversal. `MAX_RECURSION_DEPTH`
+applies uniformly to every generated Lean process and is recorded in
+`metadata.tsv`.
 
 This is the configuration used for the recorded table. It produces known
 truncation warnings for some Velvet files and exits nonzero after writing all
@@ -82,6 +86,7 @@ scripts/benchmark-corpora.sh
 RUN_AUTO=false scripts/benchmark-corpora.sh
 RUN_CRUSH=false scripts/benchmark-corpora.sh
 RUN_DUPER=false scripts/benchmark-corpora.sh
+RUN_GRIND=false scripts/benchmark-corpora.sh
 ```
 
 Run selected Cashmere or Velvet files:
@@ -108,14 +113,17 @@ Useful overrides include:
 | `BENCHMARK_SOURCE_CACHE` | `BenchmarkResults/sources` | Cached Git repositories |
 | `OUT_DIR` | timestamped directory | Result location |
 | `DUPER_TIMEOUT` | `5` | Duper saturation limit per portfolio instance |
+| `CRUSH_MODES` | `verify core alethe portfolio` | Crush measurement lanes |
+| `MAX_RECURSION_DEPTH` | `100000` | Lean recursion limit for generated files |
 | `USE_MATHLIB_CACHE` | `true` | Fetch Mathlib build artifacts |
-| `CRUSH_PROFILE` | `false` | Include Crush phase profiling in logs |
+| `CRUSH_PROFILE` | `true` | Include Crush phase profiling and report records |
 | `KEEP_WORKTREES` | `false` | Retain temporary detached worktrees |
 
 ## LeanHammer
 
-The standalone harness runs `duper-only`, `auto-duper`, `crush-only`,
-`aesop-auto-duper`, and `aesop-crush` over every case:
+The standalone harness defaults to the published Z3-based `crush-only` lane,
+direct cvc5 verification and reconstruction lanes, `grind-only`,
+`duper-only`, LeanHammer's Auto/Duper lanes, and `aesop-crush`:
 
 ```sh
 REPEATS=3 \
@@ -189,7 +197,8 @@ sources so both backends attempt every VC. It excludes incomplete
 
 ## Outputs
 
-The corpus and PLean harnesses write:
+All harnesses write the normalized measurement and profiling reports. The
+corpus and PLean harnesses also retain their original comparison reports:
 
 | File | Contents |
 |---|---|
@@ -200,7 +209,26 @@ The corpus and PLean harnesses write:
 | `matched-summary.tsv` | Corpus-only coverage and timing on the three-backend VC intersection |
 | `comparison.tsv` | Pairwise results and means for VCs matched across each available backend pair |
 | `file-summary.tsv` | PLean-only per-file coverage and timing |
+| `measurements.tsv` | Normalized per-VC status and tactic-local time |
+| `profile-events.tsv` | Normalized Crush outcomes, replay failures, phases, and numeric metrics |
+| `coverage-summary.tsv` | Coverage and timing grouped by suite and lane |
+| `reconstruction-summary.tsv` | Verified VCs reconstructed by Core, Alethe, and the portfolio |
+| `reconstruction-failures.tsv` | Reconstruction failures grouped by reported cause |
+| `outcome-summary.tsv` | Crush outcomes and replay statuses grouped by suite and lane |
+| `phase-summary.tsv` | Total, mean, minimum, and maximum time for each Crush phase |
+| `alethe-replay-scaling.tsv` | Successful Alethe replays with certificate size and replay time |
+| `alethe-replay-scaling-summary.tsv` | Correlation and least-squares scaling grouped by suite and lane |
 | `logs/` | Complete Lean and solver output |
+
+`alethe-replay-scaling.tsv` uses the number of parsed Alethe commands as its
+primary script-length measure. It also records parsed S-expression nodes and
+the byte length of the certificate's canonical S-expression rendering.
+`replay_nanos` covers parsing, replay, proof assembly, and final kernel
+checking, but excludes solver time. The summary reports Pearson correlation,
+R-squared, milliseconds per 100 commands, and milliseconds per KiB only when
+at least two successful VCs have nonzero size and time variance. Repeated runs
+are preserved in the detailed file and averaged per VC before fitting, so they
+do not over-weight one obligation.
 
 Do not compare raw totals when branch-specific sources emit different goals or
 a run is marked truncated. Use `comparison.tsv` for matched-VC comparisons.

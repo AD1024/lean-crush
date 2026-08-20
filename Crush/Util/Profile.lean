@@ -26,6 +26,7 @@ namespace Crush
 structure PhaseTime where
   label : String
   ms    : Nat
+  nanos : Nat
   deriving Inhabited
 
 /-- Accumulated phase timings, newest last. A plain structure threaded through the
@@ -52,13 +53,19 @@ def time {m : Type → Type} {α : Type} [MonadLiftT BaseIO m] [Monad m]
   if !p.enabled then
     let a ← act
     return (a, p)
-  let t0 ← (IO.monoMsNow : BaseIO Nat)
+  let t0 ← (IO.monoNanosNow : BaseIO Nat)
   let a ← act
-  let t1 ← (IO.monoMsNow : BaseIO Nat)
-  return (a, { p with phases := p.phases.push { label, ms := t1 - t0 } })
+  let t1 ← (IO.monoNanosNow : BaseIO Nat)
+  let nanos := t1 - t0
+  return (a, {
+    p with phases := p.phases.push { label, ms := nanos / 1_000_000, nanos } })
 
 /-- Total recorded time across all phases. -/
 def total (p : Profiler) : Nat := p.phases.foldl (fun acc ph => acc + ph.ms) 0
+
+/-- Total recorded time across all phases at the profiler's native resolution. -/
+def totalNanos (p : Profiler) : Nat :=
+  p.phases.foldl (fun acc ph => acc + ph.nanos) 0
 
 /-- A one-line-per-phase report with a total, e.g.
 ```
@@ -80,6 +87,48 @@ def report (p : Profiler) : String := Id.run do
     let pct := if tot == 0 then 0 else ph.ms * 100 / tot
     lines := lines.push s!"  {ph.label}{pad}  {ph.ms}ms ({pct}%)"
   return String.intercalate "\n" lines.toList
+
+/-- An optional mutable profiler used by long pipelines.
+
+The disabled session is `none`, so timing a phase retains the profiler's
+single-branch disabled cost without allocating or touching an `IO.Ref`. -/
+abbrev Session := Option (IO.Ref Profiler)
+
+namespace Session
+
+def start (enabled : Bool) : IO Session :=
+  if enabled then return some (← IO.mkRef Profiler.on) else return none
+
+def time {m : Type → Type} {α : Type}
+    [MonadLiftT BaseIO m] [MonadLiftT (ST IO.RealWorld) m] [Monad m]
+    (session : Session) (label : String) (act : m α) : m α := do
+  let some ref := session | return ← act
+  let profiler ← ref.get
+  let (result, profiler) ← profiler.time label act
+  ref.set profiler
+  return result
+
+def get (session : Session) : IO Profiler := do
+  let some ref := session | return Profiler.off
+  ref.get
+
+end Session
+
+private def sanitizeField (value : String) : String :=
+  value.replace "\t" " " |>.replace "\n" " " |>.replace "\r" " "
+
+/-- Emit one stable TSV record for benchmark tooling.
+
+The final two fields contain comma-separated `phase=nanos` and
+`metric=value` entries. Their names are controlled by Crush. -/
+def machineRecord (p : Profiler) (decl : String) (goalHash : UInt64)
+    (outcome replay detail : String)
+    (metrics : Array (String × Nat) := #[]) : String :=
+  let phases := p.phases.toList.map fun phase => s!"{phase.label}={phase.nanos}"
+  let metrics := metrics.toList.map fun (name, value) => s!"{name}={value}"
+  s!"CRUSH_PROFILE\t2\t{sanitizeField decl}\t{goalHash}\t\
+{sanitizeField outcome}\t{sanitizeField replay}\t{sanitizeField detail}\t\
+{p.totalNanos}\t{String.intercalate "," phases}\t{String.intercalate "," metrics}"
 
 end Profiler
 

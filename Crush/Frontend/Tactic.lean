@@ -252,9 +252,71 @@ private def reconstructionFailureDetails (goal : MVarId) (st : TranslateState)
     renderSection "Other selected facts outside the core" otherLines ++ m!"\n" ++
     renderSection "Candidate library lemmas (best effort)" candidateLines
 
+private structure ReplayCertificateStats where
+  commands : Nat
+  assumes : Nat
+  steps : Nat
+  anchors : Nat
+
 private inductive ProofReplayAttempt where
-  | success
+  | success (certificate : ReplayCertificateStats)
   | declined (failure : Option Alethe.ReplayFailure)
+
+private structure RunProfileContext where
+  decl : String
+  goalHash : UInt64
+
+private def captureRunProfileContext (goal : MVarId) : TacticM RunProfileContext :=
+  goal.withContext do
+    let decl := (← Term.getDeclName?).getD `anonymous |>.toString
+    let target := toString (← ppExpr (← goal.getType))
+    return { decl, goalHash := hash target }
+
+private def reportRunProfile (cfg : Config) (session : Profiler.Session)
+    (context? : Option RunProfileContext) (outcome replay detail : String)
+    (metrics : Array (String × Nat) := #[]) :
+    TacticM Unit := do
+  unless cfg.profile do return
+  let profiler ← session.get
+  logInfo profiler.report
+  if cfg.profileMachine then
+    let context := context?.getD { decl := "anonymous", goalHash := 0 }
+    IO.println
+      (profiler.machineRecord context.decl context.goalHash outcome replay detail metrics)
+
+private partial def sexpNodeCount : SMT.Sexp → Nat
+  | .atom _ | .str _ => 1
+  | .list items => items.foldl (fun total item => total + sexpNodeCount item) 1
+
+private def replayProfileMetrics (cfg : Config) (certificate : ReplayCertificateStats)
+    (proofSexps : Array SMT.Sexp) : Array (String × Nat) :=
+  if cfg.profile && cfg.profileMachine then
+    let nodes := proofSexps.foldl (fun total sexp => total + sexpNodeCount sexp) 0
+    let bodyBytes :=
+      proofSexps.foldl (fun total sexp => total + sexp.toString.utf8ByteSize) 0
+    let separatorBytes := if proofSexps.isEmpty then 0 else proofSexps.size - 1
+    #[
+      ("certificate_commands", certificate.commands),
+      ("certificate_assumes", certificate.assumes),
+      ("certificate_steps", certificate.steps),
+      ("certificate_anchors", certificate.anchors),
+      ("certificate_sexp_nodes", nodes),
+      ("certificate_bytes", bodyBytes + separatorBytes)
+    ]
+  else
+    #[]
+
+private def replayDeclineLabel (cfg : Config) (proofSexps : Array SMT.Sexp)
+    (failure? : Option Alethe.ReplayFailure) : String :=
+  if cfg.reconstruct == .core then
+    "not-attempted"
+  else
+    match failure? with
+    | some failure => failure.kind.label
+    | none =>
+      if Alethe.proofError? proofSexps |>.isSome then "certificate-error"
+      else if proofSexps.isEmpty then "no-certificate"
+      else "malformed-certificate"
 
 /-- Try to close `goal` by replaying the solver's proof certificate
 (`Crush/Solver/AletheReplay.lean`).
@@ -271,6 +333,12 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
   if cfg.reconstruct == .core then return .declined none
   if proofSexps.isEmpty then return .declined none
   let some proof := Alethe.parseProofSexps proofSexps | return .declined none
+  let certificate : ReplayCertificateStats :=
+    if cfg.profile && cfg.profileMachine then
+      let (assumes, steps, anchors) := proof.stats
+      { commands := proof.commands.size, assumes, steps, anchors }
+    else
+      { commands := 0, assumes := 0, steps := 0, anchors := 0 }
   let features := proof.features
   trace[crush.result] "alethe certificate features: operators={features.operators}, \
     indexed={features.indexedOperators}, sorts={features.sorts}, rules={features.rules}"
@@ -312,7 +380,7 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
         -- Assemble `byContradiction (fun hneg => falseProof)` and hand it to the kernel.
         let pf ← mkAppOptM ``Classical.byContradiction #[some goalType, some lam]
         goal.assign (← kernelCheckProof snapshot goalType pf)
-        return .success
+        return .success certificate
       catch e =>
         let detail ← e.toMessageData.toString
         let failure : Alethe.ReplayFailure := {
@@ -366,33 +434,34 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
       logWarning m!"crush: `crush.ho.mode native` requires a higher-order capable \
                     backend (cvc5); `{cfg.backend}` is first-order only. Falling \
                     back to `defunctionalize`."
-  -- Profiling: when `crush.profile` is on, each phase below is wall-clock timed and a
-  -- breakdown is logged at the end. Off by default and costs only a branch per phase.
-  let mut prof := if cfg.profile then Profiler.on else Profiler.off
+  -- Profiling is session-backed so all completed phases remain available when a later
+  -- solver or reconstruction path declines.
+  let prof ← Profiler.Session.start cfg.profile
+  let profileContext? ←
+    if cfg.profile then some <$> captureRunProfileContext goal else pure none
   let premiseMax :=
     if cfg.premises && hints.allowPremiseSelection then cfg.premiseMax else 0
-  let (collected, prof') ←
+  let collected ←
     prof.time "collect" (collectFactsWithRewrite goal hints cfg.autoUnfold premiseMax)
-  prof := prof'
   trace[crush] "selected {collected.selectedPremises} library premise(s)"
   -- `backend = none` is an emission/debugging mode, so it must still produce the script
   -- even when Lean can close the goal without consulting a solver.
   if cfg.backend != .none && !forceAlethe then
     if ← closeFromSelectedFacts goal collected.facts then
       trace[crush.result] "goal is one of the selected facts; skipped SMT"
-      if cfg.profile then logInfo prof.report
+      reportRunProfile cfg prof profileContext? "selected-fact" "not-attempted"
+        "closed from a selected Lean fact"
       return
-    let (closed, prof') ←
+    let closed ←
       prof.time "pre-reconstruct"
         (tryPreReconstruct goal collected.facts (selectedRuleSearch := cfg.trust != .trust))
-    prof := prof'
     if closed then
       trace[crush.result] "pre-translation checked proof succeeded; skipped SMT"
-      if cfg.profile then logInfo prof.report
+      reportRunProfile cfg prof profileContext? "pre-reconstructed" "not-attempted"
+        "closed before SMT translation"
       return
-  let (normalized, prof') ←
+  let normalized ←
     prof.time "normalize" (normalizeFacts collected.facts collected.rewriteLemmas)
-  prof := prof'
   trace[crush] "normalized {normalized.rewritten} fact(s) with \
                 {collected.rewriteLemmas.size} selected equation lemma(s)"
   let facts := normalized.facts
@@ -400,8 +469,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
   -- polymorphic lemma is emitted at an abstract instantiation, giving SMT symbols
   -- disjoint from the goal's, so it cannot discharge anything — even for a ground
   -- goal (see `Crush.monomorphizeFacts`).
-  let (mono, prof') ← prof.time "monomorphize" (monomorphizeFacts cfg facts)
-  prof := prof'
+  let mono ← prof.time "monomorphize" (monomorphizeFacts cfg facts)
   let facts := mono.facts
   trace[crush.mono] "generated {mono.generated} instance(s); \
                      dropped: {mono.dropped}; rejected: {mono.rejected}; \
@@ -422,9 +490,8 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
                   instance(s) that failed certification and were dropped \
                   ({mono.rejected}); this indicates an internal bug in the \
                   monomorphizer. The affected facts were not asserted."
-  let (instantiated, prof') ←
+  let instantiated ←
     prof.time "instantiate" (instantiateGroundFacts cfg facts)
-  prof := prof'
   let fullFacts := instantiated.facts
   trace[crush.inst] "generated {instantiated.generated} ground instance(s); \
                      exhausted: {instantiated.exhausted}"
@@ -438,8 +505,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
   let reducedFacts :=
     if cfg.backend == .none then none else instantiated.groundFacts
   let firstFacts := reducedFacts.getD fullFacts
-  let ((firstScript, firstSt), prof') ← prof.time "translate" (buildScript cfg firstFacts)
-  prof := prof'
+  let (firstScript, firstSt) ← prof.time "translate" (buildScript cfg firstFacts)
   let mut script := firstScript
   let mut st := firstSt
   if cfg.traceScript then
@@ -448,12 +514,12 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
   if cfg.backend == .none then
     Solver.maybeSave cfg script
     logInfo m!"crush: backend is `none`; emitted {script.size} commands, no solver run."
-    if cfg.profile then logInfo prof.report
+    reportRunProfile cfg prof profileContext? "script-emitted" "not-attempted"
+      "backend disabled"
     return
   -- Saved before the run, so a query that throws still leaves its script on disk.
   Solver.maybeSave cfg script
-  let (firstResult, prof') ← prof.time "solve" (Solver.runQuery cfg script)
-  prof := prof'
+  let firstResult ← prof.time "solve" (Solver.runQuery cfg script)
   let mut result := firstResult
   if reducedFacts.isSome then
     match result with
@@ -462,18 +528,16 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
     | .sat .. | .unknown .. =>
       trace[crush.result] "ground-instance query did not close the goal; retrying with \
                            retained quantified templates"
-      let ((fallbackScript, fallbackSt), prof') ←
+      let (fallbackScript, fallbackSt) ←
         prof.time "translate-fallback" (buildScript cfg fullFacts)
-      prof := prof'
       script := fallbackScript
       st := fallbackSt
       if cfg.traceScript then
         logInfo m!"crush SMT fallback script:{indentD (scriptToString script)}"
       trace[crush.script] "{scriptToString script}"
       Solver.maybeSave cfg script
-      let (fallbackResult, prof') ←
+      let fallbackResult ←
         prof.time "solve-fallback" (Solver.runQuery cfg script)
-      prof := prof'
       result := fallbackResult
   match result with
   | .unsat coreSexp proofSexps =>
@@ -483,7 +547,8 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
     | .trust =>
       let goalType ← goal.getType
       goal.assign (mkApp (mkConst ``crushSorry) goalType)
-      if cfg.profile then logInfo prof.report
+      reportRunProfile cfg prof profileContext? "verified" "not-requested"
+        "solver returned unsat; closed under the trust policy"
     | .reconstruct | .reconstructOrTrust =>
       -- Solver-as-oracle: the core tells us *which* hypotheses matter, and a Lean
       -- finishing tactic re-proves the goal from just those. On success the solver
@@ -498,45 +563,54 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
       -- goals the single-shot ladder cannot (long chains of trivial steps — Boolean
       -- pigeonhole, deep EUF conflicts) because the chain is already found. A step it
       -- cannot replay falls through to the ladder below.
-      let (replayAttempt, prof') ←
-        prof.time "replay" (tryProofReplay goal cfg st proofSexps)
-      prof := prof'
-      if let .success := replayAttempt then
+      let replayAttempt ← prof.time "replay" (tryProofReplay goal cfg st proofSexps)
+      if let .success certificate := replayAttempt then
         trace[crush.result] "proof replay succeeded; no axiom used"
-        if cfg.profile then logInfo prof.report
+        reportRunProfile cfg prof profileContext? "alethe-reconstructed" "success"
+          "Alethe certificate replay succeeded"
+          (replayProfileMetrics cfg certificate proofSexps)
         return
       let replayFailure? :=
         match replayAttempt with
-        | .success => none
+        | .success _ => none
         | .declined failure => failure
+      let replayLabel := replayDeclineLabel cfg proofSexps replayFailure?
       -- `alethe` mode deliberately has no fallback: it is for working on replay itself,
       -- where the ladder silently closing the goal would hide whether replay worked.
       if cfg.reconstruct == .alethe then
         if let some reason := Alethe.proofError? proofSexps then
+          reportRunProfile cfg prof profileContext? "reconstruction-failed"
+            replayLabel reason
           throwError m!"crush: cvc5 did not emit an Alethe certificate: {reason}. \
                         Set `crush.reconstruct` to \"auto\" to use core-directed \
                         reconstruction instead."
         else if proofSexps.isEmpty then
+          reportRunProfile cfg prof profileContext? "reconstruction-failed"
+            replayLabel "cvc5 returned no Alethe certificate"
           throwError "crush: cvc5 did not return an Alethe certificate. Set \
                       `crush.reconstruct` to \"auto\" to use core-directed \
                       reconstruction instead."
         else if let some failure := replayFailure? then
+          reportRunProfile cfg prof profileContext? "reconstruction-failed"
+            replayLabel failure.detail
           throwError m!"crush: Alethe replay failed with {failure.toMessageData}. \
                         Set `crush.reconstruct` to \"auto\" to fall back to the \
                         core-directed finishers."
         else
+          reportRunProfile cfg prof profileContext? "reconstruction-failed"
+            replayLabel "the Alethe certificate could not be parsed"
           throwError m!"crush: `crush.reconstruct alethe` is set and the solver's Alethe \
                         certificate could not be replayed. Set `crush.reconstruct` to \
                         \"auto\" to fall back to the core-directed finishers, or enable \
                         `trace.crush.result` to see which step declined."
-      let (ok, prof') ←
+      let ok ←
         prof.time "reconstruct"
           (tryReconstruct goal reconstructionProofs (← finisherTactics)
             reconstructionFinisher?)
-      prof := prof'
       if ok then
         trace[crush.result] "reconstruction succeeded; no axiom used"
-        if cfg.profile then logInfo prof.report
+        reportRunProfile cfg prof profileContext? "core-reconstructed" replayLabel
+          "core-directed reconstruction succeeded"
       else if cfg.trust == .reconstructOrTrust then
         logWarning m!"crush: solver reported `unsat`, but no finishing tactic could \
                       replay it from the {coreProofs.size} core \
@@ -547,10 +621,13 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
                       Set `crush.trust` to `reconstruct` to make this an error."
         let goalType ← goal.getType
         goal.assign (mkApp (mkConst ``crushSorry) goalType)
-        if cfg.profile then logInfo prof.report
+        reportRunProfile cfg prof profileContext? "trusted-fallback" replayLabel
+          "core-directed reconstruction failed; closed under the trust policy"
       else
         let details ← reconstructionFailureDetails
           goal st coreIds reconstructionProofs reconstructionHints
+        reportRunProfile cfg prof profileContext? "reconstruction-failed" replayLabel
+          "core-directed reconstruction did not close the goal"
         throwError m!"crush: solver reported `unsat`, but reconstruction failed — no \
                       finishing tactic could replay it from the core \
                       ({coreDescriptions st coreIds}).\n{details}\n\
@@ -563,12 +640,15 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
   | .sat modelText =>
     -- The verdict is about the encoding, which is incomplete in places, so the message
     -- reports a model rather than claiming the Lean goal is false.
+    reportRunProfile cfg prof profileContext? "sat" "not-attempted"
+      "solver returned sat"
     throwError m!"crush: could not prove the goal — the solver found a \
                   {← formatCounterexample modelText st}\n\
                   The encoding is incomplete, so a model does not necessarily \
                   describe a Lean counterexample."
   | .unknown reason =>
     let reason := if reason.isEmpty then "no reason given" else reason
+    reportRunProfile cfg prof profileContext? "unknown" "not-attempted" reason
     throwError m!"crush: solver returned `unknown` ({reason}). \
                   Try increasing `crush.timeout` or adding hypotheses."
 

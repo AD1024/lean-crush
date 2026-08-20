@@ -296,6 +296,16 @@ Profiling distinguishes time spent in Lean-side preprocessing and translation
 from solver and reconstruction time.
 It should be the first diagnostic enabled for a scalability problem.
 
+{optionDocs crush.profile.machine}
+
+`crush.profile.machine` is intended for benchmark tooling.
+It has an effect only when `crush.profile` is enabled and adds one
+tab-separated `CRUSH_PROFILE` record per tactic invocation.
+The record includes the outcome, replay status, nanosecond phase timings, and
+certificate-size metrics for successful Alethe replay.
+Interactive users normally need only the human-readable `crush.profile`
+report.
+
 The diagnostics answer different questions:
 
 * `crush.profile` identifies the expensive pipeline stage.

@@ -233,6 +233,13 @@ register_option crush.profile : Bool := {
             message, to find where time goes."
 }
 
+register_option crush.profile.machine : Bool := {
+  defValue := false
+  descr := "When `crush.profile` is enabled, also print one machine-readable TSV record \
+            containing the declaration, goal hash, outcome, reconstruction status, and \
+            nanoseconds spent in each phase. Intended for benchmark tooling."
+}
+
 register_option crush.premises : Bool := {
   defValue := false
   descr := "Use Lean's registered LibrarySuggestions engine to add relevant library \
@@ -268,6 +275,7 @@ structure Config where
   trustBvDecide  : Bool      := false
   trustNativeDecide : Bool   := false
   profile        : Bool      := false
+  profileMachine : Bool      := false
   premises       : Bool      := false
   premiseMax     : Nat       := 32
   deriving Inhabited
@@ -297,6 +305,7 @@ def Config.ofOptions (opts : Options) : Config :=
     trustBvDecide  := crush.reconstruct.trustBvDecide.get opts
     trustNativeDecide := crush.reconstruct.trustNativeDecide.get opts
     profile        := crush.profile.get opts
+    profileMachine := crush.profile.machine.get opts
     premises       := crush.premises.get opts
     premiseMax     := crush.premises.max.get opts }
 

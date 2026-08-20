@@ -35,14 +35,17 @@ REPEATS="${REPEATS:-1}"
 TIMEOUT="${TIMEOUT:-5}"
 DUPER_TIMEOUT="${DUPER_TIMEOUT:-5}"
 SOLVER="${SOLVER:-cvc5}"
-CRUSH_TRUST="${CRUSH_TRUST:-reconstruct}"
-CRUSH_PROFILE="${CRUSH_PROFILE:-false}"
+CRUSH_MODES="${CRUSH_MODES:-verify core alethe portfolio}"
+CRUSH_PROFILE="${CRUSH_PROFILE:-true}"
 CRUSH_TRACE_INST="${CRUSH_TRACE_INST:-false}"
 MAX_HEARTBEATS="${MAX_HEARTBEATS:-1000000}"
+MAX_RECURSION_DEPTH="${MAX_RECURSION_DEPTH:-100000}"
+GRIND_SPLITS="${GRIND_SPLITS:-20}"
 
 RUN_AUTO="${RUN_AUTO:-true}"
 RUN_CRUSH="${RUN_CRUSH:-true}"
 RUN_DUPER="${RUN_DUPER:-true}"
+RUN_GRIND="${RUN_GRIND:-true}"
 RUN_LEANHAMMER="${RUN_LEANHAMMER:-true}"
 RUN_LOOM="${RUN_LOOM:-true}"
 RUN_CASHMERE="${RUN_CASHMERE:-true}"
@@ -61,6 +64,8 @@ METADATA="$OUT_DIR/metadata.tsv"
 SUMMARY="$OUT_DIR/summary.tsv"
 MATCHED_SUMMARY="$OUT_DIR/matched-summary.tsv"
 COMPARISON="$OUT_DIR/comparison.tsv"
+MEASUREMENTS="$OUT_DIR/measurements.tsv"
+PROFILES="$OUT_DIR/profile-events.tsv"
 
 WORKTREES=()
 ADDED_WORKTREE=""
@@ -74,6 +79,41 @@ die() {
 is_true() {
   [[ "$1" == "true" ]]
 }
+
+is_crush_lane() {
+  [[ "$1" == crush-* ]]
+}
+
+crush_lane_trust() {
+  case "$1" in
+    crush-verify) printf 'trust\n' ;;
+    crush-core|crush-alethe|crush-portfolio) printf 'reconstruct\n' ;;
+    *) printf '%s\n' '-' ;;
+  esac
+}
+
+crush_lane_reconstruct() {
+  case "$1" in
+    crush-core) printf 'core\n' ;;
+    crush-alethe) printf 'alethe\n' ;;
+    crush-verify|crush-portfolio) printf 'auto\n' ;;
+    *) printf '%s\n' '-' ;;
+  esac
+}
+
+CRUSH_LANES=()
+if is_true "$RUN_CRUSH"; then
+  for mode in $CRUSH_MODES; do
+    case "$mode" in
+      verify|core|alethe|portfolio)
+        CRUSH_LANES+=("crush-$mode")
+        ;;
+      *)
+        die "unknown Crush measurement mode: $mode"
+        ;;
+    esac
+  done
+fi
 
 find_solver() {
   local name="$1"
@@ -207,13 +247,13 @@ record_metadata() {
   local backend="$2"
   local ref="$3"
   local tree="$4"
-  local commit toolchain crush_commit crush_dirty duper_commit
+  local commit toolchain crush_commit crush_dirty duper_commit trust reconstruct
   commit="$(git -C "$tree" rev-parse HEAD)"
   toolchain="$(tr -d '\r\n' < "$tree/lean-toolchain")"
   crush_commit="-"
   crush_dirty="false"
   duper_commit="-"
-  if [[ "$backend" == "crush" ]]; then
+  if is_crush_lane "$backend"; then
     crush_commit="$(git -C "$CRUSH_ROOT" rev-parse HEAD)"
     if [[ -n "$(git -C "$CRUSH_ROOT" status --porcelain -- \
         . ':(exclude)BenchmarkResults')" ]]; then
@@ -223,16 +263,20 @@ record_metadata() {
   if [[ "$backend" == "duper" ]]; then
     duper_commit="$(git -C "$tree/.lake/packages/Duper" rev-parse HEAD)"
   fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  trust="$(crush_lane_trust "$backend")"
+  reconstruct="$(crush_lane_reconstruct "$backend")"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$suite" "$backend" "$ref" "$commit" "$toolchain" "$SOLVER" "$TIMEOUT" \
-    "$DUPER_TIMEOUT" "$MAX_HEARTBEATS" "$CRUSH_TRUST" "$crush_commit" \
-    "$duper_commit" "$crush_dirty" "$tree" \
+    "$DUPER_TIMEOUT" "$MAX_HEARTBEATS" "$MAX_RECURSION_DEPTH" "$trust" \
+    "$reconstruct" "$crush_commit" "$duper_commit" "$crush_dirty" "$tree" \
+    "$CRUSH_PROFILE" \
     >> "$METADATA"
 }
 
 write_prelude() {
   local output="$1"
   local backend="$2"
+  local trust reconstruct
 
   if [[ "$backend" == "auto" ]]; then
     cat >> "$output" <<EOF
@@ -243,17 +287,27 @@ macro "corpus_backend" : tactic =>
     set_option loom.solver.smt.timeout $TIMEOUT in
     loom_auto)
 EOF
-  elif [[ "$backend" == "crush" ]]; then
+  elif is_crush_lane "$backend"; then
+    trust="$(crush_lane_trust "$backend")"
+    reconstruct="$(crush_lane_reconstruct "$backend")"
     cat >> "$output" <<EOF
 
 macro "corpus_backend" : tactic =>
   \`(tactic|
     set_option crush.backend "$SOLVER" in
     set_option crush.timeout $TIMEOUT in
-    set_option crush.trust "$CRUSH_TRUST" in
+    set_option crush.trust "$trust" in
+    set_option crush.reconstruct "$reconstruct" in
     set_option crush.profile $CRUSH_PROFILE in
+    set_option crush.profile.machine true in
     set_option trace.crush.inst $CRUSH_TRACE_INST in
     loom_crush)
+EOF
+  elif [[ "$backend" == "grind" ]]; then
+    cat >> "$output" <<EOF
+
+macro "corpus_backend" : tactic =>
+  \`(tactic| grind (splits := $GRIND_SPLITS))
 EOF
   else
     cat >> "$output" <<EOF
@@ -284,7 +338,8 @@ private def corpusBenchCategory (msg : String) : String :=
       corpusBenchContains msg "the goal is false" then "sat"
   else if corpusBenchContains msg "translation" ||
       corpusBenchContains msg "unsupported" then "translation"
-  else if corpusBenchContains msg "reconstruction" then "reconstruction"
+  else if corpusBenchContains msg "reconstruction" ||
+      corpusBenchContains msg "Alethe" then "reconstruction"
   else "tactic"
 
 private def runCorpusBench : TacticM Unit := Lean.withCurrHeartbeats do
@@ -398,7 +453,7 @@ append_records() {
 
   awk -v suite="$suite" -v backend="$backend" -v ref="$ref" \
       -v commit="$commit" -v toolchain="$toolchain" -v repeat="$repeat" \
-      -v file="$file" '
+      -v file="$file" -v measurements="$MEASUREMENTS" '
     BEGIN { FS = OFS = "\t" }
     {
       marker = index($0, "CORPUS_BENCH\t")
@@ -408,8 +463,60 @@ append_records() {
       print suite, backend, ref, commit, toolchain, repeat, file,
             result[2], result[3], result[4], result[5], result[6],
             result[7], result[8], result[9]
+      vcKey = file "|" result[2] "|" result[4]
+      print suite, backend, repeat, vcKey, result[5], result[6],
+            result[7], result[8] >> measurements
     }
   ' "$log" >> "$RESULTS"
+}
+
+append_profile_records() {
+  local suite="$1"
+  local backend="$2"
+  local repeat="$3"
+  local file="$4"
+  local log="$5"
+
+  awk -v suite="$suite" -v lane="$backend" -v repeat="$repeat" \
+      -v file="$file" -v profiles="$PROFILES" '
+    BEGIN { FS = OFS = "\t"; pending = 0 }
+    {
+      profileMarker = index($0, "CRUSH_PROFILE\t")
+      if (profileMarker > 0) {
+        line = substr($0, profileMarker)
+        split(line, profile, "\t")
+        pending++
+        declaration[pending] = profile[3]
+        profileHash[pending] = profile[4]
+        outcome[pending] = profile[5]
+        replay[pending] = profile[6]
+        detail[pending] = profile[7]
+        totalNanos[pending] = profile[8]
+        phases[pending] = profile[9]
+        metrics[pending] = profile[10]
+        next
+      }
+      resultMarker = index($0, "CORPUS_BENCH\t")
+      if (resultMarker == 0) next
+      line = substr($0, resultMarker)
+      split(line, result, "\t")
+      vcKey = file "|" result[2] "|" result[4]
+      for (i = 1; i <= pending; i++) {
+        print suite, lane, repeat, vcKey, declaration[i], profileHash[i],
+              outcome[i], replay[i], detail[i], totalNanos[i], phases[i],
+              metrics[i] >> profiles
+        delete declaration[i]
+        delete profileHash[i]
+        delete outcome[i]
+        delete replay[i]
+        delete detail[i]
+        delete totalNanos[i]
+        delete phases[i]
+        delete metrics[i]
+      }
+      pending = 0
+    }
+  ' "$log"
 }
 
 run_lean_file() {
@@ -427,11 +534,13 @@ run_lean_file() {
   toolchain="$(tr -d '\r\n' < "$tree/lean-toolchain")"
   printf '%-9s %-5s run %s: %s\n' "$suite" "$backend" "$repeat" "$label"
   started="$(date +%s)"
-  if [[ "$backend" == "crush" ]]; then
+  if is_crush_lane "$backend"; then
     "$CRUSH_ROOT/scripts/with-local-crush.sh" "$tree" \
-      "-DmaxHeartbeats=0" "$generated" > "$log" 2>&1
+      "-DmaxHeartbeats=0" "-DmaxRecDepth=$MAX_RECURSION_DEPTH" \
+      "$generated" > "$log" 2>&1
   else
-    (cd "$tree" && lake env lean "-DmaxHeartbeats=0" "$generated") \
+    (cd "$tree" && lake env lean "-DmaxHeartbeats=0" \
+      "-DmaxRecDepth=$MAX_RECURSION_DEPTH" "$generated") \
       > "$log" 2>&1
   fi
   exit_code=$?
@@ -448,6 +557,7 @@ run_lean_file() {
   vc_count="$(awk '/CORPUS_BENCH\t/ { n++ } END { print n + 0 }' "$log")"
   append_records "$suite" "$backend" "$ref" "$commit" "$toolchain" \
     "$repeat" "$label" "$log"
+  append_profile_records "$suite" "$backend" "$repeat" "$label" "$log"
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$suite" "$backend" "$repeat" "$label" "$exit_code" "$elapsed" "$vc_count" \
     "$truncated" "$message" \
@@ -532,7 +642,7 @@ write_reports() {
       OFS = "\t"
       backend[1] = "auto"
       backend[2] = "duper"
-      backend[3] = "crush"
+      backend[3] = "crush-portfolio"
       print "suite", "backend", "attempted", "passed", "failed", "pass_pct",
             "total_ms", "mean_ms", "min_ms", "max_ms"
     }
@@ -556,7 +666,7 @@ write_reports() {
       for (vc in vcs) {
         autoKey = vc SUBSEP "auto"
         duperKey = vc SUBSEP "duper"
-        crushKey = vc SUBSEP "crush"
+        crushKey = vc SUBSEP "crush-portfolio"
         if (runs[autoKey] != repeats || runs[duperKey] != repeats ||
             runs[crushKey] != repeats) continue
         split(vc, p, SUBSEP)
@@ -590,9 +700,12 @@ write_reports() {
   awk -F '\t' -v repeats="$REPEATS" '
     BEGIN {
       OFS = "\t"
-      left[1] = "auto";  right[1] = "crush"
+      left[1] = "auto";  right[1] = "crush-portfolio"
       left[2] = "auto";  right[2] = "duper"
-      left[3] = "duper"; right[3] = "crush"
+      left[3] = "duper"; right[3] = "crush-portfolio"
+      left[4] = "grind"; right[4] = "crush-portfolio"
+      left[5] = "auto";  right[5] = "grind"
+      left[6] = "duper"; right[6] = "grind"
       print "suite", "left_backend", "right_backend", "shared_vcs",
             "left_only", "right_only", "both_solved", "neither_solved",
             "left_mean_ms", "right_mean_ms"
@@ -619,7 +732,7 @@ write_reports() {
       for (vc in vcs) {
         split(vc, p, SUBSEP)
         suite = p[1]
-        for (pair = 1; pair <= 3; pair++) {
+        for (pair = 1; pair <= 6; pair++) {
           leftKey = vc SUBSEP left[pair]
           rightKey = vc SUBSEP right[pair]
           if (runs[leftKey] != repeats || runs[rightKey] != repeats) continue
@@ -638,7 +751,7 @@ write_reports() {
         }
       }
       for (suite in suites) {
-        for (pair = 1; pair <= 3; pair++) {
+        for (pair = 1; pair <= 6; pair++) {
           resultKey = suite SUBSEP pair
           if (!shared[resultKey]) continue
           leftMean = both[resultKey] ? leftMs[resultKey] / both[resultKey] : 0
@@ -654,7 +767,8 @@ write_reports() {
 }
 
 check_repo "$CRUSH_ROOT" "lean-crush"
-if ! is_true "$RUN_AUTO" && ! is_true "$RUN_CRUSH" && ! is_true "$RUN_DUPER"; then
+if ! is_true "$RUN_AUTO" && ! is_true "$RUN_CRUSH" && ! is_true "$RUN_DUPER" &&
+    ! is_true "$RUN_GRIND"; then
   die "at least one backend must be enabled"
 fi
 
@@ -685,7 +799,8 @@ if is_true "$RUN_LOOM" || is_true "$RUN_CASHMERE"; then
   if is_true "$RUN_AUTO" && [[ -z "$LOOM_AUTO_TREE" ]]; then
     loom_need_auto=true
   fi
-  if is_true "$RUN_CRUSH" && [[ -z "$LOOM_CRUSH_TREE" ]]; then
+  if (is_true "$RUN_CRUSH" || is_true "$RUN_GRIND") &&
+      [[ -z "$LOOM_CRUSH_TREE" ]]; then
     loom_need_crush=true
   fi
   if is_true "$RUN_DUPER" && [[ -z "$LOOM_DUPER_TREE" ]]; then
@@ -749,7 +864,8 @@ if is_true "$RUN_VELVET"; then
   if is_true "$RUN_AUTO" && [[ -z "$VELVET_AUTO_TREE" ]]; then
     velvet_need_auto=true
   fi
-  if is_true "$RUN_CRUSH" && [[ -z "$VELVET_CRUSH_TREE" ]]; then
+  if (is_true "$RUN_CRUSH" || is_true "$RUN_GRIND") &&
+      [[ -z "$VELVET_CRUSH_TREE" ]]; then
     velvet_need_crush=true
   fi
   if is_true "$RUN_DUPER" && [[ -z "$VELVET_DUPER_TREE" ]]; then
@@ -809,12 +925,15 @@ fi
 
 printf 'suite\tbackend\tref\tcommit\ttoolchain\trepeat\tfile\tproof\tvc\tgoal_hash\tstatus\tcategory\tmilliseconds\tmessage\tgoal\n' > "$RESULTS"
 printf 'suite\tbackend\trepeat\tfile\texit_code\twall_seconds\tvc_count\ttruncated\tmessage\n' > "$RUNS"
-printf 'suite\tbackend\tref\tcommit\ttoolchain\tsolver\ttimeout\tduper_timeout\tvc_max_heartbeats\tcrush_trust\tcrush_commit\tduper_commit\tcrush_dirty\tworktree\n' > "$METADATA"
+printf 'suite\tbackend\tref\tcommit\ttoolchain\tsolver\ttimeout\tduper_timeout\tvc_max_heartbeats\tmax_rec_depth\tcrush_trust\tcrush_reconstruct\tcrush_commit\tduper_commit\tcrush_dirty\tworktree\tcrush_profile\n' > "$METADATA"
+printf 'suite\tlane\trepeat\tvc_key\tstatus\tcategory\tmilliseconds\tmessage\n' > "$MEASUREMENTS"
+printf 'suite\tlane\trepeat\tvc_key\tdeclaration\tgoal_hash\toutcome\treplay\tdetail\ttotal_nanos\tphases\tmetrics\n' > "$PROFILES"
 
 if is_true "$RUN_LEANHAMMER"; then
   printf 'Running LeanHammer focused suite\n'
   hammer_out="$OUT_DIR/leanhammer"
   if HAMMER_REPO="$HAMMER_REPO" REPEATS="$REPEATS" OUT_DIR="$hammer_out" \
+      MAX_RECURSION_DEPTH="$MAX_RECURSION_DEPTH" \
       "$CRUSH_ROOT/scripts/benchmark-leanhammer.sh" \
       > "$OUT_DIR/leanhammer.log" 2>&1; then
     tail -n 12 "$OUT_DIR/leanhammer.log"
@@ -869,7 +988,7 @@ if is_true "$RUN_LOOM" || is_true "$RUN_CASHMERE"; then
     prepare_tree "loom-auto" "$loom_auto_tree" \
       CaseStudies.Tactic CaseStudies.Cashmere.Syntax_Cashmere
   fi
-  if is_true "$RUN_CRUSH"; then
+  if is_true "$RUN_CRUSH" || is_true "$RUN_GRIND"; then
     if [[ -n "$LOOM_CRUSH_TREE" ]]; then
       loom_crush_tree="$(cd "$LOOM_CRUSH_TREE" && pwd)"
     else
@@ -903,8 +1022,14 @@ if is_true "$RUN_LOOM"; then
     run_fixture "auto" "$LOOM_AUTO_REF" "$loom_auto_tree"
   fi
   if is_true "$RUN_CRUSH"; then
-    record_metadata "loom" "crush" "$LOOM_CRUSH_REF" "$loom_crush_tree"
-    run_fixture "crush" "$LOOM_CRUSH_REF" "$loom_crush_tree"
+    for lane in "${CRUSH_LANES[@]}"; do
+      record_metadata "loom" "$lane" "$LOOM_CRUSH_REF" "$loom_crush_tree"
+      run_fixture "$lane" "$LOOM_CRUSH_REF" "$loom_crush_tree"
+    done
+  fi
+  if is_true "$RUN_GRIND"; then
+    record_metadata "loom" "grind" "$LOOM_CRUSH_REF" "$loom_crush_tree"
+    run_fixture "grind" "$LOOM_CRUSH_REF" "$loom_crush_tree"
   fi
   if is_true "$RUN_DUPER"; then
     record_metadata "loom" "duper" "$LOOM_DUPER_REF" "$loom_duper_tree"
@@ -918,8 +1043,14 @@ if is_true "$RUN_CASHMERE"; then
     run_files "cashmere" "auto" "$LOOM_AUTO_REF" "$loom_auto_tree" "${CASHMERE_FILES[@]}"
   fi
   if is_true "$RUN_CRUSH"; then
-    record_metadata "cashmere" "crush" "$LOOM_CRUSH_REF" "$loom_crush_tree"
-    run_files "cashmere" "crush" "$LOOM_CRUSH_REF" "$loom_crush_tree" "${CASHMERE_FILES[@]}"
+    for lane in "${CRUSH_LANES[@]}"; do
+      record_metadata "cashmere" "$lane" "$LOOM_CRUSH_REF" "$loom_crush_tree"
+      run_files "cashmere" "$lane" "$LOOM_CRUSH_REF" "$loom_crush_tree" "${CASHMERE_FILES[@]}"
+    done
+  fi
+  if is_true "$RUN_GRIND"; then
+    record_metadata "cashmere" "grind" "$LOOM_CRUSH_REF" "$loom_crush_tree"
+    run_files "cashmere" "grind" "$LOOM_CRUSH_REF" "$loom_crush_tree" "${CASHMERE_FILES[@]}"
   fi
   if is_true "$RUN_DUPER"; then
     record_metadata "cashmere" "duper" "$LOOM_DUPER_REF" "$loom_duper_tree"
@@ -940,7 +1071,7 @@ if is_true "$RUN_VELVET"; then
       die "VELVET_AUTO_TREE is not at $VELVET_AUTO_REF"
     prepare_tree "velvet-auto" "$velvet_auto_tree" Velvet.Std
   fi
-  if is_true "$RUN_CRUSH"; then
+  if is_true "$RUN_CRUSH" || is_true "$RUN_GRIND"; then
     if [[ -n "$VELVET_CRUSH_TREE" ]]; then
       velvet_crush_tree="$(cd "$VELVET_CRUSH_TREE" && pwd)"
     else
@@ -969,8 +1100,14 @@ if is_true "$RUN_VELVET"; then
     run_files "velvet" "auto" "$VELVET_AUTO_REF" "$velvet_auto_tree" "${VELVET_FILES[@]}"
   fi
   if is_true "$RUN_CRUSH"; then
-    record_metadata "velvet" "crush" "$VELVET_CRUSH_REF" "$velvet_crush_tree"
-    run_files "velvet" "crush" "$VELVET_CRUSH_REF" "$velvet_crush_tree" "${VELVET_FILES[@]}"
+    for lane in "${CRUSH_LANES[@]}"; do
+      record_metadata "velvet" "$lane" "$VELVET_CRUSH_REF" "$velvet_crush_tree"
+      run_files "velvet" "$lane" "$VELVET_CRUSH_REF" "$velvet_crush_tree" "${VELVET_FILES[@]}"
+    done
+  fi
+  if is_true "$RUN_GRIND"; then
+    record_metadata "velvet" "grind" "$VELVET_CRUSH_REF" "$velvet_crush_tree"
+    run_files "velvet" "grind" "$VELVET_CRUSH_REF" "$velvet_crush_tree" "${VELVET_FILES[@]}"
   fi
   if is_true "$RUN_DUPER"; then
     record_metadata "velvet" "duper" "$VELVET_DUPER_REF" "$velvet_duper_tree"
@@ -979,6 +1116,10 @@ if is_true "$RUN_VELVET"; then
 fi
 
 write_reports
+if ! python3 "$SCRIPT_DIR/benchmark-report.py" \
+    --measurements "$MEASUREMENTS" --profiles "$PROFILES" --out-dir "$OUT_DIR"; then
+  die "failed to generate measurement reports"
+fi
 
 printf '\nCorpus summary:\n'
 column -t -s $'\t' "$SUMMARY" 2>/dev/null || cat "$SUMMARY"
@@ -986,6 +1127,15 @@ printf '\nThree-way matched summary:\n'
 column -t -s $'\t' "$MATCHED_SUMMARY" 2>/dev/null || cat "$MATCHED_SUMMARY"
 printf '\nMatched-VC comparison:\n'
 column -t -s $'\t' "$COMPARISON" 2>/dev/null || cat "$COMPARISON"
+printf '\nReconstruction coverage:\n'
+column -t -s $'\t' "$OUT_DIR/reconstruction-summary.tsv" 2>/dev/null ||
+  cat "$OUT_DIR/reconstruction-summary.tsv"
+printf '\nReconstruction failures:\n'
+column -t -s $'\t' "$OUT_DIR/reconstruction-failures.tsv" 2>/dev/null ||
+  cat "$OUT_DIR/reconstruction-failures.tsv"
+printf '\nAlethe replay scaling:\n'
+column -t -s $'\t' "$OUT_DIR/alethe-replay-scaling-summary.tsv" 2>/dev/null ||
+  cat "$OUT_DIR/alethe-replay-scaling-summary.tsv"
 printf '\nResults: %s\n' "$OUT_DIR"
 
 if [[ "$TRUNCATED_RUNS" -gt 0 ]]; then

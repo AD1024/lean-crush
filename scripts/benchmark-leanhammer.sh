@@ -12,13 +12,22 @@ hammer_rev="${HAMMER_REV:-df4dd13671412591d678eada250b04c030fd4d40}"
 source_cache="${BENCHMARK_SOURCE_CACHE:-$crush_root/BenchmarkResults/sources}"
 repeats="${REPEATS:-1}"
 duper_timeout="${DUPER_TIMEOUT:-5}"
+solver="${SOLVER:-cvc5}"
+timeout="${TIMEOUT:-5}"
+max_heartbeats="${MAX_HEARTBEATS:-1000000}"
+max_rec_depth="${MAX_RECURSION_DEPTH:-100000}"
+crush_profile="${CRUSH_PROFILE:-true}"
 out_dir="${OUT_DIR:-$crush_root/BenchmarkResults/leanhammer-$(date +%Y%m%d-%H%M%S)}"
+mkdir -p "$out_dir"
+out_dir="$(cd "$out_dir" && pwd)"
 results="$out_dir/results.tsv"
 metadata="$out_dir/metadata.tsv"
 summary="$out_dir/summary.tsv"
+measurements="$out_dir/measurements.tsv"
+profiles_out="$out_dir/profile-events.tsv"
 logs="$out_dir/logs"
 read -r -a profiles <<< \
-  "${PROFILES:-duper-only auto-duper crush-only aesop-auto-duper aesop-crush}"
+  "${PROFILES:-crush-only crush-verify crush-core crush-alethe crush-portfolio grind-only duper-only auto-duper aesop-auto-duper aesop-crush}"
 tmp_root=""
 managed_repo=""
 
@@ -111,22 +120,153 @@ EOF
   } > "$output"
 }
 
+write_direct_case() {
+  local source="$1"
+  local output="$2"
+  local profile="$3"
+  local trust reconstruct
+
+  if [[ "$profile" == "grind-only" ]]; then
+    {
+      printf 'import Hammer\n\n'
+      cat <<'EOF'
+open Lean Elab Tactic
+
+private def runBenchmarkDirect (premises : TSyntaxArray `term) : TacticM Unit := do
+  let params : TSyntaxArray `Lean.Parser.Tactic.grindParam ← premises.mapM fun premise => do
+    let premise : TSyntax `term := ⟨premise⟩
+    `(Lean.Parser.Tactic.grindParam| $(premise):term)
+  let tactic ← `(tactic| grind [$params,*])
+  let start ← IO.monoMsNow
+  try
+    evalTactic tactic
+    logInfo m!"BENCHMARK_MS={(← IO.monoMsNow) - start}"
+  catch e =>
+    logInfo m!"BENCHMARK_MS={(← IO.monoMsNow) - start}"
+    throw e
+
+syntax "benchmark_hammer" : tactic
+syntax "benchmark_hammer" "[" term,* "]" : tactic
+
+elab_rules : tactic
+  | `(tactic| benchmark_hammer) => runBenchmarkDirect #[]
+  | `(tactic| benchmark_hammer [$premises,*]) =>
+    runBenchmarkDirect premises
+
+EOF
+      tail -n +2 "$source"
+    } > "$output"
+    return
+  fi
+
+  case "$profile" in
+    crush-verify)
+      trust="trust"
+      reconstruct="auto"
+      ;;
+    crush-core)
+      trust="reconstruct"
+      reconstruct="core"
+      ;;
+    crush-alethe)
+      trust="reconstruct"
+      reconstruct="alethe"
+      ;;
+    crush-portfolio)
+      trust="reconstruct"
+      reconstruct="auto"
+      ;;
+    *)
+      printf 'error: unsupported direct LeanHammer profile: %s\n' "$profile" >&2
+      return 1
+      ;;
+  esac
+
+  {
+    printf 'import Hammer\n\n'
+    cat <<EOF
+open Lean Elab Tactic
+
+private def runBenchmarkDirect (premises : TSyntaxArray \`term) : TacticM Unit :=
+    withMainContext do
+  let terms ← premises.mapM fun premise => do
+    let proof ← Term.elabTerm premise none
+    Term.synthesizeSyntheticMVarsNoPostponing
+    let proof ← instantiateMVars proof
+    let descr := premise.reprint.getD "benchmark hint"
+    pure (proof, descr)
+  let cfg := {
+    Crush.Config.ofOptions (← getOptions) with
+    backend := .$solver
+    timeout := $timeout
+    trust := .$trust
+    reconstruct := .$reconstruct
+    profile := $crush_profile
+    profileMachine := true
+  }
+  let start <- IO.monoMsNow
+  try
+    Crush.runCrush (← getMainGoal) cfg {
+      terms
+      allHyps := true
+      allowPremiseSelection := false
+    }
+    let stop <- IO.monoMsNow
+    logInfo m!"BENCHMARK_MS={stop - start}"
+  catch e =>
+    let stop <- IO.monoMsNow
+    logInfo m!"BENCHMARK_MS={stop - start}"
+    throw e
+
+syntax "benchmark_hammer" : tactic
+syntax "benchmark_hammer" "[" term,* "]" : tactic
+
+elab_rules : tactic
+  | \`(tactic| benchmark_hammer) => runBenchmarkDirect #[]
+  | \`(tactic| benchmark_hammer [\$premises,*]) =>
+    runBenchmarkDirect premises
+
+EOF
+    tail -n +2 "$source"
+  } > "$output"
+}
+
 printf 'profile\tcase\trun\tstatus\ttactic_ms\n' > "$results"
-printf 'hammer_commit\ttoolchain\tduper_commit\tduper_timeout\tcrush_commit\tcrush_dirty\tcrush_root\n' > "$metadata"
+printf 'suite\tlane\trepeat\tvc_key\tstatus\tcategory\tmilliseconds\tmessage\n' > "$measurements"
+printf 'suite\tlane\trepeat\tvc_key\tdeclaration\tgoal_hash\toutcome\treplay\tdetail\ttotal_nanos\tphases\tmetrics\n' > "$profiles_out"
+printf 'hammer_commit\ttoolchain\tduper_commit\tduper_timeout\tsolver\ttimeout\tmax_heartbeats\tmax_rec_depth\tcrush_profile\tcrush_commit\tcrush_dirty\tcrush_root\n' > "$metadata"
 crush_dirty=false
 if [[ -n "$(git -C "$crush_root" status --porcelain -- \
     . ':(exclude)BenchmarkResults')" ]]; then
   crush_dirty=true
 fi
 duper_commit="$(git -C "$hammer_repo/.lake/packages/Duper" rev-parse HEAD)"
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
   "$(git -C "$hammer_repo" rev-parse HEAD)" \
   "$(tr -d '\r\n' < "$hammer_repo/lean-toolchain")" \
   "$duper_commit" \
   "$duper_timeout" \
+  "$solver" \
+  "$timeout" \
+  "$max_heartbeats" \
+  "$max_rec_depth" \
+  "$crush_profile" \
   "$(git -C "$crush_root" rev-parse HEAD)" \
   "$crush_dirty" \
   "$crush_root" >> "$metadata"
+
+case_files=("$hammer_repo"/Benchmark/Cases/*.lean)
+if [[ -n "${HAMMER_CASES:-}" ]]; then
+  case_files=()
+  read -r -a selected_cases <<< "$HAMMER_CASES"
+  for selected in "${selected_cases[@]}"; do
+    if [[ "$selected" == *.lean ]]; then
+      case_files+=("$hammer_repo/Benchmark/Cases/$selected")
+    else
+      case_files+=("$hammer_repo/Benchmark/Cases/$selected.lean")
+    fi
+  done
+fi
 
 for profile in "${profiles[@]}"; do
   harness_profile="$profile"
@@ -134,20 +274,35 @@ for profile in "${profiles[@]}"; do
     auto-duper) harness_profile="auto-only" ;;
     aesop-auto-duper) harness_profile="aesop-auto" ;;
   esac
-  for case_file in "$hammer_repo"/Benchmark/Cases/*.lean; do
+  for case_file in "${case_files[@]}"; do
     case_name="$(basename "$case_file" .lean)"
     relative_case="Benchmark/Cases/$(basename "$case_file")"
     input_case="$relative_case"
     if [[ "$profile" == "duper-only" ]]; then
-      generated="$out_dir/generated/duper-only/$(basename "$case_file")"
+      generated="$out_dir/generated/$profile/$(basename "$case_file")"
       mkdir -p "$(dirname "$generated")"
       write_duper_case "$case_file" "$generated"
+      input_case="$generated"
+    elif [[ "$profile" == "crush-verify" || "$profile" == "crush-core" ||
+        "$profile" == "crush-alethe" || "$profile" == "crush-portfolio" ||
+        "$profile" == "grind-only" ]]; then
+      generated="$out_dir/generated/$profile/$(basename "$case_file")"
+      mkdir -p "$(dirname "$generated")"
+      write_direct_case "$case_file" "$generated" "$profile"
       input_case="$generated"
     fi
     for ((run = 1; run <= repeats; run++)); do
       log="$logs/${profile}-${case_name}-${run}.log"
-      lean_args=("-Dduper.maxSaturationTime=$duper_timeout")
-      if [[ "$profile" != "duper-only" ]]; then
+      lean_args=(
+        "-Dduper.maxSaturationTime=$duper_timeout"
+        "-DmaxHeartbeats=$max_heartbeats"
+        "-DmaxRecDepth=$max_rec_depth"
+        "-Dcrush.profile=$crush_profile"
+        "-Dcrush.profile.machine=true"
+      )
+      if [[ "$profile" != "duper-only" && "$profile" != "crush-verify" &&
+          "$profile" != "crush-core" && "$profile" != "crush-alethe" &&
+          "$profile" != "crush-portfolio" && "$profile" != "grind-only" ]]; then
         lean_args+=("-Dbenchmark.profile=$harness_profile")
       fi
       if "$script_dir/with-local-crush.sh" "$hammer_repo" \
@@ -160,6 +315,37 @@ for profile in "${profiles[@]}"; do
       tactic_ms="${tactic_ms:-0}"
       printf '%s\t%s\t%s\t%s\t%s\n' \
         "$profile" "$case_name" "$run" "$status" "$tactic_ms" >> "$results"
+      if [[ "$case_name" != "00_import_only" ]]; then
+        category="-"
+        message="-"
+        if [[ "$status" != "pass" ]]; then
+          category="$(awk -F '\t' '
+            /CRUSH_PROFILE\t/ {
+              marker = index($0, "CRUSH_PROFILE\t")
+              split(substr($0, marker), row, "\t")
+              category = row[5]
+            }
+            END {
+              if (category == "") print "tactic"
+              else print category
+            }
+          ' "$log")"
+        fi
+        printf 'leanhammer\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+          "$profile" "$run" "$case_name" "$status" "$category" "$tactic_ms" \
+          "$message" >> "$measurements"
+        awk -v lane="$profile" -v repeat="$run" -v vc="$case_name" \
+            -v profiles="$profiles_out" '
+          BEGIN { FS = OFS = "\t" }
+          {
+            marker = index($0, "CRUSH_PROFILE\t")
+            if (marker == 0) next
+            split(substr($0, marker), row, "\t")
+            print "leanhammer", lane, repeat, vc, row[3], row[4], row[5],
+                  row[6], row[7], row[8], row[9], row[10] >> profiles
+          }
+        ' "$log"
+      fi
       printf '%-12s %-24s run %s: %-4s %6sms\n' \
         "$profile" "$case_name" "$run" "$status" "$tactic_ms"
     done
@@ -207,7 +393,8 @@ awk -F '\t' -v repeats="$repeats" '
       }
     }
     printf "%-12s %2d common successes, %.1fms %s, %.1fms %s\n",
-      label, common, leftTotal / common, left, rightTotal / common, right
+      label, common, common ? leftTotal / common : 0, left,
+      common ? rightTotal / common : 0, right
   }
   NR > 1 && $2 != "00_import_only" {
     key = $1 SUBSEP $2
@@ -234,7 +421,8 @@ awk -F '\t' -v repeats="$repeats" '
         }
       }
       printf "%-12s %2d/%2d solved, %.1fms successful-run mean\n",
-        profile, solved, count, successTotal[profile] / successRuns[profile]
+        profile, solved, count,
+        successRuns[profile] ? successTotal[profile] / successRuns[profile] : 0
     }
     print ""
     reportPair("auto-duper", "auto-duper", "crush-only")
@@ -242,7 +430,25 @@ awk -F '\t' -v repeats="$repeats" '
     reportPair("with-aesop", "aesop-auto-duper", "aesop-crush")
     reportPair("direct-old", "auto-only", "crush-only")
     reportPair("aesop-old", "aesop-auto", "aesop-crush")
+    reportPair("grind", "grind-only", "crush-portfolio")
+    reportPair("core", "crush-core", "crush-portfolio")
+    reportPair("alethe", "crush-alethe", "crush-portfolio")
   }
 ' "$results"
 
+if ! python3 "$script_dir/benchmark-report.py" \
+    --measurements "$measurements" --profiles "$profiles_out" --out-dir "$out_dir"; then
+  printf 'error: failed to generate measurement reports\n' >&2
+  exit 1
+fi
+
+printf '\nReconstruction coverage:\n'
+column -t -s $'\t' "$out_dir/reconstruction-summary.tsv" 2>/dev/null ||
+  cat "$out_dir/reconstruction-summary.tsv"
+printf '\nReconstruction failures:\n'
+column -t -s $'\t' "$out_dir/reconstruction-failures.tsv" 2>/dev/null ||
+  cat "$out_dir/reconstruction-failures.tsv"
+printf '\nAlethe replay scaling:\n'
+column -t -s $'\t' "$out_dir/alethe-replay-scaling-summary.tsv" 2>/dev/null ||
+  cat "$out_dir/alethe-replay-scaling-summary.tsv"
 printf '\nResults: %s\n' "$out_dir"

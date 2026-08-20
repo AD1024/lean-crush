@@ -44,3 +44,13 @@ open Crush
 /-- info: "crush profile (total 0ms):" -/
 #guard_msgs in
 #eval (Profiler.on.report)
+
+-- Machine records retain nanosecond phase data and stable outcome fields.
+/-- info: (true, true) -/
+#guard_msgs in
+#eval do
+  let (_, p) ← Profiler.on.time "phase" (pure ())
+  let record := p.machineRecord "Profile.test" 17 "verified" "not-requested" "ok"
+    #[("commands", 3)]
+  return (record.startsWith "CRUSH_PROFILE\t2\tProfile.test\t17\tverified",
+    record.contains "phase=" && record.endsWith "commands=3")
