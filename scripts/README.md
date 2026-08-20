@@ -13,6 +13,7 @@ written under `BenchmarkResults/`.
 | `benchmark-plean.sh` | PLean verification conditions |
 | `benchmark-common.sh` | Shared pinned-source provisioning |
 | `with-local-crush.sh` | Runs a downstream Lean file against the local Crush build |
+| `plot-benchmarks.py` | Renders normalized reports as Markdown tables and SVG figures |
 
 The latest recorded results and exact tested revisions are in
 [`BENCHMARKS.md`](../BENCHMARKS.md).
@@ -50,7 +51,7 @@ TIMEOUT=5 \
 DUPER_TIMEOUT=5 \
 SOLVER=cvc5 \
 MAX_HEARTBEATS=1000000 \
-MAX_RECURSION_DEPTH=100000 \
+MAX_RECURSION_DEPTH=1000000 \
 OUT_DIR="$PWD/BenchmarkResults/corpora-reproduction" \
 scripts/benchmark-corpora.sh
 ```
@@ -114,7 +115,7 @@ Useful overrides include:
 | `OUT_DIR` | timestamped directory | Result location |
 | `DUPER_TIMEOUT` | `5` | Duper saturation limit per portfolio instance |
 | `CRUSH_MODES` | `verify core alethe portfolio` | Crush measurement lanes |
-| `MAX_RECURSION_DEPTH` | `100000` | Lean recursion limit for generated files |
+| `MAX_RECURSION_DEPTH` | `1000000` | Lean recursion limit for generated files |
 | `USE_MATHLIB_CACHE` | `true` | Fetch Mathlib build artifacts |
 | `CRUSH_PROFILE` | `true` | Include Crush phase profiling and report records |
 | `KEEP_WORKTREES` | `false` | Retain temporary detached worktrees |
@@ -229,6 +230,52 @@ R-squared, milliseconds per 100 commands, and milliseconds per KiB only when
 at least two successful VCs have nonzero size and time variance. Repeated runs
 are preserved in the detailed file and averaged per VC before fitting, so they
 do not over-weight one obligation.
+
+## Tables and Figures
+
+Render one or more completed result directories with only the Python standard
+library:
+
+```sh
+python3 scripts/plot-benchmarks.py \
+  BenchmarkResults/corpora-reproduction \
+  BenchmarkResults/leanhammer-reproduction \
+  BenchmarkResults/plean-reproduction \
+  --out-dir BenchmarkResults/figures
+```
+
+Each input must contain the normalized TSV reports listed above. Use only one
+input for a given corpus and lane; the script rejects conflicting aggregate
+rows rather than silently combining different runs. Exact duplicate rows are
+ignored.
+
+The command writes:
+
+| File | Contents |
+|---|---|
+| `tables.md` | Coverage, reconstruction, failure, phase, and scaling tables |
+| `coverage.svg` | Solved VCs by corpus and lane |
+| `reconstruction.svg` | Core, Alethe, and portfolio reconstruction among verified VCs |
+| `reconstruction-failures.svg` | Counts grouped by reported failure mode |
+| `phase-breakdown.svg` | Stacked profiler-accounted time by Crush phase |
+| `alethe-replay-scaling.svg` | Successful replay time against parsed command count |
+
+The scaling plot defaults to a logarithmic replay-time axis because measured
+replays span several orders of magnitude. Pass `--replay-axis linear` for a
+linear axis. In either view, the annotation and dashed line report the
+least-squares fit in the original linear units.
+
+The Verso manual publishes a checked-in snapshot of the SVGs. Refresh it from
+the result directories used for `BENCHMARKS.md`:
+
+```sh
+python3 scripts/plot-benchmarks.py \
+  BenchmarkResults/corpora-reproduction \
+  BenchmarkResults/leanhammer-reproduction \
+  BenchmarkResults/plean-reproduction \
+  --out-dir Doc/Verso/figures \
+  --skip-tables
+```
 
 Do not compare raw totals when branch-specific sources emit different goals or
 a run is marked truncated. Use `comparison.tsv` for matched-VC comparisons.

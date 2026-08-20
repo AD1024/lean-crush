@@ -424,6 +424,8 @@ the solvers are not on `PATH`; `RUN_AUTO=false`, `RUN_DUPER=false`, or
 self-contained commands, including the bounded PLean Duper stress run, are in
 the [benchmark script guide](scripts/README.md). See
 [`BENCHMARKS.md`](BENCHMARKS.md) for the latest recorded comparison.
+The user manual also presents the
+[coverage and reconstruction figures](https://ad1024.github.io/lean-crush/Benchmarks/).
 
 The [Cedar `crush-backend` branch](https://github.com/AD1024/cedar-spec/tree/crush-backend)
 contains a

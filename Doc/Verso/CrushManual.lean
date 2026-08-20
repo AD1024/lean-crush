@@ -6,6 +6,7 @@ import CrushManual.UsingCrush
 import CrushManual.Configuration
 import CrushManual.Extending
 import CrushManual.Troubleshooting
+import CrushManual.Benchmarks
 
 open Verso.Genre Manual
 
@@ -24,7 +25,7 @@ result, or discharges the Lean goal.
 
 The overview explains the complete pipeline and when to use each major feature.
 The remaining chapters cover installation, tactic usage, options, extension
-APIs, and failure diagnosis.
+APIs, failure diagnosis, and benchmark results.
 
 {include 0 CrushManual.Overview}
 
@@ -37,3 +38,5 @@ APIs, and failure diagnosis.
 {include 0 CrushManual.Extending}
 
 {include 0 CrushManual.Troubleshooting}
+
+{include 0 CrushManual.Benchmarks}

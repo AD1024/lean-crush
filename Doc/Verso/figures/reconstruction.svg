@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1135 600" role="img" aria-labelledby="title description">
+<title id="title">Proof reconstruction coverage</title>
+<desc id="description">Kernel-checked reconstruction success among SMT-verified conditions.</desc>
+<style>
+text { fill: #1B2927; font-family: 'Avenir Next', 'IBM Plex Sans', sans-serif; }
+.title { font-size: 25px; font-weight: 700; letter-spacing: .2px; }
+.subtitle { fill: #64716E; font-size: 13px; }
+.axis { fill: #64716E; font-size: 12px; }
+.label { font-size: 13px; font-weight: 600; }
+.value { font-size: 11px; font-weight: 600; }
+.legend { font-size: 12px; }
+.grid { stroke: #D9D5CB; stroke-width: 1; }
+.axis-line { stroke: #64716E; stroke-width: 1.2; }
+</style>
+<rect width="1135" height="600" fill="#FBF8F1"/>
+<text x="42.00" y="42.00" text-anchor="start" class="title">Proof reconstruction coverage</text>
+<text x="42.00" y="66.00" text-anchor="start" class="subtitle">Successfully reconstructed VCs / SMT-verified VCs; higher is better</text>
+<rect x="42.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#DD7A45" opacity="1.000"/>
+<text x="63.00" y="96.00" text-anchor="start" class="legend">Core</text>
+<rect x="129.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#D3A22E" opacity="1.000"/>
+<text x="150.00" y="96.00" text-anchor="start" class="legend">Alethe</text>
+<rect x="216.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#254A62" opacity="1.000"/>
+<text x="237.00" y="96.00" text-anchor="start" class="legend">Portfolio</text>
+<line x1="80.00" y1="492.00" x2="1101.00" y2="492.00" class="grid"/>
+<text x="68.00" y="496.00" text-anchor="end" class="axis">0%</text>
+<line x1="80.00" y1="404.00" x2="1101.00" y2="404.00" class="grid"/>
+<text x="68.00" y="408.00" text-anchor="end" class="axis">25%</text>
+<line x1="80.00" y1="316.00" x2="1101.00" y2="316.00" class="grid"/>
+<text x="68.00" y="320.00" text-anchor="end" class="axis">50%</text>
+<line x1="80.00" y1="228.00" x2="1101.00" y2="228.00" class="grid"/>
+<text x="68.00" y="232.00" text-anchor="end" class="axis">75%</text>
+<line x1="80.00" y1="140.00" x2="1101.00" y2="140.00" class="grid"/>
+<text x="68.00" y="144.00" text-anchor="end" class="axis">100%</text>
+<rect x="115.90" y="140.00" width="38.80" height="352.00" rx="2.00" fill="#DD7A45" opacity="1.000"/>
+<text x="135.30" y="135.00" text-anchor="middle" class="value">38/38</text>
+<rect x="162.70" y="408.63" width="38.80" height="83.37" rx="2.00" fill="#D3A22E" opacity="1.000"/>
+<text x="182.10" y="401.63" text-anchor="middle" class="value">9/38</text>
+<rect x="209.50" y="140.00" width="38.80" height="352.00" rx="2.00" fill="#254A62" opacity="1.000"/>
+<text x="228.90" y="135.00" text-anchor="middle" class="value">38/38</text>
+<text x="182.10" y="519.00" text-anchor="middle" class="label">cashmere</text>
+<text x="182.10" y="539.00" text-anchor="middle" class="axis">38/38 SMT-verified</text>
+<rect x="320.10" y="140.00" width="38.80" height="352.00" rx="2.00" fill="#DD7A45" opacity="1.000"/>
+<text x="339.50" y="135.00" text-anchor="middle" class="value">19/19</text>
+<rect x="366.90" y="251.16" width="38.80" height="240.84" rx="2.00" fill="#D3A22E" opacity="1.000"/>
+<text x="386.30" y="244.16" text-anchor="middle" class="value">13/19</text>
+<rect x="413.70" y="140.00" width="38.80" height="352.00" rx="2.00" fill="#254A62" opacity="1.000"/>
+<text x="433.10" y="135.00" text-anchor="middle" class="value">19/19</text>
+<text x="386.30" y="519.00" text-anchor="middle" class="label">leanhammer</text>
+<text x="386.30" y="539.00" text-anchor="middle" class="axis">19/20 SMT-verified</text>
+<rect x="524.30" y="140.00" width="38.80" height="352.00" rx="2.00" fill="#DD7A45" opacity="1.000"/>
+<text x="543.70" y="135.00" text-anchor="middle" class="value">4/4</text>
+<rect x="571.10" y="140.00" width="38.80" height="352.00" rx="2.00" fill="#D3A22E" opacity="1.000"/>
+<text x="590.50" y="135.00" text-anchor="middle" class="value">4/4</text>
+<rect x="617.90" y="140.00" width="38.80" height="352.00" rx="2.00" fill="#254A62" opacity="1.000"/>
+<text x="637.30" y="135.00" text-anchor="middle" class="value">4/4</text>
+<text x="590.50" y="519.00" text-anchor="middle" class="label">loom</text>
+<text x="590.50" y="539.00" text-anchor="middle" class="axis">4/4 SMT-verified</text>
+<rect x="728.50" y="174.39" width="38.80" height="317.61" rx="2.00" fill="#DD7A45" opacity="1.000"/>
+<text x="747.90" y="167.39" text-anchor="middle" class="value">157/174</text>
+<rect x="775.30" y="489.98" width="38.80" height="2.02" rx="2.00" fill="#D3A22E" opacity="1.000"/>
+<text x="794.70" y="482.98" text-anchor="middle" class="value">1/174</text>
+<rect x="822.10" y="174.39" width="38.80" height="317.61" rx="2.00" fill="#254A62" opacity="1.000"/>
+<text x="841.50" y="167.39" text-anchor="middle" class="value">157/174</text>
+<text x="794.70" y="519.00" text-anchor="middle" class="label">plean</text>
+<text x="794.70" y="539.00" text-anchor="middle" class="axis">174/192 SMT-verified</text>
+<rect x="932.70" y="184.22" width="38.80" height="307.78" rx="2.00" fill="#DD7A45" opacity="1.000"/>
+<text x="952.10" y="177.22" text-anchor="middle" class="value">355/406</text>
+<rect x="979.50" y="376.69" width="38.80" height="115.31" rx="2.00" fill="#D3A22E" opacity="1.000"/>
+<text x="998.90" y="369.69" text-anchor="middle" class="value">133/406</text>
+<rect x="1026.30" y="184.22" width="38.80" height="307.78" rx="2.00" fill="#254A62" opacity="1.000"/>
+<text x="1045.70" y="177.22" text-anchor="middle" class="value">355/406</text>
+<text x="998.90" y="519.00" text-anchor="middle" class="label">velvet</text>
+<text x="998.90" y="539.00" text-anchor="middle" class="axis">406/425 SMT-verified</text>
+</svg>

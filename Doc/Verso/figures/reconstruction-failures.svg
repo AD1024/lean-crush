@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 846" role="img" aria-labelledby="title description">
+<title id="title">Proof reconstruction failure modes</title>
+<desc id="description">Counts of verified conditions that each reconstruction lane did not reconstruct.</desc>
+<style>
+text { fill: #1B2927; font-family: 'Avenir Next', 'IBM Plex Sans', sans-serif; }
+.title { font-size: 25px; font-weight: 700; letter-spacing: .2px; }
+.subtitle { fill: #64716E; font-size: 13px; }
+.axis { fill: #64716E; font-size: 12px; }
+.label { font-size: 13px; font-weight: 600; }
+.value { font-size: 11px; font-weight: 600; }
+.legend { font-size: 12px; }
+.grid { stroke: #D9D5CB; stroke-width: 1; }
+.axis-line { stroke: #64716E; stroke-width: 1.2; }
+</style>
+<rect width="1160" height="846" fill="#FBF8F1"/>
+<text x="42.00" y="42.00" text-anchor="start" class="title">Proof reconstruction failure modes</text>
+<text x="42.00" y="66.00" text-anchor="start" class="subtitle">Verified VCs grouped by the reported reconstruction failure</text>
+<rect x="42.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#A4433E" opacity="1.000"/>
+<text x="63.00" y="96.00" text-anchor="start" class="legend">certificate-error</text>
+<rect x="193.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#D27645" opacity="1.000"/>
+<text x="214.00" y="96.00" text-anchor="start" class="legend">certificate-error+core-failed</text>
+<rect x="428.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#D6A73A" opacity="1.000"/>
+<text x="449.00" y="96.00" text-anchor="start" class="legend">core-failed</text>
+<rect x="537.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#557A75" opacity="1.000"/>
+<text x="558.00" y="96.00" text-anchor="start" class="legend">not-attempted</text>
+<rect x="660.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#476A8A" opacity="1.000"/>
+<text x="681.00" y="96.00" text-anchor="start" class="legend">rule-gap</text>
+<rect x="748.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#7B7653" opacity="1.000"/>
+<text x="769.00" y="96.00" text-anchor="start" class="legend">solver-sat</text>
+<rect x="850.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#A4433E" opacity="1.000"/>
+<text x="871.00" y="96.00" text-anchor="start" class="legend">solver-unknown</text>
+<rect x="980.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#D27645" opacity="1.000"/>
+<text x="1001.00" y="96.00" text-anchor="start" class="legend">tactic</text>
+<rect x="42.00" y="111.00" width="15.00" height="10.00" rx="2.00" fill="#D6A73A" opacity="1.000"/>
+<text x="63.00" y="120.00" text-anchor="start" class="legend">term-gap</text>
+<text x="326.00" y="170.00" text-anchor="end" class="label">cashmere / Alethe / certificate-error</text>
+<rect x="340.00" y="156.00" width="94.82" height="19.00" rx="3.00" fill="#A4433E" opacity="1.000"/>
+<text x="442.82" y="170.00" text-anchor="start" class="value">29</text>
+<text x="326.00" y="200.00" text-anchor="end" class="label">leanhammer / Alethe / certificate-error</text>
+<rect x="340.00" y="186.00" width="6.54" height="19.00" rx="3.00" fill="#A4433E" opacity="1.000"/>
+<text x="354.54" y="200.00" text-anchor="start" class="value">2</text>
+<text x="326.00" y="230.00" text-anchor="end" class="label">leanhammer / Alethe / rule-gap</text>
+<rect x="340.00" y="216.00" width="3.27" height="19.00" rx="3.00" fill="#476A8A" opacity="1.000"/>
+<text x="351.27" y="230.00" text-anchor="start" class="value">1</text>
+<text x="326.00" y="260.00" text-anchor="end" class="label">leanhammer / Alethe / solver-sat</text>
+<rect x="340.00" y="246.00" width="3.27" height="19.00" rx="3.00" fill="#7B7653" opacity="1.000"/>
+<text x="351.27" y="260.00" text-anchor="start" class="value">1</text>
+<text x="326.00" y="290.00" text-anchor="end" class="label">leanhammer / Alethe / solver-unknown</text>
+<rect x="340.00" y="276.00" width="3.27" height="19.00" rx="3.00" fill="#A4433E" opacity="1.000"/>
+<text x="351.27" y="290.00" text-anchor="start" class="value">1</text>
+<text x="326.00" y="320.00" text-anchor="end" class="label">leanhammer / Alethe / term-gap</text>
+<rect x="340.00" y="306.00" width="3.27" height="19.00" rx="3.00" fill="#D6A73A" opacity="1.000"/>
+<text x="351.27" y="320.00" text-anchor="start" class="value">1</text>
+<text x="326.00" y="350.00" text-anchor="end" class="label">plean / Core / core-failed</text>
+<rect x="340.00" y="336.00" width="19.62" height="19.00" rx="3.00" fill="#D6A73A" opacity="1.000"/>
+<text x="367.62" y="350.00" text-anchor="start" class="value">6</text>
+<text x="326.00" y="380.00" text-anchor="end" class="label">plean / Core / solver-unknown</text>
+<rect x="340.00" y="366.00" width="13.08" height="19.00" rx="3.00" fill="#A4433E" opacity="1.000"/>
+<text x="361.08" y="380.00" text-anchor="start" class="value">4</text>
+<text x="326.00" y="410.00" text-anchor="end" class="label">plean / Core / tactic</text>
+<rect x="340.00" y="396.00" width="22.89" height="19.00" rx="3.00" fill="#D27645" opacity="1.000"/>
+<text x="370.89" y="410.00" text-anchor="start" class="value">7</text>
+<text x="326.00" y="440.00" text-anchor="end" class="label">plean / Alethe / certificate-error</text>
+<rect x="340.00" y="426.00" width="565.63" height="19.00" rx="3.00" fill="#A4433E" opacity="1.000"/>
+<text x="913.63" y="440.00" text-anchor="start" class="value">173</text>
+<text x="326.00" y="470.00" text-anchor="end" class="label">plean / Portfolio / certificate-error+core-failed</text>
+<rect x="340.00" y="456.00" width="19.62" height="19.00" rx="3.00" fill="#D27645" opacity="1.000"/>
+<text x="367.62" y="470.00" text-anchor="start" class="value">6</text>
+<text x="326.00" y="500.00" text-anchor="end" class="label">plean / Portfolio / solver-unknown</text>
+<rect x="340.00" y="486.00" width="13.08" height="19.00" rx="3.00" fill="#A4433E" opacity="1.000"/>
+<text x="361.08" y="500.00" text-anchor="start" class="value">4</text>
+<text x="326.00" y="530.00" text-anchor="end" class="label">plean / Portfolio / tactic</text>
+<rect x="340.00" y="516.00" width="22.89" height="19.00" rx="3.00" fill="#D27645" opacity="1.000"/>
+<text x="370.89" y="530.00" text-anchor="start" class="value">7</text>
+<text x="326.00" y="560.00" text-anchor="end" class="label">velvet / Core / core-failed</text>
+<rect x="340.00" y="546.00" width="13.08" height="19.00" rx="3.00" fill="#D6A73A" opacity="1.000"/>
+<text x="361.08" y="560.00" text-anchor="start" class="value">4</text>
+<text x="326.00" y="590.00" text-anchor="end" class="label">velvet / Core / not-attempted</text>
+<rect x="340.00" y="576.00" width="153.67" height="19.00" rx="3.00" fill="#557A75" opacity="1.000"/>
+<text x="501.67" y="590.00" text-anchor="start" class="value">47</text>
+<text x="326.00" y="620.00" text-anchor="end" class="label">velvet / Alethe / certificate-error</text>
+<rect x="340.00" y="606.00" width="752.00" height="19.00" rx="3.00" fill="#A4433E" opacity="1.000"/>
+<text x="1100.00" y="620.00" text-anchor="start" class="value">230</text>
+<text x="326.00" y="650.00" text-anchor="end" class="label">velvet / Alethe / rule-gap</text>
+<rect x="340.00" y="636.00" width="85.01" height="19.00" rx="3.00" fill="#476A8A" opacity="1.000"/>
+<text x="433.01" y="650.00" text-anchor="start" class="value">26</text>
+<text x="326.00" y="680.00" text-anchor="end" class="label">velvet / Alethe / solver-unknown</text>
+<rect x="340.00" y="666.00" width="9.81" height="19.00" rx="3.00" fill="#A4433E" opacity="1.000"/>
+<text x="357.81" y="680.00" text-anchor="start" class="value">3</text>
+<text x="326.00" y="710.00" text-anchor="end" class="label">velvet / Alethe / term-gap</text>
+<rect x="340.00" y="696.00" width="45.77" height="19.00" rx="3.00" fill="#D6A73A" opacity="1.000"/>
+<text x="393.77" y="710.00" text-anchor="start" class="value">14</text>
+<text x="326.00" y="740.00" text-anchor="end" class="label">velvet / Portfolio / certificate-error+core-failed</text>
+<rect x="340.00" y="726.00" width="13.08" height="19.00" rx="3.00" fill="#D27645" opacity="1.000"/>
+<text x="361.08" y="740.00" text-anchor="start" class="value">4</text>
+<text x="326.00" y="770.00" text-anchor="end" class="label">velvet / Portfolio / not-attempted</text>
+<rect x="340.00" y="756.00" width="153.67" height="19.00" rx="3.00" fill="#557A75" opacity="1.000"/>
+<text x="501.67" y="770.00" text-anchor="start" class="value">47</text>
+<line x1="340.00" y1="148.00" x2="340.00" y2="782.00" class="axis-line"/>
+</svg>

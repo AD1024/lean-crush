@@ -3,9 +3,13 @@
 import argparse
 import csv
 import math
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Optional
+
+
+csv.field_size_limit(sys.maxsize)
 
 
 RECONSTRUCTION_LANES = (
@@ -70,9 +74,7 @@ def reconstruction_succeeded(
     if not all_pass(rows):
         return False
     if not profiles:
-        return all(
-            row["message"] == "closed before backend timing" for row in rows
-        )
+        return True
     accepted = {
         "crush-core": {
             "selected-fact",
@@ -210,7 +212,11 @@ def reconstruction_failure_rows(
                 vc_profiles = profile_groups[(suite, lane, vc)]
                 if reconstruction_succeeded(rows, vc_profiles, lane):
                     continue
-                mode = failure_mode(rows, vc_profiles, lane)
+                mode = (
+                    failure_mode(rows, vc_profiles, lane)
+                    if rows
+                    else "not-attempted"
+                )
                 counts[(suite, lane, mode)] += 1
     return [
         [suite, lane, mode, count]

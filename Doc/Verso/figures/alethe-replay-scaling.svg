@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 1112" role="img" aria-labelledby="title description">
+<title id="title">Alethe replay scaling</title>
+<desc id="description">Replay time compared with parsed Alethe command count for successful replays.</desc>
+<style>
+text { fill: #1B2927; font-family: 'Avenir Next', 'IBM Plex Sans', sans-serif; }
+.title { font-size: 25px; font-weight: 700; letter-spacing: .2px; }
+.subtitle { fill: #64716E; font-size: 13px; }
+.axis { fill: #64716E; font-size: 12px; }
+.label { font-size: 13px; font-weight: 600; }
+.value { font-size: 11px; font-weight: 600; }
+.legend { font-size: 12px; }
+.grid { stroke: #D9D5CB; stroke-width: 1; }
+.axis-line { stroke: #64716E; stroke-width: 1.2; }
+</style>
+<rect width="1120" height="1112" fill="#FBF8F1"/>
+<text x="42.00" y="42.00" text-anchor="start" class="title">Alethe replay scaling</text>
+<text x="42.00" y="66.00" text-anchor="start" class="subtitle">Successful strict Alethe replays, averaged per VC; logarithmic replay-time axis</text>
+<line x1="190.21" y1="357.00" x2="1068.00" y2="157.79" stroke="#D3A22E" stroke-dasharray="7 5"/>
+<text x="100.00" y="112.00" text-anchor="start" class="label">leanhammer</text>
+<text x="190.00" y="112.00" text-anchor="start" class="subtitle">n=13, r=0.861, R2=0.741, slope=1534.7 ms / 100 commands</text>
+<line x1="100.00" y1="132.00" x2="100.00" y2="357.00" class="grid"/>
+<text x="100.00" y="377.00" text-anchor="middle" class="axis">0</text>
+<line x1="293.60" y1="132.00" x2="293.60" y2="357.00" class="grid"/>
+<text x="293.60" y="377.00" text-anchor="middle" class="axis">50</text>
+<line x1="487.20" y1="132.00" x2="487.20" y2="357.00" class="grid"/>
+<text x="487.20" y="377.00" text-anchor="middle" class="axis">100</text>
+<line x1="680.80" y1="132.00" x2="680.80" y2="357.00" class="grid"/>
+<text x="680.80" y="377.00" text-anchor="middle" class="axis">150</text>
+<line x1="874.40" y1="132.00" x2="874.40" y2="357.00" class="grid"/>
+<text x="874.40" y="377.00" text-anchor="middle" class="axis">200</text>
+<line x1="1068.00" y1="132.00" x2="1068.00" y2="357.00" class="grid"/>
+<text x="1068.00" y="377.00" text-anchor="middle" class="axis">250</text>
+<line x1="100.00" y1="357.00" x2="1068.00" y2="357.00" class="grid"/>
+<text x="88.00" y="361.00" text-anchor="end" class="axis">10^0</text>
+<line x1="100.00" y1="300.75" x2="1068.00" y2="300.75" class="grid"/>
+<text x="88.00" y="304.75" text-anchor="end" class="axis">10^1</text>
+<line x1="100.00" y1="244.50" x2="1068.00" y2="244.50" class="grid"/>
+<text x="88.00" y="248.50" text-anchor="end" class="axis">10^2</text>
+<line x1="100.00" y1="188.25" x2="1068.00" y2="188.25" class="grid"/>
+<text x="88.00" y="192.25" text-anchor="end" class="axis">10^3</text>
+<line x1="100.00" y1="132.00" x2="1068.00" y2="132.00" class="grid"/>
+<text x="88.00" y="136.00" text-anchor="end" class="axis">10^4</text>
+<line x1="100.00" y1="357.00" x2="1068.00" y2="357.00" class="axis-line"/>
+<line x1="100.00" y1="132.00" x2="100.00" y2="357.00" class="axis-line"/>
+<text x="560.00" y="400.00" text-anchor="middle" class="axis">Parsed Alethe commands</text>
+<text x="31.00" y="244.50" text-anchor="middle" class="axis" transform="rotate(-90 31 244.50)">Replay time (ms, log10)</text>
+<circle cx="111.62" cy="295.25" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>10_option_injective: 3 commands, 170 bytes, 12.524 ms</title></circle>
+<circle cx="115.49" cy="313.29" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>12_list_assoc: 4 commands, 301 bytes, 5.986 ms</title></circle>
+<circle cx="134.85" cy="306.87" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>01_prop_chain: 9 commands, 491 bytes, 7.784 ms</title></circle>
+<circle cx="154.21" cy="263.40" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>15_bitvec: 14 commands, 935 bytes, 46.136 ms</title></circle>
+<circle cx="158.08" cy="292.95" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>02_congruence: 15 commands, 950 bytes, 13.762 ms</title></circle>
+<circle cx="165.82" cy="278.50" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>16_string: 17 commands, 1337 bytes, 24.862 ms</title></circle>
+<circle cx="192.93" cy="270.31" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>03_quantified: 24 commands, 1957 bytes, 34.762 ms</title></circle>
+<circle cx="258.75" cy="240.75" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>14_bool_mixed: 41 commands, 3001 bytes, 116.594 ms</title></circle>
+<circle cx="274.24" cy="249.69" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>04_existential: 45 commands, 4348 bytes, 80.846 ms</title></circle>
+<circle cx="494.94" cy="209.27" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>07_higher_order: 102 commands, 7704 bytes, 423.003 ms</title></circle>
+<circle cx="591.74" cy="183.03" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>08_int_linear: 127 commands, 9613 bytes, 1238.182 ms</title></circle>
+<circle cx="758.24" cy="190.18" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>06_funext: 170 commands, 14370 bytes, 923.932 ms</title></circle>
+<circle cx="994.43" cy="150.28" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>09_nat_sub: 231 commands, 16743 bytes, 4731.513 ms</title></circle>
+<line x1="135.56" y1="687.00" x2="1068.00" y2="471.31" stroke="#D3A22E" stroke-dasharray="7 5"/>
+<text x="100.00" y="442.00" text-anchor="start" class="label">loom</text>
+<text x="190.00" y="442.00" text-anchor="start" class="subtitle">n=4, r=0.953, R2=0.908, slope=1114.3 ms / 100 commands</text>
+<line x1="100.00" y1="462.00" x2="100.00" y2="687.00" class="grid"/>
+<text x="100.00" y="707.00" text-anchor="middle" class="axis">0</text>
+<line x1="293.60" y1="462.00" x2="293.60" y2="687.00" class="grid"/>
+<text x="293.60" y="707.00" text-anchor="middle" class="axis">140</text>
+<line x1="487.20" y1="462.00" x2="487.20" y2="687.00" class="grid"/>
+<text x="487.20" y="707.00" text-anchor="middle" class="axis">280</text>
+<line x1="680.80" y1="462.00" x2="680.80" y2="687.00" class="grid"/>
+<text x="680.80" y="707.00" text-anchor="middle" class="axis">420</text>
+<line x1="874.40" y1="462.00" x2="874.40" y2="687.00" class="grid"/>
+<text x="874.40" y="707.00" text-anchor="middle" class="axis">560</text>
+<line x1="1068.00" y1="462.00" x2="1068.00" y2="687.00" class="grid"/>
+<text x="1068.00" y="707.00" text-anchor="middle" class="axis">700</text>
+<line x1="100.00" y1="687.00" x2="1068.00" y2="687.00" class="grid"/>
+<text x="88.00" y="691.00" text-anchor="end" class="axis">10^1</text>
+<line x1="100.00" y1="612.00" x2="1068.00" y2="612.00" class="grid"/>
+<text x="88.00" y="616.00" text-anchor="end" class="axis">10^2</text>
+<line x1="100.00" y1="537.00" x2="1068.00" y2="537.00" class="grid"/>
+<text x="88.00" y="541.00" text-anchor="end" class="axis">10^3</text>
+<line x1="100.00" y1="462.00" x2="1068.00" y2="462.00" class="grid"/>
+<text x="88.00" y="466.00" text-anchor="end" class="axis">10^4</text>
+<line x1="100.00" y1="687.00" x2="1068.00" y2="687.00" class="axis-line"/>
+<line x1="100.00" y1="462.00" x2="100.00" y2="687.00" class="axis-line"/>
+<text x="560.00" y="730.00" text-anchor="middle" class="axis">Parsed Alethe commands</text>
+<text x="31.00" y="574.50" text-anchor="middle" class="axis" transform="rotate(-90 31 574.50)">Replay time (ms, log10)</text>
+<circle cx="119.36" cy="616.99" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>LoomBackend.lean|_example|16574041739855843339: 14 commands, 1112 bytes, 85.806 ms</title></circle>
+<circle cx="122.13" cy="619.39" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>LoomBackend.lean|_example|11766715760782255510: 16 commands, 1231 bytes, 79.693 ms</title></circle>
+<circle cx="808.02" cy="493.81" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>LoomBackend.lean|_example|773944412226978707: 512 commands, 42000 bytes, 3766.130 ms</title></circle>
+<circle cx="1030.66" cy="467.44" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>LoomBackend.lean|_example|17176297989995940323: 673 commands, 51991 bytes, 8461.178 ms</title></circle>
+<line x1="166.77" y1="1017.00" x2="1068.00" y2="818.66" stroke="#D3A22E" stroke-dasharray="7 5"/>
+<text x="100.00" y="772.00" text-anchor="start" class="label">velvet</text>
+<text x="190.00" y="772.00" text-anchor="start" class="subtitle">n=26, r=0.794, R2=0.630, slope=1579.3 ms / 100 commands</text>
+<line x1="100.00" y1="792.00" x2="100.00" y2="1017.00" class="grid"/>
+<text x="100.00" y="1037.00" text-anchor="middle" class="axis">0</text>
+<line x1="293.60" y1="792.00" x2="293.60" y2="1017.00" class="grid"/>
+<text x="293.60" y="1037.00" text-anchor="middle" class="axis">60</text>
+<line x1="487.20" y1="792.00" x2="487.20" y2="1017.00" class="grid"/>
+<text x="487.20" y="1037.00" text-anchor="middle" class="axis">120</text>
+<line x1="680.80" y1="792.00" x2="680.80" y2="1017.00" class="grid"/>
+<text x="680.80" y="1037.00" text-anchor="middle" class="axis">180</text>
+<line x1="874.40" y1="792.00" x2="874.40" y2="1017.00" class="grid"/>
+<text x="874.40" y="1037.00" text-anchor="middle" class="axis">240</text>
+<line x1="1068.00" y1="792.00" x2="1068.00" y2="1017.00" class="grid"/>
+<text x="1068.00" y="1037.00" text-anchor="middle" class="axis">300</text>
+<line x1="100.00" y1="1017.00" x2="1068.00" y2="1017.00" class="grid"/>
+<text x="88.00" y="1021.00" text-anchor="end" class="axis">10^1</text>
+<line x1="100.00" y1="942.00" x2="1068.00" y2="942.00" class="grid"/>
+<text x="88.00" y="946.00" text-anchor="end" class="axis">10^2</text>
+<line x1="100.00" y1="867.00" x2="1068.00" y2="867.00" class="grid"/>
+<text x="88.00" y="871.00" text-anchor="end" class="axis">10^3</text>
+<line x1="100.00" y1="792.00" x2="1068.00" y2="792.00" class="grid"/>
+<text x="88.00" y="796.00" text-anchor="end" class="axis">10^4</text>
+<line x1="100.00" y1="1017.00" x2="1068.00" y2="1017.00" class="axis-line"/>
+<line x1="100.00" y1="792.00" x2="100.00" y2="1017.00" class="axis-line"/>
+<text x="560.00" y="1060.00" text-anchor="middle" class="axis">Parsed Alethe commands</text>
+<text x="31.00" y="904.50" text-anchor="middle" class="axis" transform="rotate(-90 31 904.50)">Replay time (ms, log10)</text>
+<circle cx="132.27" cy="941.75" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/Examples.lean|sqrt_correct|13635698331308129878: 10 commands, 538 bytes, 100.781 ms</title></circle>
+<circle cx="135.49" cy="957.00" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/IsNonPrime.lean|IsNonPrime_correct|12543135627460772462: 11 commands, 592 bytes, 63.095 ms</title></circle>
+<circle cx="135.49" cy="953.40" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/MemAlloc.lean|mem_alloc_correct|5395433166570123997: 11 commands, 704 bytes, 70.469 ms</title></circle>
+<circle cx="138.72" cy="981.63" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/SumOfDigits.lean|SumOfDigits_correct|6640297411548399355: 12 commands, 778 bytes, 29.622 ms</title></circle>
+<circle cx="141.95" cy="970.36" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/Examples.lean|sqrt_correct|4559485301326837329: 13 commands, 764 bytes, 41.866 ms</title></circle>
+<circle cx="141.95" cy="951.48" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/MemAlloc.lean|mem_alloc_correct|880346177993498408: 13 commands, 830 bytes, 74.747 ms</title></circle>
+<circle cx="141.95" cy="960.10" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/Recursion.lean|SimpleOption_correct|10153057550358142642: 13 commands, 763 bytes, 57.376 ms</title></circle>
+<circle cx="148.40" cy="976.55" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/TestLoopControl.lean|test1_correct|14929476196725773389: 15 commands, 830 bytes, 34.618 ms</title></circle>
+<circle cx="148.40" cy="984.51" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/TestLoopControl.lean|test2_correct|14929476196725773389: 15 commands, 830 bytes, 27.115 ms</title></circle>
+<circle cx="148.40" cy="966.52" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/TestMatch.lean|test3_correct|12313593517213863317: 15 commands, 695 bytes, 47.098 ms</title></circle>
+<circle cx="177.44" cy="922.88" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/TestLoopControl.lean|test1_correct|4635955882467741603: 24 commands, 1486 bytes, 179.839 ms</title></circle>
+<circle cx="180.67" cy="933.92" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/Examples.lean|sqrt_correct|16395326812896940336: 25 commands, 1596 bytes, 128.168 ms</title></circle>
+<circle cx="180.67" cy="923.79" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/Examples.lean|sqrt_correct|17119794831572106230: 25 commands, 1596 bytes, 174.890 ms</title></circle>
+<circle cx="248.43" cy="865.79" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/IsNonPrime.lean|IsNonPrime_correct|1572539502098385654: 46 commands, 4792 bytes, 1037.815 ms</title></circle>
+<circle cx="258.11" cy="866.00" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/Recursion.lean|complex_measure_binsearch_correct|9897963110172432531: 49 commands, 3709 bytes, 1031.175 ms</title></circle>
+<circle cx="258.11" cy="914.56" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/TestLoopControl.lean|test2_correct|2311107858308393802: 49 commands, 3363 bytes, 232.187 ms</title></circle>
+<circle cx="312.96" cy="897.57" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/TestLoopControl.lean|test1_correct|4982008840348523404: 66 commands, 4472 bytes, 391.250 ms</title></circle>
+<circle cx="371.04" cy="871.18" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/TestLoopControl.lean|test2_correct|4791612905070682933: 84 commands, 5867 bytes, 879.490 ms</title></circle>
+<circle cx="371.04" cy="893.17" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/TestLoopControl.lean|test2_correct|817407402121334710: 84 commands, 5491 bytes, 447.836 ms</title></circle>
+<circle cx="377.49" cy="875.32" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/TestLoopControl.lean|test1_correct|4791612905070682933: 86 commands, 6030 bytes, 774.566 ms</title></circle>
+<circle cx="490.43" cy="867.85" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/TestMatch.lean|test3_correct|5915416142655103160: 121 commands, 8797 bytes, 974.296 ms</title></circle>
+<circle cx="516.24" cy="858.35" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/Recursion.lean|pickGreater_correct|6729724634728447689: 129 commands, 9256 bytes, 1304.038 ms</title></circle>
+<circle cx="532.37" cy="872.15" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/IsNonPrime.lean|IsNonPrime_correct|11076373139303988464: 134 commands, 9523 bytes, 853.750 ms</title></circle>
+<circle cx="574.32" cy="869.07" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/Recursion.lean|simple_recursion_correct|16321134497628070328: 147 commands, 10265 bytes, 938.404 ms</title></circle>
+<circle cx="806.64" cy="861.56" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/TestLoopControl.lean|test1_correct|2311107858308393802: 219 commands, 15527 bytes, 1181.694 ms</title></circle>
+<circle cx="987.33" cy="803.01" r="5.20" fill="#D3A22E" stroke="#FBF8F1" stroke-width="1.5"><title>Velvet/Examples/Recursion.lean|pickGreaterN_correct|928177310960349346: 275 commands, 20110 bytes, 7132.694 ms</title></circle>
+</svg>

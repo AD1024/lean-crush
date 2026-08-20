@@ -1,11 +1,184 @@
 # Benchmarks
 
-Auto and Duper results were measured on 2026-08-14. Crush was remeasured on
-2026-08-15 from the reviewed working tree based on lean-crush commit
-`eeecec410864b3f0d8f59b5555b0996f5478d701`. The comparison covers lean-auto,
-Duper, and Crush across LeanHammer, Loom, Cashmere, Velvet, and PLean.
+Crush and `grind` were measured on 2026-08-20 from clean lean-crush commit
+`08a4eb091e94a369dc8eb77b70cacffe7f0138ff`. The current measurement separates
+trusted SMT verification from Core, Alethe, and portfolio reconstruction.
+Auto and Duper were not rerun; their 2026-08-14 comparison is retained in
+[Historical Backend Comparison](#historical-backend-comparison).
 
-## Results
+The [Verso benchmark chapter](https://ad1024.github.io/lean-crush/Benchmarks/)
+publishes the figures. The exact reproduction commands and output schemas are
+in [`scripts/README.md`](scripts/README.md).
+
+## Current Coverage
+
+| Corpus | Lane | Solved / attempted | Coverage | Total (s) | Avg (ms) |
+|---|---|---:|---:|---:|---:|
+| **LeanHammer** | **Crush, Z3 checked** | **20 / 20** | **100.0%** | **0.863** | **43.2** |
+| LeanHammer | Crush verify | 19 / 20 | 95.0% | 6.113 | 305.7 |
+| LeanHammer | Core | 19 / 20 | 95.0% | 6.056 | 302.8 |
+| LeanHammer | Alethe | 13 / 20 | 65.0% | 14.063 | 703.2 |
+| LeanHammer | Portfolio | 19 / 20 | 95.0% | 9.833 | 491.7 |
+| LeanHammer | `grind` | 16 / 20 | 80.0% | 0.067 | 3.4 |
+| Loom | Crush verify | 4 / 4 | 100.0% | 0.360 | 90.0 |
+| Loom | Core | 4 / 4 | 100.0% | 0.335 | 83.8 |
+| Loom | Alethe | 4 / 4 | 100.0% | 12.660 | 3,165.0 |
+| Loom | Portfolio | 4 / 4 | 100.0% | 12.797 | 3,199.3 |
+| **Loom** | **`grind`** | **4 / 4** | **100.0%** | **0.036** | **9.0** |
+| **Cashmere** | **Crush verify** | **38 / 38** | **100.0%** | **6.769** | **178.1** |
+| Cashmere | Core | 38 / 38 | 100.0% | 6.947 | 182.8 |
+| Cashmere | Alethe | 9 / 38 | 23.7% | 7.249 | 190.8 |
+| Cashmere | Portfolio | 38 / 38 | 100.0% | 6.825 | 179.6 |
+| Cashmere | `grind` | 19 / 38 | 50.0% | 0.274 | 7.2 |
+| **Velvet** | **Crush verify** | **406 / 425** | **95.5%** | **213.187** | **415.6** |
+| Velvet | Core | 355 / 378 | 93.9% | 295.341 | 682.1 |
+| Velvet | Alethe | 133 / 425 | 31.3% | 235.784 | 459.6 |
+| Velvet | Portfolio | 355 / 378 | 93.9% | 316.181 | 730.2 |
+| Velvet | `grind` | 369 / 425 | 86.8% | 28.264 | 55.1 |
+| **PLean** | **Crush verify** | **174 / 192** | **90.6%** | **1,378.833** | **7,181.4** |
+| PLean | Core | 161 / 192 | 83.9% | 47,552.983 | 247,671.8 |
+| PLean | Alethe | 8 / 192 | 4.2% | 550.113 | 2,865.2 |
+| PLean | Portfolio | 161 / 192 | 83.9% | 45,540.817 | 237,191.8 |
+| PLean | `grind` | 174 / 192 | 90.6% | 2,703.132 | 14,078.8 |
+
+**Rows.** `Crush verify` uses `crush.trust = "trust"` and measures collection,
+translation, and SMT solving without requiring a checked reconstruction.
+`Core` and `Alethe` are strict checked lanes. `Portfolio` tries Alethe first,
+then Core. The LeanHammer Z3 row is the existing checked `crush-only` profile;
+the other Crush rows use cvc5. `grind` receives the same host-generated VCs.
+
+**Columns.** `Solved / attempted` counts unique VC identities closed by that
+lane. `Total` sums tactic-local attempt time and `Avg` divides by attempts.
+PLean elaborates declarations concurrently, so its tactic-local totals overlap;
+the corresponding sums of per-file wall time are 1,170 seconds for verify,
+3,016 for Core, 1,280 for Alethe, 2,802 for Portfolio, and 2,342 for `grind`.
+Bold rows compare coverage first and average time when coverage ties. Different
+lanes provide different trust guarantees, so speed alone is not an
+interchangeable proof-quality comparison.
+
+Velvet Core and Portfolio attempted 378 rather than 425 VCs because an earlier
+failure or declaration heartbeat stopped some generated files. Their raw lane
+coverage uses 378 as its denominator. The reconstruction table below instead
+uses the common set verified by the trusted lane.
+
+## Reconstruction Coverage
+
+| Corpus | SMT verified / total | Core / verified | Alethe / verified | Portfolio / verified |
+|---|---:|---:|---:|---:|
+| LeanHammer | 19 / 20 | **19 / 19** | 13 / 19 | **19 / 19** |
+| Loom | 4 / 4 | **4 / 4** | **4 / 4** | **4 / 4** |
+| Cashmere | 38 / 38 | **38 / 38** | 9 / 38 | **38 / 38** |
+| Velvet | 406 / 425 | **355 / 406** | 133 / 406 | **355 / 406** |
+| PLean | 174 / 192 | **157 / 174** | 1 / 174 | **157 / 174** |
+
+The denominator for all three checked columns is the VC set solved by
+`Crush verify`. A checked lane also counts goals closed by a selected Lean fact
+or pre-reconstruction before SMT, because those already produce a
+kernel-checked proof. `alethe-replay-scaling.tsv` separately includes only
+successful certificate replays.
+
+## Reconstruction Gaps
+
+| Corpus | Lane | Failure mode | Verified VCs |
+|---|---|---|---:|
+| LeanHammer | Alethe | certificate error | 2 |
+| LeanHammer | Alethe | assumption/rule gap | 1 |
+| LeanHammer | Alethe | term decoder gap | 1 |
+| LeanHammer | Alethe | solver `sat` | 1 |
+| LeanHammer | Alethe | solver `unknown` | 1 |
+| Cashmere | Alethe | certificate error | 29 |
+| Velvet | Core | reconstruction failed | 4 |
+| Velvet | Core | not attempted after file termination | 47 |
+| Velvet | Alethe | certificate error | 230 |
+| Velvet | Alethe | assumption/rule gap | 26 |
+| Velvet | Alethe | term decoder gap | 14 |
+| Velvet | Alethe | solver `unknown` | 3 |
+| Velvet | Portfolio | Alethe certificate error + Core failed | 4 |
+| Velvet | Portfolio | not attempted after file termination | 47 |
+| PLean | Core | reconstruction failed | 6 |
+| PLean | Core | solver `unknown` | 4 |
+| PLean | Core | host tactic failed | 7 |
+| PLean | Alethe | certificate error | 173 |
+| PLean | Portfolio | Alethe certificate error + Core failed | 6 |
+| PLean | Portfolio | solver `unknown` | 4 |
+| PLean | Portfolio | host tactic failed | 7 |
+
+Rows partition verified VCs not closed by the named strict lane.
+`not attempted` is not a reconstruction failure: the generated Velvet file
+terminated before reaching that VC. Every recorded certificate error in this
+run is cvc5 rejecting proof output containing `DUMMY_SKOLEM`. Rule and term
+gaps are replay coverage limitations. Solver `sat` and `unknown` occur before
+replay. Portfolio failures report the final Core outcome after Alethe failed.
+
+## Phase Timing
+
+| Corpus | Lane | Accounted (s) | Largest profiler phases |
+|---|---|---:|---|
+| LeanHammer | Verify | 6.073 | solve 96.8%, translate 1.5% |
+| LeanHammer | Core | 6.005 | solve 94.3%, reconstruct 2.9% |
+| LeanHammer | Alethe | 13.991 | replay 55.0%, solve 43.7% |
+| LeanHammer | Portfolio | 9.787 | solve 56.5%, replay 41.3% |
+| Loom | Verify | 0.341 | solve 92.2%, translate 3.9% |
+| Loom | Core | 0.313 | solve 71.1%, reconstruct 22.1% |
+| Loom | Alethe | 12.631 | replay 98.1%, solve 1.8% |
+| Loom | Portfolio | 12.766 | replay 97.7%, solve 2.2% |
+| Cashmere | Verify | 6.577 | instantiate 60.5%, pre-reconstruct 18.4%, solve 14.3% |
+| Cashmere | Core | 6.781 | instantiate 45.1%, pre-reconstruct 22.3%, reconstruct 15.9% |
+| Cashmere | Alethe | 7.073 | instantiate 77.2%, solve 15.2%, translate 6.8% |
+| Cashmere | Portfolio | 6.657 | instantiate 46.4%, pre-reconstruct 22.3%, reconstruct 15.9% |
+| Velvet | Verify | 204.154 | solve 74.4%, fallback solve 10.0%, instantiate 6.5% |
+| Velvet | Core | 291.053 | solve 43.8%, reconstruct 40.2%, fallback solve 7.0% |
+| Velvet | Alethe | 231.131 | solve 66.2%, replay 15.3%, fallback solve 8.8% |
+| Velvet | Portfolio | 311.887 | solve 40.4%, reconstruct 36.0%, replay 8.7% |
+| PLean | Verify | 2,348.973 | solve 54.2%, pre-reconstruct 43.1%, translate 2.2% |
+| PLean | Core | 55,830.332 | reconstruct 68.0%, pre-reconstruct 29.9%, solve 2.0% |
+| PLean | Alethe | 828.350 | solve 79.1%, translate 17.1%, normalize 3.6% |
+| PLean | Portfolio | 53,482.310 | reconstruct 67.8%, pre-reconstruct 30.1%, solve 2.1% |
+
+`Accounted` sums profiler events, not process wall time. One host VC may invoke
+Crush more than once, and PLean declarations elaborate concurrently. The
+machine-readable `phase-summary.tsv` records event count, total, mean, minimum,
+maximum, and percentage for every phase; the
+[stacked figure](https://ad1024.github.io/lean-crush/Benchmarks/Time-Breakdown/)
+shows the complete distribution.
+
+## Alethe Scaling
+
+| Corpus | Replayed VCs | Commands | Replay time (ms) | Pearson r | R-squared | ms / 100 commands |
+|---|---:|---:|---:|---:|---:|---:|
+| LeanHammer | 13 | 3-231 | 5.986-4,731.513 | 0.8610 | 0.7413 | 1,534.658 |
+| Loom | 4 | 14-673 | 79.693-8,461.178 | 0.9528 | 0.9078 | 1,114.326 |
+| Velvet | 26 | 10-275 | 27.115-7,132.694 | 0.7936 | 0.6298 | 1,579.287 |
+
+Each point is one successful strict Alethe replay, averaged by VC across
+repeats. Script length is the parsed Alethe command count. Replay time includes
+certificate parsing, step replay, proof assembly, and final kernel checking,
+but excludes solver time. Cashmere and PLean have no successful certificate
+replay samples; their strict-lane successes closed before replay.
+
+## Current Configuration
+
+All current cvc5 lanes used cvc5 1.3.4, Lean 4.32.2, a five-second
+per-query timeout, one million heartbeats per VC, and
+`maxRecDepth = 1000000`. PLean additionally disabled ground-instantiation fuel.
+The machine was Apple Silicon arm64 running macOS 26.6; the LeanHammer Z3 lane
+used Z3 4.15.4.
+
+| Component | Revision |
+|---|---|
+| lean-crush | `08a4eb091e94a369dc8eb77b70cacffe7f0138ff` |
+| LeanHammer | `df4dd13671412591d678eada250b04c030fd4d40` |
+| Loom and Cashmere | `ec16b95ff8bbd047248de031cabd3160847e4b1b` |
+| Velvet | `e90d79341bb8ef510ec868623e74cfe98feaa4e8` |
+| PLean | `9c098b4c5ad32faf2a022929b6726d2a182a9e1d` |
+
+## Historical Backend Comparison
+
+Auto and Duper results below were measured on 2026-08-14. Crush was remeasured
+on 2026-08-15 from the reviewed working tree based on lean-crush commit
+`eeecec410864b3f0d8f59b5555b0996f5478d701`. These rows are retained for the
+cross-backend comparison and are separate from the current reconstruction
+measurement above.
 
 | Corpus | Backend | Solved / total | Coverage | Total (s) | Avg (ms) | Min (ms) | Max (ms) |
 |---|---|---:|---:|---:|---:|---:|---:|
@@ -128,7 +301,7 @@ common number of generated VCs, not a sum of solved columns.
 so no partial result is presented as complete coverage. Every file is run in a
 separate process, so one limited file does not prevent later files from running.
 
-## Configuration
+## Historical Configuration
 
 Loom, Cashmere, and Velvet used cvc5 1.3.4 for auto and Crush, a five-second
 solver timeout, one million Lean heartbeats per VC, and
@@ -163,41 +336,60 @@ then Crush.
 
 ## Reproduction
 
-The corpus harness provisions and builds all pinned revisions:
+Reproduce the current Crush and `grind` corpus lanes:
 
 ```sh
+RUN_AUTO=false \
+RUN_DUPER=false \
 REPEATS=1 \
 TIMEOUT=5 \
-DUPER_TIMEOUT=5 \
 SOLVER=cvc5 \
-CRUSH_TRUST=reconstruct \
 MAX_HEARTBEATS=1000000 \
+MAX_RECURSION_DEPTH=1000000 \
 OUT_DIR="$PWD/BenchmarkResults/corpora-reproduction" \
 scripts/benchmark-corpora.sh
 ```
 
-The PLean harness runs all three published lanes with:
+Reproduce LeanHammer:
 
 ```sh
-RUN_DUPER=true \
+REPEATS=1 \
+MAX_RECURSION_DEPTH=1000000 \
+OUT_DIR="$PWD/BenchmarkResults/leanhammer-reproduction" \
+scripts/benchmark-leanhammer.sh
+```
+
+Reproduce PLean without incomplete `Paxos.lean`:
+
+```sh
+RUN_AUTO=false \
+RUN_DUPER=false \
+RUN_CRUSH=true \
+RUN_GRIND=true \
 REPEATS=1 \
 SOLVER=cvc5 \
 TIMEOUT=5 \
 MAX_HEARTBEATS=1000000 \
-CRUSH_TRUST=trust \
+MAX_RECURSION_DEPTH=1000000 \
 CRUSH_INST_FUEL=0 \
-DUPER_TIMEOUT=1 \
-DUPER_MAX_HEARTBEATS=20000 \
-DUPER_FILE_CPU_SECONDS=60 \
 OUT_DIR="$PWD/BenchmarkResults/plean-reproduction" \
 scripts/benchmark-plean.sh
 ```
 
-Each harness writes metadata, per-VC results, aggregate summaries, per-file
-runs, and complete logs under `BenchmarkResults/`. A full corpus run writes the
-headline intersection to `matched-summary.tsv`; Crush-only validation records
-can be joined to pinned baseline records with the same key used by that report.
-LeanHammer profiles come from `leanhammer/summary.tsv`, and PLean rows from
-`summary.tsv` and `file-summary.tsv`. The bounded corpus command reports known
-Velvet truncation after writing these files. Use `REPEATS=3` or more for
-performance claims on lanes that complete.
+Render the tables and the SVGs used by the Verso manual:
+
+```sh
+python3 scripts/plot-benchmarks.py \
+  BenchmarkResults/corpora-reproduction \
+  BenchmarkResults/leanhammer-reproduction \
+  BenchmarkResults/plean-reproduction \
+  --out-dir Doc/Verso/figures \
+  --skip-tables
+```
+
+Each harness writes metadata, per-VC measurements, profiler events, coverage,
+reconstruction, failure, phase, and Alethe-scaling reports, plus complete logs.
+The bounded corpus command reports known Velvet truncation after writing its
+valid reports. Use `REPEATS=3` or more for performance claims on lanes that
+complete. Commands for historical Auto and Duper lanes are in
+[`scripts/README.md`](scripts/README.md).
