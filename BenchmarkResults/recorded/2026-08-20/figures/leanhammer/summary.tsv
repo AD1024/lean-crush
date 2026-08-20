@@ -1,0 +1,7 @@
+profile	attempted	passed	failed	pass_pct	total_ms	mean_ms	min_ms	max_ms
+grind-only	20	16	4	80.0	67.0	3.4	1.0	10.0
+crush-core	20	19	1	95.0	6056.0	302.8	3.0	5089.0
+crush-verify	20	19	1	95.0	6113.0	305.6	4.0	5045.0
+crush-alethe	20	13	7	65.0	14063.0	703.1	46.0	5058.0
+crush-only	20	20	0	100.0	863.0	43.1	6.0	138.0
+crush-portfolio	20	19	1	95.0	9833.0	491.6	3.0	5052.0

@@ -1,0 +1,2 @@
+hammer_commit	toolchain	duper_commit	duper_timeout	solver	timeout	max_heartbeats	max_rec_depth	crush_profile	crush_commit	crush_dirty	crush_root
+df4dd13671412591d678eada250b04c030fd4d40	leanprover/lean4:v4.32.2	ca7c5862bee2e62e019e6a1b70ce95612b6b6365	5	cvc5	5	1000000	1000000	true	08a4eb091e94a369dc8eb77b70cacffe7f0138ff	false	/tmp/lean-crush-benchmark-08a4eb0

@@ -1,0 +1,5 @@
+suite	backend	file	attempted	passed	failed	pass_pct	total_ms	mean_ms	min_ms	max_ms
+plean	duper	Examples/DistributedLock.lean	12	8	4	66.7	15356.2	1279.7	0.0	2690.4
+plean	duper	Examples/PingPongAuto.lean	6	4	2	66.7	6261.1	1043.5	214.5	2062.6
+plean	duper	Examples/PingPongTrivial.lean	1	1	0	100.0	0.0	0.0	0.0	0.0
+plean	duper	Examples/ShardedKV.lean	11	6	5	54.5	21558.9	1959.9	0.0	4963.3

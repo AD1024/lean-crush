@@ -1,0 +1,10 @@
+suite	backend	repeat	file	exit_code	wall_seconds	vc_count	cpu_limited	message
+plean	crush	1	Examples/ClockBound.lean	0	83	56	false	-
+plean	crush	1	Examples/Consensus.lean	1	531	17	false	-
+plean	crush	1	Examples/DistributedLock.lean	0	14	12	false	-
+plean	crush	1	Examples/LockServer.lean	1	357	37	false	-
+plean	crush	1	Examples/PingPongAuto.lean	0	10	6	false	-
+plean	crush	1	Examples/PingPongTrivial.lean	0	9	1	false	-
+plean	crush	1	Examples/RingLeader.lean	1	82	14	false	-
+plean	crush	1	Examples/ShardedKV.lean	0	11	11	false	-
+plean	crush	1	Examples/TwoPhaseCommit.lean	1	938	38	false	-

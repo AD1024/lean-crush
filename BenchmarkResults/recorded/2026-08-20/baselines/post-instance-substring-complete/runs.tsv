@@ -1,0 +1,2 @@
+suite	backend	repeat	file	exit_code	wall_seconds	vc_count	truncated	message
+velvet	crush	1	Velvet/Examples/SubstringSearch.lean	1	594	16	true	declaration heartbeat exhaustion

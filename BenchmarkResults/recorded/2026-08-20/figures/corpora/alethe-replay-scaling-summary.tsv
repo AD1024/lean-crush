@@ -1,0 +1,5 @@
+suite	lane	vcs	samples	min_commands	max_commands	min_replay_ms	mean_replay_ms	max_replay_ms	commands_pearson_r	commands_r_squared	ms_per_100_commands	bytes_pearson_r	bytes_r_squared	ms_per_kib
+loom	crush-alethe	4	4	14	673	79.693	3098.202	8461.178	0.9528	0.9078	1114.326321	0.9393	0.8823	142.811290
+loom	crush-portfolio	4	4	14	673	79.145	3117.123	8499.575	0.9537	0.9095	1121.095378	0.9403	0.8842	143.698976
+velvet	crush-alethe	26	27	10	275	27.115	700.341	7132.694	0.7936	0.6298	1579.287204	0.8088	0.6541	226.404667
+velvet	crush-portfolio	25	26	10	275	27.924	732.972	7163.220	0.7922	0.6276	1595.892729	0.8080	0.6529	228.902225

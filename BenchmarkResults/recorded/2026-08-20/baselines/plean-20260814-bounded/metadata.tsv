@@ -1,0 +1,3 @@
+backend	commit	toolchain	dirty	diff_sha256	solver	timeout	crush_trust	crush_inst_fuel	tree
+auto	be39726723e71f9aa1e02c6cfeeae9b0c31b8947	leanprover/lean4:v4.24.0	false	-	cvc5	5	trust	0	/private/tmp/PLean-auto/Src/PLean
+crush	be39726723e71f9aa1e02c6cfeeae9b0c31b8947	leanprover/lean4:v4.32.2	true	ba75ebbc5de1586515b87c1e2eae23765078422e141d62f2488073dcf3e9d33b	cvc5	5	trust	0	/Users/mikedh/Downloads/P/Src/PLean

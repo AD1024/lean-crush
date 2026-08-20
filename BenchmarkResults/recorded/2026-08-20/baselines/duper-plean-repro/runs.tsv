@@ -1,0 +1,10 @@
+suite	backend	repeat	file	exit_code	wall_seconds	vc_count	cpu_limited	message
+plean	duper	1	Examples/ClockBound.lean	152	14	0	true	file did not complete within CPU limit
+plean	duper	1	Examples/Consensus.lean	152	37	0	true	file did not complete within CPU limit
+plean	duper	1	Examples/DistributedLock.lean	1	9	12	false	-
+plean	duper	1	Examples/LockServer.lean	152	11	0	true	file did not complete within CPU limit
+plean	duper	1	Examples/PingPongAuto.lean	1	7	6	false	-
+plean	duper	1	Examples/PingPongTrivial.lean	0	5	1	false	-
+plean	duper	1	Examples/RingLeader.lean	152	51	0	true	file did not complete within CPU limit
+plean	duper	1	Examples/ShardedKV.lean	1	11	11	false	-
+plean	duper	1	Examples/TwoPhaseCommit.lean	152	10	0	true	file did not complete within CPU limit

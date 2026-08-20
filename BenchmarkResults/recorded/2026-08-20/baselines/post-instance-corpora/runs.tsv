@@ -1,0 +1,20 @@
+suite	backend	repeat	file	exit_code	wall_seconds	vc_count	truncated	message
+loom	crush	1	LoomBackend.lean	0	9	4	false	-
+cashmere	crush	1	CaseStudies/Cashmere/Cashmere.lean	0	12	28	false	-
+cashmere	crush	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean	0	11	10	false	-
+velvet	crush	1	Velvet/Examples/EncodeDecodeStr.lean	1	31	27	false	-
+velvet	crush	1	Velvet/Examples/Examples.lean	1	30	40	false	-
+velvet	crush	1	Velvet/Examples/Examples_Total.lean	1	40	73	false	-
+velvet	crush	1	Velvet/Examples/GCD.lean	0	9	3	false	-
+velvet	crush	1	Velvet/Examples/IsNonPrime.lean	1	34	15	false	-
+velvet	crush	1	Velvet/Examples/IsSorted.lean	0	32	14	false	-
+velvet	crush	1	Velvet/Examples/MaxElem.lean	0	10	10	false	-
+velvet	crush	1	Velvet/Examples/MemAlloc.lean	1	19	18	false	-
+velvet	crush	1	Velvet/Examples/Recursion.lean	1	34	60	false	-
+velvet	crush	1	Velvet/Examples/SmallHeartBeats.lean	1	72	18	false	-
+velvet	crush	1	Velvet/Examples/SpMSpV_Example.lean	1	521	56	true	declaration heartbeat exhaustion
+velvet	crush	1	Velvet/Examples/SubstringSearch.lean	1	90	16	true	declaration heartbeat exhaustion
+velvet	crush	1	Velvet/Examples/SumOfDigits.lean	0	10	8	false	-
+velvet	crush	1	Velvet/Examples/TestLoopControl.lean	0	13	23	false	-
+velvet	crush	1	Velvet/Examples/TestMatch.lean	0	25	7	false	-
+velvet	crush	1	Velvet/Examples/Total_Partial_example.lean	1	31	45	false	-

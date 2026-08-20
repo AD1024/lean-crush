@@ -1,0 +1,4 @@
+suite	backend	attempted	passed	failed	pass_pct	total_ms	mean_ms	min_ms	max_ms	successful_mean_ms
+velvet	crush	433	401	32	92.6	285895.0	660.3	1.0	17510.0	164.9
+loom	crush	4	4	0	100.0	454.0	113.5	97.0	140.0	113.5
+cashmere	crush	38	38	0	100.0	6899.0	181.6	1.0	1348.0	181.6

@@ -1,0 +1,10 @@
+suite	backend	file	attempted	passed	failed	pass_pct	total_ms	mean_ms	min_ms	max_ms
+plean	crush	Examples/ShardedKV.lean	11	11	0	100.0	2852.4	259.3	163.9	560.8
+plean	crush	Examples/RingLeader.lean	14	11	3	78.6	26286.8	1877.6	120.4	20017.6
+plean	crush	Examples/Consensus.lean	17	14	3	82.4	629687.1	37040.4	104.3	301866.4
+plean	crush	Examples/ClockBound.lean	56	56	0	100.0	55056.1	983.1	195.8	4410.0
+plean	crush	Examples/TwoPhaseCommit.lean	38	29	9	76.3	2466258.7	64901.5	156.8	733365.0
+plean	crush	Examples/LockServer.lean	37	34	3	91.9	45589.8	1232.2	110.6	10153.9
+plean	crush	Examples/DistributedLock.lean	12	12	0	100.0	2833.3	236.1	132.3	694.7
+plean	crush	Examples/PingPongAuto.lean	6	6	0	100.0	624.1	104.0	66.4	211.1
+plean	crush	Examples/PingPongTrivial.lean	1	1	0	100.0	0.0	0.0	0.0	0.0

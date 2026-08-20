@@ -1,0 +1,4 @@
+suite	left_backend	right_backend	shared_vcs	left_only	right_only	both_solved	neither_solved	left_mean_ms	right_mean_ms
+velvet	grind	crush-portfolio	378	6	34	321	17	20.9	171.6
+cashmere	grind	crush-portfolio	38	0	19	19	0	5.9	62.3
+loom	grind	crush-portfolio	4	0	0	4	0	9.0	3199.2

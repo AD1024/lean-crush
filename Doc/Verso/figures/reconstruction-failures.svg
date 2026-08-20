@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 846" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1260 768" role="img" aria-labelledby="title description">
 <title id="title">Proof reconstruction failure modes</title>
-<desc id="description">Counts of verified conditions that each reconstruction lane did not reconstruct.</desc>
+<desc id="description">One pie per corpus showing strict-lane failure records by reported cause.</desc>
 <style>
 text { fill: #1B2927; font-family: 'Avenir Next', 'IBM Plex Sans', sans-serif; }
 .title { font-size: 25px; font-weight: 700; letter-spacing: .2px; }
@@ -12,89 +12,67 @@ text { fill: #1B2927; font-family: 'Avenir Next', 'IBM Plex Sans', sans-serif; }
 .grid { stroke: #D9D5CB; stroke-width: 1; }
 .axis-line { stroke: #64716E; stroke-width: 1.2; }
 </style>
-<rect width="1160" height="846" fill="#FBF8F1"/>
+<rect width="1260" height="768" fill="#FBF8F1"/>
 <text x="42.00" y="42.00" text-anchor="start" class="title">Proof reconstruction failure modes</text>
-<text x="42.00" y="66.00" text-anchor="start" class="subtitle">Verified VCs grouped by the reported reconstruction failure</text>
+<text x="42.00" y="66.00" text-anchor="start" class="subtitle">One pie per corpus; slices aggregate Core, Alethe, and Portfolio records</text>
 <rect x="42.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#A4433E" opacity="1.000"/>
-<text x="63.00" y="96.00" text-anchor="start" class="legend">certificate-error</text>
+<text x="63.00" y="96.00" text-anchor="start" class="legend">certificate error</text>
 <rect x="193.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#D27645" opacity="1.000"/>
-<text x="214.00" y="96.00" text-anchor="start" class="legend">certificate-error+core-failed</text>
-<rect x="428.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#D6A73A" opacity="1.000"/>
-<text x="449.00" y="96.00" text-anchor="start" class="legend">core-failed</text>
-<rect x="537.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#557A75" opacity="1.000"/>
-<text x="558.00" y="96.00" text-anchor="start" class="legend">not-attempted</text>
-<rect x="660.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#476A8A" opacity="1.000"/>
-<text x="681.00" y="96.00" text-anchor="start" class="legend">rule-gap</text>
-<rect x="748.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#7B7653" opacity="1.000"/>
-<text x="769.00" y="96.00" text-anchor="start" class="legend">solver-sat</text>
-<rect x="850.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#A4433E" opacity="1.000"/>
-<text x="871.00" y="96.00" text-anchor="start" class="legend">solver-unknown</text>
-<rect x="980.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#D27645" opacity="1.000"/>
-<text x="1001.00" y="96.00" text-anchor="start" class="legend">tactic</text>
-<rect x="42.00" y="111.00" width="15.00" height="10.00" rx="2.00" fill="#D6A73A" opacity="1.000"/>
-<text x="63.00" y="120.00" text-anchor="start" class="legend">term-gap</text>
-<text x="326.00" y="170.00" text-anchor="end" class="label">cashmere / Alethe / certificate-error</text>
-<rect x="340.00" y="156.00" width="94.82" height="19.00" rx="3.00" fill="#A4433E" opacity="1.000"/>
-<text x="442.82" y="170.00" text-anchor="start" class="value">29</text>
-<text x="326.00" y="200.00" text-anchor="end" class="label">leanhammer / Alethe / certificate-error</text>
-<rect x="340.00" y="186.00" width="6.54" height="19.00" rx="3.00" fill="#A4433E" opacity="1.000"/>
-<text x="354.54" y="200.00" text-anchor="start" class="value">2</text>
-<text x="326.00" y="230.00" text-anchor="end" class="label">leanhammer / Alethe / rule-gap</text>
-<rect x="340.00" y="216.00" width="3.27" height="19.00" rx="3.00" fill="#476A8A" opacity="1.000"/>
-<text x="351.27" y="230.00" text-anchor="start" class="value">1</text>
-<text x="326.00" y="260.00" text-anchor="end" class="label">leanhammer / Alethe / solver-sat</text>
-<rect x="340.00" y="246.00" width="3.27" height="19.00" rx="3.00" fill="#7B7653" opacity="1.000"/>
-<text x="351.27" y="260.00" text-anchor="start" class="value">1</text>
-<text x="326.00" y="290.00" text-anchor="end" class="label">leanhammer / Alethe / solver-unknown</text>
-<rect x="340.00" y="276.00" width="3.27" height="19.00" rx="3.00" fill="#A4433E" opacity="1.000"/>
-<text x="351.27" y="290.00" text-anchor="start" class="value">1</text>
-<text x="326.00" y="320.00" text-anchor="end" class="label">leanhammer / Alethe / term-gap</text>
-<rect x="340.00" y="306.00" width="3.27" height="19.00" rx="3.00" fill="#D6A73A" opacity="1.000"/>
-<text x="351.27" y="320.00" text-anchor="start" class="value">1</text>
-<text x="326.00" y="350.00" text-anchor="end" class="label">plean / Core / core-failed</text>
-<rect x="340.00" y="336.00" width="19.62" height="19.00" rx="3.00" fill="#D6A73A" opacity="1.000"/>
-<text x="367.62" y="350.00" text-anchor="start" class="value">6</text>
-<text x="326.00" y="380.00" text-anchor="end" class="label">plean / Core / solver-unknown</text>
-<rect x="340.00" y="366.00" width="13.08" height="19.00" rx="3.00" fill="#A4433E" opacity="1.000"/>
-<text x="361.08" y="380.00" text-anchor="start" class="value">4</text>
-<text x="326.00" y="410.00" text-anchor="end" class="label">plean / Core / tactic</text>
-<rect x="340.00" y="396.00" width="22.89" height="19.00" rx="3.00" fill="#D27645" opacity="1.000"/>
-<text x="370.89" y="410.00" text-anchor="start" class="value">7</text>
-<text x="326.00" y="440.00" text-anchor="end" class="label">plean / Alethe / certificate-error</text>
-<rect x="340.00" y="426.00" width="565.63" height="19.00" rx="3.00" fill="#A4433E" opacity="1.000"/>
-<text x="913.63" y="440.00" text-anchor="start" class="value">173</text>
-<text x="326.00" y="470.00" text-anchor="end" class="label">plean / Portfolio / certificate-error+core-failed</text>
-<rect x="340.00" y="456.00" width="19.62" height="19.00" rx="3.00" fill="#D27645" opacity="1.000"/>
-<text x="367.62" y="470.00" text-anchor="start" class="value">6</text>
-<text x="326.00" y="500.00" text-anchor="end" class="label">plean / Portfolio / solver-unknown</text>
-<rect x="340.00" y="486.00" width="13.08" height="19.00" rx="3.00" fill="#A4433E" opacity="1.000"/>
-<text x="361.08" y="500.00" text-anchor="start" class="value">4</text>
-<text x="326.00" y="530.00" text-anchor="end" class="label">plean / Portfolio / tactic</text>
-<rect x="340.00" y="516.00" width="22.89" height="19.00" rx="3.00" fill="#D27645" opacity="1.000"/>
-<text x="370.89" y="530.00" text-anchor="start" class="value">7</text>
-<text x="326.00" y="560.00" text-anchor="end" class="label">velvet / Core / core-failed</text>
-<rect x="340.00" y="546.00" width="13.08" height="19.00" rx="3.00" fill="#D6A73A" opacity="1.000"/>
-<text x="361.08" y="560.00" text-anchor="start" class="value">4</text>
-<text x="326.00" y="590.00" text-anchor="end" class="label">velvet / Core / not-attempted</text>
-<rect x="340.00" y="576.00" width="153.67" height="19.00" rx="3.00" fill="#557A75" opacity="1.000"/>
-<text x="501.67" y="590.00" text-anchor="start" class="value">47</text>
-<text x="326.00" y="620.00" text-anchor="end" class="label">velvet / Alethe / certificate-error</text>
-<rect x="340.00" y="606.00" width="752.00" height="19.00" rx="3.00" fill="#A4433E" opacity="1.000"/>
-<text x="1100.00" y="620.00" text-anchor="start" class="value">230</text>
-<text x="326.00" y="650.00" text-anchor="end" class="label">velvet / Alethe / rule-gap</text>
-<rect x="340.00" y="636.00" width="85.01" height="19.00" rx="3.00" fill="#476A8A" opacity="1.000"/>
-<text x="433.01" y="650.00" text-anchor="start" class="value">26</text>
-<text x="326.00" y="680.00" text-anchor="end" class="label">velvet / Alethe / solver-unknown</text>
-<rect x="340.00" y="666.00" width="9.81" height="19.00" rx="3.00" fill="#A4433E" opacity="1.000"/>
-<text x="357.81" y="680.00" text-anchor="start" class="value">3</text>
-<text x="326.00" y="710.00" text-anchor="end" class="label">velvet / Alethe / term-gap</text>
-<rect x="340.00" y="696.00" width="45.77" height="19.00" rx="3.00" fill="#D6A73A" opacity="1.000"/>
-<text x="393.77" y="710.00" text-anchor="start" class="value">14</text>
-<text x="326.00" y="740.00" text-anchor="end" class="label">velvet / Portfolio / certificate-error+core-failed</text>
-<rect x="340.00" y="726.00" width="13.08" height="19.00" rx="3.00" fill="#D27645" opacity="1.000"/>
-<text x="361.08" y="740.00" text-anchor="start" class="value">4</text>
-<text x="326.00" y="770.00" text-anchor="end" class="label">velvet / Portfolio / not-attempted</text>
-<rect x="340.00" y="756.00" width="153.67" height="19.00" rx="3.00" fill="#557A75" opacity="1.000"/>
-<text x="501.67" y="770.00" text-anchor="start" class="value">47</text>
-<line x1="340.00" y1="148.00" x2="340.00" y2="782.00" class="axis-line"/>
+<text x="214.00" y="96.00" text-anchor="start" class="legend">certificate error + core failed</text>
+<rect x="442.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#D6A73A" opacity="1.000"/>
+<text x="463.00" y="96.00" text-anchor="start" class="legend">core failed</text>
+<rect x="551.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#557A75" opacity="1.000"/>
+<text x="572.00" y="96.00" text-anchor="start" class="legend">not attempted</text>
+<rect x="674.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#476A8A" opacity="1.000"/>
+<text x="695.00" y="96.00" text-anchor="start" class="legend">rule gap</text>
+<rect x="762.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#7B7653" opacity="1.000"/>
+<text x="783.00" y="96.00" text-anchor="start" class="legend">solver sat</text>
+<rect x="864.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#80546B" opacity="1.000"/>
+<text x="885.00" y="96.00" text-anchor="start" class="legend">solver unknown</text>
+<rect x="994.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#B7684B" opacity="1.000"/>
+<text x="1015.00" y="96.00" text-anchor="start" class="legend">tactic</text>
+<rect x="1081.00" y="87.00" width="15.00" height="10.00" rx="2.00" fill="#3D7C83" opacity="1.000"/>
+<text x="1102.00" y="96.00" text-anchor="start" class="legend">term gap</text>
+<text x="236.67" y="178.00" text-anchor="middle" class="label">cashmere</text>
+<circle cx="236.67" cy="286.00" r="88.00" fill="#A4433E" stroke="#FBF8F1" stroke-width="1.5"><title>cashmere: certificate error: 29 (100.0%)</title></circle>
+<text x="236.67" y="344.56" text-anchor="middle" class="value">29</text>
+<text x="236.67" y="400.00" text-anchor="middle" class="axis">29 failure records</text>
+<text x="630.00" y="178.00" text-anchor="middle" class="label">leanhammer</text>
+<path d="M 630.00 286.00 L 630.00 198.00 A 88.00 88.00 0 0 1 706.21 330.00 Z" fill="#A4433E" stroke="#FBF8F1" stroke-width="1.5"><title>leanhammer: certificate error: 2 (33.3%)</title></path>
+<text x="677.25" y="262.72" text-anchor="middle" class="value">2</text>
+<path d="M 630.00 286.00 L 706.21 330.00 A 88.00 88.00 0 0 1 630.00 374.00 Z" fill="#476A8A" stroke="#FBF8F1" stroke-width="1.5"><title>leanhammer: rule gap: 1 (16.7%)</title></path>
+<text x="657.28" y="337.25" text-anchor="middle" class="value">1</text>
+<path d="M 630.00 286.00 L 630.00 374.00 A 88.00 88.00 0 0 1 553.79 330.00 Z" fill="#7B7653" stroke="#FBF8F1" stroke-width="1.5"><title>leanhammer: solver sat: 1 (16.7%)</title></path>
+<text x="602.72" y="337.25" text-anchor="middle" class="value">1</text>
+<path d="M 630.00 286.00 L 553.79 330.00 A 88.00 88.00 0 0 1 553.79 242.00 Z" fill="#80546B" stroke="#FBF8F1" stroke-width="1.5"><title>leanhammer: solver unknown: 1 (16.7%)</title></path>
+<text x="575.44" y="290.00" text-anchor="middle" class="value">1</text>
+<path d="M 630.00 286.00 L 553.79 242.00 A 88.00 88.00 0 0 1 630.00 198.00 Z" fill="#3D7C83" stroke="#FBF8F1" stroke-width="1.5"><title>leanhammer: term gap: 1 (16.7%)</title></path>
+<text x="602.72" y="242.75" text-anchor="middle" class="value">1</text>
+<text x="630.00" y="400.00" text-anchor="middle" class="axis">6 failure records</text>
+<text x="1023.33" y="178.00" text-anchor="middle" class="label">loom</text>
+<circle cx="1023.33" cy="286.00" r="88.00" fill="#E6E1D7" stroke="#FBF8F1" stroke-width="1.5"><title>loom: no reconstruction failure records</title></circle>
+<text x="1023.33" y="291.00" text-anchor="middle" class="label">0</text>
+<text x="1023.33" y="400.00" text-anchor="middle" class="axis">no failure records</text>
+<text x="236.67" y="448.00" text-anchor="middle" class="label">plean</text>
+<path d="M 236.67 556.00 L 236.67 468.00 A 88.00 88.00 0 1 1 161.13 510.85 Z" fill="#A4433E" stroke="#FBF8F1" stroke-width="1.5"><title>plean: certificate error: 173 (83.6%)</title></path>
+<text x="263.59" y="607.46" text-anchor="middle" class="value">173</text>
+<path d="M 236.67 556.00 L 161.13 510.85 A 88.00 88.00 0 0 1 170.56 497.91 Z" fill="#D27645" stroke="#FBF8F1" stroke-width="1.5"><title>plean: certificate error + core failed: 6 (2.9%)</title></path>
+<path d="M 236.67 556.00 L 170.56 497.91 A 88.00 88.00 0 0 1 182.17 486.90 Z" fill="#D6A73A" stroke="#FBF8F1" stroke-width="1.5"><title>plean: core failed: 6 (2.9%)</title></path>
+<path d="M 236.67 556.00 L 182.17 486.90 A 88.00 88.00 0 0 1 200.39 475.83 Z" fill="#80546B" stroke="#FBF8F1" stroke-width="1.5"><title>plean: solver unknown: 8 (3.9%)</title></path>
+<path d="M 236.67 556.00 L 200.39 475.83 A 88.00 88.00 0 0 1 236.67 468.00 Z" fill="#B7684B" stroke="#FBF8F1" stroke-width="1.5"><title>plean: tactic: 14 (6.8%)</title></path>
+<text x="225.16" y="506.67" text-anchor="middle" class="value">14</text>
+<text x="236.67" y="670.00" text-anchor="middle" class="axis">207 failure records</text>
+<text x="630.00" y="448.00" text-anchor="middle" class="label">velvet</text>
+<path d="M 630.00 556.00 L 630.00 468.00 A 88.00 88.00 0 1 1 572.50 622.62 Z" fill="#A4433E" stroke="#FBF8F1" stroke-width="1.5"><title>velvet: certificate error: 230 (61.3%)</title></path>
+<text x="681.14" y="579.02" text-anchor="middle" class="value">230</text>
+<path d="M 630.00 556.00 L 572.50 622.62 A 88.00 88.00 0 0 1 568.17 618.62 Z" fill="#D27645" stroke="#FBF8F1" stroke-width="1.5"><title>velvet: certificate error + core failed: 4 (1.1%)</title></path>
+<path d="M 630.00 556.00 L 568.17 618.62 A 88.00 88.00 0 0 1 564.11 614.33 Z" fill="#D6A73A" stroke="#FBF8F1" stroke-width="1.5"><title>velvet: core failed: 4 (1.1%)</title></path>
+<path d="M 630.00 556.00 L 564.11 614.33 A 88.00 88.00 0 0 1 571.94 489.87 Z" fill="#557A75" stroke="#FBF8F1" stroke-width="1.5"><title>velvet: not attempted: 94 (25.1%)</title></path>
+<text x="575.55" y="556.57" text-anchor="middle" class="value">94</text>
+<path d="M 630.00 556.00 L 571.94 489.87 A 88.00 88.00 0 0 1 605.27 471.55 Z" fill="#476A8A" stroke="#FBF8F1" stroke-width="1.5"><title>velvet: rule gap: 26 (6.9%)</title></path>
+<text x="603.72" y="512.19" text-anchor="middle" class="value">26</text>
+<path d="M 630.00 556.00 L 605.27 471.55 A 88.00 88.00 0 0 1 609.55 470.41 Z" fill="#80546B" stroke="#FBF8F1" stroke-width="1.5"><title>velvet: solver unknown: 3 (0.8%)</title></path>
+<path d="M 630.00 556.00 L 609.55 470.41 A 88.00 88.00 0 0 1 630.00 468.00 Z" fill="#3D7C83" stroke="#FBF8F1" stroke-width="1.5"><title>velvet: term gap: 14 (3.7%)</title></path>
+<text x="630.00" y="670.00" text-anchor="middle" class="axis">375 failure records</text>
+<text x="630.00" y="744.00" text-anchor="middle" class="subtitle">A verified VC may contribute one record per strict lane; not attempted remains a separate outcome.</text>
 </svg>

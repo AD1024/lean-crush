@@ -1,0 +1,2 @@
+backend	commit	toolchain	dirty	diff_sha256	solver	timeout	duper_timeout	max_heartbeats	file_cpu_seconds	crush_trust	crush_inst_fuel	crush_commit	duper_commit	crush_dirty	tree
+duper	3557f1f0fa5246ee88fcde3776f3973349049968	leanprover/lean4:v4.32.2	false	-	cvc5	5	1	20000	60	trust	0	-	ca7c5862bee2e62e019e6a1b70ce95612b6b6365	false	/tmp/lean-crush-duper-p/Src/PLean

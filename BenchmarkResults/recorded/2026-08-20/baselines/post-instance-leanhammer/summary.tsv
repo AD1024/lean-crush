@@ -1,0 +1,3 @@
+profile	attempted	passed	failed	pass_pct	total_ms	mean_ms	min_ms	max_ms
+aesop-crush	20	20	0	100.0	1114.0	55.7	12.0	169.0
+crush-only	20	20	0	100.0	820.0	41.0	5.0	131.0

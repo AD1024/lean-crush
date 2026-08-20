@@ -16,7 +16,9 @@ interpretation notes are in
 [BENCHMARKS.md](https://github.com/AD1024/lean-crush/blob/main/BENCHMARKS.md).
 The
 [script guide](https://github.com/AD1024/lean-crush/blob/main/scripts/README.md)
-gives self-contained reproduction commands.
+gives self-contained reproduction commands. The
+[recorded inputs](https://github.com/AD1024/lean-crush/tree/main/BenchmarkResults/recorded/2026-08-20)
+regenerate these exact figures and retain the per-VC baseline records.
 
 # Verification Coverage
 
@@ -43,7 +45,13 @@ core-directed Lean reconstruction. `not-attempted` means an earlier failure or
 declaration heartbeat stopped the generated file before that VC reached the
 strict lane; it is not classified as a reconstruction attempt.
 
-![Proof reconstruction failures grouped by reported cause](../../figures/reconstruction-failures.svg)
+Each pie aggregates failure records from Core, Alethe, and Portfolio for one
+corpus. A verified VC can therefore contribute one record per strict lane; the
+lane-specific counts remain available in `reconstruction-failures.tsv` and
+the tables in
+[BENCHMARKS.md](https://github.com/AD1024/lean-crush/blob/main/BENCHMARKS.md).
+
+![Proof reconstruction failure records by corpus](../../figures/reconstruction-failures.svg)
 
 # Time Breakdown
 

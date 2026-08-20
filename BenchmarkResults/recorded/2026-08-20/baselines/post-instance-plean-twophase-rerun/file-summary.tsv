@@ -1,0 +1,2 @@
+suite	backend	file	attempted	passed	failed	pass_pct	total_ms	mean_ms	min_ms	max_ms
+plean	crush	Examples/TwoPhaseCommit.lean	38	29	9	76.3	1071319.4	28192.6	158.3	299263.8

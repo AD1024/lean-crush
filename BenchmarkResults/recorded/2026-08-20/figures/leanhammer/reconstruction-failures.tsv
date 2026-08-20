@@ -1,0 +1,6 @@
+suite	lane	failure_mode	vcs
+leanhammer	crush-alethe	certificate-error	2
+leanhammer	crush-alethe	rule-gap	1
+leanhammer	crush-alethe	solver-sat	1
+leanhammer	crush-alethe	solver-unknown	1
+leanhammer	crush-alethe	term-gap	1

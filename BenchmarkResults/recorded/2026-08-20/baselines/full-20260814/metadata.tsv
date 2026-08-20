@@ -1,0 +1,7 @@
+suite	backend	ref	commit	toolchain	solver	crush_trust	crush_commit	crush_dirty	worktree
+loom	auto	origin/master	78928abc9054b31d0bea85985496490baae95244	leanprover/lean4:v4.24.0	cvc5	reconstruct	-	false	/private/tmp/loom-auto-bench
+loom	crush	origin/crush-backend	ec16b95ff8bbd047248de031cabd3160847e4b1b	leanprover/lean4:v4.32.2	cvc5	reconstruct	c60aa1767911ae5efbef3010047ab307e209e189	true	/Users/mikedh/Documents/loom
+cashmere	auto	origin/master	78928abc9054b31d0bea85985496490baae95244	leanprover/lean4:v4.24.0	cvc5	reconstruct	-	false	/private/tmp/loom-auto-bench
+cashmere	crush	origin/crush-backend	ec16b95ff8bbd047248de031cabd3160847e4b1b	leanprover/lean4:v4.32.2	cvc5	reconstruct	c60aa1767911ae5efbef3010047ab307e209e189	true	/Users/mikedh/Documents/loom
+velvet	auto	origin/master	d254391d5e84546f96576e5b67dfb6bafe9fc301	leanprover/lean4:v4.24.0	cvc5	reconstruct	-	false	/private/tmp/velvet-auto-bench
+velvet	crush	origin/crush-backend	e90d79341bb8ef510ec868623e74cfe98feaa4e8	leanprover/lean4:v4.32.2	cvc5	reconstruct	c60aa1767911ae5efbef3010047ab307e209e189	true	/Users/mikedh/Documents/velvet

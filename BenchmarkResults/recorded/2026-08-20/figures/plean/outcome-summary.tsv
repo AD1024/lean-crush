@@ -1,0 +1,17 @@
+suite	lane	outcome	replay	events
+plean	crush-alethe	reconstruction-failed	certificate-error	1398
+plean	crush-alethe	unknown	not-attempted	118
+plean	crush-core	core-reconstructed	not-attempted	500
+plean	crush-core	pre-reconstructed	not-attempted	322
+plean	crush-core	reconstruction-failed	not-attempted	15
+plean	crush-core	selected-fact	not-attempted	111
+plean	crush-core	unknown	not-attempted	228
+plean	crush-portfolio	core-reconstructed	certificate-error	500
+plean	crush-portfolio	pre-reconstructed	not-attempted	322
+plean	crush-portfolio	reconstruction-failed	certificate-error	15
+plean	crush-portfolio	selected-fact	not-attempted	111
+plean	crush-portfolio	unknown	not-attempted	228
+plean	crush-verify	pre-reconstructed	not-attempted	24
+plean	crush-verify	selected-fact	not-attempted	109
+plean	crush-verify	unknown	not-attempted	278
+plean	crush-verify	verified	not-requested	841

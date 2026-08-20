@@ -1,0 +1,2 @@
+suite	backend	ref	commit	toolchain	solver	timeout	duper_timeout	vc_max_heartbeats	crush_trust	crush_commit	duper_commit	crush_dirty	worktree
+velvet	crush	e90d79341bb8ef510ec868623e74cfe98feaa4e8	e90d79341bb8ef510ec868623e74cfe98feaa4e8	leanprover/lean4:v4.32.2	cvc5	5	5	4000000	reconstruct	eeecec410864b3f0d8f59b5555b0996f5478d701	-	true	/Users/mikedh/Documents/velvet
