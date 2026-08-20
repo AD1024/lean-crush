@@ -6,19 +6,69 @@ open Verso.Genre.Manual.InlineLean
 
 set_option pp.rawOnError true
 
-#doc (Manual) "Extending Translation" =>
+#doc (Manual) "Extending lean-crush" =>
 %%%
 tag := "extending"
 %%%
 
-An unsupported Lean function is translated as an uninterpreted symbol.
-This preserves congruence but not the function's implementation or algebraic
-properties.
-There are three ways to add the missing semantics:
+lean-crush can be extended at both sides of the solver boundary:
 
-1. expose Lean equation lemmas;
-2. map a constant directly to an existing SMT theory symbol;
-3. register a metaprogrammed lowering for full control.
+* translation extensions teach SMT the semantics of Lean types and operations;
+* reconstruction extensions teach Lean how to recover a checked proof from an
+  `unsat` result.
+
+Adding a translation does not automatically add a reconstruction rule, and
+adding a reconstruction rule does not change the SMT query.
+Identify which side failed before choosing an API.
+
+# Choosing an Extension Point
+
+## When SMT Lacks Semantics
+
+An unsupported Lean application is normally translated as an uninterpreted
+symbol.
+SMT can still use equality congruence, but it cannot reason from the
+implementation or algebraic properties of that symbol.
+
+Choose the least powerful mechanism that represents the missing semantics:
+
+1. Use `u[f]`, `d[f]`, `@[crush_unfold]`, or `@[crush_defeq]` when Lean's own
+   equations are finite and solver-friendly.
+2. Use `crush_map` when a Lean constant is exactly an existing SMT operator.
+3. Use `@[crush_lower f]` when one stable application head needs a
+   shape-sensitive encoding.
+4. Use `@[crush_lower_result T]` when applications have unstable heads but a
+   stable result-family head, including dependent function results.
+5. Use `@[crush_translate]` only when dispatch spans several heads or
+   intentionally overrides head-indexed and built-in translation.
+6. Use `crush_map_sort` for a fixed nullary SMT sort, or
+   `@[crush_translate_sort]` for a parameterized or representation-sensitive
+   sort.
+
+Equation support is the safest starting point because Lean already proves the
+equations and reconstruction can reuse them.
+A lowering produces a smaller, theory-aware SMT term, but the author is
+responsible for showing that the encoding has exactly the Lean operation's
+semantics.
+
+## When Reconstruction Lacks a Proof
+
+First confirm that SMT returns `unsat`.
+Then choose according to the reconstruction algorithm:
+
+* Use `with [...]` for proof terms needed by one call.
+* Use `using` for a goal-specific Lean tactic needed by one call.
+* Use `@[crush_reconstruct]` for reusable lemmas used by core-directed
+  reconstruction.
+* Use `register_crush_replay term` to decode a custom SMT term appearing in a
+  cvc5 Alethe certificate.
+* Use `register_crush_replay rule` to prove a custom or unsupported Alethe
+  inference from its replayed premises.
+
+The first three mechanisms operate on the original Lean goal and unsat core.
+The last two operate on individual certificate terms and steps.
+An Alethe-only run does not consult `@[crush_reconstruct]`, while core-only
+reconstruction does not consult replay registrations.
 
 # Extending Checked Reconstruction
 
@@ -53,6 +103,21 @@ to `grind`.
 This attribute does not send a theorem to SMT.
 If the solver also needs the fact, pass it to `crush [...]`, expose equations
 with `@[crush_unfold]`, or define a lowering as described below.
+
+Use a local attribute when the theorem should affect only one section:
+
+```lean
+theorem initialAdvances :
+    Advances .initial (.next .initial) :=
+  rfl
+
+attribute [local crush_reconstruct] initialAdvances
+```
+
+Unlike `with [advancesNext phase]`, the registered theorem is matched lazily
+against reconstruction goals and can be applied at different arguments.
+Unlike `using`, it supplies a declarative rule rather than a complete tactic
+script.
 
 # Equation-Based Support
 
@@ -108,6 +173,12 @@ example (x y : Int) : addInt x y = y + x := by
   crush
 ```
 
+This command is appropriate only when every elaborated application of the Lean
+constant has the same SMT meaning.
+It provides no argument-shape or typeclass-instance guard.
+Use `@[crush_lower]` instead for overloaded operations, partial support, or
+encodings that need to inspect types.
+
 `crush_map_sort` maps a Lean type constructor to an existing nullary SMT sort.
 The Lean type and SMT sort must represent the same values.
 For example, a one-field structure over `Int` is representation-isomorphic to
@@ -144,6 +215,12 @@ example (x : MappedInt) :
     (MappedInt.next x).value = x.value + 1 := by
   crush
 ```
+
+`crush_map_sort` and `crush_map` solve different problems.
+The former chooses the representation of values of a Lean type; the latter
+chooses the operation applied to already translated values.
+After mapping a custom type to `Int`, its constructors, projections, and
+operations still need compatible term lowerings as the example demonstrates.
 
 The target is emitted verbatim and is not declared.
 These commands are therefore appropriate only for solver theory symbols or
@@ -187,6 +264,12 @@ Multiple handlers may target the same declaration.
 As shown by `lowerClampNonnegative`, a numeric priority or `high`/`low` controls
 their order in the same style as `simp`.
 
+Targeted dispatch is preferable to `@[crush_translate]` when the head constant
+is known: unrelated applications never invoke the handler, and the declaration
+itself records what is being extended.
+Like a general handler, a targeted handler may call `ctx.declare` when its
+encoding needs fresh SMT declarations.
+
 A handler must decline any shape it cannot encode exactly.
 In particular, lowerings for overloaded operations should verify argument types
 and call `ctx.hasExpectedInstance` with the exact dictionary whose semantics they
@@ -209,6 +292,12 @@ This is useful for generated declarations and lambdas whose head is unstable,
 but whose result family is known.
 The handler still receives the original term's `ctx.fn` and `ctx.args`; peeled
 binders are used only to select the handler.
+
+Use result dispatch only when head dispatch is insufficient.
+For an ordinary named operation such as `MappedInt.next`,
+`@[crush_lower MappedInt.next]` is both cheaper and more precise.
+Result dispatch is intended for generated functions, lambdas, and dependent
+functions that all produce one representation family.
 
 The term representation must agree with a sort handler.
 Here every `IndexedInt index` is representation-isomorphic to SMT `Int`,
@@ -292,6 +381,11 @@ example (x : Int) :
   crush
 ```
 
+Because a general handler is consulted for every application, it should reject
+non-matching heads before doing reduction or type inference.
+Prefer targeted or result-indexed handlers when either dispatch key is
+available.
+
 The `ctx.declare` callback can emit declarations once and return the allocated
 symbol.
 This example gives an opaque Lean function an equally opaque SMT function.
@@ -332,6 +426,12 @@ The `register_crush_replay term` and `register_crush_replay rule` commands
 extend these layers without requiring Lean metaprogramming.
 Trust mode does not replay a certificate, but checked reconstruction must
 decode every relevant term and construct a proof for every inference.
+
+A term registration is an inverse translation: use it when a custom lowering
+introduces an SMT operator that may appear in the certificate.
+A rule registration is a proof procedure: use it when terms already decode but
+one named Alethe inference is unsupported.
+Adding one does not substitute for the other.
 
 ## Define an Inverse Term
 
@@ -486,6 +586,11 @@ Returning `none` delegates to the next handler.
 `runTactic` uses only ordinary premises; `runTacticWithScopeFallback` retries
 with enclosing subproof facts when the certificate rule requires them.
 
+Prefer the `register_crush_replay` pattern DSL for a fixed certificate shape.
+Use `@[crush_replay]` or `@[crush_replay_rule]` only when matching requires
+recursive inspection, dynamic operator selection, or custom metavariable
+control.
+
 ## Test Term Decoding
 
 A solver may simplify away an operator or change the shape used in a live
@@ -595,6 +700,11 @@ supported by Alethe replay itself.
 `@[crush_translate]`.
 It can inspect type arguments and recursively translate them with
 `ctx.emitSort`.
+
+Use `crush_map_sort` when a monomorphic Lean type always maps to one existing
+nullary SMT sort.
+Use a sort handler when the target sort depends on Lean type arguments, needs
+guards, or requires declarations.
 
 A total Lean map is exactly the model provided by SMT Array theory.
 The sort handler maps `TotalMap key value` to `(Array key value)`, while term

@@ -1,5 +1,6 @@
 import VersoManual
 
+import CrushManual.Overview
 import CrushManual.GettingStarted
 import CrushManual.UsingCrush
 import CrushManual.Configuration
@@ -21,9 +22,11 @@ It translates the local proof context and the negated goal to SMT-LIB, asks an
 external solver whether they are inconsistent, and either reports a model or
 discharges the Lean goal.
 
-This manual is organized around using the tactic in an application.
-It covers installation, fact selection, unfolding, trust policies, every public
-configuration option, and the metaprogramming APIs for custom translations.
+The overview explains the complete pipeline and when to use each major feature.
+The remaining chapters cover installation, tactic usage, options, extension
+APIs, and failure diagnosis.
+
+{include 0 CrushManual.Overview}
 
 {include 0 CrushManual.GettingStarted}
 

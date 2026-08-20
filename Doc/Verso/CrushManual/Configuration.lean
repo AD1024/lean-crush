@@ -26,6 +26,32 @@ Command-line `-D` settings are useful in CI or when testing a whole module:
 lake env lean -Dcrush.backend=cvc5 MyProofs.lean
 ```
 
+# How the Main Options Compose
+
+Three option families make independent decisions:
+
+1. `crush.backend` chooses which solver receives the SMT-LIB query.
+2. `crush.trust` chooses whether an `unsat` verdict may close the Lean goal
+   directly or must produce a checked proof.
+3. `crush.reconstruct` chooses how to build that proof when the trust policy
+   requests one.
+
+For example, this profile asks cvc5 to solve and requires either Alethe replay
+or core-directed reconstruction to produce a checked Lean term:
+
+```
+set_option crush.backend "cvc5"
+set_option crush.trust "reconstruct"
+set_option crush.reconstruct "auto"
+```
+
+Changing between `"auto"` and `"core"` does not affect discharge under
+`crush.trust "trust"`.
+Conversely, changing to `crush.trust "reconstruct"` does not force Alethe:
+Z3 and Bitwuzla can still use core-directed reconstruction.
+Selecting `crush.reconstruct "alethe"` with an unsupported backend is an error
+rather than a silent fallback, even under a trusting policy.
+
 # Solver Process
 
 {optionDocs crush.backend}
@@ -93,6 +119,13 @@ Alethe replay requires cvc5 1.3 or newer.
 The core path works with any backend, but one of Lean's finishers must be able to
 re-prove the result from the selected unsat-core hypotheses.
 
+Use `"auto"` for ordinary checked proofs.
+Use `"alethe"` when testing replay coverage, because a core fallback would hide
+an unsupported certificate step.
+Use `"core"` when comparing backends, when cvc5 emits no certificate for a
+theory, or when a short Lean proof is easier than replaying the solver's
+derivation.
+
 {optionDocs crush.reconstruct.trustBvDecide}
 
 This option preserves solver-proof reconstruction but expands its trusted base to
@@ -106,6 +139,20 @@ This broader fallback can execute arbitrary Lean decision procedures. It therefo
 trusts the native compiler and runtime, plus every executable definition reached
 while deciding the proposition. Accepted proofs expose an
 `_native.native_decide.ax_*` dependency under `#print axioms`.
+
+Leave both options disabled for kernel-only reconstruction.
+They differ in scope:
+
+* `trustBvDecide` adds a specialized bitvector/SAT decision procedure and its
+  native certificate-checking dependency.
+* `trustNativeDecide` can execute any proposition with a synthesized
+  `Decidable` instance and therefore trusts substantially more generated code.
+
+Enable `trustBvDecide` first for bitvector-heavy goals.
+Enable `trustNativeDecide` only when that broader executable trust boundary is
+acceptable.
+Neither option changes the SMT query or the meaning of
+`crush.trust "trust"`.
 
 For example, core reconstruction can exhaust a finite symbolic domain:
 
@@ -130,12 +177,21 @@ The values are:
 * `"native"` passes function sorts and higher-order application directly to
   cvc5. Other backends warn and fall back to defunctionalization.
 
-Use native mode only with cvc5:
+Use native mode for solving only with cvc5:
 
 ```
 set_option crush.backend "cvc5"
 set_option crush.ho.mode "native"
 ```
+
+Backend `"none"` also preserves native higher-order syntax when exporting a
+query without solving it.
+Defunctionalization converts functions and partial applications to ordinary
+first-order closure values and is portable across all backends.
+Native mode preserves function sorts and application for cvc5.
+It can avoid a large closure encoding, but cvc5 may not emit an Alethe
+certificate for the resulting higher-order proof; use core reconstruction or a
+trusting policy in that case.
 
 # Monomorphization
 
@@ -145,10 +201,14 @@ set_option crush.ho.mode "native"
 
 Monomorphization specializes polymorphic facts at concrete types found in the
 query.
+`fuel` bounds the total number of generated type instances, while `rounds`
+bounds how many times newly discovered types can trigger another saturation
+pass.
 If either bound is hit, lean-crush warns because the resulting fact set may be
 incomplete.
 Raise the bound only when the warning names monomorphization and the missing
 instance is relevant to the goal.
+Setting either bound to `0` disables monomorphization.
 
 {optionDocs crush.mono.certify}
 
@@ -164,10 +224,16 @@ Reconstruction already asks Lean's kernel to check the final proof.
 
 This pass uses relevant ground terms to instantiate explicit hints and selected
 premises before SMT translation.
+`fuel` bounds the total generated term instances; `rounds` bounds saturation
+depth when one instance introduces terms that trigger another.
 Set either option to `0` to disable it and retain the original quantified facts.
 When generated instances are useful but do not completely replace a quantified
 template, lean-crush first tries a ground-only query and retries with the
 quantifier after `sat` or `unknown`.
+
+Monomorphization and ground instantiation are not interchangeable.
+The former chooses concrete Lean types for polymorphic facts; the latter chooses
+concrete Lean terms for value quantifiers after types are fixed.
 
 # Unfolding and Premises
 
@@ -200,6 +266,14 @@ The trace option is convenient for short queries and editor diagnostics.
 Profiling distinguishes time spent in Lean-side preprocessing and translation
 from solver and reconstruction time.
 It should be the first diagnostic enabled for a scalability problem.
+
+The diagnostics answer different questions:
+
+* `crush.profile` identifies the expensive pipeline stage.
+* `crush.save` preserves the exact final query for external solver runs.
+* `crush.trace.script` prints that query as an ordinary Lean info message.
+* `trace.crush.*` reports internal decisions and can be filtered through Lean's
+  trace system.
 
 Lean trace classes provide more focused details:
 

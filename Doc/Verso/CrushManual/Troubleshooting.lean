@@ -10,6 +10,34 @@ set_option pp.rawOnError true
 tag := "troubleshooting"
 %%%
 
+# Classify the Failure First
+
+Do not increase every timeout and fuel bound at once.
+The user-visible result identifies the failing pipeline stage:
+
+* A `sat` result means the emitted SMT problem is satisfiable. Check selected
+  facts, unfolding, lowering coverage, and then the Lean statement.
+* An `unknown` result or timeout means translation completed but the backend did
+  not decide the query. Reduce the query or change solver settings.
+* An `unsat` result followed by a reconstruction error means solving succeeded.
+  Change reconstruction inputs or algorithms, not the SMT encoding.
+* A translation error naming a term or sort means the query could not be
+  constructed. Add an equation, lowering, or sort handler.
+* A `kernel-reject` during replay means a generated proof term was invalid.
+  This is an implementation or extension defect, not a difficult proof.
+
+Enable profiling before tuning performance:
+
+```
+set_option crush.profile true
+```
+
+For a capability failure, compare a local trusted run with a reconstructing run.
+If `"trust"` closes the goal and `"reconstruct"` does not, the gap is strictly
+in proof recovery.
+Use `crush.backend "none"` only to inspect translation; it never solves or
+closes the goal.
+
 # The Goal Is Not Proved
 
 A `sat` result means the emitted facts admit a model. The model satisfies the
@@ -27,6 +55,15 @@ If a definition is the issue, add `u[f]`, `d[f]`, an unfolding attribute, or a
 custom lowering.
 If the model assigns surprising values to an unsupported function, that usually
 indicates missing semantics rather than a solver bug.
+
+Use the smallest change that establishes the missing semantics:
+
+* add a proposition with `crush [*, lemma]` when a theorem is missing;
+* add `u[f]` or `d[f]` when the implementation is already solver-friendly;
+* add a custom lowering when `f` has a direct SMT-theory representation.
+
+`with [lemma]` cannot fix `sat`: reconstruction-only hints are not sent to the
+solver.
 
 # Timeout or Unknown
 
@@ -85,16 +122,34 @@ conversion.
 
 Available choices are:
 
-* keep `crush.trust "reconstruct"` and restructure the proof into smaller
-  kernel-checkable steps;
-* use cvc5 with `crush.reconstruct "auto"` to enable Alethe replay;
-* use `"reconstructOrTrust"` for an explicit warning and trusted fallback;
-* accept the default `"trust"` policy and audit the dependency with
+* Add `with [lemma, h]` when a checked bridge fact is needed only during this
+  invocation.
+* Add `using (tactics)` when the core facts support a short manual Lean proof.
+* Register a reusable bridge theorem with `@[crush_reconstruct]`.
+* Use cvc5 with `crush.reconstruct "auto"` to try Alethe before core
+  reconstruction.
+* Restructure the theorem into smaller kernel-checkable steps.
+* Use `"reconstructOrTrust"` for an explicit warning and trusted fallback.
+* Accept `"trust"` and audit the `Crush.crushSorry` dependency with
   `#print axioms`.
+
+Choose the extension according to the reported Alethe failure.
+A `term-gap` needs a term decoder, while a `rule-gap` needs an inference
+registration.
+If cvc5 did not emit a certificate, no replay extension can recover one; use
+core reconstruction, a manual `using` finisher, or a different proof
+decomposition.
 
 Do not interpret reconstruction failure as evidence that the goal is false.
 It means only that lean-crush could not construct a checked Lean proof for the
 solver's refutation.
+
+To inspect core reconstruction attempts without dumping SMT-LIB:
+
+```
+set_option trace.crush.reconstruct true
+set_option trace.crush.result true
+```
 
 # Known Boundaries
 
