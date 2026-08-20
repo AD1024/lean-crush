@@ -27,6 +27,9 @@ lake env lean -Dcrush.backend=cvc5 MyProofs.lean
 ```
 
 # How the Main Options Compose
+%%%
+tag := "configuration-composition"
+%%%
 
 Three option families make independent decisions:
 
@@ -48,11 +51,16 @@ set_option crush.reconstruct "auto"
 Changing between `"auto"` and `"core"` does not affect discharge under
 `crush.trust "trust"`.
 Conversely, changing to `crush.trust "reconstruct"` does not force Alethe:
-Z3 and Bitwuzla can still use core-directed reconstruction.
+Z3 can use core-directed reconstruction. Bitwuzla currently returns neither an
+unsat core nor a proof certificate, so an assumption-dependent checked proof
+normally requires another backend.
 Selecting `crush.reconstruct "alethe"` with an unsupported backend is an error
 rather than a silent fallback, even under a trusting policy.
 
 # Solver Process
+%%%
+tag := "configuration-solver"
+%%%
 
 {optionDocs crush.backend}
 
@@ -85,7 +93,8 @@ solver verdict is available to justify omitting quantified fallbacks.
 
 {optionDocs crush.additionalArgs}
 
-The string is split on ASCII whitespace.
+The string is split at literal spaces, with surrounding ASCII whitespace trimmed
+from each resulting argument.
 There is no shell-style quoting layer, so use this option for simple individual
 flags rather than arguments containing spaces.
 
@@ -94,8 +103,14 @@ flags rather than arguments containing spaces.
 Leave this empty unless a solver requires a narrower logic or a generated query
 is being debugged.
 The automatic logic is `ALL`, or `HO_ALL` for native higher-order cvc5.
+Bitwuzla maps the automatic choice to `QF_AUFBV`, its supported fragment.
+An explicit `crush.logic` value is authoritative and is not rewritten for the
+selected backend.
 
 # Trust and Reconstruction
+%%%
+tag := "configuration-reconstruction"
+%%%
 
 {optionDocs crush.trust}
 
@@ -116,8 +131,9 @@ The values are:
 * `"core"` ignores certificates and runs only the core-directed finisher ladder.
 
 Alethe replay requires cvc5 1.3 or newer.
-The core path works with any backend, but one of Lean's finishers must be able to
-re-prove the result from the selected unsat-core hypotheses.
+The core path requires an unsat core, which Z3 and cvc5 provide, and one of
+Lean's finishers must be able to re-prove the result from those hypotheses.
+Bitwuzla does not currently return an unsat core or a proof certificate.
 
 Use `"auto"` for ordinary checked proofs.
 Use `"alethe"` when testing replay coverage, because a core fallback would hide
@@ -168,6 +184,9 @@ example (a b : BitVec 8) :
 ```
 
 # Higher-Order Translation
+%%%
+tag := "configuration-higher-order"
+%%%
 
 {optionDocs crush.ho.mode}
 
@@ -187,13 +206,17 @@ set_option crush.ho.mode "native"
 Backend `"none"` also preserves native higher-order syntax when exporting a
 query without solving it.
 Defunctionalization converts functions and partial applications to ordinary
-first-order closure values and is portable across all backends.
+first-order closure values and does not require a higher-order backend.
+Its generated query must still fit the backend's ordinary first-order fragment.
 Native mode preserves function sorts and application for cvc5.
 It can avoid a large closure encoding, but cvc5 may not emit an Alethe
 certificate for the resulting higher-order proof; use core reconstruction or a
 trusting policy in that case.
 
 # Monomorphization
+%%%
+tag := "configuration-monomorphization"
+%%%
 
 {optionDocs crush.mono.fuel}
 
@@ -217,6 +240,9 @@ specializations.
 Reconstruction already asks Lean's kernel to check the final proof.
 
 # Ground Instantiation
+%%%
+tag := "configuration-instantiation"
+%%%
 
 {optionDocs crush.inst.fuel}
 
@@ -255,6 +281,9 @@ Writing an explicit fact list, including `crush [*]`, disables automatic library
 selection so the call remains reproducible and user-controlled.
 
 # Diagnostics
+%%%
+tag := "configuration-diagnostics"
+%%%
 
 {optionDocs crush.trace.script}
 

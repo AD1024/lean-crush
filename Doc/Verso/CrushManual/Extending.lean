@@ -22,6 +22,9 @@ adding a reconstruction rule does not change the SMT query.
 Identify which side failed before choosing an API.
 
 # Choosing an Extension Point
+%%%
+tag := "extending-choose"
+%%%
 
 ## When SMT Lacks Semantics
 
@@ -34,16 +37,17 @@ Choose the least powerful mechanism that represents the missing semantics:
 
 1. Use `u[f]`, `d[f]`, `@[crush_unfold]`, or `@[crush_defeq]` when Lean's own
    equations are finite and solver-friendly.
-2. Use `crush_map` when a Lean constant is exactly an existing SMT operator.
+2. Use `crush_map` when a Lean constant is exactly an existing SMT operator, or
+   `crush_map_sort` when a monomorphic Lean type is exactly an existing nullary
+   SMT sort.
 3. Use `@[crush_lower f]` when one stable application head needs a
    shape-sensitive encoding.
 4. Use `@[crush_lower_result T]` when applications have unstable heads but a
    stable result-family head, including dependent function results.
 5. Use `@[crush_translate]` only when dispatch spans several heads or
    intentionally overrides head-indexed and built-in translation.
-6. Use `crush_map_sort` for a fixed nullary SMT sort, or
-   `@[crush_translate_sort]` for a parameterized or representation-sensitive
-   sort.
+6. Use `@[crush_translate_sort]` for a parameterized or
+   representation-sensitive sort.
 
 Equation support is the safest starting point because Lean already proves the
 equations and reconstruction can reuse them.
@@ -70,56 +74,10 @@ The last two operate on individual certificate terms and steps.
 An Alethe-only run does not consult `@[crush_reconstruct]`, while core-only
 reconstruction does not consult replay registrations.
 
-# Extending Checked Reconstruction
-
-Translation and proof reconstruction are separate extension points.
-When SMT already understands enough semantics to report `unsat`, but
-`crush.trust "reconstruct"` needs a domain theorem to rebuild the argument,
-register it with `@[crush_reconstruct]`:
-
-```lean
-inductive Phase where
-  | initial
-  | next (previous : Phase)
-
-def Advances (source target : Phase) : Prop :=
-  target = .next source
-
-@[crush_reconstruct]
-theorem advancesNext (phase : Phase) :
-    Advances phase (.next phase) :=
-  rfl
-```
-
-Registered theorems participate in bounded backward proof search.
-The search uses a structural index to match their conclusion against the current
-reconstruction goal,
-solves their premises with the core-restricted Lean finishers, and checks the
-resulting term with Lean's kernel.
-It is datatype-independent, so downstream libraries can register bridge lemmas
-for their own inductive types and relations without adding those rules wholesale
-to `grind`.
-
-This attribute does not send a theorem to SMT.
-If the solver also needs the fact, pass it to `crush [...]`, expose equations
-with `@[crush_unfold]`, or define a lowering as described below.
-
-Use a local attribute when the theorem should affect only one section:
-
-```lean
-theorem initialAdvances :
-    Advances .initial (.next .initial) :=
-  rfl
-
-attribute [local crush_reconstruct] initialAdvances
-```
-
-Unlike `with [advancesNext phase]`, the registered theorem is matched lazily
-against reconstruction goals and can be applied at different arguments.
-Unlike `using`, it supplies a declarative rule rather than a complete tactic
-script.
-
 # Equation-Based Support
+%%%
+tag := "extending-equations"
+%%%
 
 Use `u[f]` or `d[f]` at one call site.
 Use attributes when the definition should be available wherever it is relevant:
@@ -160,6 +118,9 @@ Equation-based support is the simplest choice when unfolding is finite and does
 not create solver quantifier loops.
 
 # Direct Symbol Mappings
+%%%
+tag := "extending-mappings"
+%%%
 
 `crush_map` recursively translates the arguments and applies an existing SMT
 symbol:
@@ -228,6 +189,9 @@ sorts already declared elsewhere.
 Use a full handler when a fresh declaration is required.
 
 # Targeted Lowerings
+%%%
+tag := "extending-targeted"
+%%%
 
 `@[crush_lower target]` registers a handler only for applications whose head is
 `target`.
@@ -257,8 +221,9 @@ example (x : Int) (hx : 0 ≤ x) :
 The `(smt| ...)` quotation is a shallow embedding of SMT-LIB terms.
 Symbols, numerals, strings, and applications use SMT-LIB syntax.
 `$term` splices an existing `Crush.SMT.Term`.
-The quotation constructs lean-crush's typed SMT syntax tree; it does not insert
-an unchecked command string.
+The quotation constructs a structured `Crush.SMT.Term`; it does not insert an
+unchecked command string. lean-crush validates the sorts of the final script
+before invoking a solver.
 
 Multiple handlers may target the same declaration.
 As shown by `lowerClampNonnegative`, a numeric priority or `high`/`low` controls
@@ -280,6 +245,9 @@ synthesis; a higher-priority global instance can change that baseline.
 parameters make full definitional equality impractical.
 
 # Dependent Result Lowerings
+%%%
+tag := "extending-result"
+%%%
 
 `@[crush_lower_result T]` dispatches on a term's result-family head instead of
 its application head.
@@ -354,6 +322,9 @@ The built-in handler is registered for both `Decidable` and the named
 `DecidableEq` alias.
 
 # General Handlers
+%%%
+tag := "extending-general"
+%%%
 
 `@[crush_translate]` registers a `TranslationHandler` that can inspect every
 term head.
@@ -415,7 +386,216 @@ example (x y : Int) (h : x = y) :
   crush
 ```
 
+# Parameterized Sort Handlers
+%%%
+tag := "extending-sorts"
+%%%
+
+`@[crush_translate_sort]` is the sort-level counterpart to
+`@[crush_translate]`.
+It can inspect type arguments and recursively translate them with
+`ctx.emitSort`.
+
+Use `crush_map_sort` when a monomorphic Lean type always maps to one existing
+nullary SMT sort.
+Use a sort handler when the target sort depends on Lean type arguments, needs
+guards, or requires declarations.
+
+A total Lean map is exactly the model provided by SMT Array theory.
+The sort handler maps `TotalMap key value` to `(Array key value)`, while term
+handlers map lookup and update to `select` and `store`:
+
+```lean
+open Crush
+
+structure TotalMap (κ ν : Type) where
+  fn : κ → ν
+
+namespace TotalMap
+
+def get {κ ν : Type}
+    (m : TotalMap κ ν) (k : κ) : ν :=
+  m.fn k
+
+def set {κ ν : Type} [DecidableEq κ]
+    (m : TotalMap κ ν)
+    (k : κ) (v : ν) : TotalMap κ ν :=
+  ⟨fun k' => if k' = k then v else m.fn k'⟩
+
+end TotalMap
+
+@[crush_translate_sort]
+def translateTotalMapSort : SortHandler := fun ctx => do
+  let .const ``TotalMap _ := ctx.fn
+    | return none
+  let #[key, value] := ctx.args | return none
+  let keySort ← ctx.emitSort key
+  let valueSort ← ctx.emitSort value
+  return some (.app (.symb "Array")
+    #[keySort, valueSort])
+
+@[crush_lower TotalMap.get]
+def translateTotalMapGet :
+    TranslationHandler := fun ctx => do
+  let #[keyTy, valueTy, map, key] := ctx.args
+    | return none
+  let mapSort ← ctx.emitSort (← Lean.Meta.inferType map)
+  let keySort ← ctx.emitSort keyTy
+  let valueSort ← ctx.emitSort valueTy
+  unless mapSort ==
+      .app (.symb "Array") #[keySort, valueSort] do
+    return none
+  let smap ← ctx.emitTerm map
+  let skey ← ctx.emitTerm key
+  return some (smt| (select $smap $skey))
+
+@[crush_lower TotalMap.set]
+def translateTotalMapSet :
+    TranslationHandler := fun ctx => do
+  let #[keyTy, valueTy, _, map, key, value] := ctx.args
+    | return none
+  let mapSort ← ctx.emitSort (← Lean.Meta.inferType map)
+  let keySort ← ctx.emitSort keyTy
+  let valueSort ← ctx.emitSort valueTy
+  unless mapSort ==
+      .app (.symb "Array") #[keySort, valueSort] do
+    return none
+  let smap ← ctx.emitTerm map
+  let skey ← ctx.emitTerm key
+  let svalue ← ctx.emitTerm value
+  return some (smt| (store $smap $skey $svalue))
+
+example (m : TotalMap Int Int) (k value : Int) :
+    TotalMap.get (TotalMap.set m k value) k = value := by
+  crush
+```
+
+Operation lowerings must agree with the selected representation.
+They should return `none` when the operand's type or another sort handler's
+representation does not match their encoding.
+
+# Extending Finite Arrays
+%%%
+tag := "extending-arrays"
+%%%
+
+Downstream Array operations can reuse lean-crush's canonical finite-array
+representation through `withFiniteArray`.
+The callback receives a let-bound Array value, its logical length, its SMT array
+data, and a constructor helper:
+
+```lean
+open Crush
+
+def overwriteFirst {α : Type}
+    (xs : Array α) (value : α) : Array α :=
+  xs.setIfInBounds 0 value
+
+@[crush_lower overwriteFirst]
+def lowerOverwriteFirst : LoweringHandler := fun ctx => do
+  let #[elem, xs, value] := ctx.args | return none
+  let svalue ← ctx.emitTerm value
+  withFiniteArray ctx elem xs fun view => do
+    let data := (smt| (store $(view.data) 0 $svalue))
+    let updated := view.mkValue view.length data
+    return (smt| (ite (> $(view.length) 0)
+      $updated $(view.value)))
+
+example (xs : Array Int) (value : Int) (_h : 0 < xs.size) :
+    (overwriteFirst xs value)[0]! = value := by
+  crush
+```
+
+`withFiniteArray` returns `none` if a custom sort handler selected another
+representation.
+It also inserts an SMT `let`, preventing repeated selectors from duplicating a
+nested update term.
+
+# Soundness Checklist
+%%%
+tag := "extending-soundness"
+%%%
+
+Before registering a lowering:
+
+* Match the complete elaborated argument spine, including type and instance
+  arguments.
+* Check overloaded instances rather than assuming they are canonical.
+* Recurse through `ctx.emitTerm` and `ctx.emitSort`.
+* Verify operand sorts and return `none` for unsupported types or
+  representations.
+* Use `ctx.declare` for fresh SMT symbols.
+* Preserve Lean's behavior at boundary cases such as division by zero and
+  out-of-bounds indexing.
+* Add a negative regression demonstrating that the encoding cannot prove an
+  arbitrary result.
+
+Under `crush.trust "reconstruct"`, Lean checks the final proof, but an incorrect
+lowering still causes confusing failures.
+Under the default trust policy, translation correctness is part of the trusted
+computing base.
+
+# Extending Checked Reconstruction
+%%%
+tag := "extending-reconstruction"
+%%%
+
+Translation and proof reconstruction are separate extension points.
+When SMT already understands enough semantics to report `unsat`, but
+`crush.trust "reconstruct"` needs a domain theorem to rebuild the argument,
+register it with `@[crush_reconstruct]`:
+
+```lean
+inductive Phase where
+  | initial
+  | next (previous : Phase)
+
+def Advances (source target : Phase) : Prop :=
+  target = .next source
+
+@[crush_reconstruct]
+theorem advancesNext (phase : Phase) :
+    Advances phase (.next phase) :=
+  rfl
+
+set_option crush.trust "reconstruct" in
+example (phase : Phase) :
+    Advances phase (.next phase) := by
+  crush d[Advances]
+```
+
+Registered theorems participate in bounded backward proof search.
+The search uses a structural index to match their conclusion against the current
+reconstruction goal,
+solves their premises with the core-restricted Lean finishers, and checks the
+resulting term with Lean's kernel.
+It is datatype-independent, so downstream libraries can register bridge lemmas
+for their own inductive types and relations without adding those rules wholesale
+to `grind`.
+
+This attribute does not send a theorem to SMT.
+If the solver also needs the fact, pass it to `crush [...]`, expose equations
+with `@[crush_unfold]`, or define a lowering as described above.
+
+Use a local attribute when the theorem should affect only one section:
+
+```lean
+theorem initialAdvances :
+    Advances .initial (.next .initial) :=
+  rfl
+
+attribute [local crush_reconstruct] initialAdvances
+```
+
+Unlike `with [advancesNext phase]`, the registered theorem is matched lazily
+against reconstruction goals and can be applied at different arguments.
+Unlike `using`, it supplies a declarative rule rather than a complete tactic
+script.
+
 # Extending Alethe Replay
+%%%
+tag := "extending-alethe"
+%%%
 
 Alethe replay has two extension layers:
 
@@ -432,6 +612,68 @@ introduces an SMT operator that may appear in the certificate.
 A rule registration is a proof procedure: use it when terms already decode but
 one named Alethe inference is unsupported.
 Adding one does not substitute for the other.
+
+## Replay DSL Syntax
+
+The registration commands have the following EBNF.
+`lean-term`, `lean-type`, and `tactic-sequence` are ordinary Lean syntax;
+`priority` is `low`, `high`, or a natural number.
+
+```
+term-registration ::=
+  "register_crush_replay" "term" [priority] "<<"
+    term-pattern {"|" term-pattern}
+    "=>" lean-term ">>"
+
+rule-registration ::=
+  "register_crush_replay" "rule" [priority] "<<"
+    rule-pattern {"|" rule-pattern}
+    ["if" lean-term]
+    "=>" "by" tactic-sequence ">>"
+
+term-pattern ::=
+    "(" symbol {expr-pattern} ")"
+  | "(" "(" "_" symbol {sexp-pattern} ")" {expr-pattern} ")"
+
+rule-pattern ::= "(" symbol {sexp-pattern} ")"
+symbol       ::= identifier | string-literal
+
+expr-pattern ::=
+    "_"
+  | ".."
+  | "(term" identifier [":" lean-type] ")"
+
+sexp-pattern ::=
+    "_"
+  | ".."
+  | identifier
+  | natural
+  | string-literal
+  | "(atom" string-literal ")"
+  | "(sexp" identifier ")"
+  | "(term" identifier [":" lean-type] ")"
+  | "(nat" identifier ")"
+  | "(int" identifier ")"
+  | "(string" identifier ")"
+  | "(atom" identifier ")"
+  | "(sort" identifier ")"
+  | "(prop" identifier ")"
+  | "(" {sexp-pattern} ")"
+```
+
+An ordinary term pattern matches an SMT operator whose arguments have already
+been decoded to Lean expressions.
+The `(_ operator indices...)` form additionally matches an indexed SMT
+identifier, while a rule pattern matches an Alethe rule name and its raw
+`:args`.
+`..` is permitted only as the final pattern in an argument list.
+Every capture name must occur once per alternative, and all `|` alternatives
+must bind the same names.
+Only rule registrations accept an `if` condition, and only their right-hand
+side is a tactic script.
+The outer `<< ... >>` fence reserves `>>` as its closing delimiter, and `=>`
+separates a rule condition from its tactic. Define a named Lean value when a
+condition itself would otherwise need either token.
 
 ## Define an Inverse Term
 
@@ -693,133 +935,3 @@ The first failure classification identifies the layer to address:
 Alethe inference replay.
 In strict `crush.reconstruct "alethe"` mode, every required inference must be
 supported by Alethe replay itself.
-
-# Parameterized Sort Handlers
-
-`@[crush_translate_sort]` is the sort-level counterpart to
-`@[crush_translate]`.
-It can inspect type arguments and recursively translate them with
-`ctx.emitSort`.
-
-Use `crush_map_sort` when a monomorphic Lean type always maps to one existing
-nullary SMT sort.
-Use a sort handler when the target sort depends on Lean type arguments, needs
-guards, or requires declarations.
-
-A total Lean map is exactly the model provided by SMT Array theory.
-The sort handler maps `TotalMap key value` to `(Array key value)`, while term
-handlers map lookup and update to `select` and `store`:
-
-```lean
-open Crush
-
-structure TotalMap (κ ν : Type) where
-  fn : κ → ν
-
-namespace TotalMap
-
-def get {κ ν : Type}
-    (m : TotalMap κ ν) (k : κ) : ν :=
-  m.fn k
-
-def set {κ ν : Type} [DecidableEq κ]
-    (m : TotalMap κ ν)
-    (k : κ) (v : ν) : TotalMap κ ν :=
-  ⟨fun k' => if k' = k then v else m.fn k'⟩
-
-end TotalMap
-
-@[crush_translate_sort]
-def translateTotalMapSort : SortHandler := fun ctx => do
-  let .const ``TotalMap _ := ctx.fn
-    | return none
-  let #[key, value] := ctx.args | return none
-  let keySort ← ctx.emitSort key
-  let valueSort ← ctx.emitSort value
-  return some (.app (.symb "Array")
-    #[keySort, valueSort])
-
-@[crush_translate]
-def translateTotalMapGet :
-    TranslationHandler := fun ctx => do
-  let .const ``TotalMap.get _ := ctx.fn
-    | return none
-  let #[_, _, map, key] := ctx.args | return none
-  let smap ← ctx.emitTerm map
-  let skey ← ctx.emitTerm key
-  return some (smt| (select $smap $skey))
-
-@[crush_translate]
-def translateTotalMapSet :
-    TranslationHandler := fun ctx => do
-  let .const ``TotalMap.set _ := ctx.fn
-    | return none
-  let #[_, _, _, map, key, value] := ctx.args
-    | return none
-  let smap ← ctx.emitTerm map
-  let skey ← ctx.emitTerm key
-  let svalue ← ctx.emitTerm value
-  return some (smt| (store $smap $skey $svalue))
-
-example (m : TotalMap Int Int) (k value : Int) :
-    TotalMap.get (TotalMap.set m k value) k = value := by
-  crush
-```
-
-Operation lowerings must agree with the selected representation.
-They should return `none` when the operand's type or another sort handler's
-representation does not match their encoding.
-
-# Extending Finite Arrays
-
-Downstream Array operations can reuse lean-crush's canonical finite-array
-representation through `withFiniteArray`.
-The callback receives a let-bound Array value, its logical length, its SMT array
-data, and a constructor helper:
-
-```lean
-open Crush
-
-def overwriteFirst {α : Type}
-    (xs : Array α) (value : α) : Array α :=
-  xs.setIfInBounds 0 value
-
-@[crush_lower overwriteFirst]
-def lowerOverwriteFirst : LoweringHandler := fun ctx => do
-  let #[elem, xs, value] := ctx.args | return none
-  let svalue ← ctx.emitTerm value
-  withFiniteArray ctx elem xs fun view => do
-    let data := (smt| (store $(view.data) 0 $svalue))
-    let updated := view.mkValue view.length data
-    return (smt| (ite (> $(view.length) 0)
-      $updated $(view.value)))
-
-example (xs : Array Int) (value : Int) (_h : 0 < xs.size) :
-    (overwriteFirst xs value)[0]! = value := by
-  crush
-```
-
-`withFiniteArray` returns `none` if a custom sort handler selected another
-representation.
-It also inserts an SMT `let`, preventing repeated selectors from duplicating a
-nested update term.
-
-# Soundness Checklist
-
-Before registering a lowering:
-
-* Match the complete elaborated argument spine, including type and instance
-  arguments.
-* Check overloaded instances rather than assuming they are canonical.
-* Recurse through `ctx.emitTerm` and `ctx.emitSort`.
-* Return `none` for unsupported types or representations.
-* Use `ctx.declare` for fresh SMT symbols.
-* Preserve Lean's behavior at boundary cases such as division by zero and
-  out-of-bounds indexing.
-* Add a negative regression demonstrating that the encoding cannot prove an
-  arbitrary result.
-
-Under `crush.trust "reconstruct"`, Lean checks the final proof, but an incorrect
-lowering still causes confusing failures.
-Under the default trust policy, translation correctness is part of the trusted
-computing base.

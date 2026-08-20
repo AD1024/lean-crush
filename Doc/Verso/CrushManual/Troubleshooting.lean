@@ -11,6 +11,9 @@ tag := "troubleshooting"
 %%%
 
 # Classify the Failure First
+%%%
+tag := "troubleshooting-classify"
+%%%
 
 Do not increase every timeout and fuel bound at once.
 The user-visible result identifies the failing pipeline stage:
@@ -66,6 +69,9 @@ Use the smallest change that establishes the missing semantics:
 solver.
 
 # Timeout or Unknown
+%%%
+tag := "troubleshooting-timeout"
+%%%
 
 First enable `crush.profile`.
 The remedy depends on the expensive phase:
@@ -87,6 +93,9 @@ An unrelated quantified lemma can trigger an unbounded solver matching loop.
 Prefer the smallest explicit set that contains the needed argument.
 
 # Inspecting SMT-LIB
+%%%
+tag := "troubleshooting-smt"
+%%%
 
 Use `crush.save` to write the final query:
 
@@ -111,6 +120,9 @@ the generated script.
 decision points without dumping the whole query.
 
 # Reconstruction Fails After Unsat
+%%%
+tag := "troubleshooting-reconstruction"
+%%%
 
 Solving and proof reconstruction have different capabilities.
 SMT can prove datatype cardinality, finite-array, native higher-order, or long
@@ -122,8 +134,8 @@ conversion.
 
 Available choices are:
 
-* Add `with [lemma, h]` when a checked bridge fact is needed only during this
-  invocation.
+* Add `with [lemma, h]` when core reconstruction needs a checked bridge fact
+  only during this invocation.
 * Add `using (tactics)` when the core facts support a short manual Lean proof.
 * Register a reusable bridge theorem with `@[crush_reconstruct]`.
 * Use cvc5 with `crush.reconstruct "auto"` to try Alethe before core
@@ -139,6 +151,8 @@ registration.
 If cvc5 did not emit a certificate, no replay extension can recover one; use
 core reconstruction, a manual `using` finisher, or a different proof
 decomposition.
+Core reconstruction requires an unsat core. Z3 and cvc5 provide one; Bitwuzla
+currently does not.
 
 Do not interpret reconstruction failure as evidence that the goal is false.
 It means only that lean-crush could not construct a checked Lean proof for the
@@ -152,6 +166,9 @@ set_option trace.crush.result true
 ```
 
 # Known Boundaries
+%%%
+tag := "troubleshooting-boundaries"
+%%%
 
 lean-crush intentionally does not perform induction.
 Drive induction in Lean and invoke `crush` on the resulting cases.
@@ -171,8 +188,8 @@ Finite arrays support local reads and updates.
 Operations that transform a symbolic range, including `append`, `extract`,
 `map`, and `filter`, generally need quantified lemmas or custom lowerings.
 
-Higher-order combinator mode is not implemented.
-Use the default defunctionalized mode or cvc5 native mode.
+Native higher-order solving is cvc5-only and currently lacks Alethe
+certificates. Use defunctionalization for portable solving and replay.
 
 # Reporting a Minimal Failure
 

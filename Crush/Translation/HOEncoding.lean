@@ -10,7 +10,8 @@ The layer that makes `crush` usable on higher-order goals. Two strategies,
 selected by `crush.ho.mode`:
 
 * **`defunctionalize`** (default) — λ-lifting into per-arrow-sort `apply` symbols.
-  Keeps everything in first-order logics that *every* backend supports.
+  Avoids native higher-order syntax, though the resulting first-order query must
+  still fit the selected backend's theory and quantifier support.
 * **`native`** — emit higher-order SMT-LIB and let a HO-capable solver (cvc5)
   handle application directly.
 

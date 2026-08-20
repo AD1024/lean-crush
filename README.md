@@ -137,7 +137,7 @@ def N.add : N → N → N
   | x, .Z   => x
   | x, .S y => .S (N.add x y)
 
-theorem add_succ (x y : N) : N.add x (N.S y) = N.S (N.add x y) := by
+theorem zero_add (x : N) : N.add .Z x = x := by
   induction x with
   | Z => crush            -- @[crush_unfold] on N.add supplies its equations
   | S x ih => crush [ih]  -- feed the induction hypothesis as a fact
@@ -173,10 +173,11 @@ theorem advancesNext (phase : Phase) : Advances phase (.next phase) :=
   rfl
 ```
 
-`@[crush_reconstruct]` affects only kernel-checked replay. It does not send the theorem to
-SMT; use `crush [...]`, `@[crush_unfold]`, or a lowering when the solver also needs the
-fact's semantics. Rules are indexed by their conclusion and searched to a fixed depth, so
-rules for unrelated datatypes are not added wholesale to `grind`.
+`@[crush_reconstruct]` affects only kernel-checked core reconstruction. It does not send
+the theorem to SMT or participate in Alethe replay; use `crush [...]`,
+`@[crush_unfold]`, or a lowering when the solver also needs the fact's semantics.
+Rules are indexed by their conclusion and searched to a fixed depth, so rules for
+unrelated datatypes are not added wholesale to `grind`.
 
 Other behaviour is controlled by `set_option`s (`crush.backend`, `crush.timeout`, and
 others); each carries its own documentation where it is declared.
@@ -210,7 +211,8 @@ proof from it takes one of two routes:
   higher-order terms, including nested Alethe subproof blocks.
 - **reconstructing from the unsat core** — the solver reports which few hypotheses actually
   mattered, and a Lean tactic redoes the argument from just those. This needs no
-  certificate, so it works with any backend.
+  certificate, but it does require a backend-provided unsat core. Z3 and cvc5 provide
+  one; Bitwuzla currently does not.
 
 Beyond plain logic and arithmetic, lean-crush covers bitvectors, string length,
 append, emptiness, String-pattern prefix/suffix/containment, and your own
@@ -249,8 +251,8 @@ particular procedure implementation. Pair a result lowering with a compatible
 
 The `(smt| ...)` quotation is a shallow embedding of SMT-LIB terms. Symbols,
 applications, numerals, Booleans, and strings use SMT-LIB syntax; `$term` splices an
-existing `Crush.SMT.Term`. The result is still the typed SMT term representation, not
-an unchecked string.
+existing `Crush.SMT.Term`. The result is a structured term representation, not an
+unchecked string; lean-crush sort-checks the final SMT script.
 
 When a custom lowering emits an SMT operator that checked replay does not know,
 register its inverse with the replay DSL:
@@ -338,14 +340,15 @@ def lowerOverwriteFirst : Crush.LoweringHandler := fun ctx => do
 
 `withFiniteArray` returns `none` if another sort handler has replaced Array's
 representation, and inserts an SMT `let` so nested updates are not duplicated.
-The built-in lowerings use this API for `size`, bounded/defaulting/optional
+The built-in lowerings use this API for `replicate`, `size`, bounded/defaulting/optional
 indexing, `set`/`setIfInBounds`/`set!`, `push`, `pop`, `swap`/
 `swapIfInBounds`, `isEmpty`, `back!`, and `back?`.
 
 ## Limitations
 
-- **No induction.** A goal needing a hypothesis about all smaller values times out. Drive the
-  `induction` yourself and let `crush` close each case — that is the intended workflow.
+- **No induction.** A goal needing an inductive hypothesis will not be solved merely by
+  increasing the timeout. Drive the `induction` yourself and let `crush` close each case —
+  that is the intended workflow.
 - **Not every function translates.** Arithmetic, canonical divisibility, `Bool`, `String`,
   `BitVec`, and your own inductive types do; some library operations such as `Finset.card`
   do not, and an untranslated one becomes uninterpreted — so the solver reports a
@@ -360,8 +363,9 @@ indexing, `set`/`setIfInBounds`/`set!`, `push`, `pop`, `swap`/
   values do not yet have a codepoint encoding, positions are UTF-8 byte offsets,
   numeric parsers accept underscores, and SMT-LIB's string alphabet ends at
   `U+2FFFF` while Lean's does not.
-- **A goal is only as strong as its premises.** A missing premise makes the query unprovable,
-  which surfaces as a *timeout* — so check the goal actually follows before blaming the solver.
+- **A goal is only as strong as its premises.** A missing premise usually leaves the
+  encoded negation satisfiable, and quantifiers can instead make the solver return
+  `unknown` — so check the goal actually follows before blaming the solver.
 - **Reconstruction is narrower than solving.** Under `crush.trust "reconstruct"`, some goals
   the solver proves cannot be replayed as a Lean proof. In particular, cvc5 1.3 does not emit
   Alethe certificates for finite-datatype exhaustiveness, finite-array reasoning, or native

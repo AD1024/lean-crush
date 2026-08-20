@@ -12,6 +12,9 @@ tag := "using-crush"
 %%%
 
 # Tactic Syntax
+%%%
+tag := "using-crush-syntax"
+%%%
 
 The full tactic grammar is:
 
@@ -28,13 +31,17 @@ These clauses act at different stages:
 
 * `[...]` chooses propositions for the SMT query.
 * `u[...]` and `d[...]` add defining equations to the SMT query.
-* `with [...]` supplies proof terms only to checked reconstruction.
-* `using` supplies a final Lean tactic only to checked reconstruction.
+* `with [...]` supplies proof terms only to checked core reconstruction.
+* `using` supplies a final Lean tactic only to checked core reconstruction.
 
 The last two clauses are rejected under `crush.trust "trust"` because trusted
-mode does not attempt reconstruction.
+mode does not attempt reconstruction. They do not affect Alethe certificate
+replay, which reconstructs individual solver steps instead of the original goal.
 
 # Choosing Solver Facts
+%%%
+tag := "using-crush-facts"
+%%%
 
 ## Bare, Restricted, and Extended Calls
 
@@ -114,6 +121,9 @@ Writing any explicit list, including `crush [*]`, disables premise selection.
 Once the relevant theorems are known, prefer naming them explicitly.
 
 # Exposing Definitions
+%%%
+tag := "using-crush-definitions"
+%%%
 
 An untranslated function is treated as uninterpreted.
 That is sound, but its defining equations are unavailable unless they are
@@ -163,8 +173,11 @@ nothing to a query that cannot reach it.
 `u[...]` and `d[...]` clauses still apply.
 
 # Helping Checked Reconstruction
+%%%
+tag := "using-crush-reconstruction"
+%%%
 
-The solver and Lean's proof reconstruction have different inputs.
+The solver and Lean's core-directed reconstruction have different inputs.
 A fact in `[...]` is available while solving and may also appear in the unsat
 core.
 A fact in `with [...]` is withheld from SMT and becomes available only after the
@@ -210,9 +223,13 @@ Use these mechanisms at different scales:
   throughout a module or library.
 * `register_crush_replay` extends step-by-step Alethe certificate replay.
 
+The first three mechanisms are not consulted by Alethe replay.
 The extension chapter gives examples of the two persistent mechanisms.
 
 # Drive Induction in Lean
+%%%
+tag := "using-crush-induction"
+%%%
 
 lean-crush does not discover induction schemes.
 Perform induction or case analysis in Lean and use `crush` as the case solver:
@@ -227,14 +244,17 @@ def Unary.add : Unary → Unary → Unary
   | x, .zero => x
   | x, .succ y => .succ (Unary.add x y)
 
-theorem Unary.addSucc (x y : Unary) :
-    Unary.add x (.succ y) = .succ (Unary.add x y) := by
+theorem Unary.zeroAdd (x : Unary) :
+    Unary.add .zero x = x := by
   induction x with
   | zero => crush
   | succ x ih => crush [ih]
 ```
 
 # Supported Data
+%%%
+tag := "using-crush-supported-data"
+%%%
 
 The built-in translator handles:
 
@@ -257,7 +277,7 @@ example (x : BitVec 16) : x ^^^ x = 0 := by
   crush
 ```
 
-Finite arrays support `size`, bounded/defaulting/optional indexing,
+Finite arrays support `replicate`, `size`, bounded/defaulting/optional indexing,
 `set`, `setIfInBounds`, `set!`, `push`, `pop`, `swap`,
 `swapIfInBounds`, `isEmpty`, `back!`, and `back?`.
 Their read-over-write behavior is handled directly by SMT array theory:
@@ -278,6 +298,9 @@ Operations that copy a symbolic range, such as `append`, `extract`, `map`, and
 encoding is quantified element-by-element.
 
 # Choosing a Proof Policy
+%%%
+tag := "using-crush-proof-policy"
+%%%
 
 The trust policy answers whether an SMT `unsat` verdict is sufficient to close
 the Lean goal:
@@ -293,8 +316,8 @@ When reconstruction is requested, `crush.reconstruct` chooses the algorithm:
 * `"alethe"` replays a cvc5 proof certificate one inference at a time. It is
   effective for long solver derivations but requires cvc5.
 * `"core"` ignores certificates and asks Lean tactics to prove the original
-  goal from the unsat-core facts. It works with every backend but must rediscover
-  the argument in Lean.
+  goal from the unsat-core facts. Z3 and cvc5 provide these cores; Bitwuzla
+  currently does not. The Lean tactics must rediscover the argument.
 * `"auto"` tries Alethe first and then core reconstruction.
 
 `crush.trust` and `crush.reconstruct` are independent.
@@ -302,6 +325,8 @@ Under `"trust"`, selecting `"auto"` or `"core"` does not change discharge
 because no checked proof is requested.
 Selecting `"alethe"` is still validated and therefore requires cvc5, even under
 a trusting policy.
+The `with [...]`, `using`, and `@[crush_reconstruct]` mechanisms customize only
+the core path.
 
 # Complete Integrations
 

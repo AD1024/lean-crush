@@ -64,8 +64,8 @@ reach, so this selects between them:
 
 * replaying the solver's proof certificate step by step (`Crush/Solver/AletheReplay.lean`),
   which needs cvc5 and handles long inference chains;
-* the core-directed finisher ladder (`Crush/Solver/Reconstruct.lean`), which works with any
-  backend but needs one Lean tactic to re-find the whole argument. -/
+* the core-directed finisher ladder (`Crush/Solver/Reconstruct.lean`), which requires a
+  backend-provided unsat core and one Lean tactic to re-find the whole argument. -/
 inductive ReconstructMode where
   /-- Try Alethe certificate replay first, then the finisher ladder. The default: replay
   reaches goals the ladder cannot, and declining is cheap, so trying both closes the most. -/
@@ -204,7 +204,8 @@ register_option crush.reconstruct : ReconstructMode := {
             neither can close a goal on the solver's word; they differ in reach. Alethe \
             replay handles long chains of trivial inferences (Boolean pigeonhole, deep EUF \
             conflicts) but needs cvc5 ≥ 1.3; the ladder needs one Lean tactic to re-find \
-            the whole argument but works with any backend. Under `alethe`, a goal whose \
+            the whole argument and an unsat core (available from Z3 and cvc5, but not \
+            currently Bitwuzla). Under `alethe`, a goal whose \
             certificate cannot be replayed fails rather than falling back — useful when \
             working on replay itself, where a silent fallback hides whether it worked."
 }

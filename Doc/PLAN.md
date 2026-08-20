@@ -793,7 +793,7 @@ constructs ordinary proof terms directly in `MetaM`.
 
 *Remaining work.* Add a live `sko_ex` regression when cvc5 emits one, re-run every
 `no-certificate` probe on solver upgrades, and add inverse decoders alongside new custom
-SMT operators. `Doc/ALETHE_COVERAGE.md` is the current coverage matrix.
+SMT operators. `Test/AletheReplay.lean` is the executable coverage record.
 
 **M5 — Ergonomics & scale. partial.** In rough priority order:
 1. The hint grammar (§7): `crush [h₁, …, *] (u[…]) (d[…])`. **done** — a user can now

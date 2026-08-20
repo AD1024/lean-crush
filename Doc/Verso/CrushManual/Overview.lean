@@ -14,13 +14,17 @@ tag := "overview"
 lean-crush is a leaf-proof tactic for goals that become constraint problems
 after the surrounding proof has exposed the right facts.
 It translates Lean propositions to SMT-LIB, invokes an external solver, and
-either reports a model or turns an `unsat` result into a Lean proof according to
-the selected trust policy.
+reports the solver outcome. An `unsat` result becomes a Lean proof according to
+the selected trust policy; `sat` reports a model and `unknown` leaves the goal
+open.
 
 It is most useful for arithmetic, equality propagation, finite datatypes,
 arrays, quantified facts, and combinations of these theories.
 It does not replace induction, theorem selection for an entire library, or
 domain-specific proof decomposition.
+
+For installation, solver requirements, and a first proof, continue to
+{ref "getting-started"}[Getting Started].
 
 # What Happens During `crush`
 
@@ -43,6 +47,9 @@ This separation matters when diagnosing a failure.
 A missing equation is a collection or translation problem; an `unknown` result
 is a solver problem; and an `unsat` result followed by failure is a
 reconstruction problem.
+See {ref "troubleshooting-classify"}[Classify the Failure First] for the
+stage-by-stage diagnostic workflow and
+{ref "configuration-diagnostics"}[Diagnostics] for profiling and traces.
 
 # Constraint Solving
 
@@ -63,6 +70,10 @@ The solver treats an unsupported `f` as an uninterpreted function.
 That is enough for congruence, such as deriving `f a = f b` from `a = b`, but
 not enough to reason from the body of `f`.
 Expose equations or register a lowering when the implementation matters.
+The {ref "using-crush-supported-data"}[Supported Data] section lists the
+built-in theory surface, while
+{ref "using-crush-definitions"}[Exposing Definitions] explains how to reveal
+user-defined functions.
 
 ## Inductive Datatypes and Arrays
 
@@ -94,6 +105,10 @@ on each case.
 Operations that transform an entire symbolic range, such as `Array.map` or
 `Array.filter`, usually need a theorem or custom lowering rather than a larger
 solver timeout.
+See {ref "using-crush-induction"}[Drive Induction in Lean] for recursive proofs,
+{ref "using-crush-supported-data"}[Supported Data] for built-in array
+operations, and {ref "extending-arrays"}[Extending Finite Arrays] for custom
+operations over the canonical array encoding.
 
 # Controlling Knowledge
 
@@ -118,6 +133,8 @@ of the query.
 Use `crush.premises` instead when a bare call should ask Lean's
 `LibrarySuggestions` engine for likely library theorems.
 Writing any explicit list disables premise selection.
+See {ref "using-crush-facts"}[Choosing Solver Facts] for the exact behavior of
+bare calls, restricted lists, `*`, explicit lemmas, and premise selection.
 
 ## Polymorphism and Quantifiers
 
@@ -153,6 +170,9 @@ The passes are bounded to prevent search explosions.
 Raise `crush.mono.*` only for missing type specializations, and
 `crush.inst.*` only for missing term applications.
 Increasing one does not compensate for exhaustion in the other.
+The {ref "configuration-monomorphization"}[Monomorphization] and
+{ref "configuration-instantiation"}[Ground Instantiation] sections document
+their separate bounds, warnings, and fallback behavior.
 
 # Higher-Order Terms
 
@@ -167,7 +187,9 @@ example (applyAtTwo : (Int → Int) → Int)
 ```
 
 The default `crush.ho.mode "defunctionalize"` converts function values to
-first-order closure datatypes and works with every backend.
+first-order closure values without requiring native higher-order solver support.
+The resulting query must still fit the selected backend's ordinary theory and
+quantifier support.
 `crush.ho.mode "native"` preserves function sorts and application for cvc5's
 higher-order engine:
 
@@ -180,6 +202,8 @@ Native mode can give cvc5 more direct higher-order structure, but it is
 backend-specific and certificate support is narrower.
 Defunctionalization is the portable default and is usually the better starting
 point.
+See {ref "configuration-higher-order"}[Higher-Order Translation] for mode
+selection, backend restrictions, and reconstruction implications.
 
 # Trust and Checked Proofs
 
@@ -203,7 +227,8 @@ example (x y : Int) (hxy : x = y) (hy : y = 4) :
 policy requests reconstruction:
 
 * `"alethe"` replays cvc5's certificate step by step.
-* `"core"` asks Lean tactics to re-prove the result from the SMT unsat core.
+* `"core"` asks Lean tactics to re-prove the result from an SMT unsat core,
+  available from Z3 and cvc5 but not currently from Bitwuzla.
 * `"auto"` tries Alethe first and then core reconstruction.
 
 These are separate choices.
@@ -211,6 +236,11 @@ Under `crush.trust "trust"`, `"auto"` and `"core"` do not change how the goal is
 discharged because no checked proof is requested.
 The stricter `"alethe"` setting is still validated and therefore still requires
 the cvc5 backend.
+See {ref "using-crush-proof-policy"}[Choosing a Proof Policy] for the user
+workflow, {ref "configuration-reconstruction"}[Trust and Reconstruction] for
+the complete option semantics, and
+{ref "using-crush-reconstruction"}[Helping Checked Reconstruction] for
+per-invocation recovery mechanisms.
 
 # Extensibility
 
@@ -243,6 +273,16 @@ quantifiers, or when a Lean operation corresponds directly to an SMT theory
 operator.
 Reconstruction extensions do not change the SMT query, while translation
 extensions do.
+Start with {ref "extending-choose"}[Choosing an Extension Point].
+The detailed sections cover {ref "extending-equations"}[equation-based support],
+{ref "extending-mappings"}[direct symbol mappings],
+{ref "extending-targeted"}[targeted],
+{ref "extending-result"}[result-indexed], and
+{ref "extending-general"}[general term handlers],
+{ref "extending-sorts"}[sort handlers],
+{ref "extending-arrays"}[finite-array extensions],
+{ref "extending-reconstruction"}[core reconstruction rules], and
+{ref "extending-alethe"}[Alethe replay extensions].
 
 # Recommended Workflow
 
@@ -257,5 +297,8 @@ For a new proof:
 6. Add a translation or reconstruction extension only at the stage where the
    gap occurs.
 
-The remaining chapters provide the complete tactic grammar, option reference,
-extension APIs, and failure diagnostics.
+The {ref "using-crush-syntax"}[Tactic Syntax] section provides the complete
+grammar.
+For failures, use {ref "troubleshooting-classify"}[the diagnostic workflow],
+then inspect {ref "troubleshooting-smt"}[the generated SMT-LIB] or
+{ref "troubleshooting-reconstruction"}[reconstruction failures] as appropriate.
