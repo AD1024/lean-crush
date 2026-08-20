@@ -18,6 +18,8 @@ namespace Crush
 
 open SMT
 
+universe u
+
 /-- A decoded SMT application offered to a replay term handler. -/
 structure ReplayTermContext where
   /-- The ordinary or indexed SMT operator name. -/
@@ -121,6 +123,12 @@ structure ReplayRuleContext where
   decodeSort : Sexp → MetaM (Option Expr)
   toProp : Expr → MetaM Expr
   bindings : Array ReplayBinding := #[]
+
+/-- Retrieve a value captured by a replay pattern. -/
+def ReplayRuleContext.binding? (ctx : ReplayRuleContext) (name : Name) : Option Expr :=
+  let name := name.eraseMacroScopes
+  ctx.bindings.findSome? fun binding =>
+    if binding.name == name then some binding.value else none
 
 /-- Patterns over raw Alethe S-expressions. -/
 inductive ReplaySexpPattern where
@@ -450,6 +458,19 @@ abbrev ReplayRuleHandler := ReplayRuleContext → TacticM (Option Expr)
 
 instance : TypeName ReplayRuleHandler := unsafe (TypeName.mk _ ``ReplayRuleHandler)
 
+/-- Uniform callback used internally for conditional replay dispatch. -/
+abbrev ReplayConditionHandler := ReplayRuleContext → MetaM Bool
+
+instance : TypeName ReplayConditionHandler :=
+  unsafe (TypeName.mk _ ``ReplayConditionHandler)
+
+/-- Interface for values that decide whether a matched replay rule applies. -/
+class ReplayCondition (α : Type u) where
+  check : α → ReplayRuleContext → MetaM Bool
+
+instance : ReplayCondition ReplayConditionHandler where
+  check condition ctx := condition ctx
+
 private partial def withReplayBindings {α : Type}
     (bindings : Array ReplayBinding) (index : Nat) (locals : Array Expr)
     (k : Array Expr → TacticM α) : TacticM α := do
@@ -597,9 +618,15 @@ structure ReplayRuleAlternative where
   args : Array ReplaySexpPattern
   deriving Inhabited
 
+private structure ReplayConditionRef where
+  declName : Name
+  label : String
+  deriving Inhabited
+
 /-- A shallow inference replay registration retained as syntax and run natively. -/
 structure ReplayRulePatternHandler where
   alternatives : Array ReplayRuleAlternative
+  condition : Option ReplayConditionRef
   tactic : TSyntax `tactic
   priority : Nat
   deriving Inhabited
@@ -633,6 +660,7 @@ initialize crushReplayRulePatternExt :
 inductive ReplayRuleImplementation where
   | declaration (declName : Name) (handler : ReplayRuleHandler)
   | pattern (handler : ReplayRulePatternHandler)
+      (condition : Option (ReplayConditionRef × ReplayConditionHandler))
 
 /-- A resolved inference replay implementation and its dispatch priority. -/
 structure ResolvedReplayRuleHandler where
@@ -659,12 +687,21 @@ unsafe def getReplayRuleHandlersUnsafe : MetaM ReplayRuleRegistry := do
         throwError "failed to evaluate replay rule handler `{entry.declName}`: {error}"
     result := result.insert rule handlers
   for (rule, entries) in (crushReplayRulePatternExt.getState env).toList do
+    let entries ← entries.mapM fun entry => do
+      let condition ← entry.condition.mapM fun reference => do
+        match env.evalConst ReplayConditionHandler options reference.declName with
+        | .ok condition =>
+          return (reference, condition)
+        | .error error =>
+          throwError "failed to evaluate replay condition \
+            `{reference.label}`: {error}"
+      return (entry, condition)
     result := result.alter rule fun current =>
       let current := current.getD #[]
       some <| entries.foldl (init := current) fun result entry =>
         result.push {
-          priority := entry.priority
-          implementation := .pattern entry
+          priority := entry.1.priority
+          implementation := .pattern entry.1 entry.2
         }
   for (rule, handlers) in result.toList do
     result := result.insert rule
@@ -686,11 +723,19 @@ def runReplayRuleHandlers (registry : ReplayRuleRegistry)
         match entry.implementation with
         | .declaration _ handler =>
           handler ctx
-        | .pattern handler => do
+        | .pattern handler condition => do
           let mut result := none
           for alternative in handler.alternatives do
             if alternative.rule == ctx.rule then
               if let some matched ← ctx.matchArgs alternative.args then
+                if let some (reference, condition) := condition then
+                  let applies ← try
+                    liftMetaM <| withoutModifyingState (condition matched)
+                  catch exception =>
+                    throwError "replay condition `{reference.label}` failed:\n\
+                      {exception.toMessageData}"
+                  unless applies do
+                    continue
                 result ← matched.runTacticWithScopeFallback handler.tactic
                 if result.isSome then break
           pure result
@@ -705,7 +750,7 @@ def runReplayRuleHandlers (registry : ReplayRuleRegistry)
       let source :=
         match entry.implementation with
         | .declaration declName _ => m!"handler `{declName}`"
-        | .pattern _ => m!"pattern for `{ctx.rule}`"
+        | .pattern _ _ => m!"pattern for `{ctx.rule}`"
       throwError "replay rule {source} failed:\n{exception.toMessageData}"
   return none
 
@@ -731,6 +776,7 @@ def sortKeyword : Parser := nonReservedSymbol "sort"
 def propKeyword : Parser := nonReservedSymbol "prop"
 def ruleKeyword : Parser := nonReservedSymbol "rule"
 def fencedTerm : Parser := withForbidden ">>" termParser
+def fencedCondition : Parser := withForbidden "=>" termParser
 def fencedTacticSeq : Parser :=
   withForbidden ">>" Lean.Parser.Tactic.tacticSeq
 
@@ -791,7 +837,8 @@ values captured by the pattern.
 syntax (name := registerCrushReplayRule)
   "register_crush_replay" ReplayParser.ruleKeyword (ppSpace prio)? ppSpace
     "<<" ppLine crushReplayRulePattern
-    (ppSpace "|" ppSpace crushReplayRulePattern)* ppSpace "=>" ppSpace
+    (ppSpace "|" ppSpace crushReplayRulePattern)*
+    (ppSpace "if" ppSpace ReplayParser.fencedCondition)? ppSpace "=>" ppSpace
     "by" ppSpace ReplayParser.fencedTacticSeq ppLine ">>" : command
 
 /--
@@ -958,6 +1005,33 @@ private def validateReplayCaptures
         s!"all replay pattern alternatives must bind the same names; \
           expected {expected}, got {captures}"
 
+open Elab Command in
+private def compileReplayCondition
+    (condition : TSyntax `term) : CommandElabM ReplayConditionRef :=
+  liftTermElabM do
+    let valueSyntax ←
+      `(fun ctx => ReplayCondition.check $condition ctx)
+    let type := mkConst ``ReplayConditionHandler
+    let value ← Term.withoutErrToSorry <| Term.withSynthesize <|
+      Term.elabTermEnsuringType valueSyntax type
+    Term.synthesizeSyntheticMVarsNoPostponing
+    let value ← instantiateMVars value
+    if value.hasSorry then
+      throwErrorAt condition "replay condition contains `sorry`"
+    if value.hasMVar || value.hasLevelMVar then
+      throwErrorAt condition
+        "replay condition contains unresolved metavariables"
+    let name :=
+      mkPrivateName (← getEnv)
+        (← mkFreshUserName `_crushReplayCondition)
+    let declaration ←
+      mkDefinitionValInferringUnsafe name [] type value .opaque
+    addAndCompile <| .defnDecl declaration
+    return {
+      declName := name
+      label := condition.raw.reprint.getD "condition" |>.trimAscii.toString
+    }
+
 private structure ExpandedReplayRulePattern where
   source : Syntax
   ruleName : String
@@ -1024,7 +1098,8 @@ open Elab Command in
 elab_rules : command
   | `(command| register_crush_replay rule $[$priority:prio]?
       << $first:crushReplayRulePattern
-         $[| $rest:crushReplayRulePattern]* =>
+         $[| $rest:crushReplayRulePattern]*
+         $[if $condition:term]? =>
         by $tactics:tacticSeq >>) => do
     let alternatives ←
       (#[first.raw] ++ rest.map (·.raw)).mapM expandReplayRulePattern
@@ -1047,6 +1122,7 @@ elab_rules : command
     let tactic ← `(tactic| ($tactics))
     let tactic : TSyntax `tactic :=
       ⟨← resolveReplaySyntax captures tactic.raw⟩
+    let condition ← condition.mapM compileReplayCondition
     let alternatives := alternatives.map fun alternative => {
       rule := alternative.ruleName
       args := alternative.args
@@ -1054,6 +1130,7 @@ elab_rules : command
     modifyEnv fun env =>
       crushReplayRulePatternExt.addEntry env {
         alternatives
+        condition
         tactic
         priority
       }

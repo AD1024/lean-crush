@@ -53,6 +53,69 @@ register_crush_replay rule <<
   (test_replay_context ..) => by assumption
 >>
 
+structure ReplayStringBindingIs where
+  name : Name
+  expected : String
+
+instance : ReplayCondition ReplayStringBindingIs where
+  check condition ctx := do
+    let some (.lit (.strVal value)) := ctx.binding? condition.name
+      | return false
+    return value == condition.expected
+
+private def enabledReplayCondition : ReplayStringBindingIs where
+  name := `value
+  expected := "enabled"
+
+register_crush_replay rule <<
+  (test_replay_conditional_left (atom value)) |
+  (test_replay_conditional_right (atom value))
+    if enabledReplayCondition =>
+    by exact True.intro
+>>
+
+private def functionReplayCondition : ReplayConditionHandler := fun ctx =>
+  return ctx.args[0]? == some (.atom "function")
+
+register_crush_replay rule <<
+  (test_replay_function_condition ..)
+    if functionReplayCondition =>
+    by exact True.intro
+>>
+
+private def assigningReplayCondition : ReplayConditionHandler := fun ctx => do
+  let target ← whnf ctx.target
+  unless target.isAppOfArity ``Eq 3 do return false
+  let value := target.getAppArgs[1]!
+  unless value.isMVar do return false
+  value.mvarId!.assign (Lean.toExpr (1 : Nat))
+  return true
+
+register_crush_replay rule <<
+  (test_replay_condition_state ..)
+    if assigningReplayCondition =>
+    by rfl
+>>
+
+private def failingReplayCondition : ReplayConditionHandler := fun _ =>
+  throwError "condition exploded"
+
+register_crush_replay rule <<
+  (test_replay_condition_error ..)
+    if failingReplayCondition =>
+    by exact True.intro
+>>
+
+/-!
+error: failed to synthesize
+-/
+#guard_msgs(error, substring := true) in
+register_crush_replay rule <<
+  (test_replay_missing_condition_instance ..)
+    if (0 : Nat) =>
+    by exact True.intro
+>>
+
 /-!
 error: all replay pattern alternatives must bind the same names
 -/
@@ -148,6 +211,29 @@ elab "assert_test_replay_declines " rule:str arg:str : tactic => do
   if (← replayTestRule goal rule arg).isSome then
     throwError "test replay rule `{rule}` unexpectedly used the ambient context"
 
+elab "assert_test_replay_condition_isolated" : tactic => do
+  let goal ← getMainGoal
+  goal.withContext do
+    let value ← mkFreshExprMVar (mkConst ``Nat)
+    let target ← mkEq value (Lean.toExpr (0 : Nat))
+    let registry ← getReplayRuleHandlers
+    let some _ ← runReplayRuleHandlers registry {
+      stepId := "condition-state"
+      rule := "test_replay_condition_state"
+      target
+      targetLiterals := #[target]
+      premises := #[]
+      args := #[]
+      decodeTerm := fun _ => return none
+      decodeSort := fun _ => return none
+      toProp := pure
+    } | throwError "replay condition leaked its metavariable assignment"
+    let value ← instantiateMVars value
+    unless ← isDefEq value (Lean.toExpr (0 : Nat)) do
+      throwError "replay condition state was retained"
+    goal.assign (mkConst ``True.intro)
+    replaceMainGoal []
+
 example : (3 : Nat) ≤ 3 := by
   run_test_replay "test_replay_left" "3"
 
@@ -157,6 +243,29 @@ example : (4 : Nat) ≤ 4 := by
 example (h : False) : False := by
   assert_test_replay_declines "test_replay_context" "unused"
   exact h
+
+example : True := by
+  run_test_replay "test_replay_conditional_left" "enabled"
+
+example : True := by
+  run_test_replay "test_replay_conditional_right" "enabled"
+
+example (h : True) : True := by
+  assert_test_replay_declines "test_replay_conditional_left" "disabled"
+  exact h
+
+example : True := by
+  run_test_replay "test_replay_function_condition" "function"
+
+example : True := by
+  assert_test_replay_condition_isolated
+
+/-!
+error: replay condition `failingReplayCondition` failed:
+-/
+#guard_msgs(error, substring := true) in
+example : True := by
+  run_test_replay "test_replay_condition_error" "unused"
 
 /-!
 error: crush: reconstructed proof failed kernel validation:

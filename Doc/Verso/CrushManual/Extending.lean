@@ -418,6 +418,43 @@ Use `register_crush_replay rule high`, `low`, or a numeric priority to control
 dispatch.
 Exact-rule handlers run before wildcard low-level handlers.
 
+Append `if condition` when matching the certificate syntax alone is not enough.
+The condition is a metaprogrammed dispatch guard, not a Lean proposition:
+
+```lean
+structure ReplayStringBindingIs where
+  name : Name
+  expected : String
+
+instance : ReplayCondition ReplayStringBindingIs where
+  check condition ctx := do
+    let captured := ctx.binding? condition.name
+    let some (.lit (.strVal value)) := captured
+      | return false
+    return value == condition.expected
+
+def docsEnabledReplay : ReplayStringBindingIs where
+  name := `mode
+  expected := "enabled"
+
+register_crush_replay rule low <<
+  (docs_conditional_rule (atom mode) ..)
+    if docsEnabledReplay =>
+    by exact True.intro
+>>
+```
+
+`ReplayCondition α` defines `check : α → ReplayRuleContext → MetaM Bool`.
+The guard runs after the pattern has matched, so it can inspect the target,
+premises, raw arguments, and named captures through `ctx.binding?`.
+It runs without retaining metavariable-state changes.
+Returning `false` delegates to the next registration; an exception reports a
+broken condition.
+When a registration has several `|` alternatives, the condition applies to all
+of them.
+A callback of type `ReplayConditionHandler` can be used directly through the
+built-in instance.
+
 Every proof returned by a rule registration is checked against the step target
 with `Lean.Kernel.check`.
 Declarations generated while the tactic runs are checked recursively as well.

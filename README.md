@@ -287,6 +287,32 @@ register_crush_replay rule low <<
 The tactic sees only the replayed premises, its captures, and the step target.
 Every proof and generated auxiliary declaration is kernel-checked. Add `high`,
 `low`, or a numeric priority after `term` or `rule` when handlers overlap.
+
+Rule registrations can also use a typeclass-dispatched, metaprogrammed
+condition:
+
+```lean
+structure RuleArgumentIs where
+  expected : String
+
+instance : Crush.ReplayCondition RuleArgumentIs where
+  check condition ctx :=
+    return ctx.args[0]? == some (.atom condition.expected)
+
+def enabledRule : RuleArgumentIs where
+  expected := "enabled"
+
+register_crush_replay rule <<
+  (my_conditional_rule ..) if enabledRule =>
+    by exact True.intro
+>>
+```
+
+The condition is not a proposition and creates no proof obligation.
+It runs after pattern matching; `false` delegates to the next registration.
+The `ReplayRuleContext` exposes the target, premises, raw arguments, and named
+captures through `binding?`.
+
 For dynamic matching, use `@[crush_replay "operator"]` on a
 `Crush.ReplayTermHandler` or `@[crush_replay_rule "rule"]` on a
 `Crush.ReplayRuleHandler`; returning `none` defers to the next handler. See

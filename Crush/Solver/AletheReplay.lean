@@ -754,30 +754,71 @@ private def bitVecSignedLtHint? (target : Expr) :
     (rw [bitVecSignedLtBitsCorrect (width := $widthSyntax)]
      simp [bitVecUnsignedLtBits, BitVec.msb_eq_getLsbD_last])))
 
-@[crush_replay_rule "bv_bitblast_step_bvequal" low]
-private def replayBitVecEquality : ReplayRuleHandler := fun ctx => do
-  let some tactic ← bitVecEqualityHint? ctx.target | return none
-  ctx.runTacticWithScopeFallback tactic
+private inductive BitVecReplayKind where
+  | equality
+  | negation
+  | extract
+  | unsignedLt
+  | signedLt
 
-@[crush_replay_rule "bv_bitblast_step_bvneg" low]
-private def replayBitVecNegation : ReplayRuleHandler := fun ctx => do
-  let some tactic ← bitVecNegationHint? ctx.target | return none
-  ctx.runTacticWithScopeFallback tactic
+private def BitVecReplayKind.applicable
+    (kind : BitVecReplayKind) (target : Expr) : MetaM Bool := do
+  let target ← whnf target
+  return match kind with
+    | .equality | .unsignedLt | .signedLt =>
+      target.isAppOfArity ``Iff 2
+    | .negation | .extract =>
+      target.isAppOfArity ``Eq 3
 
-@[crush_replay_rule "bv_bitblast_step_extract" low]
-private def replayBitVecExtract : ReplayRuleHandler := fun ctx => do
-  let some tactic ← bitVecExtractHint? ctx.target | return none
-  ctx.runTacticWithScopeFallback tactic
+private def BitVecReplayKind.hint?
+    (kind : BitVecReplayKind) (target : Expr) :
+    TacticM (Option (TSyntax `tactic)) :=
+  match kind with
+  | .equality => bitVecEqualityHint? target
+  | .negation => bitVecNegationHint? target
+  | .extract => bitVecExtractHint? target
+  | .unsignedLt => bitVecUnsignedLtHint? target
+  | .signedLt => bitVecSignedLtHint? target
 
-@[crush_replay_rule "bv_bitblast_step_bvult" low]
-private def replayBitVecUnsignedLt : ReplayRuleHandler := fun ctx => do
-  let some tactic ← bitVecUnsignedLtHint? ctx.target | return none
-  ctx.runTacticWithScopeFallback tactic
+private instance : ReplayCondition BitVecReplayKind where
+  check kind ctx := kind.applicable ctx.target
 
-@[crush_replay_rule "bv_bitblast_step_bvslt" low]
-private def replayBitVecSignedLt : ReplayRuleHandler := fun ctx => do
-  let some tactic ← bitVecSignedLtHint? ctx.target | return none
-  ctx.runTacticWithScopeFallback tactic
+private def runBitVecReplay (kind : BitVecReplayKind) : TacticM Unit := do
+  let goal ← getMainGoal
+  let target ← instantiateMVars (← goal.getType)
+  let some tactic ← kind.hint? target
+    | throwError "bit-vector replay target has an unsupported shape"
+  evalTactic tactic
+
+register_crush_replay rule low <<
+  (bv_bitblast_step_bvequal ..)
+    if BitVecReplayKind.equality =>
+    by run_tac runBitVecReplay BitVecReplayKind.equality
+>>
+
+register_crush_replay rule low <<
+  (bv_bitblast_step_bvneg ..)
+    if BitVecReplayKind.negation =>
+    by run_tac runBitVecReplay BitVecReplayKind.negation
+>>
+
+register_crush_replay rule low <<
+  (bv_bitblast_step_extract ..)
+    if BitVecReplayKind.extract =>
+    by run_tac runBitVecReplay BitVecReplayKind.extract
+>>
+
+register_crush_replay rule low <<
+  (bv_bitblast_step_bvult ..)
+    if BitVecReplayKind.unsignedLt =>
+    by run_tac runBitVecReplay BitVecReplayKind.unsignedLt
+>>
+
+register_crush_replay rule low <<
+  (bv_bitblast_step_bvslt ..)
+    if BitVecReplayKind.signedLt =>
+    by run_tac runBitVecReplay BitVecReplayKind.signedLt
+>>
 
 @[crush_replay_rule low]
 private def replayTrustedBitVecRule : ReplayRuleHandler := fun ctx => do
