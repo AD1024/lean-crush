@@ -181,11 +181,8 @@ def coverage_rows(
     return output
 
 
-def canonical_crush_lane(suite: str, lanes: set[str]) -> Optional[str]:
-    for lane in ("crush-verify", "crush-portfolio", "crush-only"):
-        if lane in lanes:
-            return lane
-    return None
+def canonical_crush_lane(lanes: set[str]) -> Optional[str]:
+    return "crush-verify" if "crush-verify" in lanes else None
 
 
 def headline_lane_map(suite: str, lanes: set[str]) -> list[tuple[str, str]]:
@@ -205,7 +202,7 @@ def headline_lane_map(suite: str, lanes: set[str]) -> list[tuple[str, str]]:
     for backend, lane in candidates:
         if lane in lanes:
             selected.append((backend, lane))
-    crush_lane = canonical_crush_lane(suite, lanes)
+    crush_lane = canonical_crush_lane(lanes)
     if crush_lane is not None:
         selected.append(("crush", crush_lane))
     if grind_lane in lanes:
@@ -239,7 +236,7 @@ def comparison_rows(
 
     output: list[list[object]] = []
     for suite, lanes in sorted(lanes_by_suite.items()):
-        crush_lane = canonical_crush_lane(suite, lanes)
+        crush_lane = canonical_crush_lane(lanes)
         if crush_lane is None:
             continue
         for backend, baseline_lane in headline_lane_map(suite, lanes):

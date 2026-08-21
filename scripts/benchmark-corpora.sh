@@ -359,7 +359,12 @@ private def runCorpusBench : TacticM Unit := Lean.withCurrHeartbeats do
         unless (← getUnsolvedGoals).isEmpty do
           throwError "backend returned without closing the goal"
         let elapsed := (← IO.monoMsNow) - start
+        saved.restore
         IO.println s!"CORPUS_BENCH\t{proofName}\t-\t{goalHash}\tpass\t-\t{elapsed}\t-\t{goalText}"
+        let goal <- getMainGoal
+        let proof <- mkSorry (← goal.getType) true
+        goal.assign proof
+        replaceMainGoal []
       catch ex =>
         let elapsed := (← IO.monoMsNow) - start
         let msg := (← ex.toMessageData.toString)
@@ -399,7 +404,7 @@ write_benchmark_file() {
       -e 's/loom_solve_async!?([[:space:]]+[0-9]+)?/corpus_bench_goals/g' \
       -e 's/loom_solve[!?]/corpus_bench_goals/g' \
       -e 's/loom_solve/corpus_bench_goals/g' \
-      -e 's/corpus_bench_goals/loom_solve_async 1/g' \
+      -e 's/corpus_bench_goals/loom_solve/g' \
       -e 's/[[:space:]]*<;>[[:space:]]*try[[:space:]]+loom_crush//g' \
       -e 's/[[:space:]]*<;>[[:space:]]*try[[:space:]]+loom_auto//g' \
       -e 's/[[:space:]]*<;>[[:space:]]*try[[:space:]]+loom_duper//g' \
@@ -411,7 +416,7 @@ write_benchmark_file() {
       -e 's/loom_auto/corpus_bench_solver/g' \
       -e 's/loom_duper/corpus_bench_solver/g' \
       -e 's/loom_smt[[:space:]]+\[[^]]*\]/corpus_bench_solver/g' \
-      -e 's/^[[:space:]]*set_option[[:space:]]+maxHeartbeats[[:space:]]+[0-9]+[[:space:]]*$/set_option maxHeartbeats 0/' \
+      -e 's/^([[:space:]]*set_option[[:space:]]+maxHeartbeats)[[:space:]]+[0-9]+([[:space:]]+in)?[[:space:]]*$/\1 0\2/' \
       >> "$output"
 }
 
@@ -461,10 +466,8 @@ append_records() {
       -v file="$file" -v measurements="$MEASUREMENTS" '
     BEGIN { FS = OFS = "\t"; occurrence = 0 }
     {
-      marker = index($0, "CORPUS_BENCH\t")
-      if (marker == 0) next
-      line = substr($0, marker)
-      split(line, result, "\t")
+      if (index($0, "CORPUS_BENCH\t") != 1) next
+      split($0, result, "\t")
       occurrence++
       print suite, backend, ref, commit, toolchain, repeat, file,
             result[2], occurrence, result[4], result[5], result[6],
@@ -487,10 +490,8 @@ append_profile_records() {
       -v file="$file" -v profiles="$PROFILES" '
     BEGIN { FS = OFS = "\t"; pending = 0; occurrence = 0 }
     {
-      profileMarker = index($0, "CRUSH_PROFILE\t")
-      if (profileMarker > 0) {
-        line = substr($0, profileMarker)
-        split(line, profile, "\t")
+      if (index($0, "CRUSH_PROFILE\t") == 1) {
+        split($0, profile, "\t")
         pending++
         declaration[pending] = profile[3]
         profileHash[pending] = profile[4]
@@ -502,10 +503,8 @@ append_profile_records() {
         metrics[pending] = profile[10]
         next
       }
-      resultMarker = index($0, "CORPUS_BENCH\t")
-      if (resultMarker == 0) next
-      line = substr($0, resultMarker)
-      split(line, result, "\t")
+      if (index($0, "CORPUS_BENCH\t") != 1) next
+      split($0, result, "\t")
       occurrence++
       vcKey = file "|" occurrence "|" result[4]
       for (i = 1; i <= pending; i++) {
@@ -543,10 +542,11 @@ run_lean_file() {
   started="$(date +%s)"
   if is_crush_lane "$backend"; then
     "$CRUSH_ROOT/scripts/with-local-crush.sh" "$tree" \
-      "-DmaxHeartbeats=0" "-DmaxRecDepth=$MAX_RECURSION_DEPTH" \
+      "-DElab.async=false" "-DmaxHeartbeats=0" \
+      "-DmaxRecDepth=$MAX_RECURSION_DEPTH" \
       "$generated" > "$log" 2>&1
   else
-    (cd "$tree" && lake env lean "-DmaxHeartbeats=0" \
+    (cd "$tree" && lake env lean "-DElab.async=false" "-DmaxHeartbeats=0" \
       "-DmaxRecDepth=$MAX_RECURSION_DEPTH" "$generated") \
       > "$log" 2>&1
   fi
@@ -554,7 +554,8 @@ run_lean_file() {
   elapsed="$(( $(date +%s) - started ))"
   truncated="false"
   message="-"
-  if grep -qE 'error: .*maximum number of heartbeats' "$log"; then
+  if grep -qE \
+      '^.*:[0-9]+:[0-9]+: error: .*maximum number of heartbeats' "$log"; then
     truncated="true"
     message="declaration heartbeat exhaustion"
     TRUNCATED_RUNS=$((TRUNCATED_RUNS + 1))

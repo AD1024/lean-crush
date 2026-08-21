@@ -294,6 +294,7 @@ for profile in "${profiles[@]}"; do
     for ((run = 1; run <= repeats; run++)); do
       log="$logs/${profile}-${case_name}-${run}.log"
       lean_args=(
+        "-DElab.async=false"
         "-Dduper.maxSaturationTime=$duper_timeout"
         "-DmaxHeartbeats=$max_heartbeats"
         "-DmaxRecDepth=$max_rec_depth"

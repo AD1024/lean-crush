@@ -27,6 +27,20 @@ LANE_LABELS = {
     "crush-portfolio": "Portfolio",
 }
 
+BACKEND_LABELS = {
+    "auto": "Auto",
+    "duper": "Duper",
+    "crush": "Crush",
+    "grind": "grind",
+}
+
+BACKEND_COLORS = {
+    "auto": "#597A91",
+    "duper": "#B55B45",
+    "crush": "#178078",
+    "grind": "#77834D",
+}
+
 LANE_ORDER = (
     "auto",
     "auto-duper",
@@ -105,6 +119,15 @@ MUTED = "#64716E"
 GRID = "#D9D5CB"
 PAPER = "#FBF8F1"
 
+OUTPUTS = (
+    "tables",
+    "coverage",
+    "reconstruction",
+    "reconstruction-failures",
+    "phase-breakdown",
+    "alethe-replay-scaling",
+)
+
 
 def read_tsv(result_dirs: list[Path], filename: str) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
@@ -122,6 +145,12 @@ def read_tsv(result_dirs: list[Path], filename: str) -> list[dict[str, str]]:
                 row["_source"] = str(result_dir)
                 rows.append(row)
     return rows
+
+
+def rows_with_columns(
+    rows: list[dict[str, str]], columns: tuple[str, ...]
+) -> list[dict[str, str]]:
+    return [row for row in rows if all(column in row for column in columns)]
 
 
 def unique_rows(
@@ -156,6 +185,10 @@ def lane_sort_key(lane: str) -> tuple[int, str]:
 
 def label_lane(lane: str) -> str:
     return LANE_LABELS.get(lane, lane)
+
+
+def label_backend(backend: str) -> str:
+    return BACKEND_LABELS.get(backend, backend)
 
 
 def xml(value: object) -> str:
@@ -319,9 +352,30 @@ def draw_legend(
 
 def plot_coverage(rows: list[dict[str, str]], path: Path) -> None:
     suites = sorted({row["suite"] for row in rows})
-    lanes = sorted({row["lane"] for row in rows}, key=lane_sort_key)
-    indexed = {(row["suite"], row["lane"]): row for row in rows}
-    width = max(1040, 260 + len(suites) * max(130, len(lanes) * 32))
+    is_headline = all(row.get("backend") for row in rows)
+    if is_headline:
+        order = ("auto", "duper", "crush", "grind")
+        series = sorted(
+            {row["backend"] for row in rows},
+            key=lambda backend: (
+                order.index(backend) if backend in order else len(order),
+                backend,
+            ),
+        )
+        indexed = {(row["suite"], row["backend"]): row for row in rows}
+        labels = {backend: label_backend(backend) for backend in series}
+        colors = {
+            backend: BACKEND_COLORS.get(backend, "#66736F")
+            for backend in series
+        }
+    else:
+        series = sorted({row["lane"] for row in rows}, key=lane_sort_key)
+        indexed = {(row["suite"], row["lane"]): row for row in rows}
+        labels = {lane: label_lane(lane) for lane in series}
+        colors = {
+            lane: LANE_COLORS.get(lane, "#66736F") for lane in series
+        }
+    width = max(1040, 260 + len(suites) * max(130, len(series) * 32))
     height = 610
     left, right, top, bottom = 80.0, 32.0, 142.0, 105.0
     chart_width = width - left - right
@@ -337,14 +391,14 @@ def plot_coverage(rows: list[dict[str, str]], path: Path) -> None:
         text(
             42,
             66,
-            "Solved VCs / all corpus VCs; higher is better",
+            "Solved / all corpus VCs; Crush trusts SMT; failed and missing count unsolved",
             "subtitle",
         )
     )
     legend_entries = list(
         dict.fromkeys(
-            (label_lane(lane), LANE_COLORS.get(lane, "#66736F"))
-            for lane in lanes
+            (labels[entry], colors[entry])
+            for entry in series
         )
     )
     draw_legend(elements, legend_entries, 42, 98, width - 84)
@@ -356,16 +410,18 @@ def plot_coverage(rows: list[dict[str, str]], path: Path) -> None:
 
     group_width = chart_width / max(len(suites), 1)
     for suite_index, suite in enumerate(suites):
-        available = [lane for lane in lanes if (suite, lane) in indexed]
+        available = [
+            entry for entry in series if (suite, entry) in indexed
+        ]
         usable = group_width * 0.78
         bar_width = min(31.0, max(10.0, usable / max(len(available), 1) - 5))
         bars_width = len(available) * bar_width + max(0, len(available) - 1) * 5
         group_start = left + suite_index * group_width + (group_width - bars_width) / 2
-        for lane_index, lane in enumerate(available):
-            row = indexed[(suite, lane)]
+        for entry_index, entry in enumerate(available):
+            row = indexed[(suite, entry)]
             percentage = float(row["pass_pct"])
             total_vcs = row.get("total_vcs", row["attempted_vcs"])
-            x = group_start + lane_index * (bar_width + 5)
+            x = group_start + entry_index * (bar_width + 5)
             y = top + chart_height * (1.0 - percentage / 100.0)
             elements.append(
                 rect(
@@ -373,7 +429,7 @@ def plot_coverage(rows: list[dict[str, str]], path: Path) -> None:
                     y,
                     bar_width,
                     top + chart_height - y,
-                    LANE_COLORS.get(lane, "#66736F"),
+                    colors[entry],
                     2,
                 )
             )
@@ -957,7 +1013,7 @@ def write_tables(
                 (
                     [
                         row["suite"],
-                        row["backend"],
+                        label_backend(row["backend"]),
                         label_lane(row["lane"]),
                         f'{row["solved_vcs"]} / {row["total_vcs"]}',
                         row["attempted_vcs"],
@@ -1008,7 +1064,7 @@ def write_tables(
                 (
                     [
                         row["suite"],
-                        row["baseline"],
+                        label_backend(row["baseline"]),
                         label_lane(row["baseline_lane"]),
                         label_lane(row["crush_lane"]),
                         row["matched_vcs"],
@@ -1025,126 +1081,139 @@ def write_tables(
                     )
                 ),
             )
-        stream.write("\n## Verification Coverage\n\n")
-        stream.write(
-            "`Total` is the fixed number of VC occurrences in the corpus. "
-            "`Attempted` counts VCs with a complete backend record; `Failed` "
-            "counts attempted but unsolved VCs; and `Missing` counts corpus VCs "
-            "without a complete attempt record. Missing VCs count as unsolved "
-            "for coverage and are excluded from timing statistics.\n\n"
-        )
-        write_markdown_table(
-            stream,
-            [
-                "Corpus",
-                "Lane",
-                "Solved / total",
-                "Attempted",
-                "Failed",
-                "Missing",
-                "Coverage",
-                "Total (ms)",
-                "Mean (ms)",
-            ],
-            (
+        if coverage and not headline:
+            stream.write("\n## Verification Coverage\n\n")
+            stream.write(
+                "`Total` is the fixed number of VC occurrences in the corpus. "
+                "`Attempted` counts VCs with a complete backend record; `Failed` "
+                "counts attempted but unsolved VCs; and `Missing` counts corpus "
+                "VCs without a complete attempt record. Missing VCs count as "
+                "unsolved for coverage and are excluded from timing "
+                "statistics.\n\n"
+            )
+            write_markdown_table(
+                stream,
                 [
-                    row["suite"],
-                    label_lane(row["lane"]),
-                    (
-                        f'{row["solved_vcs"]} / '
-                        f'{row.get("total_vcs", row["attempted_vcs"])}'
-                    ),
-                    row["attempted_vcs"],
-                    row["failed_vcs"],
-                    row.get("missing_vcs", "0"),
-                    f'{row["pass_pct"]}%',
-                    row["total_ms"],
-                    row["mean_ms"],
-                ]
-                for row in sorted(
-                    coverage, key=lambda item: (item["suite"], lane_sort_key(item["lane"]))
-                )
-            ),
-        )
-        stream.write("## Proof Reconstruction\n\n")
-        write_markdown_table(
-            stream,
-            [
-                "Corpus",
-                "SMT verified / total",
-                "Core / verified",
-                "Alethe / verified",
-                "Portfolio / verified",
-            ],
-            (
+                    "Corpus",
+                    "Lane",
+                    "Solved / total",
+                    "Attempted",
+                    "Failed",
+                    "Missing",
+                    "Coverage",
+                    "Total (ms)",
+                    "Mean (ms)",
+                ],
+                (
+                    [
+                        row["suite"],
+                        label_lane(row["lane"]),
+                        (
+                            f'{row["solved_vcs"]} / '
+                            f'{row.get("total_vcs", row["attempted_vcs"])}'
+                        ),
+                        row["attempted_vcs"],
+                        row["failed_vcs"],
+                        row.get("missing_vcs", "0"),
+                        f'{row["pass_pct"]}%',
+                        row["total_ms"],
+                        row["mean_ms"],
+                    ]
+                    for row in sorted(
+                        coverage,
+                        key=lambda item: (
+                            item["suite"],
+                            lane_sort_key(item["lane"]),
+                        ),
+                    )
+                ),
+            )
+        if reconstruction:
+            stream.write("## Proof Reconstruction\n\n")
+            write_markdown_table(
+                stream,
                 [
-                    row["suite"],
-                    f'{row["verified_vcs"]} / {row["total_vcs"]}',
-                    f'{row["core_reconstructed"]} / {row["verified_vcs"]}',
-                    f'{row["alethe_reconstructed"]} / {row["verified_vcs"]}',
-                    f'{row["portfolio_reconstructed"]} / {row["verified_vcs"]}',
-                ]
-                for row in sorted(reconstruction, key=lambda item: item["suite"])
-            ),
-        )
-        stream.write("## Reconstruction Failures\n\n")
-        write_markdown_table(
-            stream,
-            ["Corpus", "Lane", "Failure mode", "VCs"],
-            (
+                    "Corpus",
+                    "SMT verified / total",
+                    "Core / verified",
+                    "Alethe / verified",
+                    "Portfolio / verified",
+                ],
+                (
+                    [
+                        row["suite"],
+                        f'{row["verified_vcs"]} / {row["total_vcs"]}',
+                        f'{row["core_reconstructed"]} / {row["verified_vcs"]}',
+                        f'{row["alethe_reconstructed"]} / {row["verified_vcs"]}',
+                        f'{row["portfolio_reconstructed"]} / {row["verified_vcs"]}',
+                    ]
+                    for row in sorted(
+                        reconstruction, key=lambda item: item["suite"]
+                    )
+                ),
+            )
+        if failures:
+            stream.write("## Reconstruction Failures\n\n")
+            write_markdown_table(
+                stream,
+                ["Corpus", "Lane", "Failure mode", "VCs"],
+                (
+                    [
+                        row["suite"],
+                        label_lane(row["lane"]),
+                        row["failure_mode"],
+                        row["vcs"],
+                    ]
+                    for row in sorted(
+                        failures,
+                        key=lambda item: (
+                            item["suite"],
+                            lane_sort_key(item["lane"]),
+                            item["failure_mode"],
+                        ),
+                    )
+                ),
+            )
+        if phases:
+            stream.write("## Crush Phase Breakdown\n\n")
+            write_markdown_table(
+                stream,
+                ["Corpus", "Lane", "Phase", "Events", "Total (ms)", "Share"],
+                (
+                    [
+                        row["suite"],
+                        label_lane(row["lane"]),
+                        row["phase"],
+                        row["events"],
+                        row["total_ms"],
+                        f'{row["phase_pct"]}%',
+                    ]
+                    for row in sorted(
+                        phases,
+                        key=lambda item: (
+                            item["suite"],
+                            lane_sort_key(item["lane"]),
+                            item["phase"],
+                        ),
+                    )
+                ),
+            )
+        scaling_rows = scaling_summary_rows(scaling)
+        if scaling_rows:
+            stream.write("## Alethe Replay Scaling\n\n")
+            write_markdown_table(
+                stream,
                 [
-                    row["suite"],
-                    label_lane(row["lane"]),
-                    row["failure_mode"],
-                    row["vcs"],
-                ]
-                for row in sorted(
-                    failures,
-                    key=lambda item: (
-                        item["suite"],
-                        lane_sort_key(item["lane"]),
-                        item["failure_mode"],
-                    ),
-                )
-            ),
-        )
-        stream.write("## Crush Phase Breakdown\n\n")
-        write_markdown_table(
-            stream,
-            ["Corpus", "Lane", "Phase", "Events", "Total (ms)", "Share"],
-            (
-                [
-                    row["suite"],
-                    label_lane(row["lane"]),
-                    row["phase"],
-                    row["events"],
-                    row["total_ms"],
-                    f'{row["phase_pct"]}%',
-                ]
-                for row in sorted(
-                    phases,
-                    key=lambda item: (
-                        item["suite"],
-                        lane_sort_key(item["lane"]),
-                        item["phase"],
-                    ),
-                )
-            ),
-        )
-        stream.write("## Alethe Replay Scaling\n\n")
-        write_markdown_table(
-            stream,
-            [
-                "Corpus",
-                "VCs",
-                "Command range",
-                "Replay range (ms)",
-                "Pearson r",
-                "R2",
-                "ms / 100 commands",
-            ],
-            scaling_summary_rows(scaling),
-        )
+                    "Corpus",
+                    "VCs",
+                    "Command range",
+                    "Replay range (ms)",
+                    "Pearson r",
+                    "R2",
+                    "ms / 100 commands",
+                ],
+                scaling_rows,
+            )
 
 
 def main() -> None:
@@ -1174,43 +1243,95 @@ def main() -> None:
         action="store_true",
         help="write SVG figures without tables.md",
     )
+    parser.add_argument(
+        "--only",
+        action="append",
+        choices=OUTPUTS,
+        help="generate only this output; repeat to select multiple outputs",
+    )
     args = parser.parse_args()
 
     missing = [path for path in args.result_dirs if not path.is_dir()]
     if missing:
         raise SystemExit(f"result directory does not exist: {missing[0]}")
 
-    coverage = unique_rows(
-        read_tsv(args.result_dirs, "coverage-summary.tsv"),
-        ("suite", "lane"),
-        "coverage-summary.tsv",
+    selected = set(args.only or OUTPUTS)
+    if args.skip_tables:
+        selected.discard("tables")
+
+    need_tables = "tables" in selected
+    need_coverage = need_tables or "coverage" in selected
+    need_reconstruction = (
+        need_tables
+        or "reconstruction" in selected
+        or "reconstruction-failures" in selected
     )
-    headline = unique_rows(
-        read_tsv(args.result_dirs, "headline-summary.tsv"),
-        ("suite", "backend"),
-        "headline-summary.tsv",
+    need_failures = need_tables or "reconstruction-failures" in selected
+    need_phases = need_tables or "phase-breakdown" in selected
+    need_scaling = need_tables or "alethe-replay-scaling" in selected
+
+    headline = (
+        unique_rows(
+            read_tsv(args.result_dirs, "headline-summary.tsv"),
+            ("suite", "backend"),
+            "headline-summary.tsv",
+        )
+        if need_coverage
+        else []
     )
-    comparisons = unique_rows(
-        read_tsv(args.result_dirs, "comparison.tsv"),
-        ("suite", "baseline"),
-        "comparison.tsv",
+    coverage = (
+        unique_rows(
+            read_tsv(args.result_dirs, "coverage-summary.tsv"),
+            ("suite", "lane"),
+            "coverage-summary.tsv",
+        )
+        if need_tables or (need_coverage and not headline)
+        else []
     )
-    reconstruction = unique_rows(
-        read_tsv(args.result_dirs, "reconstruction-summary.tsv"),
-        ("suite",),
-        "reconstruction-summary.tsv",
+    comparisons = (
+        unique_rows(
+            rows_with_columns(
+                read_tsv(args.result_dirs, "comparison.tsv"),
+                ("suite", "baseline", "baseline_lane", "crush_lane"),
+            ),
+            ("suite", "baseline"),
+            "comparison.tsv",
+        )
+        if need_tables
+        else []
     )
-    failures = unique_rows(
-        read_tsv(args.result_dirs, "reconstruction-failures.tsv"),
-        ("suite", "lane", "failure_mode"),
-        "reconstruction-failures.tsv",
+    reconstruction = (
+        unique_rows(
+            read_tsv(args.result_dirs, "reconstruction-summary.tsv"),
+            ("suite",),
+            "reconstruction-summary.tsv",
+        )
+        if need_reconstruction
+        else []
     )
-    phases = unique_rows(
-        read_tsv(args.result_dirs, "phase-summary.tsv"),
-        ("suite", "lane", "phase"),
-        "phase-summary.tsv",
+    failures = (
+        unique_rows(
+            read_tsv(args.result_dirs, "reconstruction-failures.tsv"),
+            ("suite", "lane", "failure_mode"),
+            "reconstruction-failures.tsv",
+        )
+        if need_failures
+        else []
     )
-    scaling = read_tsv(args.result_dirs, "alethe-replay-scaling.tsv")
+    phases = (
+        unique_rows(
+            read_tsv(args.result_dirs, "phase-summary.tsv"),
+            ("suite", "lane", "phase"),
+            "phase-summary.tsv",
+        )
+        if need_phases
+        else []
+    )
+    scaling = (
+        read_tsv(args.result_dirs, "alethe-replay-scaling.tsv")
+        if need_scaling
+        else []
+    )
 
     if not any(
         (
@@ -1227,7 +1348,7 @@ def main() -> None:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     generated: list[Path] = []
-    if not args.skip_tables:
+    if "tables" in selected:
         write_tables(
             args.out_dir / "tables.md",
             args.result_dirs,
@@ -1240,23 +1361,28 @@ def main() -> None:
             scaling,
         )
         generated.append(args.out_dir / "tables.md")
-    if coverage:
+    coverage_plot_rows = headline or coverage
+    if "coverage" in selected and coverage_plot_rows:
         path = args.out_dir / "coverage.svg"
-        plot_coverage(coverage, path)
+        plot_coverage(coverage_plot_rows, path)
         generated.append(path)
-    if reconstruction:
+    if "reconstruction" in selected and reconstruction:
         path = args.out_dir / "reconstruction.svg"
         plot_reconstruction(reconstruction, path)
         generated.append(path)
-    if reconstruction:
+    if "reconstruction-failures" in selected and reconstruction:
         path = args.out_dir / "reconstruction-failures.svg"
         plot_failures(failures, reconstruction, path)
         generated.append(path)
-    if phases:
+    if "phase-breakdown" in selected and phases:
         path = args.out_dir / "phase-breakdown.svg"
         plot_phases(phases, path)
         generated.append(path)
-    if scaling and averaged_scaling(scaling):
+    if (
+        "alethe-replay-scaling" in selected
+        and scaling
+        and averaged_scaling(scaling)
+    ):
         path = args.out_dir / "alethe-replay-scaling.svg"
         plot_scaling(scaling, path, args.replay_axis)
         generated.append(path)

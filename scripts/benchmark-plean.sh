@@ -48,6 +48,7 @@ MEASUREMENTS="$OUT_DIR/measurements.tsv"
 PROFILES="$OUT_DIR/profile-events.tsv"
 WORKTREES=()
 PROVISIONED_TREE=""
+HARNESS_FAILURES=0
 
 PLEAN_FILES=(
   "Examples/ClockBound.lean"
@@ -209,19 +210,21 @@ EOF
   elif [[ "$backend" == "grind" ]]; then
     cat >> "$output" <<EOF
 
+open Lean Elab Tactic
+
 syntax "plean_bench_grind" : tactic
 
 elab_rules : tactic
   | \`(tactic| plean_bench_grind) => withMainContext do
       let key ← PLean.currentObligationKey
-      let start ← IO.monoNanosNow
+      let startedAt ← IO.monoNanosNow
       try
         evalTactic (← \`(tactic| grind (splits := $GRIND_SPLITS)))
-        let elapsed := (← IO.monoNanosNow) - start
+        let elapsed := (← IO.monoNanosNow) - startedAt
         liftM (m := IO) (PLean.Verify.Profile.modifyRow key fun row =>
           { row with smtCrush := row.smtCrush + elapsed })
       catch error =>
-        let elapsed := (← IO.monoNanosNow) - start
+        let elapsed := (← IO.monoNanosNow) - startedAt
         liftM (m := IO) (PLean.Verify.Profile.modifyRow key fun row =>
           { row with smtCrush := row.smtCrush + elapsed })
         throw error
@@ -302,6 +305,7 @@ elab "#plean_bench_report" : command => do
 
 EOF
   fi
+  printf '\n-- PLEAN_BENCH_PRELUDE_END\n' >> "$output"
 }
 
 write_benchmark_file() {
@@ -487,6 +491,7 @@ run_file() {
   local generated="$TMP_ROOT/generated/$backend/${file//\//_}"
   local log="$OUT_DIR/logs/$backend/${file//\//_}.$repeat.log"
   local started elapsed exit_code total max_heartbeats cpu_limited message
+  local prelude_end prelude_errors
 
   mkdir -p "$(dirname "$generated")" "$(dirname "$log")"
   write_benchmark_file "$tree/$file" "$generated" "$backend"
@@ -498,6 +503,7 @@ run_file() {
   started="$(date +%s)"
   if is_crush_lane "$backend"; then
     "$CRUSH_ROOT/scripts/with-local-crush.sh" "$tree" \
+      "-DElab.async=false" \
       "-DmaxHeartbeats=$max_heartbeats" \
       "-DmaxRecDepth=$MAX_RECURSION_DEPTH" \
       "-Dpverify.cache=false" "$generated" > "$log" 2>&1
@@ -506,12 +512,14 @@ run_file() {
       ulimit -t "$DUPER_FILE_CPU_SECONDS"
       cd "$tree"
       lake env lean \
+        "-DElab.async=false" \
         "-DmaxHeartbeats=$max_heartbeats" \
         "-DmaxRecDepth=$MAX_RECURSION_DEPTH" \
         "-Dpverify.cache=false" "$generated"
     ) > "$log" 2>&1
   else
     (cd "$tree" && lake env lean \
+      "-DElab.async=false" \
       "-DmaxHeartbeats=$max_heartbeats" \
       "-DmaxRecDepth=$MAX_RECURSION_DEPTH" \
       "-Dpverify.cache=false" "$generated") > "$log" 2>&1
@@ -522,12 +530,27 @@ run_file() {
   append_profile_records "$backend" "$repeat" "$file" "$log"
   append_synthetic_records "$backend" "$repeat" "$file" "$log"
   total="$(sed -nE 's/.*: ([0-9]+) obligations from.*/\1/p' "$log" | tail -n 1)"
+  prelude_end="$(grep -nF -- '-- PLEAN_BENCH_PRELUDE_END' "$generated" |
+    cut -d: -f1)"
+  if [[ -z "$prelude_end" ]]; then
+    prelude_errors=1
+  else
+    prelude_errors="$(
+      grep -F "$generated:" "$log" |
+        sed -nE 's/^.*:([0-9]+):[0-9]+: error[(:].*$/\1/p' |
+        awk -v limit="$prelude_end" \
+          '$1 <= limit { count++ } END { print count + 0 }'
+    )"
+  fi
   cpu_limited="false"
   message="-"
   if [[ "$backend" == "duper" && "$DUPER_FILE_CPU_SECONDS" -gt 0 &&
       "$exit_code" -eq 152 ]]; then
     cpu_limited="true"
     message="file did not complete within CPU limit"
+  elif [[ "$prelude_errors" -gt 0 ]]; then
+    HARNESS_FAILURES=$((HARNESS_FAILURES + 1))
+    message="benchmark prelude reported an error"
   fi
   printf 'plean\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$backend" "$repeat" "$file" "$exit_code" "$elapsed" "${total:-0}" \
@@ -720,4 +743,7 @@ missing_headline="$(
 )"
 if [[ "$missing_headline" -gt 0 ]]; then
   die "$missing_headline headline VC attempt(s) are missing"
+fi
+if [[ "$HARNESS_FAILURES" -gt 0 ]]; then
+  die "$HARNESS_FAILURES benchmark prelude(s) reported an error"
 fi
