@@ -1,0 +1,4 @@
+suite	baseline	baseline_lane	crush_lane	matched_vcs	baseline_only_solved	crush_only_solved	both_solved	neither_solved	baseline_mean_ms	crush_mean_ms
+leanhammer	auto	auto-duper	crush-verify	20	0	11	8	1	293.625	62.875
+leanhammer	duper	duper-only	crush-verify	20	1	8	11	0	76.909	59.273
+leanhammer	grind	grind-only	crush-verify	20	0	3	16	1	4.438	56.750

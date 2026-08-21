@@ -34,12 +34,29 @@ BACKEND_LABELS = {
     "grind": "grind",
 }
 
+SUITE_LABELS = {
+    "leanhammer": "LeanHammer",
+    "loom": "Loom",
+    "cashmere": "Cashmere",
+    "velvet": "Velvet",
+    "plean": "PLean",
+}
+
+SUITE_ORDER = ("leanhammer", "loom", "cashmere", "velvet", "plean")
+
 BACKEND_COLORS = {
     "auto": "#597A91",
     "duper": "#B55B45",
     "crush": "#178078",
     "grind": "#77834D",
 }
+
+OUTCOME_FIELDS = (
+    ("success", "Success", "#178078"),
+    ("translation_error", "Translation error", "#D69A3A"),
+    ("timeout", "Timeout", "#A4433E"),
+    ("failed_to_prove", "Failed to prove", "#597A91"),
+)
 
 LANE_ORDER = (
     "auto",
@@ -122,6 +139,7 @@ PAPER = "#FBF8F1"
 OUTPUTS = (
     "tables",
     "coverage",
+    "outcomes",
     "reconstruction",
     "reconstruction-failures",
     "phase-breakdown",
@@ -189,6 +207,17 @@ def label_lane(lane: str) -> str:
 
 def label_backend(backend: str) -> str:
     return BACKEND_LABELS.get(backend, backend)
+
+
+def label_suite(suite: str) -> str:
+    return SUITE_LABELS.get(suite, suite)
+
+
+def suite_sort_key(suite: str) -> tuple[int, str]:
+    try:
+        return (SUITE_ORDER.index(suite), suite)
+    except ValueError:
+        return (len(SUITE_ORDER), suite)
 
 
 def xml(value: object) -> str:
@@ -453,6 +482,135 @@ def plot_coverage(rows: list[dict[str, str]], path: Path) -> None:
             "middle",
         )
     )
+    write_svg(path, elements)
+
+
+def plot_outcomes(rows: list[dict[str, str]], path: Path) -> None:
+    suites = sorted({row["suite"] for row in rows}, key=suite_sort_key)
+    backend_order = ("auto", "duper", "crush", "grind")
+    indexed = {(row["suite"], row["backend"]): row for row in rows}
+    totals_by_suite: dict[str, set[int]] = defaultdict(set)
+    for row in rows:
+        total = int(row["total_vcs"])
+        totals_by_suite[row["suite"]].add(total)
+        partition = sum(int(row[field]) for field, _, _ in OUTCOME_FIELDS)
+        if total <= 0 or partition != total:
+            raise SystemExit(
+                "headline-outcomes.tsv does not partition the fixed workload "
+                f"for {row['suite']} / {row['backend']}: "
+                f"{partition} outcomes for {total} VCs"
+            )
+    for suite, totals in totals_by_suite.items():
+        if len(totals) != 1:
+            raise SystemExit(
+                "headline-outcomes.tsv uses different workloads for "
+                f"{suite}: {sorted(totals)}"
+            )
+
+    width = max(1180, 220 + len(suites) * 220)
+    height = 650
+    left, right, top, bottom = 82.0, 36.0, 142.0, 120.0
+    chart_width = width - left - right
+    chart_height = height - top - bottom
+    chart_bottom = top + chart_height
+    elements = svg_open(
+        width,
+        height,
+        "Verification outcomes by corpus and backend",
+        (
+            "Within each corpus, every stacked bar partitions the same VCs into "
+            "success, translation error, timeout, and failed to prove."
+        ),
+    )
+    elements.append(text(42, 42, "Verification outcomes", "title"))
+    elements.append(
+        text(
+            42,
+            66,
+            "Within each corpus, every bar uses the same VCs; Crush trusts SMT verdicts",
+            "subtitle",
+        )
+    )
+    draw_legend(
+        elements,
+        [(label, color) for _, label, color in OUTCOME_FIELDS],
+        42,
+        98,
+        width - 84,
+    )
+
+    for value in (0, 25, 50, 75, 100):
+        y = chart_bottom - chart_height * value / 100.0
+        elements.append(line(left, y, width - right, y, "grid"))
+        elements.append(text(left - 12, y + 4, f"{value}%", "axis", "end"))
+
+    group_width = chart_width / max(len(suites), 1)
+    for suite_index, suite in enumerate(suites):
+        available = [
+            backend
+            for backend in backend_order
+            if (suite, backend) in indexed
+        ]
+        bar_width = min(42.0, group_width * 0.16)
+        gap = min(14.0, bar_width * 0.35)
+        bars_width = len(available) * bar_width + max(0, len(available) - 1) * gap
+        group_start = (
+            left
+            + suite_index * group_width
+            + (group_width - bars_width) / 2
+        )
+        for backend_index, backend in enumerate(available):
+            row = indexed[(suite, backend)]
+            total = int(row["total_vcs"])
+            x = group_start + backend_index * (bar_width + gap)
+            cursor_y = chart_bottom
+            for field, label, color in OUTCOME_FIELDS:
+                count = int(row[field])
+                if count == 0:
+                    continue
+                segment_height = chart_height * count / total
+                y = cursor_y - segment_height
+                tooltip = (
+                    f"{label_suite(suite)} / {label_backend(backend)} / {label}: "
+                    f"{count} of {total} ({100.0 * count / total:.1f}%)"
+                )
+                elements.append(
+                    f"<g><title>{xml(tooltip)}</title>"
+                    f"{rect(x, y, bar_width, segment_height, color)}</g>"
+                )
+                if segment_height >= 18:
+                    elements.append(
+                        text(
+                            x + bar_width / 2,
+                            y + segment_height / 2 + 4,
+                            count,
+                            "value",
+                            "middle",
+                        )
+                    )
+                cursor_y = y
+            elements.append(
+                text(
+                    x + bar_width / 2,
+                    chart_bottom + 22,
+                    label_backend(backend),
+                    "axis",
+                    "middle",
+                )
+            )
+        center = left + (suite_index + 0.5) * group_width
+        total = int(indexed[(suite, available[0])]["total_vcs"])
+        elements.append(
+            text(center, chart_bottom + 50, label_suite(suite), "label", "middle")
+        )
+        elements.append(
+            text(center, chart_bottom + 69, f"{total} VCs", "axis", "middle")
+        )
+        if suite_index > 0:
+            separator = left + suite_index * group_width
+            elements.append(
+                line(separator, top, separator, chart_bottom + 74, stroke=GRID)
+            )
     write_svg(path, elements)
 
 
@@ -970,6 +1128,7 @@ def write_tables(
     path: Path,
     result_dirs: list[Path],
     headline: list[dict[str, str]],
+    outcomes: list[dict[str, str]],
     comparisons: list[dict[str, str]],
     coverage: list[dict[str, str]],
     reconstruction: list[dict[str, str]],
@@ -1027,6 +1186,50 @@ def write_tables(
                     ]
                     for row in sorted(
                         headline,
+                        key=lambda item: (
+                            item["suite"],
+                            ("auto", "duper", "crush", "grind").index(
+                                item["backend"]
+                            ),
+                        ),
+                    )
+                ),
+            )
+        if outcomes:
+            stream.write("## Verification Outcomes\n\n")
+            stream.write(
+                "The four outcome columns partition each backend's fixed "
+                "corpus workload. `Translation error` means the backend "
+                "explicitly rejected an unsupported translation or encoding. "
+                "`Timeout` requires an explicit wall-clock, heartbeat, or "
+                "saturation-limit diagnostic. `Failed to prove` contains all "
+                "other unsuccessful attempts, including solver `sat` or "
+                "`unknown`, exhausted proof search, and ordinary tactic "
+                "errors.\n\n"
+            )
+            write_markdown_table(
+                stream,
+                [
+                    "Corpus",
+                    "Backend",
+                    "Total",
+                    "Success",
+                    "Translation error",
+                    "Timeout",
+                    "Failed to prove",
+                ],
+                (
+                    [
+                        row["suite"],
+                        label_backend(row["backend"]),
+                        row["total_vcs"],
+                        row["success"],
+                        row["translation_error"],
+                        row["timeout"],
+                        row["failed_to_prove"],
+                    ]
+                    for row in sorted(
+                        outcomes,
                         key=lambda item: (
                             item["suite"],
                             ("auto", "duper", "crush", "grind").index(
@@ -1261,6 +1464,7 @@ def main() -> None:
 
     need_tables = "tables" in selected
     need_coverage = need_tables or "coverage" in selected
+    need_outcomes = need_tables or "outcomes" in selected
     need_reconstruction = (
         need_tables
         or "reconstruction" in selected
@@ -1286,6 +1490,15 @@ def main() -> None:
             "coverage-summary.tsv",
         )
         if need_tables or (need_coverage and not headline)
+        else []
+    )
+    outcomes = (
+        unique_rows(
+            read_tsv(args.result_dirs, "headline-outcomes.tsv"),
+            ("suite", "backend"),
+            "headline-outcomes.tsv",
+        )
+        if need_outcomes
         else []
     )
     comparisons = (
@@ -1336,6 +1549,7 @@ def main() -> None:
     if not any(
         (
             headline,
+            outcomes,
             comparisons,
             coverage,
             reconstruction,
@@ -1353,6 +1567,7 @@ def main() -> None:
             args.out_dir / "tables.md",
             args.result_dirs,
             headline,
+            outcomes,
             comparisons,
             coverage,
             reconstruction,
@@ -1365,6 +1580,10 @@ def main() -> None:
     if "coverage" in selected and coverage_plot_rows:
         path = args.out_dir / "coverage.svg"
         plot_coverage(coverage_plot_rows, path)
+        generated.append(path)
+    if "outcomes" in selected and outcomes:
+        path = args.out_dir / "outcomes.svg"
+        plot_outcomes(outcomes, path)
         generated.append(path)
     if "reconstruction" in selected and reconstruction:
         path = args.out_dir / "reconstruction.svg"

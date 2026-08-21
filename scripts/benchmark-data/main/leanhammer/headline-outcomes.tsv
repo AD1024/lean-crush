@@ -1,0 +1,5 @@
+suite	backend	lane	total_vcs	success	translation_error	timeout	failed_to_prove
+leanhammer	auto	auto-duper	20	8	1	0	11
+leanhammer	duper	duper-only	20	12	0	1	7
+leanhammer	crush	crush-verify	20	19	0	1	0
+leanhammer	grind	grind-only	20	16	0	0	4

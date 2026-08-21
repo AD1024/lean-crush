@@ -1,38 +1,25 @@
-# Recorded Benchmark Results, 2026-08-20
+# Recorded Benchmark Results
 
-This snapshot preserves the machine-readable inputs for the figures and
-benchmark comparisons published on 2026-08-20. Build logs, tactic logs, source
-clones, and temporary worktrees are excluded.
+This snapshot preserves benchmark inputs used by the paper. Build logs, tactic
+logs, source clones, and temporary worktrees are excluded.
 
-## Figures
+## Paper Data
 
-The `figures/` directories are byte-for-byte copies of every TSV in:
-
-| Snapshot directory | Original result directory |
-|---|---|
-| `figures/corpora` | `BenchmarkResults/crush-measurement-20260820/corpora-final` |
-| `figures/leanhammer` | `BenchmarkResults/crush-measurement-20260820/leanhammer-final` |
-| `figures/plean` | `BenchmarkResults/crush-measurement-20260820/plean-final` |
-
-Regenerate the published figures with:
+All canonical inputs for the current tables and figures are under
+[`scripts/benchmark-data`](../../../scripts/benchmark-data). Regenerate every
+artifact from that one directory with:
 
 ```sh
-python3 scripts/plot-benchmarks.py \
-  BenchmarkResults/recorded/2026-08-20/figures/corpora \
-  BenchmarkResults/recorded/2026-08-20/figures/leanhammer \
-  BenchmarkResults/recorded/2026-08-20/figures/plean \
-  --out-dir Doc/Verso/figures \
-  --skip-tables
+scripts/render-paper-artifacts.sh
 ```
 
-The runs use clean lean-crush commit
-`08a4eb091e94a369dc8eb77b70cacffe7f0138ff`. Exact downstream revisions and
-options are recorded in each `metadata.tsv`.
+The benchmark-data README documents the two measurements, their workloads, and
+direct plotting commands.
 
-## Baselines
+## Earlier Runs
 
-The `baselines/` directories preserve the TSV records behind the Auto, Duper,
-and paired Crush rows in `BENCHMARKS.md`:
+The `baselines/` directories preserve the superseded 2026-08-14 and
+2026-08-15 inputs:
 
 | Result directory | Published use |
 |---|---|
@@ -49,5 +36,5 @@ and paired Crush rows in `BENCHMARKS.md`:
 
 Auto and Duper were measured on 2026-08-14. The paired Crush comparison was
 measured on 2026-08-15 from a reviewed working tree based on
-`eeecec410864b3f0d8f59b5555b0996f5478d701`. These records are intentionally
-separate from the 2026-08-20 reconstruction measurement.
+`eeecec410864b3f0d8f59b5555b0996f5478d701`. They remain available for
+historical validation but are not inputs to the current headline table.

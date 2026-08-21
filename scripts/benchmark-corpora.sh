@@ -332,14 +332,25 @@ private def corpusBenchContains (text needle : String) : Bool :=
   (text.splitOn needle).length > 1
 
 private def corpusBenchCategory (msg : String) : String :=
-  if corpusBenchContains msg "timeout" || corpusBenchContains msg "heartbeat" then "timeout"
+  let msg := msg.toLower
+  if corpusBenchContains msg "timed out" ||
+      corpusBenchContains msg "timeout at" ||
+      corpusBenchContains msg "deterministic) timeout" ||
+      corpusBenchContains msg "solver exited without a verdict" ||
+      corpusBenchContains msg "heartbeat" ||
+      corpusBenchContains msg "maxsaturation" ||
+      corpusBenchContains msg "saturation time" ||
+      corpusBenchContains msg "saturation limit" then "timeout"
+  else if corpusBenchContains msg "translation" ||
+      corpusBenchContains msg "unsupported" ||
+      corpusBenchContains msg "higher-order" ||
+      corpusBenchContains msg "cannot translate" ||
+      corpusBenchContains msg "cannot encode" then "translation"
   else if corpusBenchContains msg "unknown" then "unknown"
   else if corpusBenchContains msg "not provable" ||
       corpusBenchContains msg "the goal is false" then "sat"
-  else if corpusBenchContains msg "translation" ||
-      corpusBenchContains msg "unsupported" then "translation"
   else if corpusBenchContains msg "reconstruction" ||
-      corpusBenchContains msg "Alethe" then "reconstruction"
+      corpusBenchContains msg "alethe" then "reconstruction"
   else "tactic"
 
 private def runCorpusBench : TacticM Unit := Lean.withCurrHeartbeats do

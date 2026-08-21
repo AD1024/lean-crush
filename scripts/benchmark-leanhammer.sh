@@ -231,6 +231,42 @@ EOF
   } > "$output"
 }
 
+classify_failure_log() {
+  awk '
+    {
+      line = tolower($0)
+      if (line ~ /timed out|timeout at|deterministic\) timeout|solver exited without a verdict|heartbeat|maxsaturation|saturation time|saturation limit/)
+        timeout = 1
+      if (line ~ /translation|unsupported|higher-order|cannot translate|cannot encode/)
+        translation = 1
+    }
+    END {
+      if (timeout) print "timeout"
+      else if (translation) print "translation"
+      else print "tactic"
+    }
+  ' "$1"
+}
+
+failure_message() {
+  awk '
+    {
+      line = tolower($0)
+      if (diagnostic == "" &&
+          line ~ /timed out|timeout at|deterministic\) timeout|solver exited without a verdict|heartbeat|maxsaturation|saturation time|saturation limit|translation|unsupported|higher-order|cannot translate|cannot encode/)
+        diagnostic = $0
+      if (fallback == "" && line ~ /error:/) fallback = $0
+    }
+    END {
+      if (diagnostic != "") message = diagnostic
+      else if (fallback != "") message = fallback
+      else message = "-"
+      gsub(/\t/, " ", message)
+      print message
+    }
+  ' "$1"
+}
+
 printf 'profile\tcase\trun\tstatus\ttactic_ms\n' > "$results"
 printf 'suite\tlane\trepeat\tvc_key\tstatus\tcategory\tmilliseconds\tmessage\n' > "$measurements"
 printf 'suite\tlane\trepeat\tvc_key\tdeclaration\tgoal_hash\toutcome\treplay\tdetail\ttotal_nanos\tphases\tmetrics\n' > "$profiles_out"
@@ -325,7 +361,7 @@ for profile in "${profiles[@]}"; do
         category="-"
         message="-"
         if [[ "$status" != "pass" ]]; then
-          category="$(awk -F '\t' '
+          profile_category="$(awk -F '\t' '
             /CRUSH_PROFILE\t/ {
               marker = index($0, "CRUSH_PROFILE\t")
               split(substr($0, marker), row, "\t")
@@ -336,6 +372,11 @@ for profile in "${profiles[@]}"; do
               else print category
             }
           ' "$log")"
+          category="$(classify_failure_log "$log")"
+          if [[ "$category" == "tactic" && "$profile_category" != "tactic" ]]; then
+            category="$profile_category"
+          fi
+          message="$(failure_message "$log")"
         fi
         printf 'leanhammer\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
           "$profile" "$run" "$case_name" "$status" "$category" "$tactic_ms" \

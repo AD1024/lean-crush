@@ -34,6 +34,17 @@ HEADLINE_COLUMNS = [
     "max_ms",
 ]
 
+HEADLINE_OUTCOME_COLUMNS = [
+    "suite",
+    "backend",
+    "lane",
+    "total_vcs",
+    "success",
+    "translation_error",
+    "timeout",
+    "failed_to_prove",
+]
+
 
 def read_tsv(path: Path) -> list[dict[str, str]]:
     if not path.exists():
@@ -220,6 +231,129 @@ def headline_rows(coverage: list[list[object]]) -> list[list[object]]:
         for backend, lane in headline_lane_map(suite, lanes):
             row = indexed[(suite, lane)]
             output.append([suite, backend, lane, *row[2:]])
+    return output
+
+
+def diagnostic_outcome(value: str) -> Optional[str]:
+    text = value.strip().lower()
+    if not text or text == "-":
+        return None
+    if any(
+        marker in text
+        for marker in (
+            "translation",
+            "unsupported",
+            "higher-order",
+            "higher order input",
+            "cannot translate",
+            "cannot encode",
+        )
+    ):
+        return "translation_error"
+    if any(
+        marker in text
+        for marker in (
+            "timed out",
+            "timeout at",
+            "deterministic) timeout",
+            "solver exited without a verdict",
+            "maximum number of heartbeats",
+            "saturation time",
+            "saturation limit",
+        )
+    ):
+        return "timeout"
+    return None
+
+
+def category_outcome(value: str) -> Optional[str]:
+    category = value.strip().lower().replace("_", "-")
+    if "translation" in category or "unsupported" in category:
+        return "translation_error"
+    if "timeout" in category or "heartbeat" in category:
+        return "timeout"
+    return None
+
+
+def normalized_outcome(
+    rows: list[dict[str, str]], profiles: list[dict[str, str]]
+) -> str:
+    if all_pass(rows):
+        return "success"
+    outcomes: set[str] = set()
+    for row in rows:
+        if row["status"] == "pass":
+            continue
+        message = row.get("message", "")
+        diagnostic = diagnostic_outcome(message)
+        if diagnostic is not None:
+            outcomes.add(diagnostic)
+        elif not message.strip() or message.strip() == "-":
+            category = category_outcome(row["category"])
+            if category is not None:
+                outcomes.add(category)
+    for profile in profiles:
+        if profile.get("outcome", "") in {
+            "verified",
+            "pre-reconstructed",
+            "selected-fact",
+            "alethe-reconstructed",
+            "core-reconstructed",
+        }:
+            continue
+        diagnostic = diagnostic_outcome(profile.get("detail", ""))
+        if diagnostic is not None:
+            outcomes.add(diagnostic)
+        profile_outcome = category_outcome(profile.get("outcome", ""))
+        if profile_outcome is not None:
+            outcomes.add(profile_outcome)
+    if "translation_error" in outcomes:
+        return "translation_error"
+    if "timeout" in outcomes:
+        return "timeout"
+    return "failed_to_prove"
+
+
+def headline_outcome_rows(
+    attempts: dict[tuple[str, str, str], list[dict[str, str]]],
+    profiles: list[dict[str, str]],
+) -> list[list[object]]:
+    profile_groups = profiles_by_vc(profiles)
+    lanes_by_suite: dict[str, set[str]] = defaultdict(set)
+    vcs_by_lane: dict[
+        tuple[str, str], dict[str, list[dict[str, str]]]
+    ] = defaultdict(dict)
+    for (suite, lane, vc), rows in attempts.items():
+        lanes_by_suite[suite].add(lane)
+        vcs_by_lane[(suite, lane)][vc] = rows
+
+    output: list[list[object]] = []
+    for suite, lanes in sorted(lanes_by_suite.items()):
+        selected = headline_lane_map(suite, lanes)
+        if not selected:
+            continue
+        total_vcs = max(
+            len(vcs_by_lane[(suite, lane)]) for _, lane in selected
+        )
+        for backend, lane in selected:
+            counts = Counter(
+                normalized_outcome(
+                    rows, profile_groups.get((suite, lane, vc), [])
+                )
+                for vc, rows in vcs_by_lane[(suite, lane)].items()
+            )
+            output.append(
+                [
+                    suite,
+                    backend,
+                    lane,
+                    total_vcs,
+                    counts["success"],
+                    counts["translation_error"],
+                    counts["timeout"],
+                    counts["failed_to_prove"],
+                ]
+            )
     return output
 
 
@@ -570,6 +704,11 @@ def main() -> None:
         args.out_dir / "headline-summary.tsv",
         HEADLINE_COLUMNS,
         headline_rows(coverage),
+    )
+    write_tsv(
+        args.out_dir / "headline-outcomes.tsv",
+        HEADLINE_OUTCOME_COLUMNS,
+        headline_outcome_rows(attempts, profiles),
     )
     write_tsv(
         args.out_dir / "comparison.tsv",

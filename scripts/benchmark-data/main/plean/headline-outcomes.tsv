@@ -1,0 +1,5 @@
+suite	backend	lane	total_vcs	success	translation_error	timeout	failed_to_prove
+plean	auto	auto	192	168	6	0	18
+plean	duper	duper	192	71	0	19	102
+plean	crush	crush-verify	192	174	0	16	2
+plean	grind	grind	192	155	0	0	37

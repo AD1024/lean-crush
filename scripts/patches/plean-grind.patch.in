@@ -1,0 +1,54 @@
+diff --git a/PLean/Verify/Tactic.lean b/PLean/Verify/Tactic.lean
+--- a/PLean/Verify/Tactic.lean
++++ b/PLean/Verify/Tactic.lean
+@@ -733,7 +733,7 @@ def pverifySmtCloseDefault : TacticM Unit := do
+   unless cacheHit do
+     evalTactic (← `(tactic| pverify_smt_prep))
+     unless (← getGoals).isEmpty do
+-      evalTactic (← `(tactic| all_goals crush [*]))
++      evalTactic (← `(tactic| all_goals grind (splits := @GRIND_SPLITS@)))
+     if let some (hash, text) := cacheHash? then
+       liftM (pverifyCacheInsert hash text)
+ 
+@@ -783,7 +783,7 @@ def pverifySmtCloseProfiled : TacticM Unit := do
+       { r with smtPrep := r.smtPrep + prepNs }))
+     unless (← getGoals).isEmpty do
+       let (_, crushNs) ← PLean.Verify.Profile.timeTacticNanos
+-        (evalTactic (← `(tactic| all_goals crush [*])))
++        (evalTactic (← `(tactic| all_goals grind (splits := @GRIND_SPLITS@))))
+       liftM (m := IO) (PLean.Verify.Profile.modifyRow key (fun r =>
+         { r with smtCrush := r.smtCrush + crushNs }))
+     if let some (hash, text) := cacheHash? then
+@@ -815,7 +815,7 @@ syntax "pverify_structural_smt" : tactic
+ macro_rules
+   | `(tactic| pverify_structural_smt) => `(tactic| (
+       pverify_smt_prep_structural
+-      all_goals crush [*]
++      all_goals grind (splits := @GRIND_SPLITS@)
+     ))
+ 
+ /-- Arithmetic / boolean fallback for default-invariant goals SMT
+@@ -1357,11 +1357,7 @@ macro_rules
+   | `(tactic| pverify_close_chain) => `(tactic| (
+       first
+         | default_inv
+-        | pverify_smt
+-        | pverify_structural_smt
+-        | pverify_split_ite_smt
+-        | pverify_split_smt
+-        | pverify_grind))
++        | pverify_smt))
+ 
+ /-- Internal close-chain used by `pverify_default`: SMT first because
+ the goal arrives with explicit `DefaultInvariants` content the SMT
+@@ -1370,10 +1366,6 @@ syntax "pverify_close_chain_smt_first" : tactic
+ macro_rules
+   | `(tactic| pverify_close_chain_smt_first) => `(tactic| (
+       first
+         | pverify_smt
+-        | pverify_structural_smt
+-        | pverify_split_ite_smt
+-        | pverify_split_smt
+-        | default_inv
+-        | pverify_grind))
++        | default_inv))

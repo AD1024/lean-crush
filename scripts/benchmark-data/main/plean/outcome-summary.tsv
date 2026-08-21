@@ -1,0 +1,5 @@
+suite	lane	outcome	replay	events
+plean	crush-verify	pre-reconstructed	not-attempted	24
+plean	crush-verify	selected-fact	not-attempted	109
+plean	crush-verify	unknown	not-attempted	278
+plean	crush-verify	verified	not-requested	841

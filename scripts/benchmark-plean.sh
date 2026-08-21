@@ -10,12 +10,15 @@ source "$SCRIPT_DIR/benchmark-common.sh"
 PLEAN_AUTO_TREE="${PLEAN_AUTO_TREE:-}"
 PLEAN_CRUSH_TREE="${PLEAN_CRUSH_TREE:-}"
 PLEAN_DUPER_TREE="${PLEAN_DUPER_TREE:-}"
+PLEAN_GRIND_TREE="${PLEAN_GRIND_TREE:-}"
 PLEAN_AUTO_REPO_URL="${PLEAN_AUTO_REPO_URL:-https://github.com/AD1024/P.git}"
 PLEAN_AUTO_REV="${PLEAN_AUTO_REV:-be39726723e71f9aa1e02c6cfeeae9b0c31b8947}"
 PLEAN_CRUSH_REPO_URL="${PLEAN_CRUSH_REPO_URL:-https://github.com/AD1024/P.git}"
 PLEAN_CRUSH_REV="${PLEAN_CRUSH_REV:-9c098b4c5ad32faf2a022929b6726d2a182a9e1d}"
 PLEAN_DUPER_REPO_URL="${PLEAN_DUPER_REPO_URL:-https://github.com/AD1024/P.git}"
 PLEAN_DUPER_REV="${PLEAN_DUPER_REV:-3557f1f0fa5246ee88fcde3776f3973349049968}"
+PLEAN_GRIND_REPO_URL="${PLEAN_GRIND_REPO_URL:-$PLEAN_CRUSH_REPO_URL}"
+PLEAN_GRIND_REV="${PLEAN_GRIND_REV:-$PLEAN_CRUSH_REV}"
 BENCHMARK_SOURCE_CACHE="${BENCHMARK_SOURCE_CACHE:-$CRUSH_ROOT/BenchmarkResults/sources}"
 REPEATS="${REPEATS:-1}"
 SOLVER="${SOLVER:-cvc5}"
@@ -49,6 +52,7 @@ PROFILES="$OUT_DIR/profile-events.tsv"
 WORKTREES=()
 PROVISIONED_TREE=""
 HARNESS_FAILURES=0
+SOLVER_GUARD_DIR="$TMP_ROOT/solver-guard"
 
 PLEAN_FILES=(
   "Examples/ClockBound.lean"
@@ -77,6 +81,13 @@ is_true() {
 
 is_crush_lane() {
   [[ "$1" == crush-* ]]
+}
+
+validate_nat() {
+  local name="$1"
+  local value="$2"
+  [[ "$value" =~ ^[0-9]+$ ]] ||
+    die "$name must be a nonnegative integer, got: $value"
 }
 
 crush_lane_trust() {
@@ -145,10 +156,49 @@ provision_tree() {
   PROVISIONED_TREE="$checkout/Src/PLean"
 }
 
+prepare_solver_guard() {
+  mkdir -p "$SOLVER_GUARD_DIR"
+  cat > "$SOLVER_GUARD_DIR/solver-disabled" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "${0##*/}" >> "${PLEAN_SOLVER_GUARD_LOG:?}"
+exit 97
+EOF
+  chmod +x "$SOLVER_GUARD_DIR/solver-disabled"
+  ln -sf solver-disabled "$SOLVER_GUARD_DIR/cvc5"
+  ln -sf solver-disabled "$SOLVER_GUARD_DIR/z3"
+  ln -sf solver-disabled "$SOLVER_GUARD_DIR/bitwuzla"
+}
+
+validate_grind_tree() {
+  local tree="$1"
+  local tactic="$tree/PLean/Verify/Tactic.lean"
+  local expected
+
+  expected="$(grep -F -c "grind (splits := $GRIND_SPLITS)" "$tactic")"
+  [[ "$expected" -eq 3 ]] ||
+    die "grind PLean tree is not patched for GRIND_SPLITS=$GRIND_SPLITS"
+  if grep -Fq 'all_goals crush [*]' "$tactic"; then
+    die "grind PLean tree still contains a direct Crush backend call"
+  fi
+}
+
+patch_grind_tree() {
+  local tree="$1"
+  local patch_file="$TMP_ROOT/plean-grind.patch"
+
+  sed "s/@GRIND_SPLITS@/$GRIND_SPLITS/g" \
+    "$SCRIPT_DIR/patches/plean-grind.patch.in" > "$patch_file"
+  if ! patch -d "$tree" -p1 --forward --batch < "$patch_file"; then
+    die "failed to apply the pinned PLean grind backend patch"
+  fi
+  validate_grind_tree "$tree"
+}
+
 prepare_tree() {
   local label="$1"
   local tree="$2"
   local log="$OUT_DIR/build-$label.log"
+  local guard_log="$OUT_DIR/solver-guard-build-$label.log"
 
   printf 'Building %s PLean tree\n' "$label"
   if ! (cd "$tree" && lake env printenv LEAN_PATH) \
@@ -167,7 +217,16 @@ prepare_tree() {
     benchmark_sync_crush_sources "$CRUSH_ROOT" "$tree" ||
       die "failed to synchronize local Crush sources"
   fi
-  if ! (cd "$tree" && lake build) > "$log" 2>&1; then
+  if [[ "$label" == "grind" ]]; then
+    if ! (cd "$tree" && PATH="$SOLVER_GUARD_DIR:$PATH" \
+        PLEAN_SOLVER_GUARD_LOG="$guard_log" lake build) > "$log" 2>&1; then
+      tail -n 80 "$log" >&2
+      die "$label PLean build failed; see $log"
+    fi
+    if [[ -s "$guard_log" ]]; then
+      die "grind PLean build attempted to invoke an external solver"
+    fi
+  elif ! (cd "$tree" && lake build) > "$log" 2>&1; then
     tail -n 80 "$log" >&2
     die "$label PLean build failed; see $log"
   fi
@@ -186,6 +245,7 @@ macro "#plean_bench_pverify " name:ident : command =>
     set_option loom.solver "$SOLVER" in
     set_option loom.solver.smt.timeout $TIMEOUT in
     set_option pverify.cache false in
+    set_option pverify.failOnIncomplete false in
     set_option pverify.profile true in
     #pverify \$name)
 EOF
@@ -204,41 +264,17 @@ macro "#plean_bench_pverify " name:ident : command =>
     set_option crush.profile $CRUSH_PROFILE in
     set_option crush.profile.machine true in
     set_option pverify.cache false in
+    set_option pverify.failOnIncomplete false in
     set_option pverify.profile true in
     #pverify \$name)
 EOF
   elif [[ "$backend" == "grind" ]]; then
     cat >> "$output" <<EOF
 
-open Lean Elab Tactic
-
-syntax "plean_bench_grind" : tactic
-
-elab_rules : tactic
-  | \`(tactic| plean_bench_grind) => withMainContext do
-      let key ← PLean.currentObligationKey
-      let startedAt ← IO.monoNanosNow
-      try
-        evalTactic (← \`(tactic| grind (splits := $GRIND_SPLITS)))
-        let elapsed := (← IO.monoNanosNow) - startedAt
-        liftM (m := IO) (PLean.Verify.Profile.modifyRow key fun row =>
-          { row with smtCrush := row.smtCrush + elapsed })
-      catch error =>
-        let elapsed := (← IO.monoNanosNow) - startedAt
-        liftM (m := IO) (PLean.Verify.Profile.modifyRow key fun row =>
-          { row with smtCrush := row.smtCrush + elapsed })
-        throw error
-
-macro_rules
-  | \`(tactic| pverify_smt) => \`(tactic| plean_bench_grind)
-  | \`(tactic| pverify_structural_smt) => \`(tactic| plean_bench_grind)
-  | \`(tactic| pverify_close_chain) => \`(tactic| plean_bench_grind)
-  | \`(tactic| pverify_close_chain_smt_first) =>
-      \`(tactic| plean_bench_grind)
-
 macro "#plean_bench_pverify " name:ident : command =>
   \`(command|
     set_option pverify.cache false in
+    set_option pverify.failOnIncomplete false in
     set_option pverify.profile true in
     #pverify \$name)
 EOF
@@ -249,10 +285,47 @@ macro "#plean_bench_pverify " name:ident : command =>
   \`(command|
     set_option duper.maxSaturationTime $DUPER_TIMEOUT in
     set_option pverify.cache false in
+    set_option pverify.failOnIncomplete false in
     set_option pverify.profile true in
     #pverify \$name)
 EOF
   fi
+
+  cat >> "$output" <<'EOF'
+
+open Lean Elab Command
+
+private def pleanBenchContains (text needle : String) : Bool :=
+  (text.splitOn needle).length > 1
+
+private def pleanBenchDiagnosticCategory (obligation : String) : IO String := do
+  let diag ← PLean.getDiag obligation
+  let raw := match diag.smt with
+    | some msg => msg
+    | none => diag.tac.getD ""
+  let msg := raw.toLower
+  if pleanBenchContains msg "timed out" ||
+      pleanBenchContains msg "timeout at" ||
+      pleanBenchContains msg "deterministic) timeout" ||
+      pleanBenchContains msg "solver exited without a verdict" ||
+      pleanBenchContains msg "heartbeat" ||
+      pleanBenchContains msg "maxsaturation" ||
+      pleanBenchContains msg "saturation time" ||
+      pleanBenchContains msg "saturation limit" then
+    return "timeout"
+  if pleanBenchContains msg "translation" ||
+      pleanBenchContains msg "unsupported" ||
+      pleanBenchContains msg "higher-order" ||
+      pleanBenchContains msg "cannot translate" ||
+      pleanBenchContains msg "cannot encode" then
+    return "translation"
+  return "tactic"
+
+private def pleanBenchReportDiagnostic (obligation : String) : IO Unit := do
+  let category ← pleanBenchDiagnosticCategory obligation
+  IO.println s!"PLEAN_DIAG\t{obligation}\t{category}"
+
+EOF
 
   if [[ "$backend" == "auto" ]]; then
     cat >> "$output" <<'EOF'
@@ -265,6 +338,7 @@ elab "#plean_bench_report" : command => do
     let nanos := row.cachePp + row.cacheHash + row.cacheFs +
       row.smtPrep + row.smtAuto + row.smtSolver + row.smtAssign
     IO.println s!"PLEAN_TIME\t{row.obligation}\t{nanos}"
+    liftM (pleanBenchReportDiagnostic row.obligation)
 
 EOF
   elif is_crush_lane "$backend"; then
@@ -278,6 +352,7 @@ elab "#plean_bench_report" : command => do
     let nanos := row.cachePp + row.cacheHash + row.cacheFs +
       row.cacheClose + row.smtPrep + row.smtCrush
     IO.println s!"PLEAN_TIME\t{row.obligation}\t{nanos}"
+    liftM (pleanBenchReportDiagnostic row.obligation)
 
 EOF
   elif [[ "$backend" == "grind" ]]; then
@@ -288,7 +363,9 @@ open Lean Elab Command
 elab "#plean_bench_report" : command => do
   let profile <- liftM (PLean.Verify.Profile.stateRef.get : IO _)
   for row in profile.rows do
-    IO.println s!"PLEAN_TIME\t{row.obligation}\t{row.smtCrush}"
+    let nanos := row.smtPrep + row.smtCrush
+    IO.println s!"PLEAN_TIME\t{row.obligation}\t{nanos}"
+    liftM (pleanBenchReportDiagnostic row.obligation)
 
 EOF
   else
@@ -302,6 +379,7 @@ elab "#plean_bench_report" : command => do
     let nanos := row.cachePp + row.cacheHash + row.cacheFs +
       row.cacheClose + row.smtPrep + row.smtDuper
     IO.println s!"PLEAN_TIME\t{row.obligation}\t{nanos}"
+    liftM (pleanBenchReportDiagnostic row.obligation)
 
 EOF
   fi
@@ -325,32 +403,66 @@ write_benchmark_file() {
 
   tail -n "+$((last_import + 1))" "$source" |
     awk -v maxHeartbeats="$max_heartbeats" '
-      /^[[:space:]]*set_option[[:space:]]+maxHeartbeats[[:space:]]+[0-9]+[[:space:]]+in[[:space:]]*$/ {
-        sub(/maxHeartbeats[[:space:]]+[0-9]+/,
-            "maxHeartbeats " maxHeartbeats)
+      function emitPendingOption() {
+        if (pendingOption != "") {
+          print pendingOption
+          pendingOption = ""
+        }
       }
-      /^[[:space:]]*@\[pverifyProof\][[:space:]]*$/ {
-        renameTheorem = 1
+      skipManualBody {
+        if ($0 ~ /^[^[:space:]]/) {
+          skipManualBody = 0
+        } else {
+          next
+        }
+      }
+      manualHeader {
+        line = $0
+        if (!manualTheorem) {
+          if (line ~ /^[[:space:]]*$/) next
+          if (line !~ /^theorem[[:space:]]+/) {
+            print "error: expected theorem after @[pverifyProof]" > "/dev/stderr"
+            exit 2
+          }
+          manualTheorem = 1
+        }
+        if (line ~ /:= by/) {
+          manualHeader = 0
+          manualTheorem = 0
+          skipManualBody = 1
+        }
         next
       }
-      renameTheorem && /^theorem[[:space:]]+/ {
-        line = $0
-        name = line
-        sub(/^theorem[[:space:]]+/, "", name)
-        sub(/[[:space:]].*$/, "", name)
-        sub(/^theorem[[:space:]]+[^[:space:]]+/,
-            "theorem " name "_benchmark_disabled", line)
-        print line
-        renameTheorem = 0
+      /^[[:space:]]*set_option[[:space:]]+maxHeartbeats[[:space:]]+[0-9]+[[:space:]]+in[[:space:]]*$/ {
+        emitPendingOption()
+        sub(/maxHeartbeats[[:space:]]+[0-9]+/,
+            "maxHeartbeats " maxHeartbeats)
+        pendingOption = $0
+        next
+      }
+      /^[[:space:]]*@\[pverifyProof\][[:space:]]*$/ {
+        pendingOption = ""
+        manualHeader = 1
         next
       }
       /^#pverify[[:space:]]+/ {
+        emitPendingOption()
         sub(/^#pverify/, "#plean_bench_pverify")
         print
         print "#plean_bench_report"
         next
       }
-      { print }
+      {
+        emitPendingOption()
+        print
+      }
+      END {
+        emitPendingOption()
+        if (manualHeader) {
+          print "error: unterminated @[pverifyProof] declaration" > "/dev/stderr"
+          exit 2
+        }
+      }
     ' >> "$output"
 }
 
@@ -358,7 +470,7 @@ record_metadata() {
   local backend="$1"
   local tree="$2"
   local commit toolchain dirty diff_hash crush_commit duper_commit crush_dirty
-  local max_heartbeats file_cpu_seconds trust reconstruct
+  local max_heartbeats file_cpu_seconds trust reconstruct grind_splits
   commit="$(git -C "$tree" rev-parse HEAD)"
   toolchain="$(tr -d '\r\n' < "$tree/lean-toolchain")"
   dirty="false"
@@ -388,11 +500,16 @@ record_metadata() {
   fi
   trust="$(crush_lane_trust "$backend")"
   reconstruct="$(crush_lane_reconstruct "$backend")"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  grind_splits="-"
+  if [[ "$backend" == "grind" ]]; then
+    grind_splits="$GRIND_SPLITS"
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$backend" "$commit" "$toolchain" "$dirty" "$diff_hash" "$SOLVER" \
     "$TIMEOUT" "$DUPER_TIMEOUT" "$max_heartbeats" "$MAX_RECURSION_DEPTH" \
     "$file_cpu_seconds" "$trust" "$reconstruct" "$CRUSH_INST_FUEL" \
     "$crush_commit" "$duper_commit" "$crush_dirty" "$tree" "$CRUSH_PROFILE" \
+    "$grind_splits" \
     >> "$METADATA"
 }
 
@@ -406,6 +523,12 @@ append_markers() {
     BEGIN { FS = " "; OFS = "\t" }
     {
       if (index($0, "[SMT]") > 0) passed[$2] = 1
+      marker = index($0, "PLEAN_DIAG\t")
+      if (marker > 0) {
+        line = substr($0, marker)
+        split(line, result, "\t")
+        categories[result[2]] = result[3]
+      }
       marker = index($0, "PLEAN_TIME\t")
       if (marker > 0) {
         line = substr($0, marker)
@@ -418,7 +541,8 @@ append_markers() {
       for (i = 1; i <= count; i++) {
         name = names[i]
         status = passed[name] ? "pass" : "fail"
-        category = passed[name] ? "-" : "tactic"
+        failureCategory = (name in categories) ? categories[name] : "tactic"
+        category = passed[name] ? "-" : failureCategory
         printf "plean\t%s\t%s\t%s\t%s\t-\t%s\t%s\t%.3f\tfalse\t-\t-\n",
           backend, repeat, file, name, status, category, nanos[name] / 1000000
         vcKey = file "|" name
@@ -499,7 +623,7 @@ run_file() {
   local generated="$TMP_ROOT/generated/$backend/${file//\//_}"
   local log="$OUT_DIR/logs/$backend/${file//\//_}.$repeat.log"
   local started elapsed exit_code total max_heartbeats cpu_limited message
-  local prelude_end prelude_errors
+  local prelude_end prelude_errors guard_log
 
   mkdir -p "$(dirname "$generated")" "$(dirname "$log")"
   write_benchmark_file "$tree/$file" "$generated" "$backend"
@@ -525,6 +649,14 @@ run_file() {
         "-DmaxRecDepth=$MAX_RECURSION_DEPTH" \
         "-Dpverify.cache=false" "$generated"
     ) > "$log" 2>&1
+  elif [[ "$backend" == "grind" ]]; then
+    guard_log="$log.solver-guard"
+    (cd "$tree" && PATH="$SOLVER_GUARD_DIR:$PATH" \
+      PLEAN_SOLVER_GUARD_LOG="$guard_log" lake env lean \
+      "-DElab.async=false" \
+      "-DmaxHeartbeats=$max_heartbeats" \
+      "-DmaxRecDepth=$MAX_RECURSION_DEPTH" \
+      "-Dpverify.cache=false" "$generated") > "$log" 2>&1
   else
     (cd "$tree" && lake env lean \
       "-DElab.async=false" \
@@ -556,9 +688,15 @@ run_file() {
       "$exit_code" -eq 152 ]]; then
     cpu_limited="true"
     message="file did not complete within CPU limit"
+  elif [[ "$backend" == "grind" && -s "$guard_log" ]]; then
+    HARNESS_FAILURES=$((HARNESS_FAILURES + 1))
+    message="grind lane attempted to invoke an external solver"
   elif [[ "$prelude_errors" -gt 0 ]]; then
     HARNESS_FAILURES=$((HARNESS_FAILURES + 1))
     message="benchmark prelude reported an error"
+  elif [[ "$exit_code" -ne 0 ]]; then
+    HARNESS_FAILURES=$((HARNESS_FAILURES + 1))
+    message="generated benchmark file failed"
   fi
   printf 'plean\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$backend" "$repeat" "$file" "$exit_code" "$elapsed" "${total:-0}" \
@@ -630,7 +768,10 @@ fi
 
 mkdir -p "$OUT_DIR/logs"
 
-if is_true "$RUN_CRUSH" || is_true "$RUN_GRIND"; then
+validate_nat "GRIND_SPLITS" "$GRIND_SPLITS"
+prepare_solver_guard
+
+if is_true "$RUN_CRUSH"; then
   printf 'Building local Crush\n'
   if ! (cd "$CRUSH_ROOT" && lake build Crush) \
       > "$OUT_DIR/build-crush.log" 2>&1; then
@@ -653,7 +794,7 @@ if is_true "$RUN_AUTO"; then
   fi
 fi
 
-if is_true "$RUN_CRUSH" || is_true "$RUN_GRIND"; then
+if is_true "$RUN_CRUSH"; then
   if [[ -z "$PLEAN_CRUSH_TREE" ]]; then
     if [[ -z "$PLEAN_CRUSH_REV" ]]; then
       die "set PLEAN_CRUSH_TREE, or publish the PLean Crush adaptation and set PLEAN_CRUSH_REV"
@@ -667,6 +808,23 @@ if is_true "$RUN_CRUSH" || is_true "$RUN_GRIND"; then
   check_tree "$PLEAN_CRUSH_TREE" "Crush"
   if is_true "$PREPARE_TREES"; then
     prepare_tree "crush" "$PLEAN_CRUSH_TREE"
+  fi
+fi
+
+if is_true "$RUN_GRIND"; then
+  if [[ -z "$PLEAN_GRIND_TREE" ]]; then
+    provision_tree "grind PLean" "$PLEAN_GRIND_REPO_URL" \
+      "$PLEAN_GRIND_REV" "P-crush" "P-grind"
+    PLEAN_GRIND_TREE="$PROVISIONED_TREE"
+  else
+    PLEAN_GRIND_TREE="$(cd "$PLEAN_GRIND_TREE" && pwd)"
+  fi
+  check_tree "$PLEAN_GRIND_TREE" "grind"
+  if is_true "$PREPARE_TREES"; then
+    patch_grind_tree "$PLEAN_GRIND_TREE"
+    prepare_tree "grind" "$PLEAN_GRIND_TREE"
+  else
+    validate_grind_tree "$PLEAN_GRIND_TREE"
   fi
 fi
 
@@ -686,7 +844,7 @@ fi
 
 printf 'suite\tbackend\trepeat\tfile\tproof\tgoal_hash\tstatus\tcategory\tmilliseconds\tsynthetic\tmessage\tgoal\n' > "$RESULTS"
 printf 'suite\tbackend\trepeat\tfile\texit_code\twall_seconds\tvc_count\tcpu_limited\tmessage\n' > "$RUNS"
-printf 'backend\tcommit\ttoolchain\tdirty\tdiff_sha256\tsolver\ttimeout\tduper_timeout\tmax_heartbeats\tmax_rec_depth\tfile_cpu_seconds\tcrush_trust\tcrush_reconstruct\tcrush_inst_fuel\tcrush_commit\tduper_commit\tcrush_dirty\ttree\tcrush_profile\n' > "$METADATA"
+printf 'backend\tcommit\ttoolchain\tdirty\tdiff_sha256\tsolver\ttimeout\tduper_timeout\tmax_heartbeats\tmax_rec_depth\tfile_cpu_seconds\tcrush_trust\tcrush_reconstruct\tcrush_inst_fuel\tcrush_commit\tduper_commit\tcrush_dirty\ttree\tcrush_profile\tgrind_splits\n' > "$METADATA"
 printf 'suite\tlane\trepeat\tvc_key\tstatus\tcategory\tmilliseconds\tmessage\n' > "$MEASUREMENTS"
 printf 'suite\tlane\trepeat\tvc_key\tdeclaration\tgoal_hash\toutcome\treplay\tdetail\ttotal_nanos\tphases\tmetrics\n' > "$PROFILES"
 
@@ -699,7 +857,7 @@ if is_true "$RUN_CRUSH"; then
   done
 fi
 if is_true "$RUN_GRIND"; then
-  record_metadata "grind" "$PLEAN_CRUSH_TREE"
+  record_metadata "grind" "$PLEAN_GRIND_TREE"
 fi
 if is_true "$RUN_DUPER"; then
   record_metadata "duper" "$PLEAN_DUPER_TREE"
@@ -716,7 +874,7 @@ for repeat in $(seq 1 "$REPEATS"); do
       done
     fi
     if is_true "$RUN_GRIND"; then
-      run_file "grind" "$PLEAN_CRUSH_TREE" "$repeat" "$file"
+      run_file "grind" "$PLEAN_GRIND_TREE" "$repeat" "$file"
     fi
     if is_true "$RUN_DUPER"; then
       run_file "duper" "$PLEAN_DUPER_TREE" "$repeat" "$file"
@@ -754,5 +912,5 @@ if [[ "$missing_headline" -gt 0 ]]; then
   die "$missing_headline headline VC attempt(s) are missing"
 fi
 if [[ "$HARNESS_FAILURES" -gt 0 ]]; then
-  die "$HARNESS_FAILURES benchmark prelude(s) reported an error"
+  die "$HARNESS_FAILURES benchmark file(s) failed harness validation"
 fi

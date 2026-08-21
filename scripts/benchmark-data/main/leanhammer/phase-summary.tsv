@@ -1,0 +1,8 @@
+suite	lane	phase	events	total_ms	mean_ms	min_ms	max_ms	phase_pct
+leanhammer	crush-verify	collect	20	11.470	0.573	0.472	1.008	0.2
+leanhammer	crush-verify	instantiate	16	15.680	0.980	0.206	5.528	0.3
+leanhammer	crush-verify	monomorphize	16	13.667	0.854	0.085	4.718	0.2
+leanhammer	crush-verify	normalize	16	7.752	0.485	0.187	1.422	0.1
+leanhammer	crush-verify	pre-reconstruct	20	55.614	2.781	0.661	12.043	0.9
+leanhammer	crush-verify	solve	16	5881.901	367.619	33.252	5049.427	96.6
+leanhammer	crush-verify	translate	16	102.791	6.424	4.090	11.810	1.7

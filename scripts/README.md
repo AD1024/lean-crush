@@ -1,10 +1,10 @@
 # Benchmark Scripts
 
 The benchmark harnesses compare lean-auto, Duper, `grind`, and the local
-lean-crush build. Crush is measured separately in trusted-verification,
-core-reconstruction, Alethe-replay, and portfolio-reconstruction lanes.
-Generated sources, logs, metadata, per-VC measurements, and summaries are
-written under `BenchmarkResults/`.
+lean-crush build. The headline comparison uses trusted Crush
+(`crush.trust = "trust"`); Core, Alethe, and portfolio reconstruction are
+measured separately. Generated sources, logs, metadata, per-VC measurements,
+and summaries are written under `BenchmarkResults/`.
 
 | Script | Benchmarks |
 |---|---|
@@ -65,7 +65,8 @@ their VCs with one worker, record every backend success or failure, and admit
 failed goals only inside the temporary benchmark source so one failure cannot
 suppress later VCs. The enclosing declaration is uncapped.
 `MAX_RECURSION_DEPTH` applies uniformly to every generated Lean process and is
-recorded in `metadata.tsv`.
+recorded in `metadata.tsv`. Generated Lean processes disable asynchronous
+elaboration so tactic-local measurements do not overlap.
 
 The command runs the four headline backends: Auto, Duper, trusted Crush, and
 `grind`. `CRUSH_MODES=verify` selects `crush.trust = "trust"` and does not
@@ -174,7 +175,8 @@ The PLean Duper lane uses `DUPER_TIMEOUT=1` and
 uncapped so every obligation receives an attempt. A positive value is useful
 for bounded diagnostics, but a capped file may leave VCs `missing`; such a run
 cannot produce a valid all-VC headline comparison and exits nonzero after
-writing its reports.
+writing its reports. The harness also rejects errors in its generated benchmark
+prelude even when Lean recovers and emits later VC records.
 Set `PREPARE_TREES=false` only when all selected override trees and their
 dependencies are already built.
 
@@ -213,6 +215,7 @@ reports:
 | `runs.tsv` | Per-file wall time, exit status, and VC count; corpus runs also record truncation |
 | `summary.tsv` | Legacy raw-record aggregate emitted by the host harness |
 | `headline-summary.tsv` | Auto, Duper, trusted Crush, and `grind` coverage over one fixed all-VC denominator |
+| `headline-outcomes.tsv` | Headline VCs partitioned into success, translation error, timeout, and failed to prove |
 | `comparison.tsv` | Pairwise matched-VC outcomes for Crush versus one baseline at a time |
 | `file-summary.tsv` | PLean-only per-file coverage and timing |
 | `measurements.tsv` | Normalized per-VC status and tactic-local time |
@@ -243,6 +246,14 @@ a complete backend record. `failed_vcs` counts attempted but unsolved VCs.
 attempt record; missing VCs count as unsolved in `pass_pct` and are excluded
 from timing statistics.
 
+In `headline-outcomes.tsv`, the four outcome counts sum to `total_vcs`.
+`translation_error` requires an explicit unsupported translation or encoding
+diagnostic. `timeout` requires an explicit wall-clock, heartbeat, or saturation
+limit. `failed_to_prove` contains every other unsuccessful attempt, including
+solver `sat` or `unknown`, exhausted proof search, and ordinary tactic errors.
+The report rejects nonuniform headline workloads rather than adding a fifth
+`missing` outcome.
+
 In `comparison.tsv`, `matched_vcs` is the exact VC-identity intersection for
 the named baseline and Crush. `baseline_only_solved`, `crush_only_solved`,
 `both_solved`, and `neither_solved` partition that intersection. The two timing
@@ -265,14 +276,16 @@ python3 scripts/plot-benchmarks.py \
 Each input must contain the normalized TSV reports listed above. Use only one
 input for a given corpus and lane; the script rejects conflicting aggregate
 rows rather than silently combining different runs. Exact duplicate rows are
-ignored.
+ignored. Repeat `--only` to select outputs, for example
+`--only tables --only coverage`.
 
 The command writes:
 
 | File | Contents |
 |---|---|
 | `tables.md` | All-VC backend comparison, pairwise matched-VC, reconstruction, failure, phase, and scaling tables |
-| `coverage.svg` | Solved VCs by corpus and lane |
+| `coverage.svg` | Solved VCs by corpus and headline backend |
+| `outcomes.svg` | Four-way stacked outcome partition for every corpus and headline backend |
 | `reconstruction.svg` | Core, Alethe, and portfolio reconstruction among verified VCs |
 | `reconstruction-failures.svg` | One failure-mode pie chart per corpus |
 | `phase-breakdown.svg` | Stacked profiler-accounted time by Crush phase |
@@ -283,17 +296,215 @@ replays span several orders of magnitude. Pass `--replay-axis linear` for a
 linear axis. In either view, the annotation and dashed line report the
 least-squares fit in the original linear units.
 
-The Verso manual publishes a checked-in snapshot of the SVGs. Reproduce that
-exact snapshot from the retained result directories:
+The canonical inputs for every published table and figure are under
+[`scripts/benchmark-data`](benchmark-data).
+Regenerate all artifacts into `BenchmarkResults/figures` with:
 
 ```sh
-python3 scripts/plot-benchmarks.py \
-  BenchmarkResults/recorded/2026-08-20/figures/corpora \
-  BenchmarkResults/recorded/2026-08-20/figures/leanhammer \
-  BenchmarkResults/recorded/2026-08-20/figures/plean \
-  --out-dir Doc/Verso/figures \
-  --skip-tables
+scripts/render-paper-artifacts.sh
 ```
 
-Use `headline-summary.tsv` for all-VC coverage. Use `comparison.tsv` only for
-pairwise analysis of exact VCs shared by Crush and one baseline.
+Pass a different output directory as the first argument:
+
+```sh
+scripts/render-paper-artifacts.sh /tmp/lean-crush-paper-artifacts
+```
+
+The renderer reads `benchmark-data/main` for the all-backend comparison and
+`benchmark-data/crush-modes` for reconstruction, failure, phase, and replay-scaling
+measurements. Their workloads are intentionally separate because the
+reconstruction study predates the latest expanded Velvet workload. The
+[benchmark-data README](benchmark-data/README.md)
+lists the direct `plot-benchmarks.py` inputs.
+
+## Paper Artifacts
+
+Run these commands from the repository root. They use the pinned revisions
+documented above and write to fresh result directories under
+`BenchmarkResults/`. The published snapshot uses one repeat; use
+`REPEATS=3` or more when drawing performance conclusions from a new machine.
+Choose unused `MAIN_ROOT` and `DETAIL_ROOT` paths for each measurement so
+results and logs from separate runs remain distinguishable.
+
+### 1. Main Comparison
+
+This run gives every backend the same fixed VC set. Its Crush lane sets
+`crush.trust = "trust"` through `CRUSH_MODES=verify`.
+
+```sh
+MAIN_ROOT="$PWD/BenchmarkResults/paper-main"
+
+RUN_LEANHAMMER=false \
+RUN_LOOM=true \
+RUN_CASHMERE=true \
+RUN_VELVET=true \
+RUN_AUTO=true \
+RUN_DUPER=true \
+RUN_CRUSH=true \
+RUN_GRIND=true \
+REPEATS=1 \
+SOLVER=cvc5 \
+TIMEOUT=5 \
+DUPER_TIMEOUT=5 \
+CRUSH_MODES=verify \
+MAX_HEARTBEATS=1000000 \
+MAX_RECURSION_DEPTH=1000000 \
+CRUSH_PROFILE=true \
+OUT_DIR="$MAIN_ROOT/corpora" \
+scripts/benchmark-corpora.sh
+
+PROFILES="auto-duper duper-only crush-verify grind-only" \
+REPEATS=1 \
+SOLVER=cvc5 \
+TIMEOUT=5 \
+DUPER_TIMEOUT=5 \
+MAX_HEARTBEATS=1000000 \
+MAX_RECURSION_DEPTH=1000000 \
+CRUSH_PROFILE=true \
+OUT_DIR="$MAIN_ROOT/leanhammer" \
+scripts/benchmark-leanhammer.sh
+
+RUN_AUTO=true \
+RUN_DUPER=true \
+RUN_CRUSH=true \
+RUN_GRIND=true \
+PREPARE_TREES=true \
+REPEATS=1 \
+SOLVER=cvc5 \
+TIMEOUT=5 \
+CRUSH_MODES=verify \
+MAX_HEARTBEATS=1000000 \
+MAX_RECURSION_DEPTH=1000000 \
+CRUSH_INST_FUEL=0 \
+DUPER_TIMEOUT=1 \
+DUPER_MAX_HEARTBEATS=20000 \
+DUPER_FILE_CPU_SECONDS=0 \
+GRIND_SPLITS=20 \
+CRUSH_PROFILE=true \
+OUT_DIR="$MAIN_ROOT/plean" \
+scripts/benchmark-plean.sh
+
+python3 scripts/plot-benchmarks.py \
+  "$MAIN_ROOT/corpora" \
+  "$MAIN_ROOT/leanhammer" \
+  "$MAIN_ROOT/plean" \
+  --out-dir "$MAIN_ROOT/artifacts" \
+  --only tables \
+  --only coverage
+```
+
+The main all-VC table is `artifacts/tables.md` under **Backend Comparison**.
+`artifacts/coverage.svg` is its coverage figure. Every headline lane must have
+zero `missing_vcs`; each harness exits nonzero otherwise.
+
+### 2. Aligned VC Comparisons
+
+The main run already writes exact per-VC identities. Render its pairwise
+Crush-versus-baseline joins without rerunning a solver:
+
+```sh
+MAIN_ROOT="$PWD/BenchmarkResults/paper-main"
+
+python3 scripts/plot-benchmarks.py \
+  "$MAIN_ROOT/corpora" \
+  "$MAIN_ROOT/leanhammer" \
+  "$MAIN_ROOT/plean" \
+  --out-dir "$MAIN_ROOT/aligned" \
+  --only tables
+```
+
+Use **Pairwise Matched VCs** in `aligned/tables.md`, or the `comparison.tsv`
+file in each input directory. Each row compares trusted Crush with one
+baseline on their exact VC-identity intersection; it does not compare two
+baselines or substitute equal-sized workloads for identity matching.
+
+### 3. Outcome Charts
+
+Generate the stacked success, translation-error, timeout, and
+failed-to-prove chart from the same fixed-workload main run:
+
+```sh
+MAIN_ROOT="$PWD/BenchmarkResults/paper-main"
+
+python3 scripts/plot-benchmarks.py \
+  "$MAIN_ROOT/corpora" \
+  "$MAIN_ROOT/leanhammer" \
+  "$MAIN_ROOT/plean" \
+  --out-dir "$MAIN_ROOT/outcomes" \
+  --only outcomes
+```
+
+The result is `outcomes/outcomes.svg`. Every bar partitions its corpus total;
+the plotter rejects missing attempts, inconsistent totals, and incomplete
+four-way partitions.
+
+### 4. Detailed Crush Measurements
+
+Run trusted verification, Core reconstruction, strict Alethe replay, and the
+reconstruction portfolio without rerunning baseline backends. These lanes vary
+`crush.trust` and `crush.reconstruct`; all other listed solver and resource
+options remain fixed.
+
+```sh
+DETAIL_ROOT="$PWD/BenchmarkResults/paper-crush-modes"
+
+RUN_LEANHAMMER=false \
+RUN_LOOM=true \
+RUN_CASHMERE=true \
+RUN_VELVET=true \
+RUN_AUTO=false \
+RUN_DUPER=false \
+RUN_CRUSH=true \
+RUN_GRIND=false \
+REPEATS=1 \
+SOLVER=cvc5 \
+TIMEOUT=5 \
+CRUSH_MODES="verify core alethe portfolio" \
+MAX_HEARTBEATS=1000000 \
+MAX_RECURSION_DEPTH=1000000 \
+CRUSH_PROFILE=true \
+OUT_DIR="$DETAIL_ROOT/corpora" \
+scripts/benchmark-corpora.sh
+
+PROFILES="crush-verify crush-core crush-alethe crush-portfolio" \
+REPEATS=1 \
+SOLVER=cvc5 \
+TIMEOUT=5 \
+MAX_HEARTBEATS=1000000 \
+MAX_RECURSION_DEPTH=1000000 \
+CRUSH_PROFILE=true \
+OUT_DIR="$DETAIL_ROOT/leanhammer" \
+scripts/benchmark-leanhammer.sh
+
+RUN_AUTO=false \
+RUN_DUPER=false \
+RUN_CRUSH=true \
+RUN_GRIND=false \
+PREPARE_TREES=true \
+REPEATS=1 \
+SOLVER=cvc5 \
+TIMEOUT=5 \
+CRUSH_MODES="verify core alethe portfolio" \
+MAX_HEARTBEATS=1000000 \
+MAX_RECURSION_DEPTH=1000000 \
+CRUSH_INST_FUEL=0 \
+CRUSH_PROFILE=true \
+OUT_DIR="$DETAIL_ROOT/plean" \
+scripts/benchmark-plean.sh
+
+python3 scripts/plot-benchmarks.py \
+  "$DETAIL_ROOT/corpora" \
+  "$DETAIL_ROOT/leanhammer" \
+  "$DETAIL_ROOT/plean" \
+  --out-dir "$DETAIL_ROOT/artifacts" \
+  --only tables \
+  --only reconstruction \
+  --only reconstruction-failures \
+  --only phase-breakdown \
+  --only alethe-replay-scaling
+```
+
+The generated tables report mode coverage, reconstruction failures, profiler
+phase timing, and Alethe replay scaling. The SVGs visualize the corresponding
+reconstruction coverage, failure distribution, phase shares, and replay-time
+scaling.

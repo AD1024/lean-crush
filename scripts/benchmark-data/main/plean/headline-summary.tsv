@@ -1,0 +1,5 @@
+suite	backend	lane	total_vcs	attempted_vcs	solved_vcs	failed_vcs	missing_vcs	pass_pct	total_ms	mean_ms	min_ms	max_ms
+plean	auto	auto	192	192	168	24	0	87.5	301027.463	1567.851	0.000	17280.719
+plean	duper	duper	192	192	71	121	0	37.0	81280.503	423.336	0.000	2174.604
+plean	crush	crush-verify	192	192	174	18	0	90.6	1378833.116	7181.422	0.000	301768.700
+plean	grind	grind	192	192	155	37	0	80.7	76005.196	395.860	0.000	3859.566

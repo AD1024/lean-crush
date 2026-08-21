@@ -1,0 +1,8 @@
+suite	lane	phase	events	total_ms	mean_ms	min_ms	max_ms	phase_pct
+plean	crush-verify	collect	1252	707.412	0.565	0.092	12.835	0.0
+plean	crush-verify	instantiate	1119	47.755	0.043	0.005	3.842	0.0
+plean	crush-verify	monomorphize	1119	60.395	0.054	0.008	2.705	0.0
+plean	crush-verify	normalize	1119	11760.772	10.510	0.250	77.007	0.5
+plean	crush-verify	pre-reconstruct	1143	1012179.059	885.546	0.116	281195.701	43.1
+plean	crush-verify	solve	1119	1272204.977	1136.912	30.390	5096.274	54.2
+plean	crush-verify	translate	1119	52012.948	46.482	7.905	426.724	2.2

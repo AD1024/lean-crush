@@ -1,0 +1,10 @@
+suite	lane	outcome	replay	events
+cashmere	crush-verify	pre-reconstructed	not-attempted	1
+cashmere	crush-verify	selected-fact	not-attempted	5
+cashmere	crush-verify	verified	not-requested	23
+loom	crush-verify	verified	not-requested	4
+velvet	crush-verify	pre-reconstructed	not-attempted	7
+velvet	crush-verify	sat	not-attempted	1
+velvet	crush-verify	selected-fact	not-attempted	33
+velvet	crush-verify	unknown	not-attempted	19
+velvet	crush-verify	verified	not-requested	299

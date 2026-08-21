@@ -1,0 +1,4 @@
+suite	baseline	baseline_lane	crush_lane	matched_vcs	baseline_only_solved	crush_only_solved	both_solved	neither_solved	baseline_mean_ms	crush_mean_ms
+plean	auto	auto	crush-verify	192	0	6	168	18	885.813	2181.358
+plean	duper	duper	crush-verify	192	0	103	71	18	428.250	225.245
+plean	grind	grind	crush-verify	192	0	19	155	18	208.261	7306.702

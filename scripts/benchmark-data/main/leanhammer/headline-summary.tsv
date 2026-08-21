@@ -1,0 +1,5 @@
+suite	backend	lane	total_vcs	attempted_vcs	solved_vcs	failed_vcs	missing_vcs	pass_pct	total_ms	mean_ms	min_ms	max_ms
+leanhammer	auto	auto-duper	20	20	8	12	0	40.0	3240.000	162.000	2.000	1317.000
+leanhammer	duper	duper-only	20	20	12	8	0	60.0	19348.000	967.400	43.000	15745.000
+leanhammer	crush	crush-verify	20	20	19	1	0	95.0	6133.000	306.650	2.000	5070.000
+leanhammer	grind	grind-only	20	20	16	4	0	80.0	74.000	3.700	0.000	13.000

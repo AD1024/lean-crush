@@ -1,0 +1,81 @@
+suite	lane	repeat	vc_key	status	category	milliseconds	message
+leanhammer	auto-duper	1	01_prop_chain	pass	-	1317	-
+leanhammer	auto-duper	1	02_congruence	pass	-	106	-
+leanhammer	auto-duper	1	03_quantified	pass	-	136	-
+leanhammer	auto-duper	1	04_existential	pass	-	145	-
+leanhammer	auto-duper	1	05_skolemization	pass	-	182	-
+leanhammer	auto-duper	1	06_funext	pass	-	117	-
+leanhammer	auto-duper	1	07_higher_order	fail	tactic	82	Benchmark/Cases/07_higher_order.lean:6:2: error: hammer successfully translated the problem to TPTP, but the external prover was unable to solve it. Error: runAutoGetHints :: External TPTP solver unable to solve the goal
+leanhammer	auto-duper	1	08_int_linear	fail	tactic	102	Benchmark/Cases/08_int_linear.lean:5:2: error: hammer successfully translated the problem to TPTP, but the external prover was unable to solve it. Error: runAutoGetHints :: External TPTP solver unable to solve the goal
+leanhammer	auto-duper	1	09_nat_sub	fail	tactic	84	Benchmark/Cases/09_nat_sub.lean:4:2: error: hammer successfully translated the problem to TPTP, but the external prover was unable to solve it. Error: runAutoGetHints :: External TPTP solver unable to solve the goal
+leanhammer	auto-duper	1	10_option_injective	fail	tactic	76	Benchmark/Cases/10_option_injective.lean:5:2: error: hammer successfully translated the problem to TPTP, but the external prover was unable to solve it. Error: runAutoGetHints :: External TPTP solver unable to solve the goal
+leanhammer	auto-duper	1	11_enum_pigeonhole	fail	tactic	78	Benchmark/Cases/11_enum_pigeonhole.lean:10:2: error: hammer successfully translated the problem to TPTP, but the external prover was unable to solve it. Error: runAutoGetHints :: External TPTP solver unable to solve the goal
+leanhammer	auto-duper	1	12_list_assoc	pass	-	165	-
+leanhammer	auto-duper	1	13_composition	pass	-	181	-
+leanhammer	auto-duper	1	14_bool_mixed	fail	tactic	100	Benchmark/Cases/14_bool_mixed.lean:6:2: error: hammer successfully translated the problem to TPTP, but the external prover was unable to solve it. Error: runAutoGetHints :: External TPTP solver unable to solve the goal
+leanhammer	auto-duper	1	15_bitvec	fail	translation	81	Benchmark/Cases/15_bitvec.lean:4:2: error: hammer failed to preprocess facts for translation. Error: TPTP.parse :: Invalid token: +
+leanhammer	auto-duper	1	16_string	fail	tactic	77	Benchmark/Cases/16_string.lean:4:2: error: hammer successfully translated the problem to TPTP, but the external prover was unable to solve it. Error: runAutoGetHints :: External TPTP solver unable to solve the goal
+leanhammer	auto-duper	1	17_empty	fail	tactic	104	Benchmark/Cases/17_empty.lean:4:2: error: hammer successfully translated the problem to TPTP and obtained an unsat core from an external prover, but was unable to reconstruct the proof. Error: HammerCore.getDuperCoreLemmas :: Unable to use hints from external solver to reconstruct proof. Duper threw the following error:
+leanhammer	auto-duper	1	18_church_tower	fail	tactic	2	-
+leanhammer	auto-duper	1	19_polymorphic	fail	tactic	2	-
+leanhammer	auto-duper	1	20_irrelevant_quantifier	fail	tactic	103	Benchmark/Cases/20_irrelevant_quantifier.lean:6:2: error: hammer successfully translated the problem to TPTP, but the external prover was unable to solve it. Error: runAutoGetHints :: External TPTP solver unable to solve the goal
+leanhammer	duper-only	1	01_prop_chain	pass	-	67	-
+leanhammer	duper-only	1	02_congruence	pass	-	43	-
+leanhammer	duper-only	1	03_quantified	pass	-	68	-
+leanhammer	duper-only	1	04_existential	pass	-	83	-
+leanhammer	duper-only	1	05_skolemization	pass	-	108	-
+leanhammer	duper-only	1	06_funext	pass	-	51	-
+leanhammer	duper-only	1	07_higher_order	pass	-	76	-
+leanhammer	duper-only	1	08_int_linear	fail	tactic	233	/Users/mikedh/Documents/lean-crush/BenchmarkResults/comparison-20260820/final/leanhammer-outcomes-baselines-v4/generated/duper-only/08_int_linear.lean:26:2: error: Duper failed to solve the goal and determined that it will be unable to do so with the current configuration of options and selection of premises
+leanhammer	duper-only	1	09_nat_sub	fail	tactic	99	/Users/mikedh/Documents/lean-crush/BenchmarkResults/comparison-20260820/final/leanhammer-outcomes-baselines-v4/generated/duper-only/09_nat_sub.lean:25:2: error: Duper failed to solve the goal and determined that it will be unable to do so with the current configuration of options and selection of premises
+leanhammer	duper-only	1	10_option_injective	pass	-	77	-
+leanhammer	duper-only	1	11_enum_pigeonhole	fail	tactic	91	/Users/mikedh/Documents/lean-crush/BenchmarkResults/comparison-20260820/final/leanhammer-outcomes-baselines-v4/generated/duper-only/11_enum_pigeonhole.lean:31:2: error: Duper failed to solve the goal and determined that it will be unable to do so with the current configuration of options and selection of premises
+leanhammer	duper-only	1	12_list_assoc	pass	-	78	-
+leanhammer	duper-only	1	13_composition	pass	-	96	-
+leanhammer	duper-only	1	14_bool_mixed	fail	tactic	1669	/Users/mikedh/Documents/lean-crush/BenchmarkResults/comparison-20260820/final/leanhammer-outcomes-baselines-v4/generated/duper-only/14_bool_mixed.lean:27:2: error: Duper failed to solve the goal and determined that it will be unable to do so with the current configuration of options and selection of premises
+leanhammer	duper-only	1	15_bitvec	fail	tactic	175	/Users/mikedh/Documents/lean-crush/BenchmarkResults/comparison-20260820/final/leanhammer-outcomes-baselines-v4/generated/duper-only/15_bitvec.lean:25:2: error: Duper failed to solve the goal and determined that it will be unable to do so with the current configuration of options and selection of premises
+leanhammer	duper-only	1	16_string	fail	tactic	138	/Users/mikedh/Documents/lean-crush/BenchmarkResults/comparison-20260820/final/leanhammer-outcomes-baselines-v4/generated/duper-only/16_string.lean:25:2: error: Duper failed to solve the goal and determined that it will be unable to do so with the current configuration of options and selection of premises
+leanhammer	duper-only	1	17_empty	fail	tactic	54	/Users/mikedh/Documents/lean-crush/BenchmarkResults/comparison-20260820/final/leanhammer-outcomes-baselines-v4/generated/duper-only/17_empty.lean:25:2: error: Duper failed to solve the goal and determined that it will be unable to do so with the current configuration of options and selection of premises
+leanhammer	duper-only	1	18_church_tower	pass	-	298	-
+leanhammer	duper-only	1	19_polymorphic	pass	-	99	-
+leanhammer	duper-only	1	20_irrelevant_quantifier	fail	timeout	15745	/Users/mikedh/Documents/lean-crush/BenchmarkResults/comparison-20260820/final/leanhammer-outcomes-baselines-v4/generated/duper-only/20_irrelevant_quantifier.lean:27:2: error: Duper encountered a (deterministic) timeout. The maximum number of heartbeats 1000000 has been reached (use 'set_option maxHeartbeats <num>' to set the limit)
+leanhammer	grind-only	1	01_prop_chain	pass	-	1	-
+leanhammer	grind-only	1	02_congruence	pass	-	2	-
+leanhammer	grind-only	1	03_quantified	pass	-	1	-
+leanhammer	grind-only	1	04_existential	pass	-	2	-
+leanhammer	grind-only	1	05_skolemization	fail	tactic	1	/Users/mikedh/Documents/lean-crush/BenchmarkResults/comparison-20260820/final/leanhammer-outcomes-baselines-v4/generated/grind-only/05_skolemization.lean:29:2: error: `grind` failed
+leanhammer	grind-only	1	06_funext	pass	-	3	-
+leanhammer	grind-only	1	07_higher_order	pass	-	4	-
+leanhammer	grind-only	1	08_int_linear	pass	-	8	-
+leanhammer	grind-only	1	09_nat_sub	pass	-	13	-
+leanhammer	grind-only	1	10_option_injective	pass	-	2	-
+leanhammer	grind-only	1	11_enum_pigeonhole	fail	tactic	2	/Users/mikedh/Documents/lean-crush/BenchmarkResults/comparison-20260820/final/leanhammer-outcomes-baselines-v4/generated/grind-only/11_enum_pigeonhole.lean:34:2: error: `grind` failed
+leanhammer	grind-only	1	12_list_assoc	pass	-	6	-
+leanhammer	grind-only	1	13_composition	pass	-	4	-
+leanhammer	grind-only	1	14_bool_mixed	pass	-	4	-
+leanhammer	grind-only	1	15_bitvec	pass	-	11	-
+leanhammer	grind-only	1	16_string	pass	-	2	-
+leanhammer	grind-only	1	17_empty	pass	-	1	-
+leanhammer	grind-only	1	18_church_tower	fail	tactic	0	/Users/mikedh/Documents/lean-crush/BenchmarkResults/comparison-20260820/final/leanhammer-outcomes-baselines-v4/generated/grind-only/18_church_tower.lean:40:20: error: redundant parameter `hadd`, `grind` uses local hypotheses automatically
+leanhammer	grind-only	1	19_polymorphic	fail	tactic	0	/Users/mikedh/Documents/lean-crush/BenchmarkResults/comparison-20260820/final/leanhammer-outcomes-baselines-v4/generated/grind-only/19_polymorphic.lean:32:20: error: redundant parameter `combine`, `grind` uses local hypotheses automatically
+leanhammer	grind-only	1	20_irrelevant_quantifier	pass	-	7	-
+leanhammer	crush-verify	1	01_prop_chain	pass	-	97	-
+leanhammer	crush-verify	1	02_congruence	pass	-	66	-
+leanhammer	crush-verify	1	03_quantified	pass	-	42	-
+leanhammer	crush-verify	1	04_existential	pass	-	51	-
+leanhammer	crush-verify	1	05_skolemization	pass	-	6	-
+leanhammer	crush-verify	1	06_funext	pass	-	66	-
+leanhammer	crush-verify	1	07_higher_order	pass	-	5	-
+leanhammer	crush-verify	1	08_int_linear	pass	-	57	-
+leanhammer	crush-verify	1	09_nat_sub	pass	-	89	-
+leanhammer	crush-verify	1	10_option_injective	pass	-	69	-
+leanhammer	crush-verify	1	11_enum_pigeonhole	pass	-	74	-
+leanhammer	crush-verify	1	12_list_assoc	pass	-	78	-
+leanhammer	crush-verify	1	13_composition	pass	-	97	-
+leanhammer	crush-verify	1	14_bool_mixed	pass	-	15	-
+leanhammer	crush-verify	1	15_bitvec	pass	-	50	-
+leanhammer	crush-verify	1	16_string	pass	-	57	-
+leanhammer	crush-verify	1	17_empty	pass	-	2	-
+leanhammer	crush-verify	1	18_church_tower	fail	unknown	5070	-
+leanhammer	crush-verify	1	19_polymorphic	pass	-	75	-
+leanhammer	crush-verify	1	20_irrelevant_quantifier	pass	-	67	-
