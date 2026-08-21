@@ -293,6 +293,11 @@ def reconstruction_rows(
     suites = sorted({suite for suite, lane, _ in attempts if lane == "crush-verify"})
     output: list[list[object]] = []
     for suite in suites:
+        if not any(
+            row_suite == suite and lane in RECONSTRUCTION_LANES
+            for row_suite, lane, _ in attempts
+        ):
+            continue
         verify_vcs = {
             vc: rows
             for (row_suite, lane, vc), rows in attempts.items()

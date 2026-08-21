@@ -297,9 +297,14 @@ for profile in "${profiles[@]}"; do
         "-Dduper.maxSaturationTime=$duper_timeout"
         "-DmaxHeartbeats=$max_heartbeats"
         "-DmaxRecDepth=$max_rec_depth"
-        "-Dcrush.profile=$crush_profile"
-        "-Dcrush.profile.machine=true"
       )
+      if [[ "$profile" == crush-* || "$profile" == "crush-only" ||
+          "$profile" == "aesop-crush" ]]; then
+        lean_args+=(
+          "-Dcrush.profile=$crush_profile"
+          "-Dcrush.profile.machine=true"
+        )
+      fi
       if [[ "$profile" != "duper-only" && "$profile" != "crush-verify" &&
           "$profile" != "crush-core" && "$profile" != "crush-alethe" &&
           "$profile" != "crush-portfolio" && "$profile" != "grind-only" ]]; then
