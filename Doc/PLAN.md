@@ -600,9 +600,14 @@ Explicit `[...]` lists disable it and remain strict restrictions.
   behind trace classes that default off. *Done:* every failure path names the
   verdict, and a `sat` result is surfaced as a **counterexample** parsed from
   `get-model` rather than a generic failure; reconstruction failures name the core
-  hypotheses they could not replay. *Not yet:* a one-line success summary
-  (backend, wall time, facts sent/dropped) is still trace-only — worth adding with
-  the M5 frontend work, since the criticism applies to us until it is.
+  hypotheses they could not replay. An *environment* failure is also kept distinct
+  from a verdict: a backend whose executable is missing is reported before any query
+  runs (`IO.Process.spawn` does not fail uniformly across platforms, so the name is
+  resolved first), and a command the solver refused travels with the `sat` or
+  `unknown` it produced, because the solver keeps reading and decides a weaker
+  query. *Not yet:* a one-line success summary (backend, wall time, facts
+  sent/dropped) is still trace-only — worth adding with the M5 frontend work, since
+  the criticism applies to us until it is.
 - **`(set-logic ...)` must be emitted.** lean-auto never emits it (the constructor
   exists but is never constructed), which silently disables theory- and
   HO-specific solver behaviour. `crush` always emits the resolved logic

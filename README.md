@@ -51,8 +51,13 @@ example (x : Int) : x + 1 = x := by crush
 ## Install
 
 Requires the Lean toolchain in [`lean-toolchain`](lean-toolchain) and at least one solver on
-your `PATH` — `z3` (≥ 4.12.2), `cvc5` (≥ 1.3), or `bitwuzla`. z3 is the default and enough
-to start; cvc5 additionally enables proof replay and native higher-order support.
+your `PATH` — `z3` (≥ 4.15.4), `cvc5` (≥ 1.3.4), or `bitwuzla`. CI pins exactly those two
+versions, and the suite is also green on z3 5.1.0. z3 4.13 and older reject `sbv_to_int`,
+which the translator emits for `BitVec.toInt`, so those goals report a refused command
+there rather than a proof. z3 is the default and enough to start; cvc5 additionally enables
+proof replay and native higher-order support.
+Selecting a backend whose executable is not installed fails with that diagnosis and names
+the backends this machine does have, rather than reporting a solver verdict.
 
 Add to your `lakefile.lean`:
 

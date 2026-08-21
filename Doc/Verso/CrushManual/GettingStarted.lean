@@ -17,14 +17,19 @@ lean-crush uses the Lean version pinned by its `lean-toolchain` file and has no
 third-party Lean dependencies.
 It does require an SMT solver executable on `PATH`:
 
-* Z3 4.12.2 or newer is the default and is sufficient for ordinary use.
-* cvc5 1.3 or newer additionally supports native higher-order solving and Alethe
+* Z3 4.15.4 or newer is the default and is sufficient for ordinary use. It is the
+  version CI pins; releases up to 4.13 reject `sbv_to_int`, which the translator emits
+  for `BitVec.toInt`.
+* cvc5 1.3.4 or newer additionally supports native higher-order solving and Alethe
   certificate replay.
 * Bitwuzla can solve the quantifier-free bitvector, array, and uninterpreted
   function fragment, but does not provide unsat cores or proof certificates.
 
 The solver is a runtime dependency.
 Importing or compiling the library does not start a solver.
+Selecting a backend whose executable is missing is reported as a configuration
+error naming that executable and the installed alternatives; it is never reported
+as an `unknown` verdict.
 A `crush` invocation that reaches the solving stage starts one query under a
 wall-clock timeout. If a ground-only query returns `sat` or `unknown`, lean-crush
 may start a second query containing the retained quantified facts.

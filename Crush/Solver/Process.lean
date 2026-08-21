@@ -24,6 +24,10 @@ guarding against a way this layer commonly goes wrong:
   accumulate when `emitCommand` throws mid-query.
 * **`unknown` is a first-class result**, distinct from `sat`/`unsat`, so the
   tactic can report "solver gave up" instead of a misleading failure.
+* **A missing backend is a configuration error, not a verdict.** The executable is
+  resolved before spawning: `IO.Process.spawn` does not fail uniformly when it is absent
+  (on macOS the child starts, fails to `exec`, and exits), so the query would otherwise
+  come back verdictless and be read as `unknown`.
 * Backends and their flags are data-driven (`backendSpec`), so adding bitwuzla or
   a portfolio is a table entry, not new control flow. A backend declares which optional
   features it has, and only those options and follow-up queries are sent.
@@ -41,7 +45,8 @@ S-expression of the response) and the proof (whatever follows it). Keeping them 
 is what makes `crush_fact_<n>` scanning find the core rather than the proof's internal
 references to facts outside it. -/
 inductive Result where
-  | sat     (model : String)
+  /-- `diagnostics` carries commands the solver refused; see `rejectionDiagnostics`. -/
+  | sat     (model : String) (diagnostics : String)
   | unsat   (core : Option SMT.Sexp) (proof : Array SMT.Sexp)
   | unknown (reason : String)
   deriving Inhabited
@@ -86,6 +91,70 @@ def backendSpec (b : Backend) : Option BackendSpec :=
       proofs := false }
   | .none => none
 
+/-- Locate an executable the way process launch does: a name containing a path separator
+is taken as a path, a bare name is searched on `PATH`. -/
+def resolveExe (exe : String) : BaseIO (Option System.FilePath) := do
+  let candidate? (path : System.FilePath) : BaseIO (Option System.FilePath) := do
+    let variants :=
+      if System.FilePath.exeExtension.isEmpty then #[path]
+      else #[path, path.addExtension System.FilePath.exeExtension]
+    for p in variants do
+      if (← p.pathExists) && !(← p.isDir) then return some p
+    return none
+  if System.FilePath.pathSeparators.any (fun sep => exe.contains sep) then
+    return ← candidate? exe
+  let some searchPath ← IO.getEnv "PATH" | return none
+  for dir in System.SearchPath.parse searchPath do
+    if let some found ← candidate? (dir / exe) then return some found
+  return none
+
+/-- Substring of the Lean runtime's message for a child that could not `exec`. Catches what
+`resolveExe` cannot predict: a file that exists but is not executable or is built for
+another platform. -/
+private def launchFailureMarker : String := "could not execute external process"
+
+/-- One-line, length-capped excerpt of solver output. A child that fails to `exec` inherits
+the elaborator's own output, which is why the cap is not optional. -/
+private def excerpt (text : String) : String :=
+  let lines := text.splitOn "\n" |>.filterMap fun line =>
+    let trimmed := line.trimAscii.toString
+    if trimmed.isEmpty then none else some trimmed
+  let joined := String.intercalate "; " (lines.take 3)
+  if joined.length > 240 then (joined.take 240).toString ++ "..." else joined
+
+/-- Pre-verdict output naming a command the solver refused.
+
+z3 and cvc5 answer an unsupported command with `(error …)` and keep reading, so the verdict
+covers only the fragment they accepted. `unsat` survives that — a subset being unsatisfiable
+implies the whole is — while `sat` and `unknown` describe that fragment, not the goal. -/
+private def rejectionDiagnostics (noise : Array String) : String :=
+  let errors := noise.filter fun line => line.trimAscii.toString.startsWith "(error"
+  if errors.isEmpty then "" else excerpt (String.intercalate "\n" errors.toList)
+
+/-- The executable a backend launches, or `none` for a backend that runs no process. -/
+def backendExe (backend : Backend) : Option String := (backendSpec backend).map (·.exe)
+
+/-- Whether the backend's solver executable can be located. -/
+def backendAvailable (backend : Backend) : BaseIO Bool := do
+  let some exe := backendExe backend | return false
+  return (← resolveExe exe).isSome
+
+/-- Diagnostic for a selected backend whose executable is not installed. It names the other
+installed backends, since switching is usually the faster fix than installing. -/
+private def missingSolverMessage (backend : Backend) (exe : String) : BaseIO MessageData := do
+  let mut installed : Array String := #[]
+  for other in Backend.all do
+    if other != backend && (← backendAvailable other) then
+      installed := installed.push (toString other)
+  let advice :=
+    if installed.isEmpty then
+      m!"No supported solver was found on `PATH`."
+    else
+      m!"Installed here: {String.intercalate ", " installed.toList}; select one with \
+         `set_option crush.backend \"{installed[0]!}\"`."
+  return m!"crush: backend `{backend}` needs the `{exe}` executable, which was not found \
+            on `PATH`. Install {exe}, or switch backends. {advice}"
+
 /-- The options `runQuery` sends before the script, given the backend's capabilities.
 `maybeSave` writes these too, so a saved script reproduces the same query. -/
 def prologue (spec : BackendSpec) : Array SMT.Command :=
@@ -112,12 +181,17 @@ abbrev SolverProc := IO.Process.Child ⟨.piped, .piped, .piped⟩
 def spawn (cfg : Config) : MetaM SolverProc := do
   let some spec := backendSpec cfg.backend
     | throwError "crush: backend `{cfg.backend}` does not spawn a solver process"
+  unless ← backendAvailable cfg.backend do
+    throwError (← missingSolverMessage cfg.backend spec.exe)
   let args := spec.args cfg.timeout ++ cfg.additionalArgs
+  -- Launched by name so the OS still performs its own lookup; the resolution above is a
+  -- check, not a substitution.
   try
     IO.Process.spawn { stdin := .piped, stdout := .piped, stderr := .piped,
                        cmd := spec.exe, args }
   catch e =>
-    throwError "crush: failed to launch solver `{spec.exe}`. Is it on your PATH?\n{e.toMessageData}"
+    throwError "crush: backend `{cfg.backend}` failed to launch the `{spec.exe}` \
+                executable.\n{e.toMessageData}"
 
 /-- Render commands as the text to feed the solver, newline-terminated. Sent in one
 `putStr` rather than a write and flush per command. -/
@@ -197,18 +271,28 @@ def runQuery (cfg : Config) (script : Array SMT.Command) : MetaM Result := do
         return .unsat core proof
       | "sat" =>
         if wrote.isNone then return .unknown "writing the solver script failed or timed out"
-        return .sat (← drainResponse p #[.getModel] timerTask)
+        return .sat (← drainResponse p #[.getModel] timerTask) (rejectionDiagnostics noise)
       | "unknown" =>
         if wrote.isNone then return .unknown "writing the solver script failed or timed out"
-        return .unknown (← drainResponse p #[] timerTask)
+        let reason ← drainResponse p #[] timerTask
+        let rejected := rejectionDiagnostics noise
+        return .unknown (if rejected.isEmpty then reason else s!"{reason}; {rejected}")
       | _ =>
-        let detail := String.intercalate " " noise.toList
+        -- No verdict at all: stderr is the only evidence of why, so a solver that could
+        -- not start or crashed is not reported as one that gave up.
+        let errDetail ← stderrExcerpt errTask timerTask
+        if errDetail.contains launchFailureMarker then
+          throwError "crush: backend `{cfg.backend}` could not run the `{spec.exe}` \
+                      executable: {errDetail}. Check that it is installed, executable, \
+                      and built for this platform."
+        let details :=
+          #[excerpt (String.intercalate "\n" noise.toList), errDetail].filter (!·.isEmpty)
+            |>.toList
+        let detail := if details.isEmpty then "" else s!": {String.intercalate "; " details}"
         if wrote.isNone then
-          return .unknown "solver exited without a verdict; writing the script failed or timed out"
-        if detail.isEmpty then
-          return .unknown "solver exited without a verdict"
-        else
-          return .unknown s!"solver exited without a verdict: {detail}"
+          return .unknown
+            s!"solver exited without a verdict; writing the script failed or timed out{detail}"
+        return .unknown s!"solver exited without a verdict{detail}"
   finally
     IO.cancel timerTask
     -- Kill unconditionally; harmless if already exited.
@@ -221,6 +305,13 @@ def runQuery (cfg : Config) (script : Array SMT.Command) : MetaM Result := do
     -- pipe.
     pure ()
 where
+  /-- Excerpt of the child's stderr; empty when it cannot be read before the query's
+  deadline. -/
+  stderrExcerpt (errTask : Task (Except IO.Error String))
+      (timerTask : Task (Except IO.Error Unit)) : BaseIO String := do
+    let some text ← awaitBy errTask timerTask | return ""
+    return excerpt text
+
   /-- Send the follow-up queries, then read the rest of the response.
 
   `(exit)` and closing stdin come *before* reading, so the child terminates and the

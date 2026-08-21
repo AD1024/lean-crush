@@ -637,15 +637,21 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
                       `trace.crush.reconstruct` for failed proof-search steps, or set \
                       `crush.trust` to \"reconstructOrTrust\" to accept the solver's \
                       verdict anyway."
-  | .sat modelText =>
+  | .sat modelText diagnostics =>
     -- The verdict is about the encoding, which is incomplete in places, so the message
     -- reports a model rather than claiming the Lean goal is false.
     reportRunProfile cfg prof profileContext? "sat" "not-attempted"
       "solver returned sat"
+    -- A refused command weakens the query, so the model covers only the accepted fragment.
+    let rejected :=
+      if diagnostics.isEmpty then m!"" else
+        m!"\nThe solver refused part of the query, so the model covers only what it \
+           accepted — usually an emitted operator this backend or this version of it does \
+           not support: {diagnostics}"
     throwError m!"crush: could not prove the goal — the solver found a \
                   {← formatCounterexample modelText st}\n\
                   The encoding is incomplete, so a model does not necessarily \
-                  describe a Lean counterexample."
+                  describe a Lean counterexample.{rejected}"
   | .unknown reason =>
     let reason := if reason.isEmpty then "no reason given" else reason
     reportRunProfile cfg prof profileContext? "unknown" "not-attempted" reason

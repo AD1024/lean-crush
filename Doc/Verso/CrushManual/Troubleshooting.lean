@@ -18,8 +18,12 @@ tag := "troubleshooting-classify"
 Do not increase every timeout and fuel bound at once.
 The user-visible result identifies the failing pipeline stage:
 
+* A missing-executable error means the selected backend's solver is not installed.
+  Install it or select a backend that is; no query ran.
 * A `sat` result means the emitted SMT problem is satisfiable. Check selected
-  facts, unfolding, lowering coverage, and then the Lean statement.
+  facts, unfolding, lowering coverage, and then the Lean statement. When the message
+  also reports a refused command, the backend rejected part of the query and the
+  model covers only the rest.
 * An `unknown` result or timeout means translation completed but the backend did
   not decide the query. Reduce the query or change solver settings.
 * An `unsat` result followed by a reconstruction error means solving succeeded.
@@ -46,7 +50,10 @@ closes the goal.
 A `sat` result means the emitted facts admit a model. The model satisfies the
 encoding, which is weaker than the Lean statement wherever an operation stayed
 uninterpreted, so it need not be a Lean counterexample.
-Check these causes in order:
+First check whether the error reports a refused command: that is an unsupported
+emitted operator or a solver older than the encoding requires, and it makes the
+verdict a statement about the accepted fragment rather than about the goal.
+Otherwise check these causes in order:
 
 1. A required premise is missing.
 2. An explicit `crush [...]` list accidentally omitted a local hypothesis because

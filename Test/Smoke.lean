@@ -128,7 +128,7 @@ crush_map_sort Nat => "Int"
 opaque modelLabelProbe : Prop → Nat
 
 /-- error: crush: could not prove the goal — the solver found a model:
-    modelLabelProbe [modelLabelProbe_0] := -/
+    modelLabelProbe [modelLabelProbe_ -/
 #guard_msgs(error, substring := true) in
 example (p q : Prop) : modelLabelProbe p = modelLabelProbe q := by
   crush
@@ -167,16 +167,43 @@ example (p q : Prop) : modelLabelProbe p = modelLabelProbe q := by
   let cfg := Config.ofOptions (← Lean.getOptions)
   IO.println s!"default backend = {cfg.backend}, timeout = {cfg.timeout}s, ho = {cfg.hoMode}"
 
+-- Backend executable resolution: a missing solver must be caught before a query runs.
+#eval show IO Unit from do
+  unless (← Solver.resolveExe "crush-no-such-solver-executable").isNone do
+    throw <| IO.userError "a nonexistent solver name resolved to an executable"
+  unless (← Solver.resolveExe (← IO.appPath).toString).isSome do
+    throw <| IO.userError "an existing executable path failed to resolve"
+  unless Solver.backendExe .z3 == some "z3" && Solver.backendExe .none == none do
+    throw <| IO.userError "backend executables were reported incorrectly"
+
+-- A refused command must travel with the verdict: the solver keeps reading, so `sat`
+-- covers only the fragment it accepted.
+#eval show Lean.MetaM Unit from do
+  let cfg : Config := { backend := .z3, timeout := 5 }
+  if !(← Solver.backendAvailable cfg.backend) then
+    IO.println "z3: not installed; skipping refusal round-trip"
+  else
+    match ← Solver.runQuery cfg #[.assert (smt| (= (crush_not_an_smt_operator 1) 1))] with
+    | .sat _ diagnostics =>
+      unless diagnostics.contains "error" do
+        throwError "a refused command was not reported alongside the model"
+      IO.println "z3 refusal round-trip: reported with the model ✓"
+    | .unknown reason =>
+      unless reason.contains "error" do
+        throwError "a refused command was not reported alongside `unknown`"
+      IO.println "z3 refusal round-trip: reported with `unknown` ✓"
+    | .unsat .. => throwError "a refused command produced an `unsat` verdict"
+
 -- Live solver round-trip (skips gracefully if z3 is absent).
 #eval show Lean.MetaM Unit from do
   let cfg : Config := { backend := .z3, timeout := 5 }
-  match ← (Solver.backendSpec cfg.backend).elim (pure none) (fun _ => do
-      let r ← Solver.runQuery cfg #[
+  if !(← Solver.backendAvailable cfg.backend) then
+    IO.println "z3: not installed; skipping round-trip"
+  else
+    match ← Solver.runQuery cfg #[
         .declSort "U" 0,
         .declFun "a" #[] (.app (.symb "U") #[]),
-        .assert (smt| (not (= a a)))]
-      pure (some r)) with
-  | none => IO.println "z3: no backend spec"
-  | some (.unsat ..) => IO.println "z3 round-trip: unsat ✓"
-  | some (.sat ..) => IO.println "z3 round-trip: sat (unexpected)"
-  | some (.unknown r) => IO.println s!"z3 round-trip: unknown ({r})"
+        .assert (smt| (not (= a a)))] with
+    | .unsat .. => IO.println "z3 round-trip: unsat ✓"
+    | .sat .. => IO.println "z3 round-trip: sat (unexpected)"
+    | .unknown r => IO.println s!"z3 round-trip: unknown ({r})"

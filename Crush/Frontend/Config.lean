@@ -27,6 +27,9 @@ instance : ToString Backend where
   toString
     | .z3 => "z3" | .cvc5 => "cvc5" | .bitwuzla => "bitwuzla" | .none => "none"
 
+/-- Every backend value. Kept beside the constructors so a new one is added here too. -/
+def Backend.all : Array Backend := #[.z3, .cvc5, .bitwuzla, .none]
+
 instance : KVMap.Value Backend where
   toDataValue b := toString b
   ofDataValue?
