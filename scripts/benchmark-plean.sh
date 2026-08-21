@@ -312,15 +312,23 @@ write_benchmark_file() {
   local source="$1"
   local output="$2"
   local backend="$3"
-  local last_import
+  local last_import max_heartbeats
 
   last_import="$(awk '/^import / { line = NR } END { print line + 0 }' "$source")"
   [[ "$last_import" -gt 0 ]] || die "no imports found in $source"
+  max_heartbeats="$MAX_HEARTBEATS"
+  if [[ "$backend" == "duper" ]]; then
+    max_heartbeats="$DUPER_MAX_HEARTBEATS"
+  fi
   head -n "$last_import" "$source" > "$output"
   write_prelude "$output" "$backend"
 
   tail -n "+$((last_import + 1))" "$source" |
-    awk '
+    awk -v maxHeartbeats="$max_heartbeats" '
+      /^[[:space:]]*set_option[[:space:]]+maxHeartbeats[[:space:]]+[0-9]+[[:space:]]+in[[:space:]]*$/ {
+        sub(/maxHeartbeats[[:space:]]+[0-9]+/,
+            "maxHeartbeats " maxHeartbeats)
+      }
       /^[[:space:]]*@\[pverifyProof\][[:space:]]*$/ {
         renameTheorem = 1
         next
@@ -718,7 +726,8 @@ done
 
 write_reports
 if ! python3 "$SCRIPT_DIR/benchmark-report.py" \
-    --measurements "$MEASUREMENTS" --profiles "$PROFILES" --out-dir "$OUT_DIR"; then
+    --measurements "$MEASUREMENTS" --profiles "$PROFILES" \
+    --out-dir "$OUT_DIR" --require-uniform-headline; then
   die "failed to generate measurement reports"
 fi
 printf '\nAll-VC headline summary:\n'

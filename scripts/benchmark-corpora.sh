@@ -1019,7 +1019,8 @@ fi
 
 write_reports
 if ! python3 "$SCRIPT_DIR/benchmark-report.py" \
-    --measurements "$MEASUREMENTS" --profiles "$PROFILES" --out-dir "$OUT_DIR"; then
+    --measurements "$MEASUREMENTS" --profiles "$PROFILES" \
+    --out-dir "$OUT_DIR" --require-uniform-headline; then
   die "failed to generate measurement reports"
 fi
 

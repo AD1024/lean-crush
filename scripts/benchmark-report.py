@@ -282,6 +282,34 @@ def comparison_rows(
     return output
 
 
+def validate_uniform_headline(
+    attempts: dict[tuple[str, str, str], list[dict[str, str]]]
+) -> None:
+    lanes_by_suite: dict[str, set[str]] = defaultdict(set)
+    vcs_by_lane: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for suite, lane, vc in attempts:
+        lanes_by_suite[suite].add(lane)
+        vcs_by_lane[(suite, lane)].add(vc)
+
+    for suite, lanes in sorted(lanes_by_suite.items()):
+        selected = headline_lane_map(suite, lanes)
+        if len(selected) < 2:
+            continue
+        reference_backend, reference_lane = selected[0]
+        reference = vcs_by_lane[(suite, reference_lane)]
+        for backend, lane in selected[1:]:
+            current = vcs_by_lane[(suite, lane)]
+            if current == reference:
+                continue
+            missing = len(reference - current)
+            extra = len(current - reference)
+            raise SystemExit(
+                f"{suite}: headline workload mismatch between "
+                f"{reference_backend} ({reference_lane}) and "
+                f"{backend} ({lane}): {missing} missing, {extra} extra"
+            )
+
+
 def reconstruction_rows(
     attempts: dict[tuple[str, str, str], list[dict[str, str]]],
     profiles: list[dict[str, str]],
@@ -511,6 +539,7 @@ def main() -> None:
     parser.add_argument("--measurements", required=True, type=Path)
     parser.add_argument("--profiles", required=True, type=Path)
     parser.add_argument("--out-dir", required=True, type=Path)
+    parser.add_argument("--require-uniform-headline", action="store_true")
     args = parser.parse_args()
 
     measurements = read_tsv(args.measurements)
@@ -640,6 +669,8 @@ def main() -> None:
         ],
         alethe_scaling_summary_rows(scaling),
     )
+    if args.require_uniform_headline:
+        validate_uniform_headline(attempts)
 
 
 if __name__ == "__main__":

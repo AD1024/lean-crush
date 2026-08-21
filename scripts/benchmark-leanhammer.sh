@@ -443,7 +443,8 @@ awk -F '\t' -v repeats="$repeats" '
 ' "$results"
 
 if ! python3 "$script_dir/benchmark-report.py" \
-    --measurements "$measurements" --profiles "$profiles_out" --out-dir "$out_dir"; then
+    --measurements "$measurements" --profiles "$profiles_out" \
+    --out-dir "$out_dir" --require-uniform-headline; then
   printf 'error: failed to generate measurement reports\n' >&2
   exit 1
 fi
