@@ -40,7 +40,7 @@ jobs:
       - name: Install Z3
         run: |
           set -euo pipefail
-          Z3_VERSION=4.15.4
+          Z3_VERSION=5.1.0
           Z3_DIR="z3-${Z3_VERSION}-x64-glibc-2.39"
           curl -sSfL -o z3.zip \
             "https://github.com/Z3Prover/z3/releases/download/z3-${Z3_VERSION}/${Z3_DIR}.zip"

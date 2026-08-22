@@ -28,11 +28,11 @@ jobs:
       - name: Install z3
         run: |
           set -euo pipefail
-          # 4.15.x is required: the translator emits the standard SMT-LIB BV→Int
+          # 4.15 is the floor: the translator emits the standard SMT-LIB BV→Int
           # conversions `sbv_to_int` / `bv2nat` (for `BitVec.toInt`/`toNat`), and
           # older z3 (≤4.13) rejects `sbv_to_int` as an unknown constant, failing
           # the BitVec tests. The glibc-2.39 asset matches ubuntu-latest (24.04).
-          Z3_VERSION=4.15.4
+          Z3_VERSION=5.1.0
           Z3_DIR="z3-${Z3_VERSION}-x64-glibc-2.39"
           curl -sSfL -o z3.zip \
             "https://github.com/Z3Prover/z3/releases/download/z3-${Z3_VERSION}/${Z3_DIR}.zip"

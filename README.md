@@ -51,8 +51,8 @@ example (x : Int) : x + 1 = x := by crush
 ## Install
 
 Requires the Lean toolchain in [`lean-toolchain`](lean-toolchain) and at least one solver on
-your `PATH` — `z3` (≥ 4.15.4), `cvc5` (≥ 1.3.4), or `bitwuzla`. CI pins exactly those two
-versions, and the suite is also green on z3 5.1.0. z3 4.13 and older reject `sbv_to_int`,
+your `PATH` — `z3` (≥ 4.15.4), `cvc5` (≥ 1.3.4), or `bitwuzla`. CI pins z3 5.1.0 and
+cvc5 1.3.4. z3 4.13 and older reject `sbv_to_int`,
 which the translator emits for `BitVec.toInt`, so those goals report a refused command
 there rather than a proof. z3 is the default and enough to start; cvc5 additionally enables
 proof replay and native higher-order support.

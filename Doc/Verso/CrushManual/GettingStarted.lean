@@ -17,9 +17,9 @@ lean-crush uses the Lean version pinned by its `lean-toolchain` file and has no
 third-party Lean dependencies.
 It does require an SMT solver executable on `PATH`:
 
-* Z3 4.15.4 or newer is the default and is sufficient for ordinary use. It is the
-  version CI pins; releases up to 4.13 reject `sbv_to_int`, which the translator emits
-  for `BitVec.toInt`.
+* Z3 4.15.4 or newer is the default and is sufficient for ordinary use. CI pins
+  5.1.0; releases up to 4.13 reject `sbv_to_int`, which the translator emits for
+  `BitVec.toInt`.
 * cvc5 1.3.4 or newer additionally supports native higher-order solving and Alethe
   certificate replay.
 * Bitwuzla can solve the quantifier-free bitvector, array, and uninterpreted
