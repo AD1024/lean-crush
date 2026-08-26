@@ -43,6 +43,17 @@ private def ensureComplete (label : String) (e : Expr) : MetaM Unit := do
   if e.getUsedConstants.contains `Crush.crushSorry then
     throwError "crush: {label} depends on `Crush.crushSorry`"
 
+/-- Check a replay fragment with the elaborator before the complete proof reaches the kernel. -/
+def validateProofCandidate (expected proof : Expr) : MetaM Expr := do
+  let expected ← instantiateMVars expected
+  let proof ← instantiateMVars proof
+  ensureComplete "reconstructed goal type" expected
+  ensureComplete "reconstructed proof" proof
+  let actual ← inferType proof
+  unless ← isDefEqGuarded actual expected do
+    throwError "crush: reconstructed proof has type{indentExpr actual}\nbut expected{indentExpr expected}"
+  return proof
+
 private def isBvDecideAxiomName : Name → Bool
   | .str (.str (.str _ "_native") "bv_decide") suffix =>
       suffix == "ax" || suffix.startsWith "ax_"

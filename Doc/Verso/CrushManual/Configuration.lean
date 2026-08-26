@@ -322,8 +322,12 @@ set_option trace.crush.mono true
 set_option trace.crush.inst true
 set_option trace.crush.script true
 set_option trace.crush.result true
+set_option trace.crush.replay true
 ```
 
 Trace classes are separate from `crush.trace.script`.
 The option emits the script as an info message, while `trace.crush.script`
 uses Lean's trace mechanism and can be filtered with other traces.
+`trace.crush.replay` reports attempts, selected methods, and decode/dispatch
+timings by Alethe rule. It also prints the decoded inputs for steps taking at
+least 100 ms. Anchor timings are inclusive and overlap their nested steps.

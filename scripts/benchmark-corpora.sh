@@ -39,6 +39,7 @@ SOLVER="${SOLVER:-cvc5}"
 CRUSH_MODES="${CRUSH_MODES:-verify core alethe portfolio}"
 CRUSH_PROFILE="${CRUSH_PROFILE:-true}"
 CRUSH_TRACE_INST="${CRUSH_TRACE_INST:-false}"
+CRUSH_TRACE_REPLAY="${CRUSH_TRACE_REPLAY:-false}"
 MAX_HEARTBEATS="${MAX_HEARTBEATS:-1000000}"
 MAX_RECURSION_DEPTH="${MAX_RECURSION_DEPTH:-1000000}"
 GRIND_SPLITS="${GRIND_SPLITS:-20}"
@@ -265,11 +266,11 @@ record_metadata() {
   fi
   trust="$(crush_lane_trust "$backend")"
   reconstruct="$(crush_lane_reconstruct "$backend")"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$suite" "$backend" "$ref" "$commit" "$toolchain" "$SOLVER" "$TIMEOUT" \
     "$DUPER_TIMEOUT" "$MAX_HEARTBEATS" "$MAX_RECURSION_DEPTH" "$trust" \
     "$reconstruct" "$crush_commit" "$duper_commit" "$crush_dirty" "$tree" \
-    "$CRUSH_PROFILE" \
+    "$CRUSH_PROFILE" "$CRUSH_TRACE_REPLAY" \
     >> "$METADATA"
 }
 
@@ -301,6 +302,7 @@ macro "corpus_backend" : tactic =>
     set_option crush.profile $CRUSH_PROFILE in
     set_option crush.profile.machine true in
     set_option trace.crush.inst $CRUSH_TRACE_INST in
+    set_option trace.crush.replay $CRUSH_TRACE_REPLAY in
     loom_crush)
 EOF
   elif [[ "$backend" == "grind" ]]; then
@@ -817,7 +819,7 @@ fi
 
 printf 'suite\tbackend\tref\tcommit\ttoolchain\trepeat\tfile\tproof\tvc\tgoal_hash\tstatus\tcategory\tmilliseconds\tmessage\tgoal\n' > "$RESULTS"
 printf 'suite\tbackend\trepeat\tfile\texit_code\twall_seconds\tvc_count\ttruncated\tmessage\n' > "$RUNS"
-printf 'suite\tbackend\tref\tcommit\ttoolchain\tsolver\ttimeout\tduper_timeout\tvc_max_heartbeats\tmax_rec_depth\tcrush_trust\tcrush_reconstruct\tcrush_commit\tduper_commit\tcrush_dirty\tworktree\tcrush_profile\n' > "$METADATA"
+printf 'suite\tbackend\tref\tcommit\ttoolchain\tsolver\ttimeout\tduper_timeout\tvc_max_heartbeats\tmax_rec_depth\tcrush_trust\tcrush_reconstruct\tcrush_commit\tduper_commit\tcrush_dirty\tworktree\tcrush_profile\tcrush_trace_replay\n' > "$METADATA"
 printf 'suite\tlane\trepeat\tvc_key\tstatus\tcategory\tmilliseconds\tmessage\n' > "$MEASUREMENTS"
 printf 'suite\tlane\trepeat\tvc_key\tdeclaration\tgoal_hash\toutcome\treplay\tdetail\ttotal_nanos\tphases\tmetrics\n' > "$PROFILES"
 

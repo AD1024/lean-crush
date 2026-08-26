@@ -123,6 +123,7 @@ Useful overrides include:
 | `MAX_RECURSION_DEPTH` | `1000000` | Lean recursion limit for generated files |
 | `USE_MATHLIB_CACHE` | `true` | Fetch Mathlib build artifacts |
 | `CRUSH_PROFILE` | `true` | Include Crush phase profiling and report records |
+| `CRUSH_TRACE_REPLAY` | `false` | Emit rule-, method-, and phase-level Alethe replay telemetry |
 | `KEEP_WORKTREES` | `false` | Retain temporary detached worktrees |
 
 ## LeanHammer

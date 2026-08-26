@@ -504,7 +504,7 @@ private partial def introReplayBinders (goal : MVarId) : MetaM MVarId := do
 /-- Run a tactic against exactly the replayed premises and explicit pattern bindings.
 
 The implication is closed before tactic execution. `runReplayRuleHandlers`
-kernel-checks the returned proof and generated declarations. -/
+validates the returned proof before final certificate checking. -/
 def ReplayRuleContext.runTactic (ctx : ReplayRuleContext)
     (tactic : TSyntax `tactic) (includeScope : Bool := false) :
     TacticM (Option Expr) := do
@@ -543,6 +543,39 @@ def ReplayRuleContext.runTactic (ctx : ReplayRuleContext)
     restoreState saved
     return none
 
+/-- Run a metaprogrammed replay procedure in the same isolated implication used by
+`runTactic`. The callback succeeds by assigning its goal and returning `true`. -/
+def ReplayRuleContext.runMeta (ctx : ReplayRuleContext)
+    (procedure : MVarId → TacticM Bool) (includeScope : Bool := false) :
+    TacticM (Option Expr) := do
+  let premiseProofs := ctx.premises.map (·.proof)
+  let proofs :=
+    if includeScope then premiseProofs ++ ctx.scopedProofs else premiseProofs
+  let hypTypes ← proofs.mapM fun proof => do
+    instantiateMVars (← inferType proof)
+  let implication :=
+    hypTypes.foldr (fun type body => mkForall `h .default type body) ctx.target
+  let implication ←
+    withReplayBindings ctx.bindings 0 #[] fun locals =>
+      mkLetFVars (usedLetOnly := false) (generalizeNondepLet := false)
+        locals implication
+  let stepParams ← collectProofParams #[implication]
+  let closedImplication ← instantiateMVars (← mkForallFVars stepParams implication)
+  let saved ← saveState
+  try
+    let goal ← withLCtx {} {} do mkFreshExprMVar closedImplication
+    let procedureGoal ← introReplayBinders goal.mvarId!
+    if ← procedure procedureGoal then
+      let assigned ← instantiateMVars goal
+      let proof := mkAppN (mkAppN assigned stepParams) proofs
+      return some proof
+    restoreState saved
+    return none
+  catch exception =>
+    trace[crush.replay] "replay metaprogram raised: {exception.toMessageData}"
+    restoreState saved
+    return none
+
 /-- Retry a replay tactic with enclosing subproof assumptions when necessary. -/
 def ReplayRuleContext.runTacticWithScopeFallback (ctx : ReplayRuleContext)
     (tactic : TSyntax `tactic) : TacticM (Option Expr) := do
@@ -551,6 +584,15 @@ def ReplayRuleContext.runTacticWithScopeFallback (ctx : ReplayRuleContext)
   if ctx.scopedProofs.isEmpty then
     return none
   ctx.runTactic tactic (includeScope := true)
+
+/-- Retry an isolated metaprogrammed replay procedure with enclosing subproof facts. -/
+def ReplayRuleContext.runMetaWithScopeFallback (ctx : ReplayRuleContext)
+    (procedure : MVarId → TacticM Bool) : TacticM (Option Expr) := do
+  if let some proof ← ctx.runMeta procedure then
+    return some proof
+  if ctx.scopedProofs.isEmpty then
+    return none
+  ctx.runMeta procedure (includeScope := true)
 
 private structure ReplayRuleEntry where
   rule : Option String
@@ -628,6 +670,7 @@ structure ReplayRulePatternHandler where
   alternatives : Array ReplayRuleAlternative
   condition : Option ReplayConditionRef
   tactic : TSyntax `tactic
+  label : String
   priority : Nat
   deriving Inhabited
 
@@ -711,13 +754,17 @@ unsafe def getReplayRuleHandlersUnsafe : MetaM ReplayRuleRegistry := do
 @[implemented_by getReplayRuleHandlersUnsafe]
 opaque getReplayRuleHandlers : MetaM ReplayRuleRegistry
 
+/-- A successful registered replay together with its telemetry label. -/
+structure ReplayRuleResult where
+  proof : Expr
+  source : String
+
 /-- Run exact-rule handlers followed by wildcard handlers. -/
-def runReplayRuleHandlers (registry : ReplayRuleRegistry)
-    (ctx : ReplayRuleContext) : TacticM (Option Expr) := do
+def runReplayRuleHandlersDetailed (registry : ReplayRuleRegistry)
+    (ctx : ReplayRuleContext) : TacticM (Option ReplayRuleResult) := do
   let handlers := registry.getD ctx.rule #[] ++ registry.getD "" #[]
   for entry in handlers do
     let saved ← saveState
-    let snapshot ← KernelCheckSnapshot.capture
     try
       let result ←
         match entry.implementation with
@@ -741,8 +788,12 @@ def runReplayRuleHandlers (registry : ReplayRuleRegistry)
           pure result
       match result with
       | some proof =>
-        let proof ← kernelCheckProof snapshot ctx.target proof
-        return some proof
+        let proof ← validateProofCandidate ctx.target proof
+        let source :=
+          match entry.implementation with
+          | .declaration declName _ => s!"handler:{declName}"
+          | .pattern handler _ => s!"handler:pattern:{handler.label}"
+        return some { proof, source }
       | none =>
         restoreState saved
     catch exception =>
@@ -753,6 +804,11 @@ def runReplayRuleHandlers (registry : ReplayRuleRegistry)
         | .pattern _ _ => m!"pattern for `{ctx.rule}`"
       throwError "replay rule {source} failed:\n{exception.toMessageData}"
   return none
+
+/-- Compatibility wrapper for callers interested only in the reconstructed proof. -/
+def runReplayRuleHandlers (registry : ReplayRuleRegistry)
+    (ctx : ReplayRuleContext) : TacticM (Option Expr) := do
+  return (← runReplayRuleHandlersDetailed registry ctx).map (·.proof)
 
 /-! ## Registration DSL -/
 
@@ -1060,6 +1116,15 @@ private structure ExpandedReplayTermPattern where
   args : Array ReplayExprPattern
   captures : Array Name
 
+private def replayTacticLabel (source : String) : String :=
+  if source.contains "linarith" then "linarith"
+  else if source.contains "omega" then "omega"
+  else if source.contains "grind" then "grind"
+  else if source.contains "simp_all" then "simp_all"
+  else if source.contains "decide" then "decide"
+  else if source.contains "rfl" then "rfl"
+  else "direct"
+
 open Elab.Command in
 private def expandReplayTermPattern
     (stx : Syntax) : CommandElabM ExpandedReplayTermPattern := do
@@ -1122,6 +1187,7 @@ elab_rules : command
     let tactic ← `(tactic| ($tactics))
     let tactic : TSyntax `tactic :=
       ⟨← resolveReplaySyntax captures tactic.raw⟩
+    let label := replayTacticLabel (tactics.raw.reprint.getD "")
     let condition ← condition.mapM compileReplayCondition
     let alternatives := alternatives.map fun alternative => {
       rule := alternative.ruleName
@@ -1132,6 +1198,7 @@ elab_rules : command
         alternatives
         condition
         tactic
+        label
         priority
       }
   | `(command| register_crush_replay term $[$priority:prio]?

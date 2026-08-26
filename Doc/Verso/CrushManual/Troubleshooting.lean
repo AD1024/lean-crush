@@ -124,7 +124,8 @@ with another proof tactic when using it inside a successful Lean declaration.
 For short queries, `crush.trace.script true` or `trace.crush.script true` prints
 the generated script.
 `trace.crush.mono`, `trace.crush.inst`, and `trace.crush.result` expose the main
-decision points without dumping the whole query.
+decision points without dumping the whole query. Use `trace.crush.replay` to
+identify slow Alethe rules and the replay method selected for each one.
 
 # Reconstruction Fails After Unsat
 %%%

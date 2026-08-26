@@ -36,8 +36,13 @@ theorem bool_pigeonhole (p q r s : Bool) :
 #guard_msgs in
 #print axioms bool_pigeonhole
 
-/-- EUF conflict: `a = b` forces `f a = f b`, contradicting `f a = 1` and `f b = 2`. Needs a
+/- EUF conflict: `a = b` forces `f a = f b`, contradicting `f a = 1` and `f b = 2`. Needs a
 congruence step plus a literal evaluation — a 22-step chain. -/
+/--
+[crush.replay] alethe replay telemetry: success=true, commands=
+-/
+#guard_msgs(trace, whitespace := lax, substring := true) in
+set_option trace.crush.replay true in
 theorem euf_conflict (f : Int → Int) (a b c : Int)
     (h1 : f a = 1) (h2 : f b = 2) (h3 : f c = 3) (hab : a = b) : False := by crush
 
