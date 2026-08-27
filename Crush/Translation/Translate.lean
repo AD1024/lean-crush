@@ -5,6 +5,7 @@ import Crush.Translation.Monad
 import Crush.Translation.Attr
 import Crush.Translation.Theories
 import Crush.Translation.HOEncoding
+import Crush.Metatheory.Bridge.Reify
 open Lean Meta
 
 /-!
@@ -557,6 +558,19 @@ private def partitionDefaultAppArgs (fn : Expr) (args : Array Expr) :
       | _ => inferType applied
   return out
 
+/-- Pure SMT syntax corresponding to the verified metatheory's
+`Guarded.natInt.guard`.  Keeping this constructor named minimizes the refinement
+boundary between `Expr` recognition and the guarded semantic proof. -/
+def productionNatGuard (term : SMT.Term) : SMT.Term :=
+  (smt| (>= $term 0))
+
+/-- Pure guard combination used by quantified binders.  Its two branches are
+the syntax counterparts of `Encoding.guardedForall` and
+`Encoding.guardedExists`. -/
+def productionGuardBody (isForall : Bool) (condition body : SMT.Term) : SMT.Term :=
+  if isForall then (smt| (=> $condition $body))
+  else (smt| (and $condition $body))
+
 mutual
   /-- Sort translation. Interpreted Lean types map to SMT theory sorts; supported
   inductives are declared as SMT datatypes; everything else becomes a declared
@@ -636,6 +650,11 @@ mutual
   arguments — the arrow-sort counterpart of `emitResultWF`, confining `app f n` for a
   `Nat`-codomain arrow to the nonnegative `Int`s. -/
   partial def declareArrowSort (ty : Expr) : TranslateM (SSort × String) := do
+    let some shape ← arrowShape? ty
+      | throwError "crush: internal — `declareArrowSort` on a non-arrow {ty}"
+    -- The witness determines the declaration telescope. Symbol identity remains
+    -- keyed by the caller's expression: changing that identity to `whnf ty`
+    -- requires a separate stability theorem for metavariables and transparency.
     let key := arrowKey ty
     let sortName ← TranslateM.symbolForStructural key "Fn"
     let sort := SSort.app (.symb sortName) #[]
@@ -648,11 +667,25 @@ mutual
       markSortDeclared sortName
       TranslateM.emitCommand (.declSort sortName 0)
       -- `app` takes the function value plus the flattened argument sorts.
-      let some shape ← arrowShape? ty
-        | throwError "crush: internal — `declareArrowSort` on a non-arrow {ty}"
-      let argSorts ← shape.args.mapM emitSort
-      let resSort ← emitSort shape.res
-      TranslateM.emitCommand (.declFun appName (#[sort] ++ argSorts) resSort)
+      let ⟨argumentImages, argumentBridges⟩ ←
+        Metatheory.Bridge.mapSortImagesM
+          (fun bridge => emitSort bridge.expr) shape.verified.flatten.1
+      let resultBridge := shape.verified.flatten.2
+      let resultImage : Metatheory.Bridge.SortImage :=
+        { bridge := resultBridge, smt := ← emitSort resultBridge.expr }
+      let argSorts := (argumentImages.map (·.smt)).toArray
+      let resSort := resultImage.smt
+      let appCommand := productionAppDeclaration appName sort argSorts resSort
+      TranslateM.emitCertifiedStructuralCommand (.app {
+        arrow := shape.verified
+        name := appName
+        functionSort := sort
+        arguments := argumentImages
+        result := resultImage
+        argumentBridges
+        resultBridge := rfl
+        command := appCommand
+        command_eq := rfl })
       markFunDeclared appName
       let fName ← TranslateM.freshSymbol "wf_f"
       let mut names : Array String := #[]
@@ -760,7 +793,7 @@ mutual
     let key := closureKey lam
     -- Captured SMT-bound variables, in a deterministic order.
     let st ← get
-    let captures := (collectFVars lam).filter fun fid =>
+    let captures := selectClosureCaptures lam fun fid =>
       st.boundVars.contains fid || st.funVars.contains fid
     let replayHead ← mkLambdaFVars (captures.map mkFVar) lam
     if let some existing ← TranslateM.structuralSymbol? key then
@@ -771,36 +804,77 @@ mutual
              else .app (.symb existing) capArgs
     let cloName ← TranslateM.symbolForStructural key "clo"
     TranslateM.recordSymbolExpr cloName replayHead
-    let capSorts ← captures.mapM fun fid => do emitSort (← fid.getType)
+    -- Retain the same typed bridge used by `ClosureCaptureCertificate` and its
+    -- `closureDecl_args` theorem. `preserveExpr` keeps production's existing
+    -- sort-dispatch identity while the bridge supplies the intrinsic type.
+    let certifiedClosure? ← Metatheory.Bridge.certifyLocalClosure? lam captures
+    let verifiedClosureIndex : Option Nat ←
+      match certifiedClosure? with
+      | some certified => do
+          let index ← TranslateM.recordVerifiedClosure (Dynamic.mk certified)
+          pure (some index)
+      | none => pure none
+    let captureTypes ←
+      match certifiedClosure? with
+      | some certified => pure certified.captureTypes
+      | none => captures.mapM fun fid => do
+          Metatheory.Bridge.reifyType (← fid.getType) (preserveExpr := true)
+    let ⟨captureImages, captureBridges⟩ ←
+      Metatheory.Bridge.mapSortImagesM
+        (fun bridge => emitSort bridge.expr) captureTypes.toList
+    let capSorts := (captureImages.map (·.smt)).toArray
     let (arrowSort, _) ← declareArrowSort lamTy
-    TranslateM.emitCommand (.declFun cloName capSorts arrowSort)
+    let closureCommand := productionClosureDeclaration cloName capSorts arrowSort
+    TranslateM.emitCertifiedStructuralCommand (.closure {
+      arrow := shape.verified
+      name := cloName
+      captures := captureImages
+      captureTypes := captureTypes.toList
+      captureBridges
+      functionSort := arrowSort
+      command := closureCommand
+      command_eq := rfl })
     markFunDeclared cloName
     -- The defining axiom. Fresh SMT variables for the λ's own parameters; the
     -- captures are quantified too so the axiom holds for every instantiation.
     let mut binders : Array (String × SSort) := #[]
     let mut capRefs : Array SMT.Term := #[]
-    for fid in captures do
+    for (fid, captureType) in captures.zip captureTypes do
       let nm := (st.boundVars.get? fid).getD ((st.funVars.get? fid).getD "c")
-      let fty ← fid.getType
-      binders := binders.push (nm, ← emitSort fty)
+      binders := binders.push (nm, ← emitSort captureType.expr)
       capRefs := capRefs.push (.const nm)
     let cloApp := if capRefs.isEmpty then SMT.Term.const cloName
                   else SMT.Term.app (.symb cloName) capRefs
     -- Enter the λ's binders with real fvars so the body becomes closed.
     let (paramBinders, bodyTerm) ← emitLambdaBody lam shape
-    let lhs := SMT.Term.app (.symb appName)
-      (#[cloApp] ++ paramBinders.map (fun (n, _) => SMT.Term.const n))
-    let axiomBody := (smt| (= $lhs $bodyTerm))
+    let parameterRefs := paramBinders.map (fun (n, _) => SMT.Term.const n)
+    let rawEquation := productionClosureEquation appName cloApp parameterRefs bodyTerm
     -- The defining equation holds at well-formed arguments and captures only; the body is
     -- a Lean term and has no meaning at a value outside the encoded type's image.
-    let captureTys ← captures.mapM fun fid => fid.getType
-    let axiomBody ←
-      match ← binderGuard ((binders ++ paramBinders).map (·.1)) (captureTys ++ shape.args) with
-      | none => pure axiomBody
-      | some g => pure (smt| (=> $g $axiomBody))
+    let captureTys := captureTypes.map Metatheory.Bridge.TypeBridge.expr
+    let guard ← binderGuard ((binders ++ paramBinders).map (·.1))
+      (captureTys ++ shape.args)
+    let axiomBody :=
+      match guard with
+      | none => rawEquation
+      | some g => SMT.Term.symbApp "=>" #[g, rawEquation]
     let allBinders := binders ++ paramBinders
-    TranslateM.emitCommand (.assert
-      (if allBinders.isEmpty then axiomBody else .forallE allBinders axiomBody))
+    let equationCommand := productionClosureAssertion allBinders axiomBody
+    TranslateM.emitCertifiedStructuralCommand (.closureEquation {
+      arrow := shape.verified
+      appName
+      closure := cloApp
+      parameters := parameterRefs
+      body := bodyTerm
+      rawEquation
+      rawEquation_eq := rfl
+      guard
+      guardedEquation := axiomBody
+      guardedEquation_eq := rfl
+      binders := allBinders
+      verifiedClosureIndex
+      command := equationCommand
+      command_eq := rfl })
     let capArgs ← captures.mapM fun fid => emitTerm (.fvar fid)
     return if capArgs.isEmpty then .const cloName
            else .app (.symb cloName) capArgs
@@ -858,21 +932,6 @@ mutual
         -- Not syntactically a λ (e.g. a partially-applied constant): η-expand.
         return e
     return e
-
-  /-- All free variables of `e`, in first-occurrence order. -/
-  partial def collectFVars (e : Expr) : Array FVarId :=
-    go e #[]
-  where
-    go (e : Expr) (acc : Array FVarId) : Array FVarId :=
-      match e with
-      | .fvar fid => if acc.contains fid then acc else acc.push fid
-      | .app f a => go a (go f acc)
-      | .lam _ t b _ => go b (go t acc)
-      | .forallE _ t b _ => go b (go t acc)
-      | .letE _ t v b _ => go b (go v (go t acc))
-      | .mdata _ b => go b acc
-      | .proj _ _ b => go b acc
-      | _ => acc
 
   /-- Emit a `declare-sort` for an opaque type, once. -/
   partial def declareUninterpretedSort (e : Expr) : TranslateM SSort := do
@@ -1131,7 +1190,7 @@ mutual
   partial def wfCondition (ty : Expr) (t : SMT.Term) : TranslateM (Option SMT.Term) := do
     let ty ← whnf ty
     if ty.isConstOf ``Nat then
-      return some (smt| (>= $t 0))
+      return some (productionNatGuard t)
     if let some elem ← finiteArrayElem? ty then
       unless ← finiteArraySortSelected ty elem do return none
       let enc ← declareFiniteArray elem
@@ -1177,6 +1236,16 @@ mutual
     -- overrides continue to supersede built-in lowerings.
     let (fn, args) := getAppFnArgs' e
     if let .const head _ := fn then
+      if ← hasCertifiedLoweringsFor head then
+        let ctx : TranslationCtx := {
+          fn, args
+          emitTerm := emitTerm
+          emitSort := emitSort
+          declare  := declareViaThunk }
+        for mapping in (← getCertifiedLoweringsFor head) do
+          if let some t ← mapping.handler ctx then
+            TranslateM.recordCertifiedHookUse mapping.declaration mapping.targetSymbol
+            return t
       if ← hasLoweringsFor head then
         let ctx : TranslationCtx := {
           fn, args
@@ -1810,8 +1879,7 @@ mutual
     match ← wfCondition ty (.const vname) with
     | none => return body
     | some cond =>
-      if isForall then return (smt| (=> $cond $body))
-      else return (smt| (and $cond $body))
+      return productionGuardBody isForall cond body
 
   /-- Uninterpreted-function fallback: declare the head, translate the args.
 
@@ -1829,6 +1897,13 @@ mutual
     let partition ← partitionDefaultAppArgs fn args
     let valueArgs := partition.values
     let appExpr := mkAppN fn args
+    -- Attempt the modeled finite-signature bridge without changing fallback
+    -- behavior. Success ties `fn` to an exact intrinsic constant reference and
+    -- its canonical flattened semantic certificate.
+    let certifiedConstant? ← try
+      let .pack signatureBridge ← Metatheory.Bridge.reifyTermSignature appExpr
+      pure (Metatheory.Bridge.certifyConstantIn? signatureBridge fn)
+    catch _ => pure none
     -- Preserve aliases for `emitSort`: a user sort handler may intentionally target a
     -- `def`-defined type. Structural keys normalize type components separately.
     let resTy ← instantiateMVars (← inferType appExpr)
@@ -1855,6 +1930,11 @@ mutual
       let argSorts ← valueArgs.mapM (fun a => do emitSort (← inferType a))
       let resSort ← emitSort resTy
       TranslateM.emitCommand (.declFun name argSorts resSort)
+      if let some certified := certifiedConstant? then
+        let emission : Metatheory.Bridge.LiveCertifiedConstantEmission := {
+          symbol := name
+          constant := certified }
+        let _ ← TranslateM.recordVerifiedConstant (Dynamic.mk emission)
       markFunDeclared name
       emitResultWF name argSorts resTy
     -- A *function-typed* argument must be passed as a value of its `Fn` sort, not

@@ -77,7 +77,7 @@ fallback.
 | `Crush.lean` | Public root module and API exports |
 | `Crush/Frontend/Config.lean` | Options and resolved `Config` |
 | `Crush/Frontend/Tactic.lean` | Tactic syntax, hint parsing, pipeline, verdict handling |
-| `Crush/Reify/Collect.lean` | Fact and premise collection with provenance |
+| `Crush/Frontend/Collect.lean` | Fact and premise collection with provenance |
 | `Crush/Translation/Monad.lean` | `TranslateM`, state, symbols, declarations, provenance |
 | `Crush/Translation/Attr.lean` | Translation, lowering, result-lowering, and sort-handler registries |
 | `Crush/Translation/Unfold.lean` | `@[crush_unfold]` and `@[crush_defeq]` |
@@ -203,7 +203,7 @@ lowerings representation-compatible.
 
 | Task | Start here | Typical tests |
 |---|---|---|
-| Tactic syntax or hint semantics | `Crush/Frontend/Tactic.lean`, `Crush/Reify/Collect.lean` | `Test/Hints.lean`, `Test/Premises.lean` |
+| Tactic syntax or hint semantics | `Crush/Frontend/Tactic.lean`, `Crush/Frontend/Collect.lean` | `Test/Hints.lean`, `Test/Premises.lean` |
 | New option | `Crush/Frontend/Config.lean` | `Test/Smoke.lean`, relevant subsystem test, Verso configuration |
 | Built-in operation or theory | `Crush/Translation/DefaultLowerings.lean`, `Crush/Translation/Theories.lean` | `Test/Theories.lean`, `Test/Regression.lean` |
 | User extension API | `Crush/Translation/Attr.lean`, `Crush/Translation/Builtins.lean`, `Crush/SMT/Quote.lean` | `Test/Extension.lean`, `Test/ArrayTheory.lean` |

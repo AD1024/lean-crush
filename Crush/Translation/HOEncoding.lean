@@ -1,6 +1,7 @@
 import Lean
 import Crush.SMT.Syntax
 import Crush.Translation.Monad
+import Crush.Metatheory.Bridge.Type
 open Lean Meta
 
 /-!
@@ -64,31 +65,90 @@ open SMT
 /-- A curried arrow type flattened into argument types and a final result type.
 `Int → Int → Bool` becomes `(#[Int, Int], Bool)`. -/
 structure ArrowShape where
-  args : Array Expr
-  res  : Expr
-  deriving Inhabited
+  /-- Structural evidence connecting this live shape to `FO.appDecl`. -/
+  verified : Metatheory.Bridge.ArrowBridge
+
+namespace ArrowShape
+
+/-- Live argument types are projections of the verified telescope, so an
+`ArrowShape` cannot carry an SMT-facing telescope inconsistent with its core
+declaration. -/
+def args (shape : ArrowShape) : Array Expr :=
+  shape.verified.flatten.1.toArray.map Metatheory.Bridge.TypeBridge.expr
+
+/-- Live result type is likewise a projection of the verified telescope. -/
+def res (shape : ArrowShape) : Expr :=
+  shape.verified.flatten.2.expr
+
+/-- Exact proof-facing declaration represented by the live shape. -/
+def coreDecl (shape : ArrowShape) : Metatheory.FO.SymbolDecl :=
+  shape.verified.appDecl
+
+end ArrowShape
 
 /-- Flatten an arrow type. Returns `none` for a non-arrow (so callers can treat
 first-order types normally). Dependent arrows are refused: their SMT image would
 need dependent sorts. -/
 def arrowShape? (ty : Expr) : MetaM (Option ArrowShape) := do
-  let ty ← whnf ty
-  if !ty.isArrow then return none
-  let mut args : Array Expr := #[]
-  let mut cur := ty
-  -- `isArrow` guarantees the binder is not depended upon, so we can peel directly.
-  while (← whnf cur).isArrow do
-    let cur' ← whnf cur
-    let .forallE _ dom body _ := cur' | break
-    args := args.push dom
-    cur := body
-  return some { args, res := cur }
+  let some bridge ← Metatheory.Bridge.reifyArrow? ty | return none
+  return some { verified := bridge }
 
 /-- Whether `ty` is a function type we must encode (an arrow into a non-`Prop`).
 Arrows into `Prop` are predicates and are handled by the first-order path when
 fully applied; only *unapplied* or *argument-position* functions need encoding. -/
 def isFunctionType (ty : Expr) : MetaM Bool := do
   return (← whnf ty).isArrow
+
+namespace collectFVarsOrdered
+
+/-- Accumulator implementation exposed to the bridge proofs. -/
+def go (e : Expr) (acc : Array FVarId) : Array FVarId :=
+  match e with
+  | .fvar fid => if acc.contains fid then acc else acc.push fid
+  | .app f a => go a (go f acc)
+  | .lam _ type body _ => go body (go type acc)
+  | .forallE _ type body _ => go body (go type acc)
+  | .letE _ type value body _ => go body (go value (go type acc))
+  | .mdata _ body => go body acc
+  | .proj _ _ body => go body acc
+  | _ => acc
+
+end collectFVarsOrdered
+
+/-- All free variables of an expression in deterministic first-occurrence
+order. This is the collector used to choose closure parameters. It is kept
+outside the translator's mutually recursive monadic implementation so that the
+actual production function is total and available to refinement proofs. -/
+def collectFVarsOrdered (e : Expr) : Array FVarId :=
+  collectFVarsOrdered.go e #[]
+
+/-- The exact pure capture-selection step used by `emitClosure`. The predicate
+distinguishes SMT-bound locals from Lean-local symbols emitted globally. -/
+def selectClosureCaptures (e : Expr) (eligible : FVarId → Bool) : Array FVarId :=
+  (collectFVarsOrdered e).filter eligible
+
+/-! ## Pure production command shapes
+
+Keeping these constructors outside the recursive translator lets the bridge
+relate emitted syntax to typed declarations/equations without reasoning about
+`TranslateM` state effects. -/
+
+def productionAppDeclaration (appName : String) (functionSort : SMT.SSort)
+    (argumentSorts : Array SMT.SSort) (resultSort : SMT.SSort) : SMT.Command :=
+  .declFun appName (#[functionSort] ++ argumentSorts) resultSort
+
+def productionClosureDeclaration (closureName : String)
+    (captureSorts : Array SMT.SSort) (functionSort : SMT.SSort) : SMT.Command :=
+  .declFun closureName captureSorts functionSort
+
+def productionClosureEquation (appName : String) (closure : SMT.Term)
+    (parameters : Array SMT.Term) (body : SMT.Term) : SMT.Term :=
+  SMT.Term.symbApp "=" #[
+    SMT.Term.app (.symb appName) (#[closure] ++ parameters), body]
+
+def productionClosureAssertion (binders : Array (String × SMT.SSort))
+    (equation : SMT.Term) : SMT.Command :=
+  .assert (if binders.isEmpty then equation else .forallE binders equation)
 
 /-! ## Naming and bookkeeping
 

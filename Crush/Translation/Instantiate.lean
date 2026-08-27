@@ -1,7 +1,7 @@
 import Lean
 import Lean.Meta.Sym
 import Crush.Frontend.Config
-import Crush.Reify.Collect
+import Crush.Frontend.Collect
 import Crush.Translation.Pattern
 
 open Lean Meta

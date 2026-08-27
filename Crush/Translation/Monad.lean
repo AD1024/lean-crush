@@ -1,5 +1,6 @@
 import Lean
 import Crush.SMT.Syntax
+import Crush.Metatheory.Bridge.Command
 import Crush.Frontend.Config
 open Lean
 
@@ -53,6 +54,60 @@ structure StructuralKey where
   typeExprs : Array Expr := #[]
   deriving BEq, Hashable
 
+/-- Proof-carrying history of expression-derived symbol allocation.
+
+`structuralToName` is the executable lookup table.  This trace is its small
+proof-facing companion: every newly allocated structural identity is recorded,
+and its projected SMT name list is intrinsically duplicate-free.  Consequently
+two distinct recorded allocations can never be represented by the same SMT
+symbol.  Reusing an existing key does not append another allocation. -/
+structure StructuralAllocationTrace where
+  entries : List (StructuralKey × String)
+  namesNodup : (entries.map Prod.snd).Nodup
+
+instance : Inhabited StructuralAllocationTrace where
+  default := { entries := [], namesNodup := by simp }
+
+namespace StructuralAllocationTrace
+
+private theorem pair_eq_of_snd_eq_of_nodup
+    {α β : Type} {entries : List (α × β)} {left right : α × β}
+    (nodup : (entries.map Prod.snd).Nodup)
+    (leftMem : left ∈ entries) (rightMem : right ∈ entries)
+    (sameName : left.2 = right.2) : left = right := by
+  induction entries <;> grind
+
+/-- Extend an allocation trace with a name proved fresh for that trace. -/
+def cons (trace : StructuralAllocationTrace) (key : StructuralKey) (name : String)
+    (fresh : name ∉ trace.entries.map Prod.snd) : StructuralAllocationTrace where
+  entries := (key, name) :: trace.entries
+  namesNodup := by
+    simp only [List.map_cons, List.nodup_cons]
+    exact ⟨fresh, trace.namesNodup⟩
+
+/-- A name occurs at most once in the structural allocation history. -/
+theorem uniqueName (trace : StructuralAllocationTrace) :
+    trace.entries.map Prod.snd |>.Nodup :=
+  trace.namesNodup
+
+/-- The allocation trace is injective: equality of emitted names identifies the
+same structural allocation, and hence the same normalized structural key. -/
+theorem entry_eq_of_name_eq (trace : StructuralAllocationTrace)
+    {left right : StructuralKey × String}
+    (leftMem : left ∈ trace.entries) (rightMem : right ∈ trace.entries)
+    (sameName : left.2 = right.2) : left = right :=
+  pair_eq_of_snd_eq_of_nodup trace.namesNodup leftMem rightMem sameName
+
+theorem key_eq_of_name_eq (trace : StructuralAllocationTrace)
+    {leftKey rightKey : StructuralKey} {leftName rightName : String}
+    (leftMem : (leftKey, leftName) ∈ trace.entries)
+    (rightMem : (rightKey, rightName) ∈ trace.entries)
+    (sameName : leftName = rightName) : leftKey = rightKey := by
+  have := trace.entry_eq_of_name_eq leftMem rightMem sameName
+  exact congrArg Prod.fst this
+
+end StructuralAllocationTrace
+
 /-- Semantic identity for a symbol derived from an already allocated SMT symbol. -/
 structure DerivedSymbolKey where
   tag    : String
@@ -91,11 +146,29 @@ structure RegistryCache where
   translation     : Option (Array Dynamic) := none
   sort            : Option (Array Dynamic) := none
   lowerings       : Std.HashMap Name (Array Dynamic) := {}
+  certifiedLowerings : Std.HashMap Name (Array Dynamic) := {}
   resultLowerings : Std.HashMap Name (Array Dynamic) := {}
   hasTranslation  : Option Bool := none
   hasSort         : Option Bool := none
   hasResult       : Option Bool := none
   deriving Inhabited
+
+/-- Auditable link from one retained defunctionalization command certificate to
+the structural symbols whose allocation it relies on. Links are created only by
+`emitCertifiedStructuralCommand`, after checking every name against the
+proof-carrying allocation trace. -/
+structure DefunAllocationLink where
+  certificateIndex : Nat
+  symbols : Array String
+  allocation : StructuralAllocationTrace
+  symbolsAllocated : ∀ symbol ∈ symbols.toList,
+    symbol ∈ allocation.entries.map Prod.snd
+
+/-- One successful dispatch through the restricted certified primitive registry. -/
+structure CertifiedHookUse where
+  declaration : Name
+  targetSymbol : String
+  deriving Inhabited, Repr
 
 /-- Mutable translation state. -/
 structure TranslateState where
@@ -105,6 +178,8 @@ structure TranslateState where
   /-- Structural identities for expression-derived symbols. Kept separate from
       `atomToName`, whose string keys are part of the user extension API. -/
   structuralToName : Std.HashMap StructuralKey String := {}
+  /-- Auditable, proof-carrying allocation history for `structuralToName`. -/
+  structuralAllocations : StructuralAllocationTrace := default
   nameToAtom : Std.HashMap String String := {}
   /-- Emitted SMT symbol → the Lean term it stands for.
 
@@ -124,6 +199,17 @@ structure TranslateState where
   derivedSymbols : Std.HashMap DerivedSymbolKey String := {}
   /-- Emitted commands, in order. -/
   commands   : Array SMT.Command := #[]
+  /-- Proof-carrying declarations emitted by the live defunctionalization path. -/
+  defunCertificates : Array Metatheory.Bridge.CommandCertificate := #[]
+  /-- Checked structural-name dependencies of `defunCertificates`. -/
+  defunAllocationLinks : Array DefunAllocationLink := #[]
+  /-- Type-erased dependent `LiveCertifiedClosure` proofs, referenced by
+  `ClosureEquationCertificate.verifiedClosureIndex`. -/
+  verifiedClosures : Array Dynamic := #[]
+  /-- Type-erased identity-bearing semantic certificates for live source symbols. -/
+  verifiedConstants : Array Dynamic := #[]
+  /-- Auditable successful uses of proof-carrying primitive mappings. -/
+  certifiedHookUses : Array CertifiedHookUse := #[]
   /-- Provenance table indexed by fact id. -/
   facts      : Array FactSource := #[]
   /-- Counter for fresh Skolem/e-vars. -/
@@ -164,6 +250,54 @@ def run {α : Type} (cfg : Config) (x : TranslateM α) : MetaM (α × TranslateS
 /-- Emit a command into the running script. -/
 def emitCommand (c : SMT.Command) : TranslateM Unit :=
   modify fun s => { s with commands := s.commands.push c }
+
+/-- Atomically emit the command stored in a defunctionalization certificate and
+retain that same certificate. This rules out command/certificate drift in the
+stateful production path. -/
+def emitCertifiedCommand
+    (certificate : Metatheory.Bridge.CommandCertificate) : TranslateM Unit :=
+  modify fun s => { s with
+    commands := s.commands.push certificate.command
+    defunCertificates := s.defunCertificates.push certificate }
+
+/-- Emit a certified command only when all of its structural symbol dependencies
+have already been allocated and recorded in the uniqueness trace. The command,
+certificate, and dependency link are appended atomically. -/
+def emitCertifiedStructuralCommand
+    (certificate : Metatheory.Bridge.CommandCertificate) : TranslateM Unit := do
+  let symbols := certificate.structuralSymbols
+  let state ← get
+  let allocatedNames := state.structuralAllocations.entries.map Prod.snd
+  if allocated : ∀ symbol ∈ symbols.toList, symbol ∈ allocatedNames then
+    let index := state.defunCertificates.size
+    modify fun s => { s with
+      commands := s.commands.push certificate.command
+      defunCertificates := s.defunCertificates.push certificate
+      defunAllocationLinks := s.defunAllocationLinks.push {
+        certificateIndex := index
+        symbols
+        allocation := state.structuralAllocations
+        symbolsAllocated := allocated } }
+  else
+    let missing := symbols.filter fun symbol => !allocatedNames.contains symbol
+    throwError
+      "crush: internal certified command refers to unallocated structural symbols: {missing}"
+
+def recordVerifiedClosure (certificate : Dynamic) : TranslateM Nat := do
+  let index := (← get).verifiedClosures.size
+  modify fun s => { s with verifiedClosures := s.verifiedClosures.push certificate }
+  return index
+
+def recordVerifiedConstant (certificate : Dynamic) : TranslateM Nat := do
+  let index := (← get).verifiedConstants.size
+  modify fun s => { s with verifiedConstants := s.verifiedConstants.push certificate }
+  return index
+
+def recordCertifiedHookUse (declaration : Name) (targetSymbol : String) :
+    TranslateM Unit :=
+  modify fun s => { s with certifiedHookUses := s.certifiedHookUses.push {
+    declaration
+    targetSymbol } }
 
 private def sanitizeSymbol (s : String) : String :=
   -- The same alphabet the printer accepts unquoted (`Print.simpleSymbolSpecials`).
@@ -248,10 +382,16 @@ def symbolForStructural (key : StructuralKey) (hint : String) : TranslateM Strin
   | some name => return name
   | none =>
     let name ← freshSymbol hint
-    modify fun s => { s with
-      structuralToName := s.structuralToName.insert key name
-      nameToAtom := s.nameToAtom.insert name key.tag }
-    return name
+    let trace := (← get).structuralAllocations
+    if fresh : name ∉ trace.entries.map Prod.snd then
+      modify fun s => { s with
+        structuralToName := s.structuralToName.insert key name
+        structuralAllocations := trace.cons key name fresh
+        nameToAtom := s.nameToAtom.insert name key.tag }
+      return name
+    else
+      throwError
+        "crush: internal structural symbol collision for freshly reserved name `{name}`"
 
 /-- Existing symbol for a structural identity, if one has been allocated. -/
 def structuralSymbol? (key : StructuralKey) : TranslateM (Option String) := do

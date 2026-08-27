@@ -27,6 +27,42 @@ The `(smt| ...)` quotation expands nested SMT-LIB syntax into the typed SMT term
 
 open Crush.SMT
 
+/-! ## User-defined certified primitive mapping -/
+
+opaque certifiedUserNot : Prop → Prop
+
+axiom certifiedUserNotDenotes :
+  Metatheory.LeanDeclarationDenotes ``certifiedUserNot
+    Metatheory.BuiltinHooks.notSemantic.sourceValue
+
+def certifiedUserNotCertificate :
+    Metatheory.PrimitiveHookCertificate [] (.arrow .bool .bool)
+      ``certifiedUserNot "not" where
+  semantic := Metatheory.BuiltinHooks.notSemantic
+  leanDenotes := certifiedUserNotDenotes
+  solverDenotes := Metatheory.BuiltinHooks.smtNotDenotes
+
+@[crush_certified_lower certifiedUserNot]
+def certifiedUserNotMapping : CertifiedPrimitiveMapping :=
+  .ofCertificate ``certifiedUserNot "not" 0 ⟨certifiedUserNotCertificate⟩
+
+example : True := by
+  run_tac
+    let expression := Lean.mkApp (Lean.mkConst ``certifiedUserNot) (Lean.mkConst ``True)
+    let (_, state) ← TranslateM.run {} (emitTerm expression)
+    match state.certifiedHookUses[0]? with
+    | some use =>
+        unless use.declaration == ``certifiedUserNot && use.targetSymbol == "not" do
+          throwError "user certified hook recorded the wrong indexed mapping"
+    | none => throwError "user certified primitive did not use the certified registry"
+    let entries := (crushCertifiedLoweringExt.getState (← Lean.getEnv)).getD
+      ``certifiedUserNot #[]
+    unless entries.any fun entry =>
+        entry.declName == ``certifiedUserNotMapping &&
+          entry.trust == .certified ``certifiedUserNotMapping do
+      throwError "certified user mapping was not marked with proof-bearing trust metadata"
+  trivial
+
 def quotationExample (x : SMT.Term) : SMT.Term :=
   (smt| (ite (> $x 0) 1 (ite (= $x 0) 0 (- 1))))
 

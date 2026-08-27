@@ -9,6 +9,187 @@ sugar, config parsing, and a live solver round-trip.
 
 open Crush Crush.SMT
 
+/-- The live guard constructors are the exact syntax covered by the guarded
+metatheory. -/
+example (term : Term) : productionNatGuard term = (smt| (>= $term 0)) := rfl
+
+example (condition body : Term) :
+    productionGuardBody true condition body = (smt| (=> $condition $body)) := rfl
+
+example (condition body : Term) :
+    productionGuardBody false condition body = (smt| (and $condition $body)) := rfl
+
+/-- Unrestricted extension registrations are explicitly marked as crossing the
+trusted boundary; they are not accidentally reported as certified. -/
+example : ({ declName := `demo, priority := 1000 : HandlerEntry }).trust =
+    HandlerTrust.trustedBoundary := rfl
+
+/-- Boolean negation is routed through the proof-carrying primitive registry,
+not merely translated to equivalent syntax by the structural fallback. -/
+example : True := by
+  run_tac
+    let notExpression := Lean.mkApp (Lean.mkConst ``Not) (Lean.mkConst ``True)
+    let (translated, state) ← TranslateM.run {} (emitTerm notExpression)
+    match translated with
+    | .app (.symb "not") arguments =>
+        match arguments.toList with
+        | [.lit (.bool true)] => pure ()
+        | _ => throwError "certified negation hook emitted the wrong argument"
+    | _ => throwError "certified negation hook emitted the wrong SMT term"
+    unless state.certifiedHookUses.size == 1 do
+      throwError "live translation did not audit its certified-hook dispatch"
+    let use := state.certifiedHookUses[0]!
+    unless use.declaration == ``Not && use.targetSymbol == "not" do
+      throwError "certified-hook audit recorded the wrong indexed names"
+    let (mappings, _) ← TranslateM.run {} (getCertifiedLoweringsFor ``Not)
+    match mappings[0]? with
+    | some mapping =>
+        unless mappings.size == 1 && mapping.termArity == 1 do
+          throwError "certified negation registration lost its flattened arity"
+    | none => throwError "certified negation registration is missing"
+  trivial
+
+/-- Production arrow discovery now runs through the verified `TypeBridge.flatten`
+implementation. -/
+example : True := by
+  run_tac
+    let intTy := Lean.mkConst ``Int
+    let natTy := Lean.mkConst ``Nat
+    let propTy := Lean.mkSort .zero
+    let natToProp ← Lean.mkArrow natTy propTy
+    let arrow ← Lean.mkArrow intTy natToProp
+    let some shape ← arrowShape? arrow
+      | throwError "verified arrow bridge rejected a nondependent arrow"
+    unless shape.args.size == 2 && shape.args[0]! == intTy &&
+        shape.args[1]! == natTy && shape.res == propTy do
+      throwError "verified arrow bridge returned the wrong flattened telescope"
+  trivial
+
+opaque bridgeCarrier : Type
+axiom bridgeFunction : bridgeCarrier → bridgeCarrier
+axiom bridgeArgument : bridgeCarrier
+axiom bridgeArgument2 : bridgeCarrier
+
+/-- The executable bridge reifies live constants/application and lambda binding
+into intrinsically typed source terms. -/
+example : True := by
+  run_tac
+    let fn := Lean.mkConst ``bridgeFunction
+    let argument := Lean.mkConst ``bridgeArgument
+    let fnType ← Crush.Metatheory.Bridge.reifyType (← Lean.Meta.inferType fn)
+    let argumentType ← Crush.Metatheory.Bridge.reifyType (← Lean.Meta.inferType argument)
+    let signature := Crush.Metatheory.Bridge.SignatureBridge.cons fn fnType
+      (Crush.Metatheory.Bridge.SignatureBridge.cons argument argumentType
+        Crush.Metatheory.Bridge.SignatureBridge.nil)
+    unless (Crush.Metatheory.Bridge.certifyConstantIn? signature fn).isSome do
+      throwError "live constant certification lost the reified signature position"
+    let (_, constantState) ← TranslateM.run {} (emitTerm argument)
+    unless constantState.verifiedConstants.size == 1 do
+      throwError "live default declaration did not retain its constant certificate"
+    match constantState.verifiedConstants[0]? with
+    | some proof =>
+        match Dynamic.get? Crush.Metatheory.Bridge.LiveCertifiedConstantEmission proof with
+        | some emission =>
+            unless constantState.structuralAllocations.entries.any
+                (fun entry => entry.2 == emission.symbol) do
+              throwError "certified source symbol is absent from the allocation trace"
+        | none => throwError "retained constant certificate has the wrong dynamic type"
+    | none => throwError "retained constant certificate is missing"
+    let argument2 := Lean.mkConst ``bridgeArgument2
+    let sameTypedSignature := Crush.Metatheory.Bridge.SignatureBridge.cons argument argumentType
+      (Crush.Metatheory.Bridge.SignatureBridge.cons argument2 argumentType
+        Crush.Metatheory.Bridge.SignatureBridge.nil)
+    unless (Crush.Metatheory.Bridge.certifyConstantIn?
+        sameTypedSignature argument2).isSome do
+      throwError "identity-bearing certification confused same-typed constants"
+    let application := Lean.mkApp fn argument
+    unless (← Crush.Metatheory.Bridge.reifyTerm? signature
+        Crush.Metatheory.Bridge.ContextBridge.nil application).isSome do
+      throwError "typed bridge rejected a modeled constant application"
+    let carrier := Lean.mkConst ``bridgeCarrier
+    let identity := Lean.Expr.lam `x carrier (Lean.mkBVar 0) .default
+    unless (← Crush.Metatheory.Bridge.reifyTerm?
+        Crush.Metatheory.Bridge.SignatureBridge.nil
+        Crush.Metatheory.Bridge.ContextBridge.nil identity).isSome do
+      throwError "typed bridge rejected a modeled lambda"
+    unless (← Crush.Metatheory.Bridge.certifyClosure?
+        Crush.Metatheory.Bridge.SignatureBridge.nil
+        Crush.Metatheory.Bridge.ContextBridge.nil (fun _ => false) identity).isSome do
+      throwError "typed bridge failed to certify a closed lambda's capture list"
+    let (_, translatedState) ← TranslateM.run {} (emitTerm identity)
+    unless translatedState.defunCertificates.size == 3 do
+      throwError "live defunctionalization did not retain all command certificates"
+    unless translatedState.defunAllocationLinks.map (·.certificateIndex) == #[0, 1, 2] do
+      throwError "defunctionalization allocation links drifted from certificate order"
+    let allocatedNames := translatedState.structuralAllocations.entries.map Prod.snd
+    unless translatedState.defunAllocationLinks.all fun link =>
+        link.symbols.all fun symbol => allocatedNames.contains symbol do
+      throwError "a certified defunctionalization command retained an unallocated symbol"
+    unless translatedState.defunAllocationLinks.map (·.symbols.size) == #[2, 2, 2] do
+      throwError "app/closure/equation structural dependencies were not fully linked"
+    unless translatedState.verifiedClosures.size == 1 do
+      throwError "live defunctionalization did not retain its semantic closure proof"
+    match translatedState.verifiedClosures[0]? with
+    | some proof =>
+        unless (Dynamic.get? Crush.Metatheory.Bridge.LiveCertifiedClosure proof).isSome do
+          throwError "retained semantic closure proof has the wrong dynamic type"
+    | none => throwError "retained semantic closure proof is missing"
+    match translatedState.defunCertificates[0]?, translatedState.defunCertificates[1]?,
+        translatedState.defunCertificates[2]? with
+    | some (Crush.Metatheory.Bridge.CommandCertificate.app _),
+        some (Crush.Metatheory.Bridge.CommandCertificate.closure _),
+        some (Crush.Metatheory.Bridge.CommandCertificate.closureEquation equation) =>
+        unless equation.verifiedClosureIndex == some 0 do
+          throwError "closure equation is not linked to its semantic proof"
+    | _, _, _ => throwError "live defunctionalization certificates have the wrong order"
+    Lean.Meta.withLocalDeclD `captured carrier fun captured => do
+      let liveContext := Crush.Metatheory.Bridge.ContextBridge.cons
+        captured.fvarId! argumentType Crush.Metatheory.Bridge.ContextBridge.nil
+      let capturingLambda := Lean.Expr.lam `ignored carrier captured .default
+      let eligible := fun id => id == captured.fvarId!
+      unless (← Crush.Metatheory.Bridge.certifyClosure?
+          Crush.Metatheory.Bridge.SignatureBridge.nil liveContext eligible
+          capturingLambda).isSome do
+        throwError "typed bridge failed exact ordered capture certification"
+      unless (← Crush.Metatheory.Bridge.certifyLocalClosure?
+          capturingLambda #[captured.fvarId!]).isSome do
+        throwError "live closure entry point failed to construct its certificate"
+      let appliedBody := Lean.mkApp fn captured
+      let constantLambda := Lean.Expr.lam `ignored carrier appliedBody .default
+      unless (← Crush.Metatheory.Bridge.certifyLocalClosure?
+          constantLambda #[captured.fvarId!]).isSome do
+        throwError "live closure entry point failed to reify its finite signature"
+    let equalityHead ← Lean.Meta.mkConstWithFreshMVarLevels ``Eq
+    let reflexiveBody := Lean.mkApp3 equalityHead carrier (Lean.mkBVar 0) (Lean.mkBVar 0)
+    let universal := Lean.Expr.forallE `x carrier reflexiveBody .default
+    unless (← Crush.Metatheory.Bridge.reifyTerm?
+        Crush.Metatheory.Bridge.SignatureBridge.nil
+        Crush.Metatheory.Bridge.ContextBridge.nil universal).isSome do
+      throwError "typed bridge rejected modeled equality/quantification"
+    let predicate := Lean.Expr.lam `x carrier reflexiveBody .default
+    let existsHead ← Lean.Meta.mkConstWithFreshMVarLevels ``Exists
+    let existential := Lean.mkApp2 existsHead carrier predicate
+    unless (← Crush.Metatheory.Bridge.reifyTerm?
+        Crush.Metatheory.Bridge.SignatureBridge.nil
+        Crush.Metatheory.Bridge.ContextBridge.nil existential).isSome do
+      throwError "typed bridge rejected modeled existential quantification"
+  trivial
+
+/-- The total collector called by `emitClosure` preserves first occurrence,
+removes duplicates, and then applies the SMT-local eligibility predicate. -/
+example : True := by
+  run_tac
+    let x : Lean.FVarId := ⟨`capture_x⟩
+    let y : Lean.FVarId := ⟨`capture_y⟩
+    let expression := Lean.mkApp (Lean.mkFVar x)
+      (Lean.mkApp (Lean.mkFVar y) (Lean.mkFVar x))
+    unless collectFVarsOrdered expression == #[x, y] do
+      throwError "production capture collection lost first-occurrence order"
+    let selected := selectClosureCaptures expression fun id => id == y
+    unless selected == #[y] do
+      throwError "production capture eligibility filtering disagrees with collection"
+  trivial
+
 /-- IR printing round-trip. -/
 def demoScript : Array Command := #[
   .setLogic "QF_UF",
@@ -138,14 +319,21 @@ example (p q : Prop) : modelLabelProbe p = modelLabelProbe q := by
 #eval show Lean.MetaM Unit from do
   let list0 := Lean.mkConst ``List [.zero]
   let list1 := Lean.mkConst ``List [.succ .zero]
-  let ((name0, name1), _) ← TranslateM.run {} do
+  let ((name0, name0Again, name1), state) ← TranslateM.run {} do
     let name0 ← TranslateM.symbolForStructural
       { tag := "test-sort", exprs := #[list0] } "List"
+    let name0Again ← TranslateM.symbolForStructural
+      { tag := "test-sort", exprs := #[list0] } "ignored-reuse-hint"
     let name1 ← TranslateM.symbolForStructural
       { tag := "test-sort", exprs := #[list1] } "List"
-    return (name0, name1)
+    return (name0, name0Again, name1)
+  unless name0 == name0Again do
+    throwError "one structural identity did not reuse its allocated SMT symbol"
   if name0 == name1 then
     throwError "universe-distinct expressions shared one SMT symbol"
+  unless state.structuralAllocations.entries.length == 2 do
+    throwError "structural allocation trace recorded reuse as a fresh allocation"
+  have _ := state.structuralAllocations.namesNodup
 
 -- Definitional equality of universe maxima should not split an SMT symbol.
 #eval show Lean.MetaM Unit from do

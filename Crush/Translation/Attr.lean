@@ -1,5 +1,6 @@
 import Lean
 import Crush.SMT.Syntax
+import Crush.Metatheory.Hooks
 import Crush.Translation.Monad
 open Lean Elab Meta
 
@@ -46,6 +47,13 @@ term, the default structural translator runs.
 Sort handlers are additionally offered the weak-head-normalized type when the
 un-normalized one is declined, so a handler may be registered against either an alias
 or its expansion.
+
+These unrestricted callbacks execute arbitrary metaprograms and therefore enter
+the formal development through an explicit trusted boundary. Registry entries
+are tagged `HandlerTrust.trustedBoundary`. The separate
+`@[crush_certified_lower]` path accepts only a `CertifiedPrimitiveMapping`, whose
+constructor requires the indexed semantic and external-interpretation contract
+from `Metatheory/Hooks.lean` and whose executable behavior is fixed.
 -/
 
 namespace Crush
@@ -81,6 +89,45 @@ documents that head matching is performed by the `@[crush_lower target]` registr
 A lowering may still return `none` when the application shape, type, or typeclass
 instance is not one it can encode soundly. -/
 abbrev LoweringHandler := TranslationHandler
+
+/-- Runtime-evaluable certified primitive mapping. The semantic object is stored
+only through `Nonempty`, hence erased, while its declaration and target symbol
+remain indices of `PrimitiveHookCertificate` and cannot drift independently. -/
+inductive CertifiedPrimitiveMapping where
+  | ofCertificate {signature : Metatheory.Signature} {ty : Metatheory.Ty}
+      (declaration : Name) (targetSymbol : String)
+      (firstTermArgument : Nat)
+      (certificate : Nonempty
+        (Metatheory.PrimitiveHookCertificate signature ty declaration targetSymbol)) :
+      CertifiedPrimitiveMapping
+
+instance : TypeName CertifiedPrimitiveMapping := unsafe
+  (TypeName.mk _ ``CertifiedPrimitiveMapping)
+
+namespace CertifiedPrimitiveMapping
+
+def declaration : CertifiedPrimitiveMapping → Name
+  | .ofCertificate declaration _ _ _ => declaration
+
+def targetSymbol : CertifiedPrimitiveMapping → String
+  | .ofCertificate _ targetSymbol _ _ => targetSymbol
+
+def firstTermArgument : CertifiedPrimitiveMapping → Nat
+  | .ofCertificate _ _ firstTermArgument _ => firstTermArgument
+
+def termArity : CertifiedPrimitiveMapping → Nat
+  | .ofCertificate (ty := ty) _ _ _ _ =>
+      (Metatheory.Defunctionalization.sourceDecl ty).args.length
+
+/-- Mechanically fixed executable behavior for certified primitive mappings. -/
+def handler (mapping : CertifiedPrimitiveMapping) : LoweringHandler := fun ctx => do
+  unless ctx.fn.isConstOf mapping.declaration do return none
+  let arguments := ctx.args.toList.drop mapping.firstTermArgument
+  unless arguments.length == mapping.termArity do return none
+  let translated ← arguments.toArray.mapM ctx.emitTerm
+  return some (.app (.symb mapping.targetSymbol) translated)
+
+end CertifiedPrimitiveMapping
 
 instance : TypeName TranslationHandler := unsafe (TypeName.mk _ ``TranslationHandler)
 
@@ -145,10 +192,19 @@ private def unpackSortHandlers (cached : Array Dynamic) : Array SortHandler :=
 private def packSortHandlers (handlers : Array SortHandler) : Array Dynamic :=
   handlers.map fun handler => Dynamic.mk handler
 
+/-- Whether an extension carries a checked semantic certificate or crosses the
+documented trusted boundary. Existing unrestricted metaprogram attributes are
+explicitly classified as trusted; they are never silently treated as verified. -/
+inductive HandlerTrust where
+  | trustedBoundary
+  | certified (certificate : Name)
+  deriving Inhabited, BEq, Repr
+
 /-- A registered handler together with its metadata. -/
 structure HandlerEntry where
   declName : Name
   priority : Nat
+  trust : HandlerTrust := .trustedBoundary
   deriving Inhabited
 
 /-- Declaration names of a registry's entries, highest priority first. -/
@@ -243,13 +299,15 @@ structure LoweringEntry where
   head     : Name
   declName : Name
   priority : Nat
+  trust : HandlerTrust := .trustedBoundary
   deriving Inhabited
 
 private def addLoweringEntry
     (state : NameMap (Array HandlerEntry)) (entry : LoweringEntry) :
     NameMap (Array HandlerEntry) :=
   state.alter entry.head fun entries =>
-    (entries.getD #[]).push { declName := entry.declName, priority := entry.priority }
+    (entries.getD #[]).push {
+      declName := entry.declName, priority := entry.priority, trust := entry.trust }
 
 initialize crushLoweringExt :
     SimplePersistentEnvExtension LoweringEntry (NameMap (Array HandlerEntry)) ←
@@ -257,6 +315,71 @@ initialize crushLoweringExt :
     addEntryFn := addLoweringEntry
     addImportedFn := mkStateFromImportedEntries addLoweringEntry {}
   }
+
+/-! ## Certified primitive lowerings -/
+
+initialize crushCertifiedLoweringExt :
+    SimplePersistentEnvExtension LoweringEntry (NameMap (Array HandlerEntry)) ←
+  registerSimplePersistentEnvExtension {
+    addEntryFn := addLoweringEntry
+    addImportedFn := mkStateFromImportedEntries addLoweringEntry {}
+  }
+
+syntax (name := crushCertifiedLowerAttr)
+  "crush_certified_lower " ident (ppSpace prio)? : attr
+
+initialize registerBuiltinAttribute {
+  name := `crushCertifiedLowerAttr
+  descr := "Register a semantically certified primitive SMT lowering."
+  applicationTime := .afterCompilation
+  add := fun declName stx _ => do
+    let head ← Elab.realizeGlobalConstNoOverloadWithInfo stx[1]
+    let prio ← getAttrParamOptPrio stx[2]
+    let env ← getEnv
+    let some info := env.find? declName
+      | throwError "unknown declaration {declName}"
+    let expectedTy := mkConst ``Crush.CertifiedPrimitiveMapping
+    unless (← MetaM.run' (isDefEqReadOnly info.type expectedTy)) do
+      throwError "@[crush_certified_lower] expects `CertifiedPrimitiveMapping`, \
+                  but {declName} has type{indentExpr info.type}"
+    modifyEnv fun env => crushCertifiedLoweringExt.addEntry env {
+      head
+      declName
+      priority := prio
+      trust := .certified declName }
+}
+
+def hasCertifiedLoweringsFor (head : Name) : TranslateM Bool := do
+  return (crushCertifiedLoweringExt.getState (← getEnv)).contains head
+
+private def unpackCertifiedLowerings (cached : Array Dynamic) :
+    Array CertifiedPrimitiveMapping :=
+  cached.filterMap fun value => Dynamic.get? CertifiedPrimitiveMapping value
+
+private def packCertifiedLowerings (mappings : Array CertifiedPrimitiveMapping) :
+    Array Dynamic :=
+  mappings.map Dynamic.mk
+
+unsafe def getCertifiedLoweringsForUnsafe
+    (head : Name) : TranslateM (Array CertifiedPrimitiveMapping) := do
+  if let some cached := (← get).registries.certifiedLowerings.get? head then
+    return unpackCertifiedLowerings cached
+  let env ← getEnv
+  let opts ← getOptions
+  let names := sortedNames ((crushCertifiedLoweringExt.getState env).getD head #[])
+  let mappings ← names.filterMapM fun declName => do
+    match env.evalConst CertifiedPrimitiveMapping opts declName with
+    | .ok mapping =>
+        if mapping.declaration == head then return some mapping else return none
+    | .error _ => return none
+  modify fun s => { s with registries := { s.registries with
+    certifiedLowerings := s.registries.certifiedLowerings.insert head
+      (packCertifiedLowerings mappings) } }
+  return mappings
+
+@[implemented_by getCertifiedLoweringsForUnsafe]
+opaque getCertifiedLoweringsFor
+    (head : Name) : TranslateM (Array CertifiedPrimitiveMapping)
 
 /-- Register a `LoweringHandler` for applications of one Lean constant.
 
