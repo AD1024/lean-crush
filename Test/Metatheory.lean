@@ -259,7 +259,7 @@ example {signature : Signature} {source : Model signature}
       ValueRel source target models.baseRel ty sourceValue targetValue :=
   Iff.rfl
 
-example : (defunctionalize nestedCapture).axioms.length = 2 := rfl
+example : (defunctionalize nestedCapture).equations.length = 2 := rfl
 
 /-- The complete semantic soundness theorem is exposed at the same abstract
 symbol-family level as the total classic pass. -/

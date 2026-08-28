@@ -1419,7 +1419,7 @@ mutual
     -- Function-valued conditionals are values in the arrow sort just like scalar
     -- conditionals. Handling them directly is what makes
     -- `(if c then f else g) x` terminate instead of recursively η-expanding the
-    -- same head while constructing its closure axiom.
+    -- same head while constructing its closure equation.
     match_expr e with
     | ite _ c _ a b =>
       return (smt| (ite $(← emitTerm c) $(← emitFunValue a) $(← emitFunValue b)))

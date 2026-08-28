@@ -460,7 +460,7 @@ In the final clause, $\circ$ ranges only over constructors retained by the
 target: Boolean literals and connectives, equality, and quantifiers.  Thus the
 procedure is total and has no ``unsupported syntax'' case for the core language.
 
-\begin{definition}[Closure axiom]
+\begin{definition}[Closure equation]
 For $\chi=(\Gamma,\tau,\sigma,e)$, let $\bar x$ enumerate all of $\Gamma$ and
 let $x$ denote the lambda argument.  The defining equation is
 \[
@@ -469,14 +469,14 @@ let $x$ denote the lambda argument.  The defining equation is
    (\clos_\chi(x_{i_1},\ldots,x_{i_m}),x)=\df{e}.
 \]
 Only captured variables are constructor arguments, although all variables from
-the original context are quantified.  Let $\mathcal A(e)$ be the list of these
-axioms for every lambda occurrence in $e$.
+the original context are quantified.  Let $\mathcal E(e)$ be the list of these
+equations for every lambda occurrence in $e$.
 \end{definition}
 
 \begin{definition}[Defunctionalization theory]
 For a source sentence $\varphi$,
 \[
-  \mathcal T(\varphi)=\mathcal A(\varphi)\mathbin{+\!+}[\df{\varphi}].
+  \mathcal T(\varphi)=\mathcal E(\varphi)\mathbin{+\!+}[\df{\varphi}].
 \]
 Thus a target model of $\mathcal T(\varphi)$ must satisfy both all closure
 equations and the translated query.\leanfile{Defunctionalization/ModelExtension.lean}
@@ -579,11 +579,11 @@ use source interpretations, and closure constructors install their exact
 captured environment.  The capture-agreement development proves that changing
 uncaptured entries cannot affect the body denotation.\leanfile{Defunctionalization/ModelExtension.lean}
 
-\begin{theorem}[Closure-axiom validity]
+\begin{theorem}[Closure validity]
 For every source model $\mathcal M_s$ and term $e$, its canonical target model
-$\widehat{\mathcal M_s}$ satisfies all collected closure axioms:
+$\widehat{\mathcal M_s}$ satisfies all collected closure equations:
 \[
-  \widehat{\mathcal M_s}\satt\mathcal A(e).
+  \widehat{\mathcal M_s}\satt\mathcal E(e).
 \]
 \end{theorem}
 
@@ -595,7 +595,7 @@ If $\mathcal M_s\sat\varphi$, then
 \leanfile{Defunctionalization/ModelExtension.lean}
 \end{theorem}
 \begin{proof}
-Closure-axiom validity handles $\mathcal A(\varphi)$.  The canonical models are
+Closure validity handles $\mathcal E(\varphi)$.  The canonical models are
 related, so closed-formula preservation transports the truth of $\varphi$ to
 $\df{\varphi}$.
 \end{proof}
@@ -789,7 +789,7 @@ encoding; they are not premises of the unary-core fundamental lemma.
   \node[theoremNode,below=14mm of fundamental] (sentence) {closed-formula preservation\\
     $\mathcal M_s\sat\varphi\Leftrightarrow
      \mathcal M_t\sat\df{\varphi}$};
-  \node[theoremNode,below=14mm of agreement] (closure) {canonical model satisfies\\every closure axiom};
+  \node[theoremNode,below=14mm of agreement] (closure) {closure validity:\\canonical model satisfies\\every closure equation};
 
   \node[theoremNode,below=15mm of sentence] (extension) {model extension\\
     $\mathcal M_s\sat\varphi\Rightarrow
@@ -833,7 +833,7 @@ eta and flattened-application refinement toward the production encoding.}
 Reading the central solid path from top to bottom: intrinsic typing makes the
 translation total; the logical relation supports the fundamental induction;
 empty valuations specialize it to sentences; exact-capture reasoning validates
-the canonical closure axioms; and these two branches meet in model extension,
+the canonical closure equations; and these two branches meet in model extension,
 from which unsatisfiability soundness follows by contradiction.
 
 The most important machine-checked results are:

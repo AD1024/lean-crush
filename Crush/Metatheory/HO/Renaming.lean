@@ -4,7 +4,7 @@ import Crush.Metatheory.HO.Core
 # Typed renaming and weakening
 
 Renaming is the binder infrastructure needed for total eta expansion and, later,
-closure axioms.  Because variables are intrinsically typed, a renaming preserves
+closure equations.  Because variables are intrinsically typed, a renaming preserves
 types by construction.
 -/
 

@@ -80,7 +80,7 @@ def defunctionalizeCore {signature : Signature} {context : Context} :
 /-- Defining equation for one closure.  All variables from the lambda's original
 context are quantified, while the constructor receives only variables that the
 body actually captures. -/
-def closureAxiom (closure : Closure signature) :
+def closureEquation (closure : Closure signature) :
     FO.FamilySentence (CoreSymbol signature) :=
   let closureValue :
       FO.FamilyTerm (CoreSymbol signature)
@@ -97,23 +97,23 @@ def closureAxiom (closure : Closure signature) :
   FO.FamilyFormula.closeForall (.eq applied (defunctionalizeCore closure.body))
 
 /-- All closure equations required by a source term. -/
-def closureAxioms (term : Term signature context ty) :
+def closureEquations (term : Term signature context ty) :
     FO.FamilyTheory (CoreSymbol signature) :=
-  (closures term).map closureAxiom
+  (closures term).map closureEquation
 
 /-- Complete result of the total classic defunctionalization core. -/
 structure CoreResult (signature : Signature) (context : Context) (ty : Ty) where
   term : FO.FamilyTerm (CoreSymbol signature)
     (targetContext context) (FO.FOSort.ofTy ty)
-  axioms : FO.FamilyTheory (CoreSymbol signature)
+  equations : FO.FamilyTheory (CoreSymbol signature)
 
 def defunctionalize (term : Term signature context ty) :
     CoreResult signature context ty :=
   { term := defunctionalizeCore term
-    axioms := closureAxioms term }
+    equations := closureEquations term }
 
-@[simp] theorem closureAxioms_length (term : Term signature context ty) :
-    (closureAxioms term).length = (closures term).length := by
-  simp [closureAxioms]
+@[simp] theorem closureEquations_length (term : Term signature context ty) :
+    (closureEquations term).length = (closures term).length := by
+  simp [closureEquations]
 
 end Crush.Metatheory.Defunctionalization

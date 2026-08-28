@@ -812,10 +812,10 @@ theorem canonical_denote_applied_closure (source : Model signature)
   simpa [Term.denote] using appliedClosureEq
 
 /-- The canonical extension validates every generated closure equation. -/
-theorem canonical_satisfies_closureAxiom (source : Model signature)
+theorem canonical_closure_valid (source : Model signature)
     (closure : Closure signature) :
-    (canonicalModel source).Satisfies (closureAxiom closure) := by
-  unfold closureAxiom
+    (canonicalModel source).Satisfies (closureEquation closure) := by
+  unfold closureEquation
   apply FO.FamilyModel.satisfies_closeForall_of_forall_denote
   intro valuation
   let targetValuation : FO.FamilyValuation (canonicalModel source)
@@ -865,14 +865,14 @@ theorem canonical_satisfies_closureAxiom (source : Model signature)
     targetValuation valuationsRelated targetArgument]
   simpa using bodyEq
 
-theorem canonical_satisfies_closureAxioms (source : Model signature)
+theorem canonical_closures_valid (source : Model signature)
     {context : Context} {ty : Ty} (term : Term signature context ty) :
-    (canonicalModel source).SatisfiesTheory (closureAxioms term) := by
-  change ∀ formula ∈ (closures term).map closureAxiom,
+    (canonicalModel source).SatisfiesTheory (closureEquations term) := by
+  change ∀ formula ∈ (closures term).map closureEquation,
     (canonicalModel source).Satisfies formula
   intro targetFormula membership
   obtain ⟨closure, _, rfl⟩ := List.mem_map.mp membership
-  exact canonical_satisfies_closureAxiom source closure
+  exact canonical_closure_valid source closure
 
 /-- The complete target theory for a source sentence: generated closure
 equations followed by the translated formula. -/
@@ -882,7 +882,7 @@ def defunctionalizedSentence (formula : Sentence signature) :
 
 def defunctionalizationTheory (formula : Sentence signature) :
     FO.FamilyTheory (CoreSymbol signature) :=
-  closureAxioms formula ++ [defunctionalizedSentence formula]
+  closureEquations formula ++ [defunctionalizedSentence formula]
 
 /-- A satisfying source model extends to a target model of the complete
 defunctionalization theory. -/
@@ -893,9 +893,9 @@ theorem modelExtension (source : Model signature) (formula : Sentence signature)
   intro targetFormula membership
   simp only [defunctionalizationTheory, List.mem_append, List.mem_singleton]
     at membership
-  rcases membership with axiomMembership | rfl
-  · exact canonical_satisfies_closureAxioms source formula
-      targetFormula axiomMembership
+  rcases membership with equationMembership | rfl
+  · exact canonical_closures_valid source formula
+      targetFormula equationMembership
   · exact (fundamental_sentence (canonicalModelRelation source) formula).mp
       sourceSatisfies
 

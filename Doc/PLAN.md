@@ -970,7 +970,7 @@ Should a verified ledger be revived, the prerequisites — in dependency order �
    and is opaque to `decide`/`simp` (§10c), so nothing can be proved about it. This is
    feasible for passes over the finite IR, not for the `whnf`-driven reifier itself.
 4. **A higher-order value domain** to state defunctionalization (P4) with `app`/`clo`
-   *uninterpreted*, so the closure axiom does real work rather than holding by `rfl`.
+   *uninterpreted*, so the closure equation does real work rather than holding by `rfl`.
 
 With (1)–(4) the end-to-end argument mirrors lean-auto's `LamThmValid.getFalse`. This
 is essentially rebuilding the verified-checker infrastructure §1 deliberately dropped,
@@ -981,7 +981,7 @@ the *default* discharge path kernel-checked end-to-end.
 `crush.mono.certify` for defunctionalization). Monomorphization can be certified per
 call because each instance is a genuine pair of *Lean* objects — a proof term and a
 proposition — so `isDefEq (inferType proof) prop` is a real kernel-checkable
-property. A closure axiom `∀ ȳ x̄, app(clo ȳ, x̄) = ⟦body⟧` has no such pair: `app`,
+property. A closure equation `∀ ȳ x̄, app(clo ȳ, x̄) = ⟦body⟧` has no such pair: `app`,
 `clo`, and `⟦body⟧` are SMT artifacts with no Lean counterpart. Its only failure mode
 is `⟦body⟧` mistranslating the λ body — i.e. translation faithfulness — which is
 exactly prerequisite (1)/(4) above, not a `rfl`. A "closure certify" that emitted a

@@ -27,7 +27,7 @@ for free-variable positions.
 5. **Fundamental lemma — complete for every modeled source constructor.** See
    `Defunctionalization/Fundamental.lean`.
 6. **Model extension and target-unsat implies source-unsat — complete.** Exact
-   capture reconstruction, closure-axiom validity, and the final contrapositive
+   capture reconstruction, closure validity, and the final contrapositive
    are in `Defunctionalization/ModelExtension.lean`.
 7. **Flattened application and partial-application eta — complete at the typed
    semantic layer.** `EtaCorrectness.lean` proves eta normalization preserves
