@@ -132,7 +132,7 @@ We use the following notation throughout:
   \erase{\tau} & \text{first-order erasure of a source type},\\
   \df{e} & \text{core defunctionalization of syntax},\\
   \erase{\Gamma}^{\star} & \text{pointwise erasure of a context},\\
-  \vrel{\nu_s}{R,\tau}{\nu_t} & \text{logical relation on values},\\
+  \vrel{\nu_s}{\tau}{\nu_t} & \text{logical relation on values (ambient $R$ implicit)},\\
   \rrel{\rho_s}{R}{\rho_t} & \text{pointwise logical relation on valuations},\\
   \FV(e) & \text{duplicate-free free-variable positions of $e$}.
 \end{array}
@@ -485,18 +485,23 @@ equations and the translated query.\leanfile{Defunctionalization/ModelExtension.
 \section{The source--target logical relation}
 \sectioncontents{Relation at each type; related valuations; compatibility of models.}
 
-Fix a source model $\mathcal M_s$, a target model $\mathcal M_t$, and relations
+Fix a source model $\mathcal M_s$, a target model $\mathcal M_t$, and a family
+$R=(r_\beta)_\beta$ of relations
 $r_\beta\subseteq B(\beta)\times C_B(\beta)$ for opaque base sorts.
 
 \begin{definition}[Value relation]
-The relation $\vrel{\nu_s}{R,\tau}{\nu_t}$ is defined by recursion on $\tau$:
+The value relation depends on the fixed family $R$.  When $R$ is ambient and
+therefore not written explicitly, we use the abbreviated notation
+$\vrel{\nu_s}{\tau}{\nu_t}$.  The family $R$ is used directly at opaque base
+sorts and recursively through argument and result relations at arrow types.
+The relation is defined by recursion on $\tau$:
 \[
 \begin{array}{rcl}
- \vrel{p}{R,\Bool}{q} &\Longleftrightarrow& p\Leftrightarrow q,\\
- \vrel{a}{R,\Base(\beta)}{b} &\Longleftrightarrow& r_\beta(a,b),\\
- \vrel{f}{R,\tau\to\sigma}{g} &\Longleftrightarrow&
-   \forall a,b.\;\vrel{a}{R,\tau}{b}\Rightarrow
-   \vrel{f(a)}{R,\sigma}{\app_{\tau,\sigma}^{\mathcal M_t}(g,b)}.
+ \vrel{p}{\Bool}{q} &\Longleftrightarrow& p\Leftrightarrow q,\\
+ \vrel{a}{\Base(\beta)}{b} &\Longleftrightarrow& r_\beta(a,b),\\
+ \vrel{f}{\tau\to\sigma}{g} &\Longleftrightarrow&
+   \forall a,b.\;\vrel{a}{\tau}{b}\Rightarrow
+   \vrel{f(a)}{\sigma}{\app_{\tau,\sigma}^{\mathcal M_t}(g,b)}.
 \end{array}
 \]
 The arrow clause is the semantic heart of defunctionalization: the opaque target
@@ -507,12 +512,12 @@ application symbol.\leanfile{Defunctionalization/LogicalRelation.lean}
 \begin{definition}[Related valuations]
 $\rrel{\rho_s}{R}{\rho_t}$ holds when every $i:\tau\in\Gamma$ satisfies
 \[
-  \vrel{\rho_s(i)}{R,\tau}{\rho_t(\erase{i})}.
+  \vrel{\rho_s(i)}{\tau}{\rho_t(\erase{i})}.
 \]
 \end{definition}
 
 \begin{lemma}[Extension]
-If $\rrel{\rho_s}{R}{\rho_t}$ and $\vrel{\nu_s}{R,\tau}{\nu_t}$, then
+If $\rrel{\rho_s}{R}{\rho_t}$ and $\vrel{\nu_s}{\tau}{\nu_t}$, then
 $\rrel{\rho_s[\nu_s]}{R}{\rho_t[\nu_t]}$.
 \end{lemma}
 \begin{proof}
@@ -543,7 +548,7 @@ to be transported to the other.
 Suppose $R:\mathcal M_s\sim\mathcal M_t$, $\Sigma;\Gamma\vdash e:\tau$, and
 $\rrel{\rho_s}{R}{\rho_t}$.  Then
 \[
-  \vrel{\den{e}{\mathcal M_s}{\rho_s}}{R,\tau}
+  \vrel{\den{e}{\mathcal M_s}{\rho_s}}{\tau}
        {\den{\df{e}}{\mathcal M_t}{\rho_t}}.
 \]
 \leanfile{Defunctionalization/Fundamental.lean}
