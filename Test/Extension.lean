@@ -27,41 +27,63 @@ The `(smt| ...)` quotation expands nested SMT-LIB syntax into the typed SMT term
 
 open Crush.SMT
 
-/-! ## User-defined certified primitive mapping -/
+/-! ## Axiom-free certified definition lowering
 
-opaque certifiedUserNot : Prop → Prop
+A defined mapping supplies no SMT body.  The fixed dispatcher delta-reduces the
+actual Lean definition and translates the kernel-equivalent result. -/
 
-axiom certifiedUserNotDenotes :
-  Metatheory.LeanDeclarationDenotes ``certifiedUserNot
-    Metatheory.BuiltinHooks.notSemantic.sourceValue
+#guard_msgs(error, substring := true) in
+@[crush_certified_def]
+opaque invalidCertifiedDef : Prop → Prop
 
-def certifiedUserNotCertificate :
-    Metatheory.PrimitiveHookCertificate [] (.arrow .bool .bool)
-      ``certifiedUserNot "not" where
-  semantic := Metatheory.BuiltinHooks.notSemantic
-  leanDenotes := certifiedUserNotDenotes
-  solverDenotes := Metatheory.BuiltinHooks.smtNotDenotes
+@[crush_certified_def]
+def releaseReady (testsPassed reviewApproved : Prop) : Prop :=
+  testsPassed ∧ reviewApproved
 
-@[crush_certified_lower certifiedUserNot]
-def certifiedUserNotMapping : CertifiedPrimitiveMapping :=
-  .ofCertificate ``certifiedUserNot "not" 0 ⟨certifiedUserNotCertificate⟩
+@[crush_certified_def]
+def certifiedCountdown : Nat → Nat
+  | 0 => 0
+  | n + 1 => certifiedCountdown n
+
+#guard_msgs(error, substring := true) in
+example (n : Nat) : certifiedCountdown n = 0 := by
+  crush
+
+set_option crush.trust "reconstruct" in
+theorem certified_definition_fires (testsPassed reviewApproved : Prop)
+    (ready : releaseReady testsPassed reviewApproved) :
+    testsPassed ∧ reviewApproved := by
+  crush
 
 example : True := by
   run_tac
-    let expression := Lean.mkApp (Lean.mkConst ``certifiedUserNot) (Lean.mkConst ``True)
-    let (_, state) ← TranslateM.run {} (emitTerm expression)
-    match state.certifiedHookUses[0]? with
-    | some use =>
-        unless use.declaration == ``certifiedUserNot && use.targetSymbol == "not" do
-          throwError "user certified hook recorded the wrong indexed mapping"
-    | none => throwError "user certified primitive did not use the certified registry"
-    let entries := (crushCertifiedLoweringExt.getState (← Lean.getEnv)).getD
-      ``certifiedUserNot #[]
-    unless entries.any fun entry =>
-        entry.declName == ``certifiedUserNotMapping &&
-          entry.trust == .certified ``certifiedUserNotMapping do
-      throwError "certified user mapping was not marked with proof-bearing trust metadata"
+    let expression := Lean.mkApp2 (Lean.mkConst ``releaseReady)
+      (Lean.mkConst ``True) (Lean.mkConst ``False)
+    let (translated, state) ← TranslateM.run {} (emitTerm expression)
+    unless toString translated == "(and true false)" do
+      throwError "certified definition did not lower through its Lean body"
+    unless state.commands.isEmpty do
+      throwError "definition lowering unexpectedly introduced an SMT assumption"
+    unless state.certifiedHookUses.isEmpty do
+      throwError "definition lowering was incorrectly audited as an external SMT hook"
+    let definitions := crushCertifiedDefExt.getState (← Lean.getEnv)
+    unless definitions.contains ``releaseReady do
+      throwError "certified definition was not registered"
   trivial
+
+/-! ## Certified definition lowering with integer arithmetic -/
+
+@[crush_certified_def]
+def intMax (a b : Int) : Int :=
+  if a ≥ b then a else b
+
+set_option crush.trust "reconstruct" in
+theorem certified_intMax3 (a b c : Int) :
+    let greatest := intMax a (intMax b c)
+    a ≤ greatest ∧ b ≤ greatest ∧ c ≤ greatest ∧
+      (greatest = a ∨ greatest = b ∨ greatest = c) := by
+  dsimp only
+  crush using (simp_all [intMax]; grind)
 
 def quotationExample (x : SMT.Term) : SMT.Term :=
   (smt| (ite (> $x 0) 1 (ite (= $x 0) 0 (- 1))))
@@ -83,7 +105,7 @@ applications of `loweredMystery`; it does not need to inspect `ctx.fn`. -/
 
 opaque loweredMystery : Int → Int
 
-@[crush_lower loweredMystery]
+@[crush_translate_head loweredMystery]
 def loweredMysteryHandler : LoweringHandler := fun ctx => do
   let #[x] := ctx.args | return none
   let sx ← ctx.emitTerm x
@@ -162,12 +184,12 @@ end MappedInt
 
 crush_map_sort MappedInt => "Int"
 
-@[crush_lower MappedInt.value]
+@[crush_translate_head MappedInt.value]
 def mappedIntValue : LoweringHandler := fun ctx => do
   let #[x] := ctx.args | return none
   return some (← ctx.emitTerm x)
 
-@[crush_lower MappedInt.next]
+@[crush_translate_head MappedInt.next]
 def mappedIntNext : LoweringHandler := fun ctx => do
   let #[x] := ctx.args | return none
   let sx ← ctx.emitTerm x
@@ -196,14 +218,14 @@ def translateIndexedIntSort : SortHandler := fun ctx => do
   let #[_] := ctx.args | return none
   return some (.app (.symb "Int") #[])
 
-@[crush_lower_result IndexedInt]
+@[crush_translate_family IndexedInt]
 def lowerIndexedInt : LoweringHandler := fun ctx => do
   let .const ``indexedInt _ := ctx.fn
     | return none
   let #[index] := ctx.args | return none
   return some (← ctx.emitTerm index)
 
-@[crush_lower IndexedInt.value]
+@[crush_translate_head IndexedInt.value]
 def lowerIndexedIntValue : LoweringHandler := fun ctx => do
   let #[_, value] := ctx.args | return none
   return some (← ctx.emitTerm value)
@@ -231,7 +253,7 @@ def translateAliasedIntSort : SortHandler := fun ctx => do
   let .const ``AliasedInt _ := ctx.fn | return none
   return some (.app (.symb "Int") #[])
 
-@[crush_lower aliasedValue]
+@[crush_translate_head aliasedValue]
 def lowerAliasedValue : LoweringHandler := fun ctx => do
   let #[a] := ctx.args | return none
   return some (← ctx.emitTerm a)

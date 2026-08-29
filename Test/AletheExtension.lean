@@ -10,7 +10,7 @@ open Crush Crush.Alethe Crush.SMT
 def MultipleOfThree (value : Int) : Prop :=
   value % 3 = 0
 
-@[crush_lower MultipleOfThree]
+@[crush_translate_head MultipleOfThree]
 def lowerMultipleOfThree : LoweringHandler := fun ctx => do
   let #[value] := ctx.args | return none
   let value ← ctx.emitTerm value

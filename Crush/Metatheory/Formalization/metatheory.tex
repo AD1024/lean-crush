@@ -27,31 +27,27 @@
   \smallskip\noindent\textbf{Contents of this section.} #1\par\medskip}
 \newcommand{\Bool}{\mathsf{Bool}}
 \newcommand{\Base}{\mathsf{Base}}
-\newcommand{\Arr}{\mathsf{arr}}
-\newcommand{\Ty}{\mathsf{Ty}}
-\newcommand{\Term}{\mathsf{Term}}
-\newcommand{\FOSort}{\mathsf{FOSort}}
-\newcommand{\FV}{\mathsf{FV}}
+\newcommand{\Fn}{\mathsf{Fn}}
 \newcommand{\clos}{\mathsf{clos}}
 \newcommand{\app}{\mathsf{app}}
 \newcommand{\den}[3]{\llbracket #1\rrbracket_{#2,#3}}
 \newcommand{\erase}[1]{\lfloor #1\rfloor}
-\newcommand{\df}[1]{\mathcal D\llbracket #1\rrbracket}
+\newcommand{\unary}[1]{\mathcal D\llbracket #1\rrbracket}
+\newcommand{\flattr}[1]{\mathcal F\llbracket #1\rrbracket}
+\newcommand{\smtenc}[2]{\mathcal A_{#1}\llbracket #2\rrbracket}
 \newcommand{\sat}{\models}
 \newcommand{\satt}{\models^{\mathsf T}}
-\newcommand{\vrel}[3]{#1\mathrel{\approx_{#2}}#3}
-\newcommand{\rrel}[3]{#1\mathrel{\approx^{\mathsf v}_{#2}}#3}
-\newenvironment{pseudocode}[1]{%
-  \begin{center}\begin{minipage}{0.92\linewidth}
-  \hrule\smallskip\textbf{Procedure: #1}\smallskip\hrule\smallskip
-  \begin{tabbing}
-  \quad\=\quad\=\quad\=\quad\=\kill
-}{%
-  \end{tabbing}\smallskip\hrule
-  \end{minipage}\end{center}
-}
+\newcommand{\smtsat}{\models_{\mathsf{SMT}}}
+\newcommand{\unsat}{\mathsf{Unsat}}
+\newcommand{\Gen}{\mathsf{Gen}}
+\newcommand{\Theory}{\mathsf{Theory}}
+\newcommand{\Commands}{\mathsf{Commands}}
+\newcommand{\Rep}{\mathsf{Rep}}
+\newcommand{\args}{\mathsf{args}}
+\newcommand{\res}{\mathsf{res}}
+\newcommand{\FV}{\mathsf{FV}}
 
-\title{The Metatheory of Crush Defunctionalization}
+\title{The Metatheory of Crush's Certified Lowering Pipeline}
 \author{lean-crush}
 \date{August 2026}
 
@@ -59,800 +55,1014 @@
 \maketitle
 
 \begin{abstract}
-This document specifies the proof-facing higher-order language used by Crush,
-its first-order target, their model semantics, closure conversion by
-defunctionalization, and the semantic soundness theorem.  It follows the Lean
-development and deliberately distinguishes the verified mathematical core from
-the refinement boundary to the live translator.  The displayed notation agrees
-with the centralized Lean notation file.\leanfile{Notation.lean}
+Crush translates a supported fragment of Lean propositions into SMT commands.
+This document explains the mathematical models used for that translation, the
+total flattened defunctionalization algorithm, the representation of typed
+first-order formulas by the untyped production SMT syntax, and the precise
+soundness theorem proved in Lean. It is written as a guide to the proof: every
+language and semantic object is introduced before its correctness theorem, and
+the final roadmap separates completed results from remaining trust boundaries.
+The theorem justifies the reified higher-order sentence and the exact commands
+produced by the proved VCG route; it does not assume that an external solver's
+answer is correct and does not assign a denotation to arbitrary
+\texttt{Lean.Expr}.
 \end{abstract}
 
 \tableofcontents
 
-\section{Overview and notation}
-\sectioncontents{The verified pipeline; conventions; correspondence with Lean notation.}
+\section{Reader's guide}
+\sectioncontents{The question answered by the formalization; proof stages; notation and scope.}
 
-The source language is a simply typed higher-order logic with opaque base sorts.
-The target is many-sorted first-order logic.  Defunctionalization replaces every
-function space by an opaque first-order sort, every lambda by a closure
-constructor, and every higher-order application by an application symbol.
+\subsection{What is being proved}
 
-\subsection*{Metavariable conventions}
+The formalization studies this pipeline:
+\begin{center}
+\resizebox{0.98\linewidth}{!}{$
+\boxed{\text{supported Lean expression}}
+\longrightarrow
+\boxed{\text{intrinsically typed HO sentence}}
+\longrightarrow
+\boxed{\text{typed flattened FO theory}}
+\longrightarrow
+\boxed{\text{raw SMT commands}}
+$}
+\end{center}
+The first arrow is a partial recognizer: unsupported Lean syntax is rejected.
+The second and third arrows are total on their typed inputs. The principal
+semantic conclusion is:
 
-The following conventions apply before any formulas below are read:
+\begin{quote}
+If the exact raw commands returned by the proved VCG route are semantically
+unsatisfiable, then the reified higher-order source sentence is unsatisfiable.
+\end{quote}
+
+The proof is by countermodel construction. Starting from any model of the
+higher-order sentence, Lean constructs a model of the flattened first-order
+theory, then constructs a relational SMT model satisfying the exact encoded
+commands. Taking the contrapositive of those two constructions yields the
+desired reflection of unsatisfiability.
+
+\subsection{Proof stages}
+
+The argument is organized into five stages:
+\begin{enumerate}[leftmargin=*,label=\arabic*.]
+  \item Define an intrinsically typed higher-order source language and its
+        ordinary function-space semantics.
+  \item Define an intrinsically typed first-order target whose function-value
+        sorts are opaque, then give total flattened defunctionalization.
+  \item Interpret the target in a canonical model built from a source model and
+        prove term preservation plus validity of every generated obligation.
+  \item Encode the typed target theory into raw SMT syntax and prove that every
+        target model induces a model of the exact command sequence.
+  \item Retain structural evidence for Lean reification and exact stateful VCG
+        execution, while marking the remaining trusted paths explicitly.
+\end{enumerate}
+
+\subsection{Metavariables and notation}
+
+The following symbols are used consistently throughout the document:
 \[
 \begin{array}{c@{\quad}l}
- e,f,a & \text{terms (with $f$ usually function-valued and $a$ an argument)},\\
- \varphi,\psi & \text{Boolean formulas; $\varphi$ is closed when called a sentence},\\
- \beta & \text{an opaque source base sort},\\
- \sigma,\tau,\upsilon & \text{source types},\\
- \kappa & \text{a first-order target sort},\\
- \Gamma & \text{a local typing context},\\
- \Sigma & \text{a signature of uninterpreted constants or symbols},\\
- \mathcal M & \text{a semantic model},\\
- \rho & \text{a valuation assigning semantic values to local variables},\\
- \nu & \text{an individual semantic value},\\
- R & \text{a bundled relation between a source model and a target model},\\
- \Delta & \text{a target theory, that is, a list of closed formulas},\\
- \mathcal D & \text{the core syntax-to-syntax defunctionalization map},\\
- \mathcal T(\varphi) & \text{the complete target theory generated from $\varphi$}.
+ e,f,a & \text{source or target terms; $f$ is usually function-valued},\\
+ \varphi,\psi & \text{Boolean formulas; a closed formula is a sentence},\\
+ \beta & \text{an opaque source base-sort name},\\
+ \alpha,\gamma,\sigma,\tau,\upsilon & \text{source types},\\
+ \kappa & \text{a first-order sort},\\
+ \Gamma,\Delta & \text{typing contexts},\\
+ \Sigma & \text{a typed signature},\\
+ T & \text{a typed first-order theory},\\
+ M,N & \text{semantic models},\\
+ \rho & \text{a source valuation or typed renaming},\\
+ \nu & \text{a target valuation},\\
+ v,w & \text{individual semantic values},\\
+ \mathcal E & \text{a concrete FO-to-SMT encoding choice},\\
+ C & \text{an ordered array of raw SMT commands}.
 \end{array}
 \]
-Subscripts $s$ and $t$ mean \emph{source} and \emph{target}; for example,
-$\mathcal M_s$ and $\mathcal M_t$ are source and target models, while $\rho_s$
-and $\rho_t$ are their valuations.  A symbol without a subscript is used when
-the side is clear or the statement applies to either language.  We use Greek
-metavariables where conventional, rather than program-style identifiers.
-
-\begin{definition}[Carrier]
-A \emph{carrier} is the collection of semantic values that a model assigns to
-a logical sort.  For example, if $\beta$ is an opaque sort intended to represent
-entities, a model may choose some nonempty type $B(\beta)$ as its carrier; the
-variables and constants of sort $\beta$ then denote elements of $B(\beta)$.
-Syntax specifies only the name and relationships of sorts, whereas a model
-chooses their carriers.  We require carriers to be nonempty, following the
-standard many-sorted and SMT semantics.
-\end{definition}
-
-For a closed source formula $\varphi$, the central result has the shape
-\[
-  \operatorname{Unsat}_{\mathrm{FO}}\bigl(\mathcal T(\varphi)\bigr)
-  \quad\Longrightarrow\quad
-  \operatorname{Unsat}_{\mathrm{HO}}(\varphi).
-\]
-This is the direction needed to justify reporting unsatisfiability after the
-translation.
-
-We use the following notation throughout:
+Subscripts $s$, $t$, and $q$ mean source, typed target, and raw SMT model,
+respectively. The basic semantic notation is
 \[
 \begin{array}{c@{\qquad}l}
-  \den{e}{\mathcal M}{\rho} & \text{denotation of $e$ in $\mathcal M$ under $\rho$},\\
-  \mathcal M\sat\varphi & \text{satisfaction of a closed formula},\\
-  \mathcal M\satt\Delta & \text{satisfaction of every sentence in a theory},\\
-  \erase{\tau} & \text{first-order erasure of a source type},\\
-  \df{e} & \text{core defunctionalization of syntax},\\
-  \erase{\Gamma}^{\star} & \text{pointwise erasure of a context},\\
-  \vrel{\nu_s}{\tau}{\nu_t} & \text{logical relation on values (ambient $R$ implicit)},\\
-  \rrel{\rho_s}{R}{\rho_t} & \text{pointwise logical relation on valuations},\\
-  \FV(e) & \text{duplicate-free free-variable positions of $e$}.
+ \den{e}{M}{\rho} & \text{denotation of $e$ in $M$ under $\rho$},\\
+ M\sat\varphi & \text{$M$ satisfies the closed formula $\varphi$},\\
+ M\satt T & \text{$M$ satisfies every formula in theory $T$},\\
+ \erase{\tau} & \text{first-order erasure of source type $\tau$},\\
+ \erase{\Gamma}^{\star} & \text{pointwise erasure of source context $\Gamma$},\\
+ \unary{e} & \text{the classic unary reference translation},\\
+ \flattr{e} & \text{the total flattened translation result},\\
+ \smtenc{\mathcal E}{t} & \text{raw SMT term encoding of typed FO term $t$}.
 \end{array}
 \]
+The two translation brackets denote syntax-to-syntax transformations, whereas
+$\den{e}{M}{\rho}$ denotes a semantic value. The notation mirrors the scoped
+Lean notation and the flattened/SMT encoder modules.
+\leanfiles{Notation.lean, Defunctionalization/Flattened/Translate.lean, and SMT/Representation.lean}
 
-For example, $\den{e}{\mathcal M}{\rho}$ should be read from the conventions
-above as: ``the semantic value of term $e$, using the interpretations supplied
-by model $\mathcal M$ and the local-variable assignment $\rho$.''  The model
-interprets global constants and carriers; the valuation interprets only the
-locally bound variables in $e$.
-
-\section{Intrinsically typed higher-order source}
-\sectioncontents{Types and signatures; typed references; terms and formulas.}
+\section{The intrinsically typed higher-order source}
+\sectioncontents{Types, contexts, terms, and ordinary higher-order semantics.}
 
 \subsection{Types, contexts, and signatures}
 
 \begin{definition}[Source types]
-Let $\beta$ range over opaque base-sort identifiers.  Source types are generated
-by
+Let $\beta$ range over opaque base-sort names. Source types are generated by
 \[
-  \tau ::= \Bool \mid \Base(\beta) \mid \tau\to\tau.
+  \tau ::= \Bool \mid \Base(\beta) \mid \tau\to\sigma.
 \]
-Arrow types are nondependent and associate to the right.  A context is a list
-$\Gamma=[\tau_0,\ldots,\tau_{n-1}]$, with the most recently introduced binder at
-the head.  A signature $\Sigma$ is likewise a list of the types of uninterpreted
-constants.\leanfile{HO/Core.lean}
+Arrows are nondependent and associate to the right. A context
+$\Gamma=[\tau_0,\ldots,\tau_{n-1}]$ records local binders with the newest binder
+at the head. We write $\Gamma,\tau$ for extension by a new binder of type
+$\tau$; this is stored as $\tau::\Gamma$ in Lean. A signature $\Sigma$ is a list
+of the types of global constants.
+\leanfile{HO/Core.lean}
 \end{definition}
 
-Typed de Bruijn references are judgments $i:\tau\in\Gamma$, inductively
-generated by
+We write $\Gamma\ni\tau$ for the intrinsically typed lookup judgment. Its
+inhabitants are de Bruijn references, generated by:
 \begin{mathpar}
-  \inferrule*[right=here]
-    { }
-    {0:\tau\in(\tau::\Gamma)}
-
-  \inferrule*[right=there]
-    {i:\tau\in\Gamma}
-    {i+1:\tau\in(\sigma::\Gamma)}.
+ \inferrule*{ }
+   {Z:\Gamma,\tau\ni\tau}
+ \qquad
+ \inferrule*{i:\Gamma\ni\tau}
+   {S\,i:\Gamma,\sigma\ni\tau}.
 \end{mathpar}
-The same representation indexes constants in $\Sigma$.  Consequently,
-ill-typed variables and constants are not inhabitants of the syntax datatype.
+The judgment is intrinsically witnessed: its derivation simultaneously records
+the position and proves the type at that position. The witness $Z$ denotes
+index zero and $S\,i$ denotes the successor of the index denoted by $i$.
+Forgetting the derivation yields the natural-number index used when collecting
+free variables.
+Constants use the same typed-reference representation in $\Sigma$. Therefore a
+variable or constant with the wrong type cannot be constructed.
 
-\subsection{Terms}
+For $i:\Gamma\ni\tau$, write $x_i$ for the local-variable term selected by
+$i$. For $k:\Sigma\ni\tau$, write $c_k$ for the global-constant term selected
+by $k$ from the signature. The subscripts are typed lookup witnesses, not
+variable or constant names.
 
-\begin{definition}[Intrinsic source syntax]
-The judgment $\Sigma;\Gamma\vdash e:\tau$ is generated by the following forms:
+\begin{definition}[Source terms]
+The intrinsic judgment $\Sigma;\Gamma\vdash e:\tau$ has variables, constants,
+Boolean literals and connectives, same-type equality, lambda, application, and
+universal and existential quantification:
 \begin{mathpar}
-  \inferrule*[right=var]
-    {i:\tau\in\Gamma}
-    {\Sigma;\Gamma\vdash x_i:\tau}
+ \inferrule{i:\Gamma\ni\tau}
+   {\Sigma;\Gamma\vdash x_i:\tau}
+ \qquad
+ \inferrule{k:\Sigma\ni\tau}
+   {\Sigma;\Gamma\vdash c_k:\tau}
 
-  \inferrule*[right=const]
-    {k:\tau\in\Sigma}
-    {\Sigma;\Gamma\vdash c_k:\tau}
+ \inferrule{\Sigma;\Gamma,\tau\vdash e:\sigma}
+   {\Sigma;\Gamma\vdash\lambda x{:}\tau.e:\tau\to\sigma}
+ \qquad
+ \inferrule{\Sigma;\Gamma\vdash f:\tau\to\sigma\\
+             \Sigma;\Gamma\vdash a:\tau}
+   {\Sigma;\Gamma\vdash f\,a:\sigma}
 
-  \inferrule*[right=bool]
-    {b\in\{\top,\bot\}}
-    {\Sigma;\Gamma\vdash b:\Bool}
-
-  \inferrule*[right=not]
-    {\Sigma;\Gamma\vdash\varphi:\Bool}
-    {\Sigma;\Gamma\vdash\neg\varphi:\Bool}
-
-  \inferrule*[right=connective]
-    {\Sigma;\Gamma\vdash\varphi:\Bool \\
-     \Sigma;\Gamma\vdash\psi:\Bool \\
-     \circ\in\{\land,\lor,\Rightarrow,\Leftrightarrow\}}
-    {\Sigma;\Gamma\vdash\varphi\circ\psi:\Bool}
-
-  \inferrule*[right=eq]
-    {\Sigma;\Gamma\vdash e_1:\tau \\
-     \Sigma;\Gamma\vdash e_2:\tau}
-    {\Sigma;\Gamma\vdash e_1=e_2:\Bool}
-
-  \inferrule*[right=lam]
-    {\Sigma;\tau::\Gamma\vdash e:\sigma}
-    {\Sigma;\Gamma\vdash\lambda x{:}\tau.e:\tau\to\sigma}
-
-  \inferrule*[right=app]
-    {\Sigma;\Gamma\vdash f:\tau\to\sigma \\
-     \Sigma;\Gamma\vdash a:\tau}
-    {\Sigma;\Gamma\vdash f\,a:\sigma}
-
-  \inferrule*[right=quant]
-    {\Sigma;\tau::\Gamma\vdash\varphi:\Bool \\
-     Q\in\{\forall,\exists\}}
-    {\Sigma;\Gamma\vdash Qx{:}\tau.\varphi:\Bool}.
+ \inferrule{\Sigma;\Gamma\vdash e_1:\tau\\
+             \Sigma;\Gamma\vdash e_2:\tau}
+   {\Sigma;\Gamma\vdash e_1=e_2:\Bool}
+ \qquad
+ \inferrule{\Sigma;\Gamma,\tau\vdash\varphi:\Bool\\Q\in\{\forall,\exists\}}
+   {\Sigma;\Gamma\vdash Qx{:}\tau.\varphi:\Bool}.
 \end{mathpar}
-A formula is a Boolean term, and a sentence is a formula in the empty context.
-The indices of Lean's \texttt{Term} datatype enforce all premises of these
-rules.\leanfile{HO/Core.lean}
+The omitted rules are the standard typed Boolean rules. A formula is a term of
+type $\Bool$; a sentence is a formula in the empty context.
+\leanfile{HO/Core.lean}
 \end{definition}
 
-Notice that quantification may range over arrow types.  Thus ``higher-order''
-describes both lambda/application and the possible domains of quantifiers.
+Quantifiers may range over arrow types. Thus the modeled language is genuinely
+higher-order even though its arrows are nondependent.
 
-\section{Higher-order model semantics}
-\sectioncontents{Interpretation of types; models and valuations; denotation and satisfaction.}
+\subsection{Source models}
 
-\begin{definition}[Type denotation]
-A family $B$ assigns a nonempty carrier $B(\beta)$, represented by a Lean type,
-to each opaque base sort.  Its extension to all source types is
+\begin{definition}[Source type denotation]
+A carrier family $B$ assigns a nonempty type $B(\beta)$ to each opaque base
+sort. Its extension to source types is
 \[
-  \llbracket\Bool\rrbracket_B=\mathsf{Prop},\qquad
-  \llbracket\Base(\beta)\rrbracket_B=B(\beta),\qquad
-  \llbracket\tau\to\sigma\rrbracket_B=
-    \llbracket\tau\rrbracket_B\to\llbracket\sigma\rrbracket_B.
+ \llbracket\Bool\rrbracket_B=\mathsf{Prop},\qquad
+ \llbracket\Base(\beta)\rrbracket_B=B(\beta),\qquad
+ \llbracket\tau\to\sigma\rrbracket_B=
+   \llbracket\tau\rrbracket_B\to\llbracket\sigma\rrbracket_B.
 \]
-\leanfile{HO/Semantics.lean}
+Thus the only choices in $B$ are the carriers assigned to opaque base sorts.
 \end{definition}
 
 \begin{definition}[Source model and valuation]
-A source model $\mathcal M_s$ consists of nonempty carriers $B(\beta)$ and, for
-each $k:\tau\in\Sigma$, a value
-$c_k^{\mathcal M_s}\in\llbracket\tau\rrbracket_B$.  A valuation $\rho_s$ for
-$\Gamma$ assigns to every typed reference $i:\tau\in\Gamma$ a value in
-$\llbracket\tau\rrbracket_B$.  We write $\rho_s[\nu]$ for extension by a new
-head value $\nu$.
+A source model $M_s$ consists of a carrier family $B$ and an interpretation
+$c_k^{M_s}\in\llbracket\tau\rrbracket_B$ for each
+$k:\Sigma\ni\tau$. A
+valuation $\rho$ for $\Gamma$ assigns a value in
+$\llbracket\tau\rrbracket_B$ to every $i:\Gamma\ni\tau$. We write $\rho[v]$
+for extension by a new head value $v$.
 \end{definition}
 
 \begin{definition}[Source denotation]
-The function $\den{e}{\mathcal M_s}{\rho_s}$ is defined structurally.  Variables
-are looked up in $\rho_s$, constants in $\mathcal M_s$, Boolean constructs have
-their ordinary propositional meanings, and equality is Lean equality.  The
-distinctive clauses are
+Denotation is structural. Variables use $\rho$, constants use $M_s$, and the
+Boolean forms have their ordinary meanings. The higher-order clauses are
 \[
 \begin{aligned}
- \den{\lambda x{:}\tau.e}{\mathcal M_s}{\rho_s}
-   &= \lambda\nu.\den{e}{\mathcal M_s}{\rho_s[\nu]},\\
- \den{f\,a}{\mathcal M_s}{\rho_s}
-   &= \den{f}{\mathcal M_s}{\rho_s}
-      (\den{a}{\mathcal M_s}{\rho_s}),\\
- \den{\forall x{:}\tau.\varphi}{\mathcal M_s}{\rho_s}
-   &= \forall\nu\in\llbracket\tau\rrbracket_B,
-      \den{\varphi}{\mathcal M_s}{\rho_s[\nu]},\\
- \den{\exists x{:}\tau.\varphi}{\mathcal M_s}{\rho_s}
-   &= \exists\nu\in\llbracket\tau\rrbracket_B,
-      \den{\varphi}{\mathcal M_s}{\rho_s[\nu]}.
+ \den{\lambda x{:}\tau.e}{M_s}{\rho}
+   &=\lambda v.\den{e}{M_s}{\rho[v]},\\
+ \den{f\,a}{M_s}{\rho}
+   &=\den{f}{M_s}{\rho}(\den{a}{M_s}{\rho}),\\
+ \den{\forall x{:}\tau.\varphi}{M_s}{\rho}
+   &=\forall v\in\llbracket\tau\rrbracket_B,
+       \den{\varphi}{M_s}{\rho[v]},\\
+ \den{\exists x{:}\tau.\varphi}{M_s}{\rho}
+   &=\exists v\in\llbracket\tau\rrbracket_B,
+       \den{\varphi}{M_s}{\rho[v]}.
 \end{aligned}
 \]
-For a sentence $\varphi$, $\mathcal M_s\sat\varphi$ abbreviates evaluation
-under the empty valuation.\leanfile{HO/Semantics.lean}
+For a sentence $\varphi$, $M_s\sat\varphi$ means evaluation under the empty
+valuation.\leanfile{HO/Semantics.lean}
 \end{definition}
 
-\begin{lemma}[Nonemptiness]
-If every $B(\beta)$ is nonempty, then $\llbracket\tau\rrbracket_B$ is nonempty
-for every $\tau$.
-\end{lemma}
-\begin{proof}
-By induction on $\tau$.  At an arrow, choose a constant function returning an
-inhabitant of the codomain.
-\end{proof}
+\begin{definition}[Source unsatisfiability]
+A source sentence is semantically unsatisfiable when no source model satisfies
+it:
+\[
+ \unsat_{\mathsf{HO}}(\varphi)
+ \quad\Longleftrightarrow\quad
+ \forall M_s.\;\neg(M_s\sat\varphi).
+\]
+This definition is semantic: it quantifies over the mathematical models just
+introduced.
+\end{definition}
 
-\section{Intrinsically typed first-order target}
-\sectioncontents{First-order sorts and symbols; target syntax; target semantics.}
+\section{The intrinsically typed first-order target}
+\sectioncontents{Erased sorts, abstract symbol families, target terms, and target models.}
 
-\subsection{Sorts and declarations}
-
-\begin{definition}[First-order erasure]
+\begin{definition}[First-order sorts and erasure]
 Target sorts are
 \[
-  \kappa ::= \Bool\mid\Base(\beta)\mid\mathsf{Fn}(\tau,\sigma).
+ \kappa ::= \Bool\mid\Base(\beta)\mid\Fn(\tau,\sigma).
 \]
-The erasure of a source type is
+Erasure is defined by
 \[
  \erase{\Bool}=\Bool,\qquad
  \erase{\Base(\beta)}=\Base(\beta),\qquad
- \erase{\tau\to\sigma}=\mathsf{Fn}(\tau,\sigma).
+ \erase{\tau\to\sigma}=\Fn(\tau,\sigma).
 \]
-The last form is an opaque first-order sort, not a function space.  Contexts are
-erased pointwise: $\erase{[\tau_0,\ldots,\tau_n]}^{\star}
-=[\erase{\tau_0},\ldots,\erase{\tau_n}]$.\leanfile{FO/Core.lean}
-\end{definition}
-
-A symbol declaration $\delta=(\bar\kappa;\kappa)$ consists of a list of argument
-sorts and one result sort.  A target signature is a list of such declarations.
-Typed symbol references and heterogeneous argument vectors ensure that a symbol
-can only be applied at its declared arity and sorts.
-
-\begin{definition}[Target syntax]
-The first-order term judgment contains variables, symbol application, Boolean
-literals and connectives, same-sort equality, and universal and existential
-quantification.  It contains neither lambda nor higher-order application.
-Function values occur only as elements of $\mathsf{Fn}(\tau,\sigma)$.
+The last sort is opaque: it is not a function space in an arbitrary target
+model. Context erasure maps every entry pointwise.
 \leanfile{FO/Core.lean}
 \end{definition}
 
-\subsection{Target semantics}
-
-\begin{definition}[Target model]
-Target carriers $C$ provide nonempty types $C_B(\beta)$ and
-$C_F(\tau,\sigma)$.  Sort denotation maps $\mathsf{Fn}(\tau,\sigma)$ to the
-arbitrary carrier $C_F(\tau,\sigma)$, rather than to a meta-level function
-space.  A declaration $(\kappa_1,\ldots,\kappa_n;\kappa)$ denotes the curried
-type
+\begin{definition}[Declarations and symbol families]
+A declaration
 \[
-  \llbracket\kappa_1\rrbracket_C\to\cdots\to
-  \llbracket\kappa_n\rrbracket_C\to\llbracket\kappa\rrbracket_C.
+ d=(\kappa_1,\ldots,\kappa_n;\kappa)
 \]
-A target model $\mathcal M_t$ chooses an interpretation of this type for every
-symbol.  Term denotation, sentence satisfaction $\mathcal M_t\sat\varphi$, and
-theory satisfaction $\mathcal M_t\satt\Delta$ are standard.\leanfile{FO/Semantics.lean}
+records an ordered argument telescope
+$d.\mathsf{args}=[\kappa_1,\ldots,\kappa_n]$ and a result sort
+$d.\mathsf{result}=\kappa$. Let $\mathsf{Decl}$ be the type of all such
+declarations. A \emph{symbol family} is a declaration-indexed family of types
+\[
+ S:\mathsf{Decl}\longrightarrow\mathbf{Type},
+ \qquad d\longmapsto S(d).
+\]
+An inhabitant $p:S(d)$ is one symbol identity whose declaration is exactly
+$d$. The fiber $S(d)$ may contain no symbols, one symbol, or several distinct
+symbols with the same argument and result sorts. Thus the declaration is part
+of a symbol's type, while its identity remains separate from its declaration.
+\leanfile{FO/Family.lean}
 \end{definition}
 
-The actual core translation uses a type-indexed family of symbols rather than a
-finite list while proving semantics.  Family syntax and semantics differ only in
-how symbols are indexed; this avoids irrelevant finite-signature bookkeeping in
-the fundamental proof.\leanfiles{FO/Family.lean and FO/FamilySemantics.lean}
-
-\section{Collection and generated declarations}
-\sectioncontents{Free variables; closures and arrows; total collection; generated symbols.}
-
-\begin{definition}[Free-variable positions]
-$\FV(e)$ is computed structurally as a left-to-right, duplicate-free list of
-de Bruijn positions.  Under a binder, position $0$ is removed and every
-$i+1$ becomes $i$.  Binary forms concatenate their lists and erase duplicates.
-\leanfile{Defunctionalization/Collect.lean}
-\end{definition}
-
-\begin{definition}[Closure descriptor]
-A closure descriptor is a tuple
-\[
-  \chi=(\Gamma,\tau,\sigma,e)
-  \quad\text{where}\quad
-  \Sigma;\tau::\Gamma\vdash e:\sigma.
-\]
-Its captures are $\mathsf{leave}(\FV(e))$, hence are positions in $\Gamma$, not
-in $\tau::\Gamma$.  Total typed lookup converts these positions to an
-existentially packed list of typed references; their types form
-$\mathsf{captureTypes}(\chi)$.
-\end{definition}
-
-\begin{definition}[Collection plan]
-An arrow key is a pair $(\tau,\sigma)$ representing $\tau\to\sigma$.  The total
-collector recursively gathers all lambda occurrences and every arrow node in
-the source signature and term, removing duplicate arrow keys.  Its result is
-\[
-  P(e)=(\mathsf{arrows}(e),\mathsf{closures}(e)).
-\]
-The collector is a total Lean function, and bounds and uniqueness lemmas show
-that every capture position names an actual context entry.
-\leanfile{Defunctionalization/Collect.lean}
-\end{definition}
-
-The executable content of collection can be summarized independently of its
-Lean representation as follows.  Here $\mathsf{dedup}$ preserves first-occurrence
-order, and $\mathbin{+\!+}$ denotes list concatenation.
-
-\begin{pseudocode}{$\mathsf{collect}(\Sigma,e)$}
-$\alpha \gets \mathsf{dedup}(\mathsf{arrowsInSignature}(\Sigma)
-  \mathbin{+\!+}\mathsf{arrowsInTerm}(e))$ \\
-$\kappa \gets \mathsf{closures}(e)$ \\
-\textbf{return} $(\alpha,\kappa)$ \\
-\\[-1mm]
-\textbf{procedure} $\mathsf{closures}(e)$ \\
-\>\textbf{match} $e$ \textbf{with} \\
-\>\>$x_i, c_k, b$ $\Rightarrow []$ \\
-\>\>$\lambda x{:}\tau.e'$ $\Rightarrow
-  [(\Gamma,\tau,\sigma,e')]\mathbin{+\!+}\mathsf{closures}(e')$ \\
-\>\>$e_1\,e_2$ $\Rightarrow
-  \mathsf{closures}(e_1)\mathbin{+\!+}\mathsf{closures}(e_2)$ \\
-\>\>$\circ(e_1,\ldots,e_n)$ $\Rightarrow
-  \mathsf{concat}(\mathsf{map}(\mathsf{closures},[e_1,\ldots,e_n]))$ \\
-\>\textbf{end match}
-\end{pseudocode}
-
-For the classic proof core, each arrow key generates a unary symbol
-\[
- \app_{\tau,\sigma}:
- \mathsf{Fn}(\tau,\sigma)\times\erase{\tau}\longrightarrow\erase{\sigma},
-\]
-and each $\chi=(\Gamma,\tau,\sigma,e)$ generates
-\[
- \clos_\chi:
- \erase{\gamma_{i_1}}\times\cdots\times\erase{\gamma_{i_m}}
- \longrightarrow\mathsf{Fn}(\tau,\sigma),
-\]
-where $i_1,\ldots,i_m$ are the exact captures of $e$.
-
-\section{Core defunctionalization}
-\sectioncontents{Translation on syntax; closure equations; complete target theory.}
-
-\begin{definition}[Core translation]
-The total, type-preserving translation satisfies
-\[
- \Sigma;\Gamma\vdash e:\tau
- \quad\Longrightarrow\quad
- \erase{\Sigma};\erase{\Gamma}^{\star}\vdash\df{e}:\erase{\tau}.
-\]
-Variables, constants, Boolean constructs, equality, and quantifiers translate
-homomorphically.  Its essential clauses are
+\begin{definition}[Typed family arguments and symbol application]
+Terms and heterogeneous argument vectors are defined mutually. For a context
+$\Gamma$, the argument-vector family follows the declaration telescope:
 \[
 \begin{aligned}
- \df{\lambda x{:}\tau.e}
-   &=\clos_\chi(x_{i_1},\ldots,x_{i_m}),\\
- \df{f\,a}&=\app_{\tau,\sigma}(\df{f},\df{a}),
+ \mathsf{Args}_S(\Gamma,[])&=\{()\},\\
+ \mathsf{Args}_S(\Gamma,\kappa_1::\bar\kappa)
+   &=\{t\mid S;\Gamma\vdash t:\kappa_1\}
+     \times\mathsf{Args}_S(\Gamma,\bar\kappa).
 \end{aligned}
 \]
-where $\chi=(\Gamma,\tau,\sigma,e)$ and $i_1,\ldots,i_m$ are its captures.
-Source constants are nullary target symbols in this classic core.
-\leanfile{Defunctionalization/Core.lean}
+The only general symbol-application rule is
+\begin{mathpar}
+ \inferrule{p:S(d)\\
+             \bar t:\mathsf{Args}_S(\Gamma,d.\mathsf{args})}
+   {S;\Gamma\vdash p(\bar t):d.\mathsf{result}}.
+\end{mathpar}
+Consequently the result sort and the complete ordered list of argument sorts
+are determined by the index $d$. A missing, extra, or incorrectly sorted
+argument cannot be represented. In particular, symbols are always fully
+applied; partial application is not a target-language operation.
 \end{definition}
 
-The complete syntax-directed procedure is shown below.  The notation
-$\mathsf{mapChildren}$ means recursive, constructor-preserving traversal of the
-Boolean, equality, and quantifier forms.
+For example, let $d=(\kappa_1,\kappa_2;\kappa)$ and let $p,q:S(d)$ be distinct
+symbols. Given $S;\Gamma\vdash u:\kappa_1$ and
+$S;\Gamma\vdash v:\kappa_2$, both $p(u,v)$ and $q(u,v)$ have sort $\kappa$,
+but they remain different terms. Neither $p(u)$ nor $p(v,u)$ is constructible.
 
-\begin{pseudocode}{$\df{e}$}
-\textbf{match} $e$ \textbf{with} \\
-\>$x_i$ $\Rightarrow x_{\erase{i}}$ \\
-\>$c_k$ $\Rightarrow c_k^{\mathsf{FO}}()$ \\
-\>$b$ $\Rightarrow b$ \\
-\>$\lambda x{:}\tau.e'$ $\Rightarrow$ \\
-\>\>$\chi\gets(\Gamma,\tau,\sigma,e')$ \\
-\>\>$(i_1,\ldots,i_m)\gets\mathsf{captureRefs}(\chi)$ \\
-\>\>\textbf{return} $\clos_\chi(x_{i_1},\ldots,x_{i_m})$ \\
-\>$e_1\,e_2$ $\Rightarrow
-  \app_{\tau,\sigma}(\df{e_1},\df{e_2})$ \\
-\>$\circ(e_1,\ldots,e_n)$ $\Rightarrow
-  \circ(\df{e_1},\ldots,\df{e_n})$ \\
-\textbf{end match}
-\end{pseudocode}
+\begin{definition}[Target terms]
+For a symbol family $S$, the intrinsic judgment $S;\Gamma\vdash t:\kappa$
+contains variables, the fully applied family symbols above, Boolean literals
+and connectives, same-sort equality, and first-order quantifiers. It contains
+neither lambda nor a distinguished higher-order application constructor. A
+function value is merely an element of an opaque $\Fn(\tau,\sigma)$ carrier;
+applying that value later requires an ordinary family symbol with the appropriate
+declaration.
+\leanfiles{FO/Family.lean and FO/FamilySemantics.lean}
+\end{definition}
 
-In the final clause, $\circ$ ranges only over constructors retained by the
-target: Boolean literals and connectives, equality, and quantifiers.  Thus the
-procedure is total and has no ``unsupported syntax'' case for the core language.
+\paragraph{Why translation uses a family.}
+The finite target syntax also exists: a finite signature is a list
+$\Xi=[d_0,\ldots,d_m]$, and a symbol occurrence carries a typed position
+showing that some $d_j$ is its declaration. That form is useful after allocation,
+but inconvenient during recursive translation. A recursive branch may discover
+a new closure or application symbol; combining two branches then concatenates
+their declaration traces. If terms already stored numeric signature positions,
+those positions would have to be weakened and reindexed after every such
+concatenation.
 
-\begin{definition}[Closure equation]
-For $\chi=(\Gamma,\tau,\sigma,e)$, let $\bar x$ enumerate all of $\Gamma$ and
-let $x$ denote the lambda argument.  The defining equation is
+With a family, the translator instead constructs a structural identity
+$p:S(d)$ immediately. Recursive results concatenate an occurrence trace of
+existential packages $(d,p)$, while already constructed terms remain unchanged.
+For flattened defunctionalization, $S$ is an indexed inductive family whose
+constructors represent source constants, application symbols, closures, and
+certified primitives. Each constructor's result index is its exact declaration;
+Section~4.2 spells out those four shapes.
+
+\paragraph{From abstract identities to concrete symbols.}
+The abstraction is removed only at a boundary where allocation information is
+available. The library provides a total structural conversion to a finite
+signature $\Xi$. Write $\mathsf{Symbol}(\Xi,d)$ for the type of positions in
+$\Xi$ that select declaration $d$. A typed resolver has one component
 \[
- \forall\bar x\,x.\quad
- \app_{\tau,\sigma}
-   (\clos_\chi(x_{i_1},\ldots,x_{i_m}),x)=\df{e}.
+ r_d:S(d)\longrightarrow\mathsf{Symbol}(\Xi,d)
+ \qquad\text{for every }d\in\mathsf{Decl}.
 \]
-Only captured variables are constructor arguments, although all variables from
-the original context are quantified.  Let $\mathcal E(e)$ be the list of these
-equations for every lambda occurrence in $e$.
-\end{definition}
-
-\begin{definition}[Defunctionalization theory]
-For a source sentence $\varphi$,
+The proved raw-SMT route can also encode family terms directly. Its encoding
+record similarly supplies one naming component
 \[
-  \mathcal T(\varphi)=\mathcal E(\varphi)\mathbin{+\!+}[\df{\varphi}].
+ \mathsf{name}_d:S(d)\longrightarrow\mathsf{String}
+ \qquad\text{for every }d\in\mathsf{Decl},
 \]
-Thus a target model of $\mathcal T(\varphi)$ must satisfy both all closure
-equations and the translated query.\leanfile{Defunctionalization/ModelExtension.lean}
+with injectivity both between declarations and between two inhabitants of the
+same fiber, plus freshness from logical built-ins. For each traced pair $(d,p)$,
+the command encoder emits the argument and result sorts from $d$ and the concrete
+identifier $\mathsf{name}(p)$. Thus delaying allocation loses neither typing nor
+symbol identity.
+\leanfiles{FO/Family.lean, Defunctionalization/TranslationResult.lean, and SMT/Representation.lean}
+
+\begin{definition}[Target model]
+A target model $M_t$ supplies a nonempty carrier
+$\llbracket\kappa\rrbracket_{M_t}$ for each target sort. A declaration denotes
+the curried semantic type
+\[
+ \llbracket d\rrbracket_{M_t}
+ =
+ \llbracket\kappa_1\rrbracket_{M_t}\to\cdots\to
+ \llbracket\kappa_n\rrbracket_{M_t}\to
+ \llbracket\kappa\rrbracket_{M_t}
+\]
+for $d=(\kappa_1,\ldots,\kappa_n;\kappa)$. The model then supplies an
+interpretation component for every declaration:
+\[
+ I^d_{M_t}:S(d)\longrightarrow\llbracket d\rrbracket_{M_t}
+ \qquad\text{for every }d\in\mathsf{Decl}.
+\]
+Hence two inhabitants of the same $S(d)$ may receive different interpretations,
+while every interpretation necessarily has the type prescribed by $d$. Target
+term denotation feeds the denotations of the typed argument vector to
+$I^d_{M_t}(p)$. The satisfaction relations $M_t\sat\varphi$ and $M_t\satt T$ are
+then the standard many-sorted first-order semantics.
+\leanfile{FO/FamilySemantics.lean}
 \end{definition}
 
-\section{The source--target logical relation}
-\sectioncontents{Relation at each type; related valuations; compatibility of models.}
-
-Fix a source model $\mathcal M_s$, a target model $\mathcal M_t$, and a family
-$R=(r_\beta)_\beta$ of relations
-$r_\beta\subseteq B(\beta)\times C_B(\beta)$ for opaque base sorts.
-
-\begin{definition}[Value relation]
-The value relation depends on the fixed family $R$.  When $R$ is ambient and
-therefore not written explicitly, we use the abbreviated notation
-$\vrel{\nu_s}{\tau}{\nu_t}$.  The family $R$ is used directly at opaque base
-sorts and recursively through argument and result relations at arrow types.
-The relation is defined by recursion on $\tau$:
+\begin{definition}[Target-theory unsatisfiability]
+A typed first-order theory is semantically unsatisfiable when it has no target
+model:
 \[
-\begin{array}{rcl}
- \vrel{p}{\Bool}{q} &\Longleftrightarrow& p\Leftrightarrow q,\\
- \vrel{a}{\Base(\beta)}{b} &\Longleftrightarrow& r_\beta(a,b),\\
- \vrel{f}{\tau\to\sigma}{g} &\Longleftrightarrow&
-   \forall a,b.\;\vrel{a}{\tau}{b}\Rightarrow
-   \vrel{f(a)}{\sigma}{\app_{\tau,\sigma}^{\mathcal M_t}(g,b)}.
+ \unsat_{\mathsf{FO}}(T)
+ \quad\Longleftrightarrow\quad
+ \forall M_t.\;\neg(M_t\satt T).
+\]
+\end{definition}
+
+\section{Total flattened defunctionalization}
+\sectioncontents{Arrow telescopes, closures, generated symbols, translation results, and the total algorithm.}
+
+\subsection{Flattened arrow shape}
+
+\begin{definition}[Arrow telescope]
+Every source type has a list of leading argument types $\args(\tau)$ and a
+non-arrow residual type $\res(\tau)$:
+\[
+\begin{array}{rcl@{\qquad}rcl}
+ \args(\Bool)&=&[], & \res(\Bool)&=&\Bool,\\
+ \args(\Base(\beta))&=&[], & \res(\Base(\beta))&=&\Base(\beta),\\
+ \args(\tau\to\sigma)&=&\tau::\args(\sigma), &
+ \res(\tau\to\sigma)&=&\res(\sigma).
 \end{array}
 \]
-The arrow clause is the semantic heart of defunctionalization: the opaque target
-value $g$ behaves like $f$ whenever it is observed through the generated
-application symbol.\leanfile{Defunctionalization/LogicalRelation.lean}
+For example, if $\alpha=\tau_1\to\tau_2\to\upsilon$ and $\upsilon$ is
+non-arrow, then $\args(\alpha)=[\tau_1,\tau_2]$ and
+$\res(\alpha)=\upsilon$.
 \end{definition}
 
-\begin{definition}[Related valuations]
-$\rrel{\rho_s}{R}{\rho_t}$ holds when every $i:\tau\in\Gamma$ satisfies
+The indices of a target argument spine record that applying the listed
+arguments changes a source type $\alpha$ into a residual type $\gamma$. A
+\emph{ground-result witness} proves that $\gamma$ is Boolean or a base type;
+only then can the spine be emitted as one complete first-order symbol
+application. This indexed representation is what makes under-application
+impossible in the total translator.
+\leanfile{Defunctionalization/Flattened/Spine.lean}
+
+\subsection{Captures, closures, and symbols}
+
+\begin{definition}[Exact captures]
+$\FV(e)$ is the duplicate-free, left-to-right list of free de Bruijn positions
+in $e$. Beneath a binder, position zero is removed and positive positions are
+shifted down. A closure descriptor
 \[
-  \vrel{\rho_s(i)}{\tau}{\rho_t(\erase{i})}.
+ \chi=(\Gamma,\tau,\sigma,e),
+ \qquad \Sigma;\Gamma,\tau\vdash e:\sigma,
 \]
+stores the lambda's context, domain, codomain, body, and the typed references
+selected from $\FV(e)$. If their types are
+$\gamma_1,\ldots,\gamma_m$, these are the exact constructor captures.
+\leanfiles{Defunctionalization/Collect.lean and Defunctionalization/Annotate.lean}
 \end{definition}
 
-\begin{lemma}[Extension]
-If $\rrel{\rho_s}{R}{\rho_t}$ and $\vrel{\nu_s}{\tau}{\nu_t}$, then
-$\rrel{\rho_s[\nu_s]}{R}{\rho_t[\nu_t]}$.
-\end{lemma}
-\begin{proof}
-Case analysis on the typed de Bruijn reference: the head uses the new hypothesis,
-and a tail reference uses the old valuation relation.
-\end{proof}
-
-\begin{definition}[Related models]
-A model relation $R:\mathcal M_s\sim\mathcal M_t$ packages the base relations
-and five compatibility obligations:
-\begin{enumerate}[label=(\roman*)]
- \item corresponding source and target constants are related;
- \item equality of related source values is equivalent to equality of their
-       target values;
- \item the value relation is left-total;
- \item the value relation is right-total;
- \item every translated closure constructor is related to the denotation of its
-       source lambda under related valuations.
+\begin{definition}[Flattened symbol family]
+The target symbol family has four semantic roles:
+\begin{enumerate}[leftmargin=*]
+ \item a source constant $c:\alpha$, declared with arguments
+       $\erase{\args(\alpha)}$ and result $\erase{\res(\alpha)}$;
+ \item an application symbol for every arrow $\tau\to\sigma$, declared as
+       \[
+       \app_{\tau,\sigma}:
+       \Fn(\tau,\sigma)\times
+       \erase{\args(\tau\to\sigma)}
+       \longrightarrow\erase{\res(\tau\to\sigma)};
+       \]
+ \item a closure constructor
+       \[
+       \clos_\chi:
+       \erase{\gamma_1}\times\cdots\times\erase{\gamma_m}
+       \longrightarrow\Fn(\tau,\sigma);
+       \]
+ \item a certified primitive symbol carrying a proof that its chosen semantic
+       value equals the canonical flattened interpretation of its source
+       constant.
 \end{enumerate}
-The two totality conditions are exactly what allow quantifiers in either model
-to be transported to the other.
+The roles remain distinct even when two declarations have the same shape.
+\leanfile{Defunctionalization/Flattened/Symbol.lean}
 \end{definition}
 
-\section{Semantic preservation}
-\sectioncontents{Fundamental lemma; sentence equivalence; canonical model extension; unsatisfiability soundness.}
+\subsection{What translation returns}
 
-\begin{theorem}[Fundamental lemma]
-Suppose $R:\mathcal M_s\sim\mathcal M_t$, $\Sigma;\Gamma\vdash e:\tau$, and
-$\rrel{\rho_s}{R}{\rho_t}$.  Then
+\begin{definition}[Translation result]
+For $\Sigma;\Gamma\vdash e:\tau$, the total translation result
+$\flattr{e}$ contains
 \[
-  \vrel{\den{e}{\mathcal M_s}{\rho_s}}{\tau}
-       {\den{\df{e}}{\mathcal M_t}{\rho_t}}.
+ \flattr{e}=(t_e,D_e,E_e,G_e,X_e,P_e),
 \]
-\leanfile{Defunctionalization/Fundamental.lean}
+where:
+\begin{itemize}[leftmargin=*]
+ \item $t_e$ is a target term in context $\erase{\Gamma}^{\star}$ and sort
+       $\erase{\tau}$;
+ \item $D_e$ is the ordered trace of required symbol declarations;
+ \item $E_e$ is the list of closure equations;
+ \item $G_e$ is the list of representation guards;
+ \item $X_e$ is the list of extensionality formulas;
+ \item $P_e$ is the list of certified primitive constraints.
+\end{itemize}
+The generated auxiliary theory and the complete theory of a source sentence are
+\[
+ \Gen(e)=E_e\mathbin{+\!+}G_e\mathbin{+\!+}X_e\mathbin{+\!+}P_e,
+ \qquad
+ \Theory(\varphi)=\Gen(\varphi)\mathbin{+\!+}[t_\varphi].
+\]
+Lists are kept separate in Lean to retain provenance, then concatenated in this
+fixed order for semantic statements.
+\leanfile{Defunctionalization/TranslationResult.lean}
+\end{definition}
+
+\subsection{How terms are translated}
+
+Boolean constructors, ground variables, ground constants, equality at ground
+types, and quantifiers translate structurally. Three cases require additional
+machinery.
+
+\paragraph{Complete applications.}
+The translator collects the left-associated source application spine. When its
+result is ground, the typed argument indices prove that all leading arrow
+arguments are present, so it emits exactly one flattened source or application
+symbol.
+
+\paragraph{Residual function values.}
+A variable, constant, or partial application of arrow type cannot be emitted as
+an under-applied first-order symbol. It is eta-expanded into a closure. The
+\texttt{LambdaBody} structure opens the complete leading lambda telescope and
+the theorem \texttt{denote\_etaBody} proves that the resulting source function
+has exactly the original denotation.
+\leanfiles{Defunctionalization/Flattened/Lambda.lean and Defunctionalization/EtaCorrectness.lean}
+
+\paragraph{Function equality.}
+Equality between opaque function-sort values would be stronger than pointwise
+equality unless extensionality is asserted. For each function equality used by
+the translation, $X_e$ receives a closed formula saying that pointwise equality
+over the complete arrow telescope implies equality of the function values.
+
+\begin{definition}[Flattened closure equation]
+Suppose $\chi$ has arrow type
+$\alpha=\tau_1\to\cdots\to\tau_n\to\upsilon$ with ground $\upsilon$, exact captures
+$\bar y$, and eta-opened body $b$. Its defining equation has the shape
+\[
+ \forall\bar y\,x_1\cdots x_n.\quad
+ \app_{\alpha}(\clos_\chi(\bar y),x_1,\ldots,x_n)=t_b,
+\]
+where $\app_\alpha$ abbreviates the application symbol selected by the full
+arrow type $\alpha$.
+The left side uses one flattened application, not a chain of unary applications.
+The right side carries all obligations recursively generated while translating
+$b$.
+\end{definition}
+
+The three mutually recursive modes---ordinary term translation, application
+spine translation, and lambda-body translation---use a lexicographic measure
+built from constructor count and a mode tag. Lean therefore accepts them as
+total definitions, with no \texttt{partial} escape hatch.
+\leanfile{Defunctionalization/Flattened/Translate.lean}
+
+\section{The canonical model and flattened correctness}
+\sectioncontents{Why the model is chosen; term preservation; generated validity; unsatisfiability reflection.}
+
+\subsection{Modeling function values}
+
+An arbitrary first-order target model may interpret $\Fn(\tau,\sigma)$ by any
+nonempty carrier. To prove soundness, however, it suffices to construct one
+target model from each source model. This is the role of the canonical model.
+
+\begin{definition}[Canonical flattened model]
+Given a source model $M_s$, its canonical target model $\widehat M_s$ uses the
+same carriers at Boolean and base sorts and uses the genuine source function
+space at each function sort:
+\[
+ \llbracket\Fn(\tau,\sigma)\rrbracket_{\widehat M_s}
+ =\llbracket\tau\to\sigma\rrbracket_{M_s}.
+\]
+More generally, the Lean development exposes mutually inverse, type-directed
+maps $\mathsf{toCanonical}_\tau$ and $\mathsf{fromCanonical}_\tau$ so statements
+remain uniform at all types. In $\widehat M_s$:
+\begin{itemize}[leftmargin=*]
+ \item flattened source symbols perform repeated source application;
+ \item $\app_{\tau,\sigma}$ performs repeated source application;
+ \item $\clos_\chi$ reconstructs the exact captured source environment and
+       denotes the source lambda;
+ \item certified primitives use their proved canonical interpretation.
+\end{itemize}
+This does not claim that all target models contain actual functions. It is a
+countermodel construction used only in the soundness proof.
+\leanfiles{Defunctionalization/ModelExtension.lean and Defunctionalization/Flattened/Symbol.lean}
+\end{definition}
+
+A source valuation $\rho$ induces a canonical target valuation
+$\widehat\rho$ by applying $\mathsf{toCanonical}$ pointwise.
+
+\begin{theorem}[Flattened term preservation]
+For every source model $M_s$, valuation $\rho$, and typed source term
+$\Sigma;\Gamma\vdash e:\tau$,
+\[
+ \den{t_e}{\widehat M_s}{\widehat\rho}
+ =\mathsf{toCanonical}_\tau\bigl(\den{e}{M_s}{\rho}\bigr),
+ \qquad\text{where }\flattr{e}=(t_e,D_e,E_e,G_e,X_e,P_e).
+\]
+\leanfile{Defunctionalization/Flattened/Denotation.lean}
 \end{theorem}
-\begin{proof}[Proof structure]
-By induction on $e$.  Variables use related valuations and constants use model
-compatibility.  Boolean cases use propositional congruence.  Equality uses
-equality compatibility.  Lambda uses the closure obligation, and application
-unfolds the arrow clause of the logical relation.  For $\forall$, right-totality
-turns an arbitrary target value into a related source value in one direction,
-and left-totality does the converse; $\exists$ uses the dual witness argument.
+\begin{proof}[Proof architecture]
+One structural induction proves ordinary translation and spine translation
+simultaneously. Ground syntax is homomorphic. Complete spines use the currying
+theorem for the flattened symbol. Residual arrows use eta-closure correctness.
+Quantifiers use the fact that extending a canonical target valuation corresponds
+to extending the source valuation.
 \end{proof}
 
-\begin{corollary}[Closed-formula preservation]
-For a sentence $\varphi$ and related models,
+\begin{theorem}[Validity of generated obligations]
+For every $e$, the same canonical model satisfies the entire auxiliary theory:
 \[
-  \mathcal M_s\sat\varphi
-  \quad\Longleftrightarrow\quad
-  \mathcal M_t\sat\df{\varphi}.
+ \widehat M_s\satt\Gen(e).
 \]
+\leanfile{Defunctionalization/Flattened/Theory.lean}
+\end{theorem}
+\begin{proof}[Proof architecture]
+A second simultaneous induction follows the three translator modes. Closure
+equations use term preservation and eta correctness; function extensionality is
+valid because the canonical function carriers are genuine source function
+spaces. Guards and primitive constraints are retained in the induction even
+when a particular structural term generates none.
+\end{proof}
+
+\begin{theorem}[Flattened model extension]
+For every source sentence $\varphi$ and source model $M_s$,
+\[
+ M_s\sat\varphi
+ \quad\Longrightarrow\quad
+ \widehat M_s\satt\Theory(\varphi).
+\]
+\leanfile{Defunctionalization/Flattened/Theory.lean}
+\end{theorem}
+\begin{proof}
+Generated-obligation validity proves the prefix $\Gen(\varphi)$. Flattened term
+preservation at the empty valuation proves the final assertion $t_\varphi$.
+\end{proof}
+
+\begin{corollary}[Flattened unsatisfiability reflection]
+\[
+ \unsat_{\mathsf{FO}}(\Theory(\varphi))
+ \quad\Longrightarrow\quad
+ \unsat_{\mathsf{HO}}(\varphi).
+\]
+\leanfile{Defunctionalization/Flattened/Theory.lean}
 \end{corollary}
 \begin{proof}
-Empty valuations are related vacuously.  Instantiate the fundamental lemma at
-$\Bool$, where the logical relation is logical equivalence.
+If $\varphi$ had a source model, model extension would construct a target model
+of $\Theory(\varphi)$, contradicting the premise.
 \end{proof}
 
-\subsection{Canonical target model}
+\subsection{The unary reference proof}
 
-Given $\mathcal M_s$, the canonical model interprets target base sorts by source
-base carriers and target function sorts by a canonical representation of source
-functions.  Its application symbols apply represented functions, source symbols
-use source interpretations, and closure constructors install their exact
-captured environment.  The capture-agreement development proves that changing
-uncaptured entries cannot affect the body denotation.\leanfile{Defunctionalization/ModelExtension.lean}
-
-\begin{theorem}[Closure validity]
-For every source model $\mathcal M_s$ and term $e$, its canonical target model
-$\widehat{\mathcal M_s}$ satisfies all collected closure equations:
+The development retains a smaller classic translation $\unary{e}$ that uses a
+binary application symbol at each arrow. A source/target logical relation is
+defined at Boolean, base, and arrow types; its arrow clause says that related
+function values produce related results when observed through unary
+application. The fundamental lemma proves
 \[
-  \widehat{\mathcal M_s}\satt\mathcal E(e).
+ \den{e}{M_s}{\rho_s}\approx_\tau
+ \den{\unary{e}}{M_t}{\rho_t}
 \]
-\end{theorem}
+under related models and valuations. The flattened currying development then
+proves that the production-shaped translation and the unary reference have the
+same canonical denotation. Thus the unary proof is an independent semantic
+reference, not the endpoint of the current VCG theorem.
+\leanfiles{Defunctionalization/Fundamental.lean, Defunctionalization/ModelExtension.lean, and Defunctionalization/Flattened/Currying.lean}
 
-\begin{theorem}[Model extension]
-If $\mathcal M_s\sat\varphi$, then
-\[
-  \widehat{\mathcal M_s}\satt\mathcal T(\varphi).
-\]
-\leanfile{Defunctionalization/ModelExtension.lean}
-\end{theorem}
-\begin{proof}
-Closure validity handles $\mathcal E(\varphi)$.  The canonical models are
-related, so closed-formula preservation transports the truth of $\varphi$ to
-$\df{\varphi}$.
-\end{proof}
+\section{From typed FO theories to raw SMT commands}
+\sectioncontents{Why raw SMT semantics is relational; encoding choices; exact representation; semantic model lifting.}
 
-\begin{theorem}[Target unsatisfiability implies source unsatisfiability]
-For every closed source formula $\varphi$,
-\[
- \operatorname{Unsat}_{\mathrm{FO}}(\mathcal T(\varphi))
- \Longrightarrow
- \operatorname{Unsat}_{\mathrm{HO}}(\varphi).
-\]
-\leanfile{Defunctionalization/ModelExtension.lean}
-\end{theorem}
-\begin{proof}
-Assume a source model satisfies $\varphi$.  Model extension constructs a target
-model satisfying $\mathcal T(\varphi)$, contradicting target unsatisfiability.
-\end{proof}
+The production SMT syntax is intentionally not intrinsically typed. The proof
+therefore does not pretend that every raw term is well sorted. Instead it
+defines a semantic relation for the fragment emitted by the proved encoder.
 
-\section{Eta expansion and flattened application}
-\sectioncontents{Eta-long form; semantic eta correctness; production-style flattened symbols.}
-
-The production encoding uses one fully flattened symbol for a complete arrow
-spine.  If
-\[
- \tau=\tau_1\to\cdots\to\tau_n\to\sigma
-\]
-with non-arrow result $\sigma$, its declaration has the shape
-\[
- \app_\tau:
- \mathsf{Fn}(\tau_1,\tau_2\to\cdots\to\sigma)
- \times\erase{\tau_1}\times\cdots\times\erase{\tau_n}
- \longrightarrow\erase{\sigma}.
-\]
-An under-applied symbol cannot represent a residual function, so partial
-applications must be converted to closures.
-
-\begin{definition}[Eta-long normalization]
-$\eta(e)$ recursively normalizes subterms.  Whenever the reconstructed term has
-arrow type $\tau\to\sigma$ and is not already a lambda, it becomes
-\[
-  \lambda x{:}\tau.\eta(e\,x),
-\]
-recursing through $\sigma$ as needed.  Existing lambdas retain their outer
-binder.\leanfile{Defunctionalization/Eta.lean}
+\begin{definition}[Raw SMT model]
+A raw model $M_q$ contains one universe of values, a membership predicate
+$\mathsf{inSort}(s,v)$, nonemptiness of every concrete sort, distinguished
+Boolean values, literal interpretations, and a graph
+$\mathsf{apply}(p,\bar v,w)$ for user symbols. A declaration requires the graph
+to be total, single-valued, and sort-correct at that declared type. An inductive
+evaluation relation gives Boolean connectives, equality, binders, and user-symbol
+applications their intended meanings.
+\leanfile{SMT/Semantics.lean}
 \end{definition}
 
-\begin{pseudocode}{$\eta(e)$}
-$e'\gets\mathsf{mapChildren}(\eta,e)$ \\
-\textbf{if} $\mathsf{type}(e')=\tau\to\sigma$ \textbf{then} \\
-\>\textbf{match} $e'$ \textbf{with} \\
-\>\>$\lambda x{:}\tau.e''$ $\Rightarrow
-  \lambda x{:}\tau.e''$ \\
-\>\>$\_$ $\Rightarrow
-  \lambda x{:}\tau.\eta_{\sigma}(\mathsf{weaken}(e')\,x)$ \\
-\>\textbf{end match} \\
-\textbf{else return} $e'$
-\end{pseudocode}
+Only the command forms needed by this path are semantically admitted: sort and
+function declarations, assertions, and administrative/query commands.
+Definitions, recursive definitions, lambdas, and datatype declarations are
+outside the verified raw-command fragment.
 
-\begin{lemma}[Arrow-value invariant]
-If $\Sigma;\Gamma\vdash e:\tau\to\sigma$, then $\eta(e)$ is syntactically a
-lambda.
-\end{lemma}
-
-\begin{theorem}[Eta semantic preservation]
-For every $\mathcal M_s$, $\rho_s$, and $e$,
+\begin{definition}[Semantic command unsatisfiability]
+$M_q\smtsat C$ means that $M_q$ satisfies every supported command in the ordered
+array $C$. Define
 \[
-  \den{\eta(e)}{\mathcal M_s}{\rho_s}
-  =\den{e}{\mathcal M_s}{\rho_s}.
+ \unsat_{\mathsf{SMT}}(C)
+ \quad\Longleftrightarrow\quad
+ \forall M_q.\;\neg(M_q\smtsat C).
 \]
-In particular, eta-expanding a partial application preserves its residual
-function value exactly.\leanfile{Defunctionalization/EtaCorrectness.lean}
+This is a mathematical property of commands, not a claim about a solver process
+or a reported result.
+\end{definition}
+
+\begin{definition}[Encoding choice]
+For a typed symbol family $S$, an encoding $\mathcal E$ chooses:
+\begin{itemize}[leftmargin=*]
+ \item a concrete SMT sort $\mathcal E_s(\kappa)$ for every FO sort,
+       injectively, with $\Bool$ mapped to SMT \texttt{Bool};
+ \item a concrete name $\mathcal E_n(p)$ for every typed symbol, injectively
+       across both symbol identity and declaration shape;
+ \item proofs that generated names do not collide with logical built-ins.
+\end{itemize}
+The pure term encoder $\smtenc{\mathcal E}{t}$ maps variables to numeric de
+Bruijn indices, symbols to their chosen names, and logical constructors to their
+corresponding raw SMT forms.
+\leanfile{SMT/Representation.lean}
+\end{definition}
+
+\begin{definition}[Exact theory representation]
+Given an ordered declaration trace $D$ and typed theory $T$, the pure encoder
+first emits required sort declarations, then symbol declarations, then one
+assertion per formula in $T$, preserving stable order. Write
+\[
+ \Rep(\mathcal E,T,C)
+\]
+when there exists an explicit ordered declaration trace $D$ such that $C$ is
+definitionally equal to that pure encoding. For a source sentence, define
+\[
+ \Commands(\mathcal E,\varphi)
+ =\mathsf{encode}_{\mathcal E}(D_\varphi,\Theory(\varphi)).
+\]
+The theorem \texttt{encode\_translation} proves
+$\Rep(\mathcal E,\Theory(\varphi),\Commands(\mathcal E,\varphi))$ by
+construction.
+\end{definition}
+
+\begin{theorem}[FO-to-SMT representation soundness]
+If $\Rep(\mathcal E,T,C)$ and $M_t\satt T$, then there is a raw SMT model $M_q$
+such that $M_q\smtsat C$.
+\leanfile{SMT/Soundness.lean}
 \end{theorem}
+\begin{proof}[Model construction]
+The raw universe tags values by their intrinsic target sort. Sort membership
+checks the tag. Each encoded user-symbol graph decodes tagged arguments, applies
+the corresponding typed target interpretation, and re-tags the result.
+Injective sort and name maps prevent accidental aliasing. A term-evaluation
+lemma relates raw evaluation of $\smtenc{\mathcal E}{t}$ to intrinsic denotation
+of $t$; declaration and assertion lemmas then establish the complete command
+sequence.
+\end{proof}
 
-\begin{theorem}[Flattened application preservation]
-Under the canonical interpretation of a production application symbol, feeding
-the translated argument spine to the single flattened symbol yields the same
-result as iterated source application.\leanfile{Defunctionalization/FlattenedApplication.lean}
+\begin{corollary}[SMT command unsatisfiability reflects to FO]
+If $\Rep(\mathcal E,T,C)$, then
+\[
+ \unsat_{\mathsf{SMT}}(C)\Longrightarrow\unsat_{\mathsf{FO}}(T).
+\]
+\leanfile{SMT/Soundness.lean}
+\end{corollary}
+
+\section{Lean reification and the proved VCG route}
+\sectioncontents{Structural witnesses; pure and stateful command generation; the composed theorem; exact scope.}
+
+\subsection{The supported Lean boundary}
+
+\begin{definition}[Reification witness]
+The executable reifier recognizes supported normalized Lean-expression
+constructors and returns an existentially typed source term. A witness records:
+\begin{itemize}[leftmargin=*]
+ \item the inferred Lean type and the expected retained Lean type;
+ \item exact correspondence of recognized expression and intrinsic-term shapes;
+ \item the typed local-context bridge;
+ \item the typed finite signature bridge for global constants.
+\end{itemize}
+For a closed proposition, successful reification packages a source signature
+$\Sigma$, a sentence $\varphi$, and this witness.
+\leanfiles{Reification/Type.lean, Reification/Term.lean, Reification/Capture.lean, Reification/Reify.lean, and Reification/Witness.lean}
+\end{definition}
+
+The witness is structural. It does not define a denotation for arbitrary Lean
+expressions and therefore does not, by itself, prove that Lean's proposition and
+$\varphi$ have the same truth value. Unsupported syntax causes reification to
+return no result rather than entering the proved route.
+
+\subsection{Pure and stateful VCG}
+
+\begin{definition}[Proved VCG commands]
+For encoding $\mathcal E$ and source sentence $\varphi$, the pure VCG function
+computes $\flattr{\varphi}$ and then the exact command array
+$\Commands(\mathcal E,\varphi)$. Its result retains the theorem
+\[
+ \Rep(\mathcal E,\Theory(\varphi),\Commands(\mathcal E,\varphi)).
+\]
+\leanfile{VCG/Generate.lean}
+\end{definition}
+
+The total stateful function \texttt{VCG.run} starts from fresh translation
+bookkeeping and installs exactly this array in \texttt{TranslateState.commands}.
+The theorem \texttt{run\_represents} proves both command equality and the
+representation property. Fresh state matters: the proved result cannot inherit
+commands or trust markers from a previous direct translation.
+\leanfile{VCG/Stateful.lean}
+
+\begin{theorem}[Composed VCG soundness]
+Let $C$ be the exact command array in the fresh state returned by
+\texttt{VCG.run} for $\mathcal E$ and $\varphi$. Then
+\[
+ \unsat_{\mathsf{SMT}}(C)
+ \Longrightarrow
+ \unsat_{\mathsf{FO}}(\Theory(\varphi))
+ \Longrightarrow
+ \unsat_{\mathsf{HO}}(\varphi).
+\]
+\leanfile{VCG/Soundness.lean}
 \end{theorem}
+\begin{proof}
+The state representation theorem supplies $\Rep(\mathcal E,\Theory(\varphi),C)$.
+SMT representation soundness reflects command unsatisfiability to the typed FO
+theory. Flattened unsatisfiability reflection then yields source
+unsatisfiability.
+\end{proof}
 
-Together, eta correctness and flattened-application preservation justify the
-production representation at the typed semantic layer.  They are separate from
-the classic unary-core fundamental theorem; connecting concrete emitted syntax
-to these objects is a refinement obligation.
+\begin{corollary}[Structural Lean-facing specialization]
+If a closed Lean expression has a reification witness for $\varphi$, the same
+command-unsatisfiability premise implies $\unsat_{\mathsf{HO}}(\varphi)$.
+This is theorem \texttt{encoded\_unsat\_implies\_source\_unsat}. Its conclusion
+is intentionally about $\varphi$, not about a postulated semantics of the
+original \texttt{Lean.Expr}.
+\end{corollary}
 
-\section{Guarded subtype encodings}
-\sectioncontents{Encoding contract; guarded quantifiers and equality; natural numbers.}
+\subsection{Proved versus trusted status}
 
-\begin{definition}[Guarded encoding]
-A guarded encoding from $S$ to $T$ consists of nonempty $S$, a map
-$\epsilon:S\to T$, a predicate $G:T\to\mathsf{Prop}$, and a decoder
-$\delta:(t:T)\to G(t)\to S$ such that
+\texttt{VCG.TranslationStatus} makes the boundary structural. A
+\texttt{proved} result stores the intrinsic sentence, exact commands, and their
+representation theorem. A \texttt{trusted} result stores commands and a
+nonempty list of trust reasons but exposes no theorem for reflecting command
+unsatisfiability. The legacy extensible \texttt{emitTerm} route is marked trusted
+at its root; unrestricted handlers, uncertified constants or closures, and
+native-HO emission add more specific reasons.
+\leanfiles{VCG/Trust.lean and VCG/Status.lean}
+
+\section{Interpreted operations and guarded carriers}
+\sectioncontents{What is modeled now; semantic contracts for extensions; limitations of the proved command fragment.}
+
+\begin{definition}[Guarded carrier encoding]
+A guarded encoding of a source carrier $S$ in a target carrier $T$ consists of
+an encoder $\epsilon:S\to T$, a guard $G:T\to\mathsf{Prop}$, and a decoder
+$\delta:(t:T)\to G(t)\to S$ satisfying
 \[
  G(\epsilon(s)),\qquad
  \delta(\epsilon(s))=s,\qquad
  G(t)\Rightarrow\epsilon(\delta(t))=t.
 \]
-Thus $S$ is equivalent to the guarded subtype $\{t:T\mid G(t)\}$.
+Thus $S$ is equivalent to the guarded subtype of $T$. Universal binders become
+guarded implications, existential binders become guarded conjunctions, and
+equality is reflected by injectivity. The canonical example represents
+$\mathbb N$ in $\mathbb Z$ with guard $0\le z$.
 \leanfile{Guarded/Encoding.lean}
 \end{definition}
 
-\begin{lemma}[Guarded quantifiers]
-If predicates $P:S\to\mathsf{Prop}$ and $Q:T\to\mathsf{Prop}$ agree on encoded
-values, then
-\[
-\begin{aligned}
- (\forall s, P(s))&\Longleftrightarrow
-   \forall t, G(t)\Rightarrow Q(t),\\
- (\exists s, P(s))&\Longleftrightarrow
-   \exists t, G(t)\land Q(t).
-\end{aligned}
-\]
-Moreover $\epsilon(s_1)=\epsilon(s_2)$ iff $s_1=s_2$.
-\end{lemma}
+Certified hook contracts tie a source constant to a target interpretation by a
+semantic equality proof. These contracts avoid axioms: a primitive is certified
+only when its chosen target meaning is proved equal to the canonical meaning of
+its source constant. Arbitrary metaprogram handlers remain trusted.
+\leanfile{Hooks.lean}
 
-The concrete natural-number encoding takes $S=\mathbb N$, $T=\mathbb Z$,
-$\epsilon(n)=n$, and $G(z)\equiv 0\le z$.  The Lean development also lifts
-functions while enforcing guarded results and supports optional guarded fields.
+Guarded encodings and certified primitives are modeled components, but the
+current proved raw-command encoder treats flattened symbols as fresh user
+symbols. A full proved path for interpreted integer operations requires an
+extended encoding and model-lifting theorem for the corresponding SMT built-ins;
+it is roadmap work, not an implicit consequence of the present theorem.
 
-\section{Certified refinement to the live translator}
-\sectioncontents{Typed bridges; capture and command certificates; extension hooks; trusted boundary.}
+\section{Proof roadmap and trust boundary}
+\sectioncontents{Completed chain; exact non-claims; prioritized future work.}
 
-The semantic theorem above speaks about proof-facing syntax.  Production Crush
-starts with Lean expressions and emits named SMT commands.  The bridge modules
-attach typed witnesses to the parts of that process covered by the core:
-\begin{itemize}
- \item type witnesses relate normalized, nondependent Lean arrows to source types
-       and generated first-order declarations;\leanfile{Bridge/Type.lean}
- \item term and context bridges reify supported Lean expressions into intrinsic
-       terms;\leanfiles{Bridge/Term.lean and Bridge/Reify.lean}
- \item capture certificates connect the live free-variable collector to exact,
-       duplicate-free typed closure captures;\leanfile{Bridge/Capture.lean}
- \item command certificates retain the declarations and guarded equations that
-       were actually emitted.\leanfile{Bridge/Command.lean}
-\end{itemize}
-
-Certified hooks state semantic preservation for restricted primitive mappings.
-The built-in Boolean negation exercises this path.  Arbitrary metaprogram
-handlers remain an explicit trusted boundary rather than receiving a vacuous
-certificate.\leanfile{Hooks.lean}
-
-\begin{remark}[Scope of the theorem]
-The complete theorem is established for every constructor of the modeled core.
-The live translator routes the supported fragment through proof-carrying bridge
-objects and falls back explicitly outside it.  Therefore one should distinguish
-(i) the fully proved core semantic theorem, (ii) proved eta, flattening, guarded
-encoding, and hook components, and (iii) the remaining refinement assumptions
-for unsupported Lean expressions, recursive datatype well-formedness discovery,
-and unrestricted trusted handlers.
-\end{remark}
-
-\section{Dependency map and theorem inventory}
-\sectioncontents{Proof dependency chain; principal machine-checked results.}
-
-Figure~\ref{fig:proof-roadmap} gives the proof roadmap.  Solid arrows are direct
-logical dependencies of the classic-core soundness theorem.  Dashed arrows mark
-proved refinements used to relate that core result to production's flattened
-encoding; they are not premises of the unary-core fundamental lemma.
+Figure~\ref{fig:proof-roadmap} shows the completed semantic chain. Every solid
+arrow is backed by a Lean theorem.
 
 \begin{figure}[htbp]
 \centering
 \resizebox{\textwidth}{!}{%
 \begin{tikzpicture}[
-  node distance=8mm and 12mm,
+  node distance=8mm and 10mm,
   every node/.style={font=\small,align=center},
-  foundation/.style={draw=blue!55!black,fill=blue!7,rounded corners,
-    minimum width=35mm,minimum height=9mm},
-  lemmaNode/.style={draw=orange!70!black,fill=orange!9,rounded corners,
-    minimum width=37mm,minimum height=9mm},
-  theoremNode/.style={draw=green!45!black,fill=green!9,rounded corners,
-    minimum width=41mm,minimum height=10mm},
-  finalNode/.style={draw=red!60!black,fill=red!8,very thick,rounded corners,
-    minimum width=47mm,minimum height=11mm},
-  dependency/.style={-{Latex[length=2.2mm]},thick},
-  refinement/.style={-{Latex[length=2.2mm]},thick,dashed,gray!75}
+  stage/.style={draw=blue!55!black,fill=blue!7,rounded corners,
+    minimum width=34mm,minimum height=11mm},
+  proof/.style={draw=green!45!black,fill=green!9,rounded corners,
+    minimum width=39mm,minimum height=11mm},
+  boundary/.style={draw=orange!75!black,fill=orange!9,rounded corners,
+    minimum width=39mm,minimum height=11mm},
+  final/.style={draw=red!60!black,fill=red!8,very thick,rounded corners,
+    minimum width=47mm,minimum height=12mm},
+  arrow/.style={-{Latex[length=2.2mm]},thick}
 ]
-  \node[foundation] (ho) {HO intrinsic syntax\\and semantics};
-  \node[foundation,right=of ho] (fo) {FO family syntax\\and semantics};
-  \node[foundation,right=of fo] (collect) {closure and arrow\\collection};
+  \node[boundary] (lean) {supported \texttt{Lean.Expr}\\structural witness};
+  \node[stage,right=of lean] (ho) {intrinsic HO\\sentence $\varphi$};
+  \node[stage,right=of ho] (fo) {flattened FO theory\\$\Theory(\varphi)$};
+  \node[stage,right=of fo] (smt) {exact raw commands\\$C$};
 
-  \node[lemmaNode,below=of ho] (rename) {renaming-denotation\\lemma};
-  \node[lemmaNode,below=of fo] (core) {total typed core\\translation $\df{e}$};
-  \node[lemmaNode,below=of collect] (captures) {capture bounds, exactness,\\and duplicate-freedom};
+  \node[proof,below=15mm of ho,xshift=12mm] (model1) {source-model extension\\
+    $M_s\sat\varphi\Rightarrow\widehat M_s\satt\Theory(\varphi)$};
+  \node[proof,below=15mm of smt,xshift=-12mm] (model2) {SMT model lifting\\
+    $M_t\satt T\Rightarrow\exists M_q.\,M_q\smtsat C$};
+  \node[final,below=16mm of model1,xshift=34mm] (final) {composed reflection\\
+    $\unsat_{\mathsf{SMT}}(C)\Rightarrow\unsat_{\mathsf{HO}}(\varphi)$};
 
-  \node[lemmaNode,below=14mm of rename] (vextend) {valuation-relation\\extension};
-  \node[theoremNode,below=14mm of core] (fundamental) {fundamental lemma\\
-    $\den{e}{\mathcal M_s}{\rho_s}\approx
-     \den{\df{e}}{\mathcal M_t}{\rho_t}$};
-  \node[lemmaNode,below=14mm of captures] (agreement) {denotation depends only\\on exact captures};
-
-  \node[lemmaNode,below=14mm of vextend] (empty) {empty valuations\\are related};
-  \node[theoremNode,below=14mm of fundamental] (sentence) {closed-formula preservation\\
-    $\mathcal M_s\sat\varphi\Leftrightarrow
-     \mathcal M_t\sat\df{\varphi}$};
-  \node[theoremNode,below=14mm of agreement] (closure) {closure validity:\\canonical model satisfies\\every closure equation};
-
-  \node[theoremNode,below=15mm of sentence] (extension) {model extension\\
-    $\mathcal M_s\sat\varphi\Rightarrow
-     \widehat{\mathcal M_s}\satt\mathcal T(\varphi)$};
-  \node[finalNode,below=12mm of extension] (unsat) {semantic soundness\\
-    $\operatorname{Unsat}_{\mathrm{FO}}(\mathcal T(\varphi))
-      \Rightarrow\operatorname{Unsat}_{\mathrm{HO}}(\varphi)$};
-
-  \node[lemmaNode,right=18mm of closure] (eta) {$\eta$-long normalization\\preserves denotation};
-  \node[lemmaNode,below=of eta] (flat) {flattened application\\preserves application spines};
-  \node[theoremNode,below=of flat] (production) {production-style typed\\semantic preservation};
-
-  \draw[dependency] (ho) -- (rename);
-  \draw[dependency] (ho) -- (core);
-  \draw[dependency] (fo) -- (core);
-  \draw[dependency] (collect) -- (core);
-  \draw[dependency] (collect) -- (captures);
-  \draw[dependency] (rename) -- (vextend);
-  \draw[dependency] (core) -- (fundamental);
-  \draw[dependency] (vextend) -- (fundamental);
-  \draw[dependency] (captures) -- (agreement);
-  \draw[dependency] (agreement) -- (closure);
-  \draw[dependency] (fundamental) -- (sentence);
-  \draw[dependency] (empty) -- (sentence);
-  \draw[dependency] (sentence) -- (extension);
-  \draw[dependency] (closure) -- (extension);
-  \draw[dependency] (extension) -- (unsat);
-
-  \draw[refinement] (rename.east) to[bend left=12] (eta.west);
-  \draw[refinement] (eta) -- (flat);
-  \draw[refinement] (flat) -- (production);
-  \draw[refinement] (sentence.east) to[bend right=12] (production.west);
+  \draw[arrow] (lean) -- (ho);
+  \draw[arrow] (ho) -- (fo);
+  \draw[arrow] (fo) -- (smt);
+  \draw[arrow] (ho) -- (model1);
+  \draw[arrow] (fo) -- (model1);
+  \draw[arrow] (fo) -- (model2);
+  \draw[arrow] (smt) -- (model2);
+  \draw[arrow] (model1) -- (final);
+  \draw[arrow] (model2) -- (final);
 \end{tikzpicture}%
 }
-\caption{Dependency roadmap for the verified defunctionalization results.  Solid
-arrows lead to classic-core semantic soundness; dashed arrows show the separate
-eta and flattened-application refinement toward the production encoding.}
+\caption{The completed proof route. The top arrows are, from left to right,
+partial reification, total flattened translation $\mathcal F$, and exact SMT
+encoding. The leftmost box is structural rather than denotational; all semantic
+conclusions are stated about the reified HO sentence.}
 \label{fig:proof-roadmap}
 \end{figure}
 
-Reading the central solid path from top to bottom: intrinsic typing makes the
-translation total; the logical relation supports the fundamental induction;
-empty valuations specialize it to sentences; exact-capture reasoning validates
-the canonical closure equations; and these two branches meet in model extension,
-from which unsatisfiability soundness follows by contradiction.
+\subsection{What is proved today}
 
-The most important machine-checked results are:
-\begin{enumerate}
- \item typed capture positions are in bounds and duplicate-free;
- \item $\eta(e)$ is a lambda at every arrow type and preserves denotation;
- \item translated values of every source term are logically related;
- \item closed source and translated formulas agree in related models;
- \item the canonical model satisfies every generated closure equation;
- \item every satisfying source model extends to a target model;
- \item unsatisfiability of the generated target theory implies source
-       unsatisfiability;
- \item production-style flattened application preserves iterated application;
- \item guarded universal, existential, equality, and result encodings are sound.
+\begin{enumerate}[leftmargin=*]
+ \item The HO and FO syntax is intrinsically typed, and the flattened
+       defunctionalizer is total on every constructor of the modeled core.
+ \item Exact captures, complete application spines, eta closures, and function
+       extensionality are modeled in the production-shaped flattened theory.
+ \item Translated terms preserve denotation in the canonical model, and every
+       generated obligation is valid in that same model.
+ \item Every source model extends to a model of the complete flattened theory;
+       hence target-theory unsatisfiability reflects to source unsatisfiability.
+ \item The pure encoder produces an exact ordered representation in raw SMT
+       syntax, and every typed target model lifts to a model of those commands.
+ \item Fresh stateful VCG execution retains the exact representation theorem and
+       composes both reflection results.
+ \item Supported Lean expressions retain typed structural reification evidence;
+       proved and trusted whole-translation results are distinct constructors.
 \end{enumerate}
+
+\subsection{What is deliberately not claimed}
+
+\begin{itemize}[leftmargin=*]
+ \item No denotational semantics is postulated for arbitrary \texttt{Lean.Expr};
+       the final proposition concerns the reified intrinsic sentence.
+ \item Semantic command unsatisfiability is a premise. Correctness of an
+       external solver's reported \texttt{unsat} answer requires certificate
+       replay or another independently checked argument.
+ \item The legacy direct, extensible \texttt{emitTerm} pipeline does not acquire
+       a whole-run theorem merely because some local closures or primitives are
+       certified.
+ \item Unsupported syntax, dependent function types, datatypes in the proved
+       raw-command fragment, unrestricted translation handlers, and native-HO
+       commands are outside the present proved route.
+\end{itemize}
+
+\subsection{Prioritized roadmap}
+
+\begin{description}[style=nextline]
+ \item[1. Connect the proved route to user-facing execution.]
+ Route supported production goals through \texttt{reifySentence?} and
+ \texttt{VCG.run}, retain the resulting \texttt{proved} status through solver
+ invocation, and make fallback to the direct translator explicit and observable.
+
+ \item[2. Strengthen the Lean boundary semantically.]
+ Replace the current constructor/type correspondence with a theorem connecting
+ the meaning of the supported Lean proposition to the reified HO sentence.
+ This is the missing step needed to state the final result directly about Lean's
+ proposition rather than only about $\varphi$.
+
+ \item[3. Certify interpreted theories.]
+ Extend the raw SMT semantics, encoding record, and model-lifting proof for
+ interpreted integers and other selected built-ins. Compose guarded carrier
+ encodings such as $\mathbb N\hookrightarrow\mathbb Z$ with those representations.
+
+ \item[4. Expand structural coverage.]
+ Add proof-facing datatype encodings, recursive datatype declarations, and
+ selected value-indexed dependent forms. Each addition requires syntax,
+ semantics, total reification, translation, and command representation---not
+ only a new lowering rule.
+
+ \item[5. Integrate certified hooks compositionally.]
+ Give certified head/family translations a representation theorem that can be
+ combined with structural translation without granting semantic power to
+ unrestricted handlers.
+
+ \item[6. Close the solver-result boundary.]
+ Connect accepted Alethe replay or another kernel-checked certificate format to
+ the premise that the commands are semantically unsatisfiable. Keep fast
+ trusted solver mode
+ explicitly separate.
+\end{description}
+
+\section{Machine-checked theorem inventory}
+\sectioncontents{The named results that implement the proof story.}
+
+The principal declarations, in proof order, are:
+\begin{enumerate}[leftmargin=*]
+ \item \path{flattenArrow_eq}, in namespace
+       \path{Flattened.TargetArguments}: related spine lemmas show that indexed
+       spines match the flattened arrow telescope.
+ \item \path{Flattened.LambdaBody.denote_etaBody}: opening the full lambda
+       telescope preserves the source function denotation.
+ \item \path{Flattened.TargetArguments.completeApp_denote}: one flattened
+       application symbol denotes repeated source application.
+ \item \path{Flattened.translate_denote}: the translated term component has
+       the source denotation in the canonical model.
+ \item \path{Flattened.generated_valid}: all generated equations, guards,
+       extensionality formulas, and primitive constraints are valid.
+ \item \path{Flattened.model_extension}: every satisfying source model
+       extends to the complete flattened target theory.
+ \item \path{Flattened.target_unsat_implies_source_unsat}: FO
+       unsatisfiability reflects to the HO sentence.
+ \item \path{SMT.encode_translation}: the pure encoder exactly represents
+       the complete flattened theory.
+ \item \path{SMT.representation_sound}: every represented FO model induces
+       a model of the exact raw commands.
+ \item \path{SMT.commands_unsat_implies_theory_unsat}: semantic raw-command
+       unsatisfiability reflects to typed FO unsatisfiability.
+ \item \path{VCG.run_represents}: the fresh state returned by the total VCG
+       contains the exact represented commands.
+ \item \path{VCG.run_unsat_implies_source_unsat}: the direct composition
+       for stateful VCG.
+ \item \path{VCG.encoded_unsat_implies_source_unsat}: the specialization
+       retaining a structural witness for the original Lean expression.
+\end{enumerate}
+
+The earlier unary results---\path{fundamental},
+\path{fundamental_sentence}, and the unary
+\path{target_unsat_implies_source_unsat}---remain machine-checked as an
+independent reference model.
 
 \end{document}

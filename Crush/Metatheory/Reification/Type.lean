@@ -15,7 +15,7 @@ represented as a nondependent arrow; this matches production's refusal to send
 dependent arrows through `declareArrowSort`.
 -/
 
-namespace Crush.Metatheory.Bridge
+namespace Crush.Metatheory.Reification
 
 open Lean Meta
 
@@ -151,4 +151,4 @@ partial def reifyArrow? (type : Expr) : MetaM (Option ArrowBridge) := do
     domain := ← reifyType domain (preserveExpr := true)
     codomain := ← reifyType codomain }
 
-end Crush.Metatheory.Bridge
+end Crush.Metatheory.Reification

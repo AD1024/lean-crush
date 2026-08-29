@@ -1,6 +1,6 @@
 import Lean
 import Crush.SMT.Syntax
-import Crush.Metatheory.Bridge.Command
+import Crush.Metatheory.VCG.Command
 import Crush.Frontend.Config
 open Lean
 
@@ -153,12 +153,12 @@ structure RegistryCache where
   hasResult       : Option Bool := none
   deriving Inhabited
 
-/-- Auditable link from one retained defunctionalization command certificate to
+/-- Auditable link from one retained defunctionalization command encoding to
 the structural symbols whose allocation it relies on. Links are created only by
-`emitCertifiedStructuralCommand`, after checking every name against the
+`emitStructuralCommand`, after checking every name against the
 proof-carrying allocation trace. -/
 structure DefunAllocationLink where
-  certificateIndex : Nat
+  encodingIndex : Nat
   symbols : Array String
   allocation : StructuralAllocationTrace
   symbolsAllocated : ∀ symbol ∈ symbols.toList,
@@ -169,6 +169,12 @@ structure CertifiedHookUse where
   declaration : Name
   targetSymbol : String
   deriving Inhabited, Repr
+
+/-- Whole-run classification before dependent representation evidence is
+attached by the proved VCG route. -/
+inductive RunStatus where
+  | proved
+  | trusted (reasons : Array Metatheory.VCG.TrustReason)
 
 /-- Mutable translation state. -/
 structure TranslateState where
@@ -199,13 +205,16 @@ structure TranslateState where
   derivedSymbols : Std.HashMap DerivedSymbolKey String := {}
   /-- Emitted commands, in order. -/
   commands   : Array SMT.Command := #[]
-  /-- Proof-carrying declarations emitted by the live defunctionalization path. -/
-  defunCertificates : Array Metatheory.Bridge.CommandCertificate := #[]
-  /-- Checked structural-name dependencies of `defunCertificates`. -/
+  /-- Syntax encodings retained for declarations and assertions emitted by the
+      stateful defunctionalization path.  These are not semantic certificates. -/
+  defunEncodings : Array Metatheory.VCG.CommandEncoding := #[]
+  /-- Checked structural-name dependencies of `defunEncodings`. -/
   defunAllocationLinks : Array DefunAllocationLink := #[]
-  /-- Type-erased dependent `LiveCertifiedClosure` proofs, referenced by
-  `ClosureEquationCertificate.verifiedClosureIndex`. -/
-  verifiedClosures : Array Dynamic := #[]
+  /-- Every step that crossed the explicit trusted translation boundary. -/
+  trustReasons : Array Metatheory.VCG.TrustReason := #[]
+  /-- Root expression of the legacy direct translator, recorded once even when
+      recursive emission revisits many subterms. -/
+  directSource : Option Expr := none
   /-- Type-erased identity-bearing semantic certificates for live source symbols. -/
   verifiedConstants : Array Dynamic := #[]
   /-- Auditable successful uses of proof-carrying primitive mappings. -/
@@ -230,6 +239,22 @@ structure TranslateState where
   registries : RegistryCache := {}
   deriving Inhabited
 
+namespace TranslateState
+
+/-- Operational status of a completed translation run. -/
+def status (state : TranslateState) : RunStatus :=
+  if state.trustReasons.isEmpty then .proved else .trusted state.trustReasons
+
+/-- Proposition consumed by the later stateful refinement theorem. -/
+def Proved (state : TranslateState) : Prop :=
+  state.trustReasons = #[]
+
+@[simp] theorem status_eq_proved_iff (state : TranslateState) :
+    state.status = .proved ↔ state.Proved := by
+  simp [status, Proved, Array.isEmpty_iff]
+
+end TranslateState
+
 /-- The translation monad. `MetaM` at the bottom gives us `whnf`, unification,
 instance synthesis, and access to the environment — everything a user handler
 needs to inspect the term it is translating. -/
@@ -251,42 +276,49 @@ def run {α : Type} (cfg : Config) (x : TranslateM α) : MetaM (α × TranslateS
 def emitCommand (c : SMT.Command) : TranslateM Unit :=
   modify fun s => { s with commands := s.commands.push c }
 
-/-- Atomically emit the command stored in a defunctionalization certificate and
-retain that same certificate. This rules out command/certificate drift in the
-stateful production path. -/
-def emitCertifiedCommand
-    (certificate : Metatheory.Bridge.CommandCertificate) : TranslateM Unit :=
+/-- Atomically emit the command stored in a defunctionalization encoding and
+retain that same syntax witness. This rules out command/encoding drift, but does
+not establish semantic preservation. -/
+def emitEncodedCommand
+    (encoding : Metatheory.VCG.CommandEncoding) : TranslateM Unit :=
   modify fun s => { s with
-    commands := s.commands.push certificate.command
-    defunCertificates := s.defunCertificates.push certificate }
+    commands := s.commands.push encoding.command
+    defunEncodings := s.defunEncodings.push encoding }
 
-/-- Emit a certified command only when all of its structural symbol dependencies
+/-- Emit an encoded command only when all of its structural symbol dependencies
 have already been allocated and recorded in the uniqueness trace. The command,
-certificate, and dependency link are appended atomically. -/
-def emitCertifiedStructuralCommand
-    (certificate : Metatheory.Bridge.CommandCertificate) : TranslateM Unit := do
-  let symbols := certificate.structuralSymbols
+encoding, and dependency link are appended atomically. -/
+def emitStructuralCommand
+    (encoding : Metatheory.VCG.CommandEncoding) : TranslateM Unit := do
+  let symbols := encoding.structuralSymbols
   let state ← get
   let allocatedNames := state.structuralAllocations.entries.map Prod.snd
   if allocated : ∀ symbol ∈ symbols.toList, symbol ∈ allocatedNames then
-    let index := state.defunCertificates.size
+    let index := state.defunEncodings.size
     modify fun s => { s with
-      commands := s.commands.push certificate.command
-      defunCertificates := s.defunCertificates.push certificate
+      commands := s.commands.push encoding.command
+      defunEncodings := s.defunEncodings.push encoding
       defunAllocationLinks := s.defunAllocationLinks.push {
-        certificateIndex := index
+        encodingIndex := index
         symbols
         allocation := state.structuralAllocations
         symbolsAllocated := allocated } }
   else
     let missing := symbols.filter fun symbol => !allocatedNames.contains symbol
     throwError
-      "crush: internal certified command refers to unallocated structural symbols: {missing}"
+      "crush: internal encoded command refers to unallocated structural symbols: {missing}"
 
-def recordVerifiedClosure (certificate : Dynamic) : TranslateM Nat := do
-  let index := (← get).verifiedClosures.size
-  modify fun s => { s with verifiedClosures := s.verifiedClosures.push certificate }
-  return index
+def markTrusted (reason : Metatheory.VCG.TrustReason) : TranslateM Unit :=
+  modify fun state => { state with
+    trustReasons := state.trustReasons.push reason }
+
+/-- Classify the legacy direct Lean-to-SMT route as trusted exactly once. The
+proved route instead enters through `Metatheory.VCG.emit`. -/
+def markDirect (source : Expr) : TranslateM Unit := do
+  if (← get).directSource.isNone then
+    modify fun state => { state with
+      directSource := some source
+      trustReasons := state.trustReasons.push (.direct source) }
 
 def recordVerifiedConstant (certificate : Dynamic) : TranslateM Nat := do
   let index := (← get).verifiedConstants.size

@@ -141,7 +141,7 @@ theorem finiteArray_back?_push (arr : Array Int) (value : Int) :
 def overwriteFirst {α : Type} (arr : Array α) (value : α) : Array α :=
   arr.setIfInBounds 0 value
 
-@[crush_lower overwriteFirst]
+@[crush_translate_head overwriteFirst]
 def overwriteFirstLowering : LoweringHandler := fun ctx => do
   let #[elem, arr, value] := ctx.args | return none
   let svalue ← ctx.emitTerm value

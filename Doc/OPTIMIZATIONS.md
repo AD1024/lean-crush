@@ -197,7 +197,7 @@ bounded reconstruction-rule mechanism.
 
 ## Translation heuristics
 
-- `@[crush_lower target]` handlers are indexed by head constant. General dynamic
+- `@[crush_translate_head target]` handlers are indexed by head constant. General dynamic
   `@[crush_translate]` handlers remain priority-ordered because they may match any term.
 - Predicates marked `@[reducible]` are normalized with constructor-specific equations
   in proof-producing preprocessing. Their equations are not asserted as recursive

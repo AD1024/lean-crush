@@ -99,7 +99,7 @@ the differentiator. What is:
    every subterm in arbitrary order — its source literally carries
    `-- TODO: Use DiscrTree ... instead of naively looping`. General
    `@[crush_translate]` handlers remain a priority-sorted linear scan because they
-   may match dynamically; `@[crush_lower target]` uses a persistent `NameMap`
+   may match dynamically; `@[crush_translate_head target]` uses a persistent `NameMap`
    indexed by the target head, with priorities among handlers for that head.
 3. **Higher-order actually survives.** lean-smt throws
    `"SMT-LIB does not support lambdas"` — its only HO answer is monomorphization.
@@ -248,10 +248,10 @@ def succHandler : TranslationHandler := fun ctx => do
 ```
 
 For the common case where one known Lean constant needs a custom SMT encoding,
-`@[crush_lower target]` indexes the same callback type by that head constant:
+`@[crush_translate_head target]` indexes the same callback type by that head constant:
 
 ```lean
-@[crush_lower Int.sign]
+@[crush_translate_head Int.sign]
 def lowerSign : LoweringHandler := fun ctx => do
   let #[x] := ctx.args | return none
   let sx ← ctx.emitTerm x
@@ -339,15 +339,15 @@ The core theory mappings (Bool, `=`, `∧/∨/¬/→`, Nat→Int with well-forme
 side-conditions, Int, BitVec, string literals/sorts, and datatypes) live in the
 **structural translator** (`Crush/Translation/Translate.lean`) where they require
 structural or type-directed dispatch. Library-level operations that fit head
-dispatch use `@[crush_lower]` instead.
+dispatch use `@[crush_translate_head]` instead.
 
 What matters for extensibility is the *dispatch order*: `emitTerm` tries general
-`@[crush_translate]` handlers, then matching `@[crush_lower]` handlers, then the
+`@[crush_translate]` handlers, then matching `@[crush_translate_head]` handlers, then the
 structural translator. General handlers can therefore override both targeted
 lowerings and core mappings. Library-level defaults such as `Int.sign`,
 `Int.natAbs`, canonical divisibility, and `String.length`/append/
 emptiness/String-pattern prefix/suffix/containment
-dogfood `@[crush_lower]`; the hot structural theory core avoids an `evalConst`
+dogfood `@[crush_translate_head]`; the hot structural theory core avoids an `evalConst`
 indirection.
 
 ---
@@ -822,7 +822,7 @@ SMT operators. `Test/AletheReplay.lean` is the executable coverage record.
 4. Sort handlers (§4.1). **done** — `@[crush_translate_sort]` lets a user retarget a
     type to a theory sort (e.g. a map to SMT `(Array K V)`); `Test/ArrayTheory.lean`.
 5. Head-indexed lowerings and SMT quotations (§4.1). **done** —
-    `@[crush_lower target]` uses keyed dispatch and `(smt| ...)` removes raw IR
+    `@[crush_translate_head target]` uses keyed dispatch and `(smt| ...)` removes raw IR
     constructor noise; `Test/Extension.lean` and `Test/Theories.lean`.
 6. Premise selection on Lean core `LibrarySuggestions`. **done** — opt-in via
    `crush.premises`, proposition-filtered and bounded by `crush.premises.max`;

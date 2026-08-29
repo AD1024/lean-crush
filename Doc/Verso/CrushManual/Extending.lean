@@ -40,13 +40,15 @@ Choose the least powerful mechanism that represents the missing semantics:
 2. Use `crush_map` when a Lean constant is exactly an existing SMT operator, or
    `crush_map_sort` when a monomorphic Lean type is exactly an existing nullary
    SMT sort.
-3. Use `@[crush_lower f]` when one stable application head needs a
+3. Use `@[crush_certified_lower f]` when a Lean primitive maps directly to an
+   existing SMT symbol and carries the required semantic contract.
+4. Use `@[crush_translate_head f]` when one stable application head needs a
    shape-sensitive encoding.
-4. Use `@[crush_lower_result T]` when applications have unstable heads but a
+5. Use `@[crush_translate_family T]` when applications have unstable heads but a
    stable result-family head, including dependent function results.
-5. Use `@[crush_translate]` only when dispatch spans several heads or
+6. Use `@[crush_translate]` only when dispatch spans several heads or
    intentionally overrides head-indexed and built-in translation.
-6. Use `@[crush_translate_sort]` for a parameterized or
+7. Use `@[crush_translate_sort]` for a parameterized or
    representation-sensitive sort.
 
 Equation support is the safest starting point because Lean already proves the
@@ -137,7 +139,7 @@ example (x y : Int) : addInt x y = y + x := by
 This command is appropriate only when every elaborated application of the Lean
 constant has the same SMT meaning.
 It provides no argument-shape or typeclass-instance guard.
-Use `@[crush_lower]` instead for overloaded operations, partial support, or
+Use `@[crush_translate_head]` instead for overloaded operations, partial support, or
 encodings that need to inspect types.
 
 `crush_map_sort` maps a Lean type constructor to an existing nullary SMT sort.
@@ -161,12 +163,12 @@ end MappedInt
 
 crush_map_sort MappedInt => "Int"
 
-@[crush_lower MappedInt.value]
+@[crush_translate_head MappedInt.value]
 def lowerMappedIntValue : LoweringHandler := fun ctx => do
   let #[x] := ctx.args | return none
   return some (← ctx.emitTerm x)
 
-@[crush_lower MappedInt.next]
+@[crush_translate_head MappedInt.next]
 def lowerMappedIntNext : LoweringHandler := fun ctx => do
   let #[x] := ctx.args | return none
   let sx ← ctx.emitTerm x
@@ -193,7 +195,7 @@ Use a full handler when a fresh declaration is required.
 tag := "extending-targeted"
 %%%
 
-`@[crush_lower target]` registers a handler only for applications whose head is
+`@[crush_translate_head target]` registers a handler only for applications whose head is
 `target`.
 The handler receives the original Lean arguments and recursive `emitTerm` and
 `emitSort` callbacks.
@@ -207,7 +209,7 @@ open Crush
 def clampNonnegative (x : Int) : Int :=
   if x < 0 then 0 else x
 
-@[crush_lower clampNonnegative high]
+@[crush_translate_head clampNonnegative high]
 def lowerClampNonnegative : LoweringHandler := fun ctx => do
   let #[x] := ctx.args | return none
   let sx ← ctx.emitTerm x
@@ -244,12 +246,92 @@ synthesis; a higher-priority global instance can change that baseline.
 `ctx.hasInstanceHead` is available for dependent dictionaries whose proof
 parameters make full definitional equality impractical.
 
+# Certified Lowerings
+%%%
+tag := "extending-certified"
+%%%
+
+An unrestricted lowering is arbitrary metaprogram code and therefore crosses a
+trusted translation boundary.
+The certified registries are deliberately narrow: their constructors have
+fixed behavior and cannot contain an arbitrary SMT callback.
+
+The built-in `Not` mapping is closed rather than user-parameterized. The
+constructor fixes Lean `Not` and SMT logical `not`; the metatheory proves that
+negation preserves the canonical relation. There is no proposition claiming
+that an arbitrary declaration name "denotes" negation, and no axiom claiming
+that an arbitrary solver symbol "denotes" SMT `not`.
+
+For user-defined interpreted functions, use the definition constructor. It
+delta-reduces the actual Lean definition and recursively translates the
+kernel-equivalent body. The user cannot provide a separate SMT body, so the two
+sides cannot drift:
+
+```lean
+open Crush
+
+@[crush_certified_def]
+def releaseReady
+    (testsPassed reviewApproved : Prop)
+    (freezeActive : Prop) : Prop :=
+  testsPassed ∧ reviewApproved ∧ ¬freezeActive
+
+example (testsPassed reviewApproved freezeActive : Prop)
+    (ready : releaseReady testsPassed reviewApproved
+      freezeActive) :
+    testsPassed ∧ reviewApproved ∧ ¬freezeActive := by
+  crush
+```
+
+Delta reduction turns the application into
+`testsPassed ∧ reviewApproved ∧ ¬freezeActive`, after
+which ordinary structural translation emits the corresponding `and` and `not`
+terms. It emits neither a fresh uninterpreted function nor a solver axiom.
+
+`@[crush_certified_def]` accepts only declarations with a body. An `opaque`
+declaration cannot use this path: without a Lean definition or theorem, its
+proposed meaning really would be an assumption. If a recursive definition does
+not reduce at the current arguments, use its kernel-checked equation lemmas through
+`@[crush_unfold]`, `@[crush_defeq]`, `u[f]`, or `d[f]`.
+
+Certified translation and proof discharge are separate concerns.
+This restricted step introduces no additional semantic assumption, while
+`crush.trust` still determines whether the final solver result is trusted or
+reconstructed. Mapping a genuinely external primitive with `crush_map` remains
+an explicitly trusted extension until its interpreted operator is added to the
+closed verified fragment.
+
+The same mechanism works with interpreted integer operations. Here
+`greatest` names the nested result, which is proved to bound all three inputs
+and to select one of them:
+
+```lean
+@[crush_certified_def]
+def intMax (a b : Int) : Int :=
+  if a ≥ b then a else b
+
+set_option crush.trust "reconstruct" in
+example (a b c : Int) :
+    let greatest := intMax a (intMax b c)
+    a ≤ greatest ∧ b ≤ greatest ∧
+      c ≤ greatest ∧
+      (greatest = a ∨ greatest = b ∨
+        greatest = c) := by
+  dsimp only
+  crush using (simp_all [intMax]; grind)
+```
+
+`dsimp only` zeta-reduces the local name while leaving `intMax` applications
+intact for certified lowering. The solver sees nested integer `ite` and order
+terms. The explicit finisher independently checks the result in Lean by
+unfolding `intMax` and using `grind`.
+
 # Dependent Result Lowerings
 %%%
 tag := "extending-result"
 %%%
 
-`@[crush_lower_result T]` dispatches on a term's result-family head instead of
+`@[crush_translate_family T]` dispatches on a term's result-family head instead of
 its application head.
 It first checks the immediate head of the inferred type.
 If that type is syntactically a dependent function, it opens the binders and
@@ -263,7 +345,7 @@ binders are used only to select the handler.
 
 Use result dispatch only when head dispatch is insufficient.
 For an ordinary named operation such as `MappedInt.next`,
-`@[crush_lower MappedInt.next]` is both cheaper and more precise.
+`@[crush_translate_head MappedInt.next]` is both cheaper and more precise.
 Result dispatch is intended for generated functions, lambdas, and dependent
 functions that all produce one representation family.
 
@@ -287,14 +369,14 @@ def translateIndexedIntSort : SortHandler := fun ctx => do
   let #[_] := ctx.args | return none
   return some (.app (.symb "Int") #[])
 
-@[crush_lower_result IndexedInt]
+@[crush_translate_family IndexedInt]
 def lowerIndexedInt : LoweringHandler := fun ctx => do
   let .const ``indexedInt _ := ctx.fn
     | return none
   let #[index] := ctx.args | return none
   return some (← ctx.emitTerm index)
 
-@[crush_lower IndexedInt.value]
+@[crush_translate_head IndexedInt.value]
 def lowerIndexedIntValue : LoweringHandler := fun ctx => do
   let #[_, value] := ctx.args | return none
   return some (← ctx.emitTerm value)
@@ -434,7 +516,7 @@ def translateTotalMapSort : SortHandler := fun ctx => do
   return some (.app (.symb "Array")
     #[keySort, valueSort])
 
-@[crush_lower TotalMap.get]
+@[crush_translate_head TotalMap.get]
 def translateTotalMapGet :
     TranslationHandler := fun ctx => do
   let #[keyTy, valueTy, map, key] := ctx.args
@@ -449,7 +531,7 @@ def translateTotalMapGet :
   let skey ← ctx.emitTerm key
   return some (smt| (select $smap $skey))
 
-@[crush_lower TotalMap.set]
+@[crush_translate_head TotalMap.set]
 def translateTotalMapSet :
     TranslationHandler := fun ctx => do
   let #[keyTy, valueTy, _, map, key, value] := ctx.args
@@ -491,7 +573,7 @@ def overwriteFirst {α : Type}
     (xs : Array α) (value : α) : Array α :=
   xs.setIfInBounds 0 value
 
-@[crush_lower overwriteFirst]
+@[crush_translate_head overwriteFirst]
 def lowerOverwriteFirst : LoweringHandler := fun ctx => do
   let #[elem, xs, value] := ctx.args | return none
   let svalue ← ctx.emitTerm value
@@ -688,7 +770,7 @@ open Crush Crush.Alethe Crush.SMT
 def MultipleOfThree (value : Int) : Prop :=
   value % 3 = 0
 
-@[crush_lower MultipleOfThree]
+@[crush_translate_head MultipleOfThree]
 def lowerMultipleOfThree : LoweringHandler := fun ctx => do
   let #[value] := ctx.args | return none
   return some

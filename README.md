@@ -237,14 +237,14 @@ crush_map_sort Nat => "Int"
 For full control, register a metaprogram that runs at elaboration time:
 
 ```lean
-@[crush_lower Int.sign]
+@[crush_translate_head Int.sign]
 def lowerSign : Crush.LoweringHandler := fun ctx => do
   let #[x] := ctx.args | return none
   let sx ← ctx.emitTerm x
   return some (smt| (ite (> $sx 0) 1 (ite (= $sx 0) 0 (- 1))))
 ```
 
-Use `@[crush_lower_result T]` when the application head is unstable but the
+Use `@[crush_translate_family T]` when the application head is unstable but the
 result-family head is stable. The dispatcher first matches the immediate head of
 the term's type; for a syntactic dependent function type, it peels binders and
 matches the codomain head. Named aliases are separate keys, so the built-in
@@ -265,7 +265,7 @@ register its inverse with the replay DSL:
 ```lean
 def MultipleOfThree (x : Int) : Prop := x % 3 = 0
 
-@[crush_lower MultipleOfThree]
+@[crush_translate_head MultipleOfThree]
 def lowerMultipleOfThree : Crush.LoweringHandler := fun ctx => do
   let #[x] := ctx.args | return none
   return some (.app (.indexed "divisible" #[.inr 3]) #[← ctx.emitTerm x])
@@ -333,7 +333,7 @@ reimplementing its length/data encoding:
 def overwriteFirst {α : Type} (xs : Array α) (value : α) : Array α :=
   xs.setIfInBounds 0 value
 
-@[crush_lower overwriteFirst]
+@[crush_translate_head overwriteFirst]
 def lowerOverwriteFirst : Crush.LoweringHandler := fun ctx => do
   let #[elem, xs, value] := ctx.args | return none
   let svalue ← ctx.emitTerm value

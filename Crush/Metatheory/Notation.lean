@@ -6,6 +6,8 @@ import Crush.Metatheory.Defunctionalization.LogicalRelation
 This file centralizes the mathematical notation shared by the higher-order source
 language, first-order target language, and defunctionalization proofs. The notation is
 scoped: import this module and use `open scoped Crush.Metatheory` to enable it.
+The later `𝓕⟦e⟧` notation is declared beside the total translator because its
+definition cannot be imported here without introducing an import cycle.
 -/
 
 namespace Crush.Metatheory.Defunctionalization

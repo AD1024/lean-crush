@@ -1,4 +1,4 @@
-import Crush.Metatheory.Bridge.Term
+import Crush.Metatheory.Reification.Term
 import Crush.Metatheory.Hooks
 
 /-!
@@ -15,7 +15,7 @@ weak-head normalization are the metaprogramming refinement boundary; all term
 construction after it uses the total typed smart constructors in `Term.lean`.
 -/
 
-namespace Crush.Metatheory.Bridge
+namespace Crush.Metatheory.Reification
 
 open Lean Meta
 open Crush.Metatheory.Defunctionalization
@@ -311,4 +311,4 @@ def certifyConstantIn? {signature : Signature}
       some (.pack expression signatureBridge type constant equality
         ⟨CanonicalConstantHookCertificate.production constant⟩)
 
-end Crush.Metatheory.Bridge
+end Crush.Metatheory.Reification

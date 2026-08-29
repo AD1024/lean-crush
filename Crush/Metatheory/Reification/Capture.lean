@@ -1,5 +1,6 @@
-import Crush.Translation.HOEncoding
+import Crush.Translation.Capture
 import Crush.Metatheory.Defunctionalization.Collect
+import Crush.Metatheory.Reification.Type
 
 /-!
 # Executable closure-capture refinement
@@ -15,7 +16,7 @@ establishes exactness, while the no-duplicate theorem below establishes that its
 ordered output is a valid closure environment rather than a multiset.
 -/
 
-namespace Crush.Metatheory.Bridge
+namespace Crush.Metatheory.Reification
 
 open Lean
 open Crush.Metatheory.Defunctionalization
@@ -256,4 +257,4 @@ theorem captures_nodup {signature : Signature} {closure : Closure signature}
 
 end ClosureCaptureCertificate
 
-end Crush.Metatheory.Bridge
+end Crush.Metatheory.Reification

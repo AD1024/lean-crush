@@ -1,4 +1,4 @@
-import Crush.Metatheory.Defunctionalization.ModelExtension
+import Crush.Metatheory.Defunctionalization.Flattened.Symbol
 import Crush.Metatheory.Defunctionalization.EtaCorrectness
 
 /-!
@@ -9,86 +9,16 @@ Production's `arrowShape?` flattens every leading nondependent arrow and
 function value followed by the entire arrow telescope.  This module gives that
 symbol family a total typed semantics.
 
-The remaining executable refinement boundary is reification: Lean `Expr`
-normalization and handler dispatch must be shown to select the `Ty` and symbol
-key represented here.  The arity, result sort, eta policy, and symbol semantics
-are no longer part of that boundary.
+This module discharges the local semantic obligation for complete application
+spines.  It does not yet define the total flattened term translation, compose
+the recursively generated theory, assign semantics to concrete SMT commands, or
+refine a stateful translator run.  Those obligations are separate from this
+application lemma and from Lean `Expr` reification and handler dispatch.
 -/
 
-namespace Crush.Metatheory.Defunctionalization
+namespace Crush.Metatheory.Defunctionalization.Flattened
 
 variable {signature : Signature}
-
-/-- Apply a source value to all arguments in its leading arrow telescope and
-coerce the final non-arrow result into the canonical target carrier.  Its type
-is exactly the curried semantic type of production's flattened declaration. -/
-@[reducible] def flattenedDenote (source : Model signature) :
-    (ty : Ty) → ty.Denote source.Base →
-      FO.SymbolDenote (canonicalCarriers source)
-        ((FO.flattenArrow ty).1.map FO.FOSort.ofTy)
-        (FO.FOSort.ofTy (FO.flattenArrow ty).2)
-  | .bool, value => toCanonical source .bool value
-  | .base sort, value => toCanonical source (.base sort) value
-  | .arrow domain codomain, fn => fun argument =>
-      flattenedDenote source codomain
-        (fn (fromCanonical source domain argument))
-
-@[simp] theorem flattenedDenote_bool (source : Model signature)
-    (value : Prop) : flattenedDenote source .bool value = value := rfl
-
-@[simp] theorem flattenedDenote_base (source : Model signature)
-    (sort : BaseSort) (value : source.Base sort) :
-    flattenedDenote source (.base sort) value = value := rfl
-
-@[simp] theorem flattenedDenote_arrow (source : Model signature)
-    (domain codomain : Ty)
-    (fn : (Ty.arrow domain codomain).Denote source.Base)
-    (argument : (FO.FOSort.ofTy domain).Denote (canonicalCarriers source)) :
-    flattenedDenote source (.arrow domain codomain) fn argument =
-      flattenedDenote source codomain
-        (fn (fromCanonical source domain argument)) := rfl
-
-/-- The three production symbol classes represented by the core model:
-fully-flattened source declarations, n-ary application, and exact-capture
-closure constructors. -/
-inductive ProductionSymbol (signature : Signature) : FO.SymbolDecl → Type where
-  | source {ty : Ty} : Const signature ty →
-      ProductionSymbol signature (sourceDecl ty)
-  | app (arrow : Arrow) :
-      ProductionSymbol signature (FO.appDecl arrow.domain arrow.codomain)
-  | closure (closure : Closure signature) :
-      ProductionSymbol signature
-        (FO.closureDecl closure.captureTypes closure.domain closure.codomain)
-
-/-- Canonical semantics of the production-shaped symbol family.  In particular,
-the n-ary `app` is genuine repeated source application, not an independent
-uninterpreted operation in the model extension. -/
-@[reducible] noncomputable def canonicalProductionModel
-    (source : Model signature) : FO.FamilyModel (ProductionSymbol signature) where
-  carriers := canonicalCarriers source
-  symbol := fun symbol =>
-    match symbol with
-    | ProductionSymbol.source (ty := ty) constant =>
-        flattenedDenote source ty (source.const constant)
-    | ProductionSymbol.app arrow =>
-        flattenedDenote source (.arrow arrow.domain arrow.codomain)
-    | ProductionSymbol.closure closure => interpretClosure source closure
-
-@[simp] theorem canonicalProductionModel_source (source : Model signature)
-    {ty : Ty} (constant : Const signature ty) :
-    (canonicalProductionModel source).symbol
-      (ProductionSymbol.source constant) =
-        flattenedDenote source ty (source.const constant) := rfl
-
-@[simp] theorem canonicalProductionModel_app (source : Model signature)
-    (arrow : Arrow) :
-    (canonicalProductionModel source).symbol (ProductionSymbol.app arrow) =
-      flattenedDenote source (.arrow arrow.domain arrow.codomain) := rfl
-
-@[simp] theorem canonicalProductionModel_closure (source : Model signature)
-    (closure : Closure signature) :
-    (canonicalProductionModel source).symbol (ProductionSymbol.closure closure) =
-      interpretClosure source closure := rfl
 
 /-- Binary curried application is represented by one ternary production symbol,
 and its canonical interpretation is exactly two source applications. -/
@@ -191,20 +121,18 @@ each argument.  This is the semantic core of n-ary application flattening. -/
 theorem SourceArgs.translate_apply_correct
     (source : Model signature) {context : Context}
     (translate : {ty : Ty} → Term signature context ty →
-      FO.FamilyTerm (ProductionSymbol signature) (targetContext context)
-        (FO.FOSort.ofTy ty))
-    (targetValuation : FO.FamilyValuation (canonicalProductionModel source)
-      (targetContext context))
+      TargetTerm signature context ty)
+    (targetValuation : TargetValuation source context)
     (sourceValuation : Valuation source.Base context)
     (translateCorrect : ∀ {argTy : Ty}
       (term : Term signature context argTy),
-      FO.FamilyTerm.denote (canonicalProductionModel source)
+      FO.FamilyTerm.denote (canonicalModel source)
           (translate term) targetValuation =
         toCanonical source argTy (Term.denote source term sourceValuation)) :
     (ty : Ty) → (value : ty.Denote source.Base) →
     (arguments : SourceArgs signature context (FO.flattenArrow ty).1) →
     FO.FamilyArgs.apply (arguments.translate translate)
-        (canonicalProductionModel source) targetValuation
+        (canonicalModel source) targetValuation
         (flattenedDenote source ty value) =
       toCanonical source (FO.flattenArrow ty).2
         (arguments.applyDenote source sourceValuation ty value) := by
@@ -234,41 +162,37 @@ theorem SourceArgs.translate_apply_correct
 /-- A production n-ary `app` term built from a function value and the complete
 argument telescope of its arrow type. -/
 def flattenedApplicationTerm {context : Context} (domain codomain : Ty)
-    (fn : FO.FamilyTerm (ProductionSymbol signature) (targetContext context)
-      (.fn domain codomain))
+    (fn : FO.FamilyTerm (Symbol signature) (targetContext context)
+      (FO.arrowSort domain codomain))
     (translate : {ty : Ty} → Term signature context ty →
-      FO.FamilyTerm (ProductionSymbol signature) (targetContext context)
-        (FO.FOSort.ofTy ty))
+      TargetTerm signature context ty)
     (arguments : SourceArgs signature context
       (FO.flattenArrow (.arrow domain codomain)).1) :
-    FO.FamilyTerm (ProductionSymbol signature) (targetContext context)
-      (FO.FOSort.ofTy (FO.flattenArrow (.arrow domain codomain)).2) :=
-  .symbol (ProductionSymbol.app { domain, codomain })
+    TargetTerm signature context (FO.flattenArrow (.arrow domain codomain)).2 :=
+  .symbol (Symbol.application { domain, codomain })
     (.cons fn (arguments.translate translate))
 
 theorem flattenedApplicationTerm_correct
     (source : Model signature) {context : Context} (domain codomain : Ty)
     (sourceFn : (Ty.arrow domain codomain).Denote source.Base)
-    (targetFn : FO.FamilyTerm (ProductionSymbol signature)
-      (targetContext context) (FO.arrowSort domain codomain))
+    (targetFn : FO.FamilyTerm (Symbol signature) (targetContext context)
+      (FO.arrowSort domain codomain))
     (translate : {ty : Ty} → Term signature context ty →
-      FO.FamilyTerm (ProductionSymbol signature) (targetContext context)
-        (FO.FOSort.ofTy ty))
+      TargetTerm signature context ty)
     (arguments : SourceArgs signature context
       (FO.flattenArrow (.arrow domain codomain)).1)
     (sourceValuation : Valuation source.Base context)
-    (targetValuation : FO.FamilyValuation (canonicalProductionModel source)
-      (targetContext context))
+    (targetValuation : TargetValuation source context)
     (fnCorrect :
-      FO.FamilyTerm.denote (canonicalProductionModel source) targetFn
+      FO.FamilyTerm.denote (canonicalModel source) targetFn
           targetValuation =
         toCanonical source (.arrow domain codomain) sourceFn)
     (translateCorrect : ∀ {argTy : Ty}
       (term : Term signature context argTy),
-      FO.FamilyTerm.denote (canonicalProductionModel source)
+      FO.FamilyTerm.denote (canonicalModel source)
           (translate term) targetValuation =
         toCanonical source argTy (Term.denote source term sourceValuation)) :
-    FO.FamilyTerm.denote (canonicalProductionModel source)
+    FO.FamilyTerm.denote (canonicalModel source)
         (flattenedApplicationTerm domain codomain targetFn translate arguments)
         targetValuation =
       toCanonical source (FO.flattenArrow (.arrow domain codomain)).2
@@ -287,27 +211,25 @@ symbol denotes the same value as the left-associated source application chain. -
 theorem flattenedApplicationTerm_preserves_application
     (source : Model signature) {context : Context} (domain codomain : Ty)
     (sourceFnTerm : Term signature context (.arrow domain codomain))
-    (targetFn : FO.FamilyTerm (ProductionSymbol signature)
-      (targetContext context) (FO.arrowSort domain codomain))
+    (targetFn : FO.FamilyTerm (Symbol signature) (targetContext context)
+      (FO.arrowSort domain codomain))
     (translate : {ty : Ty} → Term signature context ty →
-      FO.FamilyTerm (ProductionSymbol signature) (targetContext context)
-        (FO.FOSort.ofTy ty))
+      TargetTerm signature context ty)
     (arguments : SourceArgs signature context
       (FO.flattenArrow (.arrow domain codomain)).1)
     (sourceValuation : Valuation source.Base context)
-    (targetValuation : FO.FamilyValuation (canonicalProductionModel source)
-      (targetContext context))
+    (targetValuation : TargetValuation source context)
     (fnCorrect :
-      FO.FamilyTerm.denote (canonicalProductionModel source) targetFn
+      FO.FamilyTerm.denote (canonicalModel source) targetFn
           targetValuation =
         toCanonical source (.arrow domain codomain)
           (Term.denote source sourceFnTerm sourceValuation))
     (translateCorrect : ∀ {argTy : Ty}
       (term : Term signature context argTy),
-      FO.FamilyTerm.denote (canonicalProductionModel source)
+      FO.FamilyTerm.denote (canonicalModel source)
           (translate term) targetValuation =
         toCanonical source argTy (Term.denote source term sourceValuation)) :
-    FO.FamilyTerm.denote (canonicalProductionModel source)
+    FO.FamilyTerm.denote (canonicalModel source)
         (flattenedApplicationTerm domain codomain targetFn translate arguments)
         targetValuation =
       toCanonical source (FO.flattenArrow (.arrow domain codomain)).2
@@ -319,4 +241,4 @@ theorem flattenedApplicationTerm_preserves_application
     (Term.denote source sourceFnTerm sourceValuation) targetFn translate arguments
     sourceValuation targetValuation fnCorrect translateCorrect
 
-end Crush.Metatheory.Defunctionalization
+end Crush.Metatheory.Defunctionalization.Flattened

@@ -4,9 +4,11 @@ import Crush.Metatheory.FO.Family
 /-!
 # Total classic defunctionalization core
 
-This pass uses unary application symbols.  It is the proof-friendly classic
-defunctionalization encoding; production flattening is a subsequent verified
-transformation.
+This pass uses unary application symbols.  It is the proof-friendly unary
+defunctionalization encoding and currently carries the complete intrinsic
+soundness theorem.  The flattened development reuses it as a semantic reference,
+but the total flattened transformation and its generated-theory theorem remain
+to be constructed.
 -/
 
 namespace Crush.Metatheory.Defunctionalization

@@ -19,12 +19,12 @@ Four extension surfaces are provided:
 1. `@[crush_translate]` on a `def h : TranslationHandler` — the general form. `h`
    inspects the head `Expr` and either returns `some smtTerm` or defers (`none`).
 
-2. `@[crush_lower Target.constant]` on a `def h : LoweringHandler` — the targeted
+2. `@[crush_translate_head Target.constant]` on a `def h : LoweringHandler` — the targeted
    form. The registry dispatches `h` only for applications of `Target.constant`,
    so the handler can focus on argument validation and SMT construction without
    matching every term itself. Multiple lowerings for one head use priorities.
 
-3. `@[crush_lower_result Target.type]` on a `def h : LoweringHandler` — the
+3. `@[crush_translate_family Target.type]` on a `def h : LoweringHandler` — the
    result-indexed form. It dispatches on the immediate result head when one is
    present, or peels a syntactic dependent function type to find its codomain
    head. Register named aliases separately when both forms must be handled; the
@@ -51,9 +51,11 @@ or its expansion.
 These unrestricted callbacks execute arbitrary metaprograms and therefore enter
 the formal development through an explicit trusted boundary. Registry entries
 are tagged `HandlerTrust.trustedBoundary`. The separate
-`@[crush_certified_lower]` path accepts only a `CertifiedPrimitiveMapping`, whose
-constructor requires the indexed semantic and external-interpretation contract
-from `Metatheory/Hooks.lean` and whose executable behavior is fixed.
+`@[crush_certified_lower]` path accepts only a `CertifiedPrimitiveMapping` with
+fixed executable behavior.  Logical built-ins fix both the Lean declaration and
+SMT operator in a closed constructor.  Defined mappings may only delta-reduce a
+transparent Lean definition and recursively translate the kernel-equivalent
+result; they cannot supply raw SMT syntax.
 -/
 
 namespace Crush
@@ -85,21 +87,15 @@ abbrev TranslationHandler := TranslationCtx → TranslateM (Option SMT.Term)
 /-- A lowering registered for one specific Lean head constant.
 
 This is definitionally the same callback as `TranslationHandler`; the separate name
-documents that head matching is performed by the `@[crush_lower target]` registry.
+documents that head matching is performed by the `@[crush_translate_head target]` registry.
 A lowering may still return `none` when the application shape, type, or typeclass
 instance is not one it can encode soundly. -/
 abbrev LoweringHandler := TranslationHandler
 
-/-- Runtime-evaluable certified primitive mapping. The semantic object is stored
-only through `Nonempty`, hence erased, while its declaration and target symbol
-remain indices of `PrimitiveHookCertificate` and cannot drift independently. -/
+/-- Closed primitive lowering whose constructors introduce no semantic
+assumptions. `not` fixes both the known Lean and SMT logical constructors. -/
 inductive CertifiedPrimitiveMapping where
-  | ofCertificate {signature : Metatheory.Signature} {ty : Metatheory.Ty}
-      (declaration : Name) (targetSymbol : String)
-      (firstTermArgument : Nat)
-      (certificate : Nonempty
-        (Metatheory.PrimitiveHookCertificate signature ty declaration targetSymbol)) :
-      CertifiedPrimitiveMapping
+  | not
 
 instance : TypeName CertifiedPrimitiveMapping := unsafe
   (TypeName.mk _ ``CertifiedPrimitiveMapping)
@@ -107,25 +103,53 @@ instance : TypeName CertifiedPrimitiveMapping := unsafe
 namespace CertifiedPrimitiveMapping
 
 def declaration : CertifiedPrimitiveMapping → Name
-  | .ofCertificate declaration _ _ _ => declaration
+  | .not => ``Not
 
-def targetSymbol : CertifiedPrimitiveMapping → String
-  | .ofCertificate _ targetSymbol _ _ => targetSymbol
+def targetSymbol? : CertifiedPrimitiveMapping → Option String
+  | .not => some "not"
 
-def firstTermArgument : CertifiedPrimitiveMapping → Nat
-  | .ofCertificate _ _ firstTermArgument _ => firstTermArgument
+/-- Result of restricted certified dispatch. Only external built-ins report a
+target symbol; definition reduction introduces no target-side symbol. -/
+structure Result where
+  term : SMT.Term
+  targetSymbol? : Option String
 
-def termArity : CertifiedPrimitiveMapping → Nat
-  | .ofCertificate (ty := ty) _ _ _ _ =>
-      (Metatheory.Defunctionalization.sourceDecl ty).args.length
+/-- Mechanically fixed executable behavior for restricted mappings.
 
-/-- Mechanically fixed executable behavior for certified primitive mappings. -/
-def handler (mapping : CertifiedPrimitiveMapping) : LoweringHandler := fun ctx => do
+A built-in application has a fixed arity and target. A definition is accepted
+only when its declaration has a body and full delta reduction changes the
+application to a different head. Recursive definitions that do not reduce at
+the current arguments decline; their proved equation lemmas belong on the
+`@[crush_unfold]` path instead. -/
+def lower (mapping : CertifiedPrimitiveMapping) (ctx : TranslationCtx) :
+    TranslateM (Option Result) := do
   unless ctx.fn.isConstOf mapping.declaration do return none
-  let arguments := ctx.args.toList.drop mapping.firstTermArgument
-  unless arguments.length == mapping.termArity do return none
-  let translated ← arguments.toArray.mapM ctx.emitTerm
-  return some (.app (.symb mapping.targetSymbol) translated)
+  match mapping with
+  | .not =>
+      unless ctx.args.size == 1 do return none
+      let translated ← ctx.args.mapM ctx.emitTerm
+      return some {
+        term := .app (.symb "not") translated
+        targetSymbol? := some "not" }
+
+/-- Compatibility projection for code that invokes a certified mapping directly. -/
+def handler (mapping : CertifiedPrimitiveMapping) : LoweringHandler := fun ctx => do
+  return Option.map (fun result => result.term) (← mapping.lower ctx)
+
+/-- Lower an attributed definition only by full delta reduction. The result is
+definitionally equal to the source application, and no raw SMT body or semantic
+assumption can be supplied by the user. -/
+def lowerDef (declaration : Name) (ctx : TranslationCtx) :
+    TranslateM (Option SMT.Term) := do
+  unless ctx.fn.isConstOf declaration do return none
+  let some info := (← getEnv).find? declaration | return none
+  unless info.value?.isSome do return none
+  let application := mkAppN ctx.fn ctx.args
+  let some reduced ← unfoldDefinition? application (ignoreTransparency := true)
+    | return none
+  if reduced == application || reduced.getAppFn.isConstOf declaration then
+    return none
+  return some (← ctx.emitTerm reduced)
 
 end CertifiedPrimitiveMapping
 
@@ -281,7 +305,7 @@ def hasTranslationHandlers : TranslateM Bool := do
     modify fun s => { s with registries := { s.registries with hasTranslation := some flag } }
     return flag
 
-/-! ## Head-indexed lowerings (`@[crush_lower target]`)
+/-! ## Head-indexed translations (`@[crush_translate_head target]`)
 
 The general handler extension above intentionally permits dynamic matching, but it
 requires every handler to inspect every translated term. Lowerings cover the common
@@ -291,7 +315,7 @@ indexed by the head constant, so only relevant callbacks are evaluated.
 General handlers run before targeted lowerings in `emitTerm`, preserving the original
 contract that `@[crush_translate]` can override every built-in mapping. Within the
 targeted registry, higher priority runs first, so applications can override a default
-lowering with `@[crush_lower Target high]`.
+translation with `@[crush_translate_head Target high]`.
 -/
 
 /-- Serializable entry for one head-indexed lowering. -/
@@ -316,7 +340,35 @@ initialize crushLoweringExt :
     addImportedFn := mkStateFromImportedEntries addLoweringEntry {}
   }
 
-/-! ## Certified primitive lowerings -/
+/-! ## Certified definition and primitive lowerings -/
+
+/-- Definitions approved for fixed delta-reduction lowering. The attribute is
+attached to the definition itself, so no separately quoted declaration name can
+drift from the body that Lean's kernel checks. -/
+initialize crushCertifiedDefExt :
+    SimplePersistentEnvExtension Name (Array Name) ←
+  registerSimplePersistentEnvExtension {
+    addEntryFn := fun declarations declaration => declarations.push declaration
+    addImportedFn := fun arrays => arrays.foldl (· ++ ·) #[]
+  }
+
+syntax (name := crushCertifiedDefAttr) "crush_certified_def" : attr
+
+initialize registerBuiltinAttribute {
+  name := `crushCertifiedDefAttr
+  descr := "Lower this Lean definition only by kernel-checked delta reduction."
+  applicationTime := .afterCompilation
+  add := fun declaration _ _ => do
+    let some info := (← getEnv).find? declaration
+      | throwError "unknown declaration {declaration}"
+    unless info.value?.isSome do
+      throwError "@[crush_certified_def] expects a transparent Lean definition, but \
+                  `{declaration}` has no body."
+    modifyEnv fun env => crushCertifiedDefExt.addEntry env declaration
+}
+
+def hasCertifiedDef (declaration : Name) : TranslateM Bool := do
+  return (crushCertifiedDefExt.getState (← getEnv)).contains declaration
 
 initialize crushCertifiedLoweringExt :
     SimplePersistentEnvExtension LoweringEntry (NameMap (Array HandlerEntry)) ←
@@ -330,7 +382,7 @@ syntax (name := crushCertifiedLowerAttr)
 
 initialize registerBuiltinAttribute {
   name := `crushCertifiedLowerAttr
-  descr := "Register a semantically certified primitive SMT lowering."
+  descr := "Register a closed, semantically certified primitive SMT lowering."
   applicationTime := .afterCompilation
   add := fun declName stx _ => do
     let head ← Elab.realizeGlobalConstNoOverloadWithInfo stx[1]
@@ -385,16 +437,17 @@ opaque getCertifiedLoweringsFor
 
 Example:
 ```
-@[crush_lower Int.natAbs]
+@[crush_translate_head Int.natAbs]
 def lowerNatAbs : LoweringHandler := fun ctx => ...
 ```
 As with `simp`, an optional priority (`low`, `high`, or a number) controls ordering
 when several lowerings target the same constant. -/
-syntax (name := crushLowerAttr) "crush_lower " ident (ppSpace prio)? : attr
+syntax (name := crushTranslateHeadAttr)
+  "crush_translate_head " ident (ppSpace prio)? : attr
 
 initialize registerBuiltinAttribute {
-  name := `crushLowerAttr
-  descr := "Register a head-indexed lean-crush SMT lowering (LoweringHandler)."
+  name := `crushTranslateHeadAttr
+  descr := "Register a head-indexed lean-crush SMT translation (LoweringHandler)."
   applicationTime := .afterCompilation
   add := fun declName stx _ => do
     let headStx := stx[1]
@@ -405,7 +458,7 @@ initialize registerBuiltinAttribute {
       | throwError "unknown declaration {declName}"
     let expectedTy := mkConst ``Crush.LoweringHandler
     unless (← MetaM.run' (isDefEqReadOnly info.type expectedTy)) do
-      throwError "@[crush_lower] expects a declaration of type `LoweringHandler`, \
+      throwError "@[crush_translate_head] expects a declaration of type `LoweringHandler`, \
                   but {declName} has type{indentExpr info.type}"
     modifyEnv fun env =>
       crushLoweringExt.addEntry env { head, declName, priority := prio }
@@ -435,7 +488,7 @@ unsafe def getLoweringsForUnsafe (head : Name) : TranslateM (Array LoweringHandl
 @[implemented_by getLoweringsForUnsafe]
 opaque getLoweringsFor (head : Name) : TranslateM (Array LoweringHandler)
 
-/-! ## Result-indexed lowerings (`@[crush_lower_result target]`)
+/-! ## Family-indexed translations (`@[crush_translate_family target]`)
 
 Some operations have no stable application head to register: a generated
 decision procedure may be a lambda or an auxiliary declaration. Its result family
@@ -453,14 +506,15 @@ initialize crushResultLoweringExt :
 
 /-- Register a lowering selected by the head of a term's result type.
 
-For example, `@[crush_lower_result Decidable]` sees ordinary `Decidable p` values
+For example, `@[crush_translate_family Decidable]` sees ordinary `Decidable p` values
 and syntactic dependent function types ending in `Decidable (...)`. Register
 `DecidableEq` separately to catch terms whose inferred type retains that alias. -/
-syntax (name := crushLowerResultAttr) "crush_lower_result " ident (ppSpace prio)? : attr
+syntax (name := crushTranslateFamilyAttr)
+  "crush_translate_family " ident (ppSpace prio)? : attr
 
 initialize registerBuiltinAttribute {
-  name := `crushLowerResultAttr
-  descr := "Register a result-indexed lean-crush SMT lowering (LoweringHandler)."
+  name := `crushTranslateFamilyAttr
+  descr := "Register a result-family-indexed lean-crush SMT translation (LoweringHandler)."
   applicationTime := .afterCompilation
   add := fun declName stx _ => do
     let headStx := stx[1]
@@ -471,7 +525,7 @@ initialize registerBuiltinAttribute {
       | throwError "unknown declaration {declName}"
     let expectedTy := mkConst ``Crush.LoweringHandler
     unless (← MetaM.run' (isDefEqReadOnly info.type expectedTy)) do
-      throwError "@[crush_lower_result] expects a declaration of type \
+      throwError "@[crush_translate_family] expects a declaration of type \
                   `LoweringHandler`, but {declName} has type{indentExpr info.type}"
     modifyEnv fun env =>
       crushResultLoweringExt.addEntry env { head, declName, priority := prio }

@@ -209,7 +209,7 @@ end Datatypes
 
 /-! ## Lowered mathlib primitives
 
-These operations are encoded by public `@[crush_lower]` handlers rather than the
+These operations are encoded by public `@[crush_translate_head]` handlers rather than the
 structural translator. -/
 
 section Lowered

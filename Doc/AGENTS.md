@@ -109,10 +109,10 @@ Translation is the complete recursive process that converts arbitrary Lean
 expressions and types into SMT terms, sorts, declarations, and axioms.
 
 A lowering is one extension hook inside translation. A
-`@[crush_lower Some.constant]` handler is dispatched only for that application
+`@[crush_translate_head Some.constant]` handler is dispatched only for that application
 head and may claim it by returning `some term` or defer by returning `none`.
 `@[crush_translate]` is the general dynamic hook and runs before targeted
-lowerings. `@[crush_lower_result T]` dispatches by result-family head, and
+lowerings. `@[crush_translate_family T]` dispatches by result-family head, and
 `@[crush_translate_sort]` changes a Lean type's SMT representation.
 
 Built-in theory support should normally use the same public lowering

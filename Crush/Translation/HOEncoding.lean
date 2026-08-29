@@ -1,7 +1,8 @@
 import Lean
 import Crush.SMT.Syntax
+import Crush.Translation.Capture
 import Crush.Translation.Monad
-import Crush.Metatheory.Bridge.Type
+import Crush.Metatheory.Reification.Type
 open Lean Meta
 
 /-!
@@ -66,7 +67,7 @@ open SMT
 `Int → Int → Bool` becomes `(#[Int, Int], Bool)`. -/
 structure ArrowShape where
   /-- Structural evidence connecting this live shape to `FO.appDecl`. -/
-  verified : Metatheory.Bridge.ArrowBridge
+  verified : Metatheory.Reification.ArrowBridge
 
 namespace ArrowShape
 
@@ -74,7 +75,7 @@ namespace ArrowShape
 `ArrowShape` cannot carry an SMT-facing telescope inconsistent with its core
 declaration. -/
 def args (shape : ArrowShape) : Array Expr :=
-  shape.verified.flatten.1.toArray.map Metatheory.Bridge.TypeBridge.expr
+  shape.verified.flatten.1.toArray.map Metatheory.Reification.TypeBridge.expr
 
 /-- Live result type is likewise a projection of the verified telescope. -/
 def res (shape : ArrowShape) : Expr :=
@@ -90,7 +91,7 @@ end ArrowShape
 first-order types normally). Dependent arrows are refused: their SMT image would
 need dependent sorts. -/
 def arrowShape? (ty : Expr) : MetaM (Option ArrowShape) := do
-  let some bridge ← Metatheory.Bridge.reifyArrow? ty | return none
+  let some bridge ← Metatheory.Reification.reifyArrow? ty | return none
   return some { verified := bridge }
 
 /-- Whether `ty` is a function type we must encode (an arrow into a non-`Prop`).
@@ -98,34 +99,6 @@ Arrows into `Prop` are predicates and are handled by the first-order path when
 fully applied; only *unapplied* or *argument-position* functions need encoding. -/
 def isFunctionType (ty : Expr) : MetaM Bool := do
   return (← whnf ty).isArrow
-
-namespace collectFVarsOrdered
-
-/-- Accumulator implementation exposed to the bridge proofs. -/
-def go (e : Expr) (acc : Array FVarId) : Array FVarId :=
-  match e with
-  | .fvar fid => if acc.contains fid then acc else acc.push fid
-  | .app f a => go a (go f acc)
-  | .lam _ type body _ => go body (go type acc)
-  | .forallE _ type body _ => go body (go type acc)
-  | .letE _ type value body _ => go body (go value (go type acc))
-  | .mdata _ body => go body acc
-  | .proj _ _ body => go body acc
-  | _ => acc
-
-end collectFVarsOrdered
-
-/-- All free variables of an expression in deterministic first-occurrence
-order. This is the collector used to choose closure parameters. It is kept
-outside the translator's mutually recursive monadic implementation so that the
-actual production function is total and available to refinement proofs. -/
-def collectFVarsOrdered (e : Expr) : Array FVarId :=
-  collectFVarsOrdered.go e #[]
-
-/-- The exact pure capture-selection step used by `emitClosure`. The predicate
-distinguishes SMT-bound locals from Lean-local symbols emitted globally. -/
-def selectClosureCaptures (e : Expr) (eligible : FVarId → Bool) : Array FVarId :=
-  (collectFVarsOrdered e).filter eligible
 
 /-! ## Pure production command shapes
 

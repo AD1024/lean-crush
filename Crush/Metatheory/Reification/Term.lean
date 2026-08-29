@@ -1,4 +1,4 @@
-import Crush.Metatheory.Bridge.Capture
+import Crush.Metatheory.Reification.Capture
 
 /-!
 # Typed term-reification substrate
@@ -13,7 +13,7 @@ pure constructors. That parser is the remaining metaprogramming layer; it will
 produce `PackedTerm`s rather than reconstructing typing invariants independently.
 -/
 
-namespace Crush.Metatheory.Bridge
+namespace Crush.Metatheory.Reification
 
 open Lean
 
@@ -167,4 +167,4 @@ def existsE? (domain : TypeBridge) :
 
 end PackedTerm
 
-end Crush.Metatheory.Bridge
+end Crush.Metatheory.Reification

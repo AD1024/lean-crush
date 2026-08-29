@@ -180,7 +180,7 @@ theorem flattenedDenote_canonical_related {signature : Signature}
     (source : Model signature) :
     (ty : Ty) → (value : ty.Denote source.Base) →
       FlattenedHookRel (CanonicalHookValueRelation source) ty value
-        (Defunctionalization.flattenedDenote source ty value) := by
+        (Defunctionalization.Flattened.flattenedDenote source ty value) := by
   intro ty
   induction ty with
   | bool =>
@@ -215,69 +215,16 @@ built-ins may replace `targetValue` only by proving the same indexed contract. -
 def CanonicalConstantHookCertificate.production {signature : Signature} {ty : Ty}
     (constant : Const signature ty) : CanonicalConstantHookCertificate constant where
   targetValue := fun source =>
-    Defunctionalization.flattenedDenote source ty (source.const constant)
+    Defunctionalization.Flattened.flattenedDenote source ty (source.const constant)
   preserves := fun source =>
     flattenedDenote_canonical_related source ty (source.const constant)
 
-/-! ## Explicit external interpretation boundary
+/-! ## Certified built-in example: Boolean negation
 
-The kernel can prove preservation of modeled source/target functions, but Lean's
-metatheory does not define the denotation of an arbitrary declaration name and
-SMT-LIB semantics is supplied by an external solver. These two facts are kept as
-separate opaque propositions. A primitive hook is certified *conditional on*
-named inhabitants of both; neither assumption is folded into the verified
-defunctionalization theorem. -/
-
-/-- External assertion that a Lean declaration has the modeled source
-denotation. This is part of the trusted refinement boundary. -/
-opaque LeanDeclarationDenotes {signature : Signature} {ty : Ty}
-    (declaration : Name)
-    (denotation : (source : Model signature) → ty.Denote source.Base) : Prop
-
-/-- External assertion that an SMT theory symbol has the modeled flattened
-target denotation. This is part of the solver-semantics boundary. -/
-opaque SolverSymbolDenotes {signature : Signature} {ty : Ty}
-    (symbol : String)
-    (denotation : (source : Model signature) →
-      FO.SymbolDenote (Defunctionalization.canonicalModel source).carriers
-        (Defunctionalization.sourceDecl ty).args
-        (Defunctionalization.sourceDecl ty).result) : Prop
-
-/-- Complete conditional certificate for a primitive live hook. The declaration
-and SMT symbol are indices, so a registry cannot reuse a certificate under a
-different pair of names. -/
-structure PrimitiveHookCertificate (signature : Signature) (ty : Ty)
-    (declaration : Name) (symbol : String) where
-  semantic : CanonicalTermHookCertificate signature ty
-  leanDenotes : LeanDeclarationDenotes declaration semantic.sourceValue
-  solverDenotes : SolverSymbolDenotes symbol semantic.targetValue
-
-namespace PrimitiveHookCertificate
-
-theorem preserves {declaration : Name} {symbol : String}
-    {signature : Signature} {ty : Ty}
-    (certificate : PrimitiveHookCertificate signature ty declaration symbol)
-    (source : Model signature) :
-    FlattenedHookRel (CanonicalHookValueRelation source) ty
-      (certificate.semantic.sourceValue source)
-      (certificate.semantic.targetValue source) :=
-  certificate.semantic.preserves source
-
-/-- The two external assumptions are exposed together for trust audits. -/
-theorem assumptions {declaration : Name} {symbol : String}
-    {signature : Signature} {ty : Ty}
-    (certificate : PrimitiveHookCertificate signature ty declaration symbol) :
-    LeanDeclarationDenotes declaration certificate.semantic.sourceValue ∧
-      SolverSymbolDenotes symbol certificate.semantic.targetValue :=
-  ⟨certificate.leanDenotes, certificate.solverDenotes⟩
-
-end PrimitiveHookCertificate
-
-/-! ## Certified primitive example: Boolean negation
-
-Negation's semantic preservation is proved. The two facts that connect the names
-`Not` and `"not"` to those denotations are deliberately visible axioms: they are
-the minimal Lean-runtime and solver-specification trust boundary, respectively. -/
+An arbitrary `Lean.Name` has no kernel-level denotation, so it cannot honestly
+index a semantic certificate.  Built-ins avoid that gap by fixing both endpoints
+in executable code: the only mapping using this theorem maps Lean's `Not` to the
+logical `not` constructor of the verified SMT fragment. -/
 
 namespace BuiltinHooks
 
@@ -288,19 +235,10 @@ def notSemantic : CanonicalTermHookCertificate [] (.arrow .bool .bool) where
     intro source sourceArgument targetArgument related
     exact not_congr related
 
-axiom leanNotDenotes : LeanDeclarationDenotes ``Not notSemantic.sourceValue
-axiom smtNotDenotes : SolverSymbolDenotes "not" notSemantic.targetValue
-
-def notCertificate :
-    PrimitiveHookCertificate [] (.arrow .bool .bool) ``Not "not" where
-  semantic := notSemantic
-  leanDenotes := leanNotDenotes
-  solverDenotes := smtNotDenotes
-
 theorem not_preserves (source : Model []) (sourceValue targetValue : Prop)
     (related : sourceValue ↔ targetValue) :
     ¬sourceValue ↔ ¬targetValue :=
-  notCertificate.preserves source sourceValue targetValue related
+  notSemantic.preserves source sourceValue targetValue related
 
 end BuiltinHooks
 

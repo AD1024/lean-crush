@@ -15,11 +15,18 @@ the collected signature and stable symbol allocation.
 
 namespace Crush.Metatheory.FO
 
-/-- An abstract collection of symbols indexed by their declarations. -/
-abbrev SymbolFamily := SymbolDecl → Type
+universe u
+
+/-- An abstract collection of symbols indexed by their declarations.
+
+The universe parameter is needed by symbol families that retain semantic
+contracts.  Ordinary syntactic families continue to instantiate it at
+`Type`, while a certified symbol may quantify over source models and therefore
+live one universe higher. -/
+abbrev SymbolFamily := SymbolDecl → Type u
 
 mutual
-  inductive FamilyTerm (symbols : SymbolFamily) : Context → FOSort → Type where
+  inductive FamilyTerm (symbols : SymbolFamily.{u}) : Context → FOSort → Type u where
     | var {context : Context} {sort : FOSort} :
         Var context sort → FamilyTerm symbols context sort
     | symbol {context : Context} {decl : SymbolDecl} :
@@ -50,8 +57,8 @@ mutual
         FamilyTerm symbols (domain :: context) .bool →
         FamilyTerm symbols context .bool
 
-  inductive FamilyArgs (symbols : SymbolFamily) :
-      Context → List FOSort → Type where
+  inductive FamilyArgs (symbols : SymbolFamily.{u}) :
+      Context → List FOSort → Type u where
     | nil {context : Context} : FamilyArgs symbols context []
     | cons {context : Context} {sort : FOSort} {sorts : List FOSort} :
         FamilyTerm symbols context sort → FamilyArgs symbols context sorts →
@@ -62,6 +69,13 @@ abbrev FamilyFormula (symbols : SymbolFamily) (context : Context) :=
   FamilyTerm symbols context .bool
 abbrev FamilySentence (symbols : SymbolFamily) := FamilyFormula symbols []
 abbrev FamilyTheory (symbols : SymbolFamily) := List (FamilySentence symbols)
+
+/-- Transport a typed family term across equality of its result-sort index. -/
+def FamilyTerm.castSort {symbols : SymbolFamily} {context : Context}
+    {source target : FOSort} (equality : source = target)
+    (term : FamilyTerm symbols context source) :
+    FamilyTerm symbols context target :=
+  equality ▸ term
 
 /-- Universally close a formula over its entire local context, nearest binder
 first. -/

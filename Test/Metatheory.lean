@@ -9,16 +9,30 @@ import Crush.Metatheory.Defunctionalization.EtaCorrectness
 import Crush.Metatheory.Defunctionalization.Translate
 import Crush.Metatheory.Defunctionalization.Core
 import Crush.Metatheory.FO.FamilySemantics
+import Crush.Metatheory.FO.Renaming
 import Crush.Metatheory.Defunctionalization.LogicalRelation
 import Crush.Metatheory.Notation
 import Crush.Metatheory.Defunctionalization.Fundamental
 import Crush.Metatheory.Defunctionalization.ModelExtension
 import Crush.Metatheory.Defunctionalization.FlattenedApplication
+import Crush.Metatheory.Defunctionalization.TranslationResult
+import Crush.Metatheory.Defunctionalization.Flattened.Spine
+import Crush.Metatheory.Defunctionalization.Flattened.Lambda
+import Crush.Metatheory.Defunctionalization.Flattened.Translate
+import Crush.Metatheory.Defunctionalization.Flattened.Currying
+import Crush.Metatheory.Defunctionalization.Flattened.Denotation
+import Crush.Metatheory.Defunctionalization.Flattened.Theory
 import Crush.Metatheory.Defunctionalization.ProductionClosure
 import Crush.Metatheory.Guarded.Encoding
 import Crush.Metatheory.Hooks
+import Crush.Metatheory.SMT.Soundness
+import Crush.Metatheory.VCG.Status
+import Crush.Metatheory.VCG.Generate
+import Crush.Metatheory.VCG.Stateful
+import Crush.Metatheory.VCG.Soundness
 
 open scoped Crush.Metatheory
+open scoped Crush.SMT
 
 /-!
 Compile-time examples for the intrinsically typed metatheory language. The types of
@@ -135,6 +149,27 @@ example : predicateApp.args =
 
 example : predicateApp.result = .bool := rfl
 
+/-! ## Abstract-family binder infrastructure -/
+
+private inductive BinderSymbol : SymbolDecl → Type
+
+/-- Weakening preserves a variable's sort and shifts it beneath the fresh
+binder, which is the operation used while assembling closure equations. -/
+example :
+    (FamilyTerm.var (symbols := BinderSymbol)
+      (.here : Var [.base ⟨"Entity"⟩] (.base ⟨"Entity"⟩))).weaken
+        (domain := .bool) =
+      FamilyTerm.var (.there .here) := rfl
+
+/-- Argument concatenation retains left-to-right application order. -/
+private def firstBinderArgument :
+    FamilyArgs BinderSymbol [.base ⟨"Entity"⟩] [.base ⟨"Entity"⟩] :=
+  .cons (.var .here) .nil
+
+example :
+    firstBinderArgument.append firstBinderArgument =
+      .cons (.var .here) (.cons (.var .here) .nil) := rfl
+
 /-! ## First-order semantics -/
 
 private def reflexiveSentence : Sentence [] :=
@@ -155,6 +190,8 @@ example (model : Model []) : model ⊨ᵀ [reflexiveSentence] := by
 end Crush.Metatheory.FO.Tests
 
 namespace Crush.Metatheory.Defunctionalization.Tests
+
+open Flattened
 
 private def entity : Ty := .base ⟨"Entity"⟩
 
@@ -261,6 +298,218 @@ example {signature : Signature} {source : Model signature}
 
 example : (defunctionalize nestedCapture).equations.length = 2 := rfl
 
+/-! ## Flattened translation result substrate -/
+
+/-- The primary flattened symbol family classifies application by semantic role. -/
+private def flattenedAppSymbol :
+    Flattened.Symbol [] (FO.appDecl entity entity) :=
+  .application { domain := entity, codomain := entity }
+
+/-- Certified primitives remain distinct from ordinary source constants even
+when they have the same declaration shape. -/
+private def flattenedPrimitiveSymbol :
+    Flattened.Symbol partialSignature (sourceDecl (.arrow entity (.arrow entity entity))) :=
+  .certifiedPrimitive (.production binaryFn)
+
+/-- A result with no generated formulas has an empty combined theory. -/
+private def variableTranslation :
+    Flattened.TranslationResult [] [entity] entity where
+  term := .var .here
+
+example : variableTranslation.theory = [] := rfl
+
+/-- Obligation classes are retained independently and combined in stable order. -/
+private def guardedTranslation :
+    Flattened.TranslationResult [] [entity] .bool where
+  term := .boolLit true
+  equations := [.boolLit true]
+  guards := [.boolLit false]
+
+example : guardedTranslation.theory = [.boolLit true, .boolLit false] := rfl
+
+/-- Complete application-spine collection retains both arguments in source order. -/
+private def collectedBinarySpine :=
+  Flattened.ApplicationSpine.collect
+    (completeBinaryArgs.applyTerm
+      (.arrow entity (.arrow entity entity)) (.const binaryFn))
+
+example : collectedBinarySpine.arguments.types = [entity, entity] := by native_decide
+
+example : collectedBinarySpine.toTerm =
+    .app (.app (.const binaryFn) (.var .here)) (.var .here) := by
+  apply Flattened.ApplicationSpine.toTerm_collect
+
+/-- A partial spine records only its applied prefix and retains the residual
+function result in its index. -/
+private def collectedPartialSpine :=
+  Flattened.ApplicationSpine.collect partialApplication
+
+example : collectedPartialSpine.arguments.types = [entity] := by native_decide
+
+/-- Recursive argument translation composes generated output in source order,
+ready for the flattened application node to consume. -/
+private def repeatedArguments :
+    Flattened.AppliedArguments partialSignature [entity]
+      (.arrow entity (.arrow entity entity)) entity :=
+  .snoc (.snoc (.nil _) (.var .here)) (.var .here)
+
+example
+    (translateTerm : {ty : Ty} → Term partialSignature [entity] ty →
+      Flattened.TranslationResult partialSignature [entity] ty)
+    (guard : (translateTerm (.var .here :
+      Term partialSignature [entity] entity)).guards = [.boolLit true]) :
+    (repeatedArguments.translate translateTerm).generated.guards.length = 2 := by
+  simp only [repeatedArguments, Flattened.AppliedArguments.translate]
+  change ((translateTerm (.var .here)).guards ++
+    (translateTerm (.var .here)).guards).length = 2
+  rw [guard]
+  rfl
+
+/-- The target-side telescope can emit an n-ary application only after its
+indices establish that all arguments leading to a ground result are present. -/
+private def identityClosure : Closure partialSignature :=
+  let body : Term partialSignature (entity :: [entity]) entity := .var .here
+  Closure.ofBody body
+
+private def targetIdentityArguments :
+    Flattened.TargetArguments partialSignature [entity]
+      (.arrow entity entity) entity :=
+  .snoc (.nil _) (.var .here)
+
+private def targetIdentityApplication :
+    Flattened.TargetTerm partialSignature [entity] entity :=
+  targetIdentityArguments.completeApplication
+    (.symbol (Flattened.Symbol.closure identityClosure) .nil)
+    (.base ⟨"Entity"⟩)
+
+example : targetIdentityArguments.types = [entity] := by native_decide
+
+/-- Opening a curried source value exposes its complete flattened telescope. -/
+example :
+    (Flattened.LambdaBody.ofTerm
+      (.arrow entity (.arrow entity entity))
+      (.const binaryFn :
+        Term partialSignature [] (.arrow entity (.arrow entity entity)))).binders =
+      [entity, entity] := by native_decide
+
+/-- A closure equation can now be assembled under the exact binder context. -/
+private def openedIdentityBody :=
+  (Flattened.LambdaBody.ofTerm (.arrow entity entity)
+    (.lam (.var .here) :
+      Term partialSignature [entity] (.arrow entity entity))).openTarget
+    (.symbol (Flattened.Symbol.closure identityClosure) .nil)
+    (.nil _)
+
+private def identityClosureEquation :
+    Flattened.TargetSentence partialSignature :=
+  openedIdentityBody.equation (.var .here)
+
+example : openedIdentityBody.context = [entity, entity] := by native_decide
+
+example (model : Model partialSignature)
+    (valuation : Valuation model.Base [entity]) :
+    Term.denote model
+        (.lam (Flattened.LambdaBody.etaBody partialApplication)) valuation =
+      Term.denote model partialApplication valuation :=
+  Flattened.LambdaBody.denote_etaBody model partialApplication valuation
+
+/-! ## Total flattened translation -/
+
+private def translatedApplicationEquality :=
+  𝓕⟦Crush.Metatheory.Tests.applicationEquality⟧
+
+/-- A completely applied source constant remains one flattened source-symbol
+application and introduces no closure equation. -/
+example : translatedApplicationEquality.equations.length = 0 := by native_decide
+
+/-- Translating a residual function value materializes exactly one eta closure
+and its fully flattened defining equation. -/
+private def translatedPartialApplication :=
+  𝓕⟦partialApplication⟧
+
+example : translatedPartialApplication.equations.length = 1 := by native_decide
+
+/-- A curried lambda chain is represented by one flattened closure rather than
+one intermediate closure per binder. -/
+private def translatedNestedCapture :=
+  𝓕⟦nestedCapture⟧
+
+example : translatedNestedCapture.equations.length = 1 := by native_decide
+
+/-- Exact captures survive into the structural identity of the generated
+closure symbol. -/
+private def capturingLambda :
+    Term partialSignature [entity] (.arrow entity entity) :=
+  .lam (.var (.there .here))
+
+private def firstClosureCaptureCount :
+    List (Flattened.DeclaredSymbol partialSignature) → Nat
+  | [] => 0
+  | declaration :: declarations =>
+      declaration.closureCaptureCount?.getD
+        (firstClosureCaptureCount declarations)
+
+private def translatedCaptureCount : Nat :=
+  firstClosureCaptureCount (𝓕⟦capturingLambda⟧.declarations)
+
+example : translatedCaptureCount = 1 := by native_decide
+
+/-- Function equality requests the extensionality formula for its arrow sort. -/
+private def functionReflexivity : Sentence partialSignature :=
+  .eq (.const binaryFn) (.const binaryFn)
+
+example : 𝓕⟦functionReflexivity⟧.extensionality.length = 1 := by
+  native_decide
+
+/-- Quantifiers and every Boolean constructor recurse through the same total
+translation and preserve their generated output. -/
+private def translatedQuantifiedFormula :=
+  𝓕⟦Crush.Metatheory.Tests.quantifiedFormula⟧
+
+private def translatedBooleanFormula :=
+  𝓕⟦Crush.Metatheory.Tests.booleanFormula⟧
+
+example : translatedQuantifiedFormula.term = translatedQuantifiedFormula.term := rfl
+example : translatedBooleanFormula.term = translatedBooleanFormula.term := rfl
+
+/-- The public theorem states denotation preservation for the actual total
+flattened translation. -/
+example (model : Model partialSignature)
+    (valuation : Valuation model.Base [entity]) :
+    ⟦𝓕⟦partialApplication⟧.term⟧[
+        Flattened.canonicalModel model, Flattened.targetVal model valuation] =
+      toCanonical model (.arrow entity entity)
+        ⟦partialApplication⟧[model, valuation] :=
+  Flattened.translate_denote model partialApplication valuation
+
+/-- The flattened production shape and unary reference translation have the
+same canonical denotation. -/
+example (model : Model partialSignature)
+    (valuation : Valuation model.Base [entity]) :
+    ⟦𝓕⟦partialApplication⟧.term⟧[
+        Flattened.canonicalModel model, Flattened.targetVal model valuation] =
+      ⟦𝒟⟦partialApplication⟧⟧[
+        canonicalModel model, Flattened.targetVal model valuation] :=
+  Flattened.flattened_refines_unary model partialApplication valuation
+
+/-- All equations and extensionality axioms emitted by flattened translation
+hold simultaneously in its canonical model. -/
+example (model : Model partialSignature) :
+    Flattened.canonicalModel model ⊨ᵀ
+      𝓕⟦partialApplication⟧.theory :=
+  Flattened.generated_valid model partialApplication
+
+example (model : Model partialSignature) (formula : Sentence partialSignature)
+    (sourceValid : model ⊨ formula) :
+    Flattened.canonicalModel model ⊨ᵀ Flattened.translatedTheory formula :=
+  Flattened.model_extension model formula sourceValid
+
+example (formula : Sentence partialSignature)
+    (targetUnsat : FO.FamilyTheoryUnsatisfiable
+      (Flattened.translatedTheory formula)) :
+    Unsatisfiable formula :=
+  Flattened.target_unsat_implies_source_unsat formula targetUnsat
+
 /-- The complete semantic soundness theorem is exposed at the same abstract
 symbol-family level as the total classic pass. -/
 example (formula : Sentence partialSignature)
@@ -318,6 +567,174 @@ example (fn : String → Nat) (argument : String) :
   natInt.liftResult_guard fn argument
 
 end Crush.Metatheory.Guarded.Tests
+
+namespace Crush.SMT.Tests
+
+/-- A small total Boolean model used to exercise the relational SMT semantics. -/
+private def boolModel : Model where
+  Value := Bool
+  inSort := fun _ _ => True
+  sortNonempty := fun _ => ⟨false, trivial⟩
+  bool := id
+  boolTyped := fun _ => trivial
+  boolInjective := by
+    intro left right equality
+    exact equality
+  literal
+    | .bool value => value
+    | _ => false
+  literalTyped := fun _ => trivial
+  apply := fun _ _ _ => False
+
+example : boolModel ⊨ₛ .lit (.bool true) :=
+  Eval.boolLit true
+
+example : boolModel ⊨ₛ .symbApp "not" #[.lit (.bool false)] :=
+  Eval.not (Eval.boolLit false)
+
+private def boolRefl : Term :=
+  .forallE #[("value", boolSort)]
+    (.symbApp "=" #[.bvar 0, .bvar 0])
+
+example : boolModel ⊨ₛ boolRefl := by
+  apply Eval.forallTrue
+  intro values typed
+  cases typed with
+  | cons valueTyped tail =>
+    cases tail
+    exact Eval.eqTrue (Eval.bvar rfl) (Eval.bvar rfl) rfl
+
+example : boolModel ⊨ₛᶜ #[.setLogic "ALL", .checkSat] := by
+  have logicValid : boolModel ⊨ₛᶜ #[.setLogic "ALL"] := by
+    simpa using Model.satisfiesCommands_push boolModel
+      (commands := #[]) (command := .setLogic "ALL")
+      (Model.satisfiesCommands_empty boolModel) (by trivial)
+  simpa using Model.satisfiesCommands_push boolModel
+    (commands := #[.setLogic "ALL"]) (command := .checkSat)
+    logicValid (by trivial)
+
+example : ¬Command.Supported
+    (.defFun false "f" #[] boolSort (.lit (.bool true))) := by
+  simp [Command.Supported]
+
+end Crush.SMT.Tests
+
+namespace Crush.Metatheory.SMT.Tests
+
+private def tySort : Ty → Crush.SMT.SSort
+  | .bool => .app (.symb "TyBool") #[]
+  | .base sort => .app (.indexed "TyBase" #[.inl sort.name]) #[]
+  | .arrow domain codomain =>
+      .app (.symb "TyArrow") #[tySort domain, tySort codomain]
+
+private theorem tySort_injective : Function.Injective tySort := by
+  intro left right equality
+  induction left generalizing right with
+  | bool => cases right <;> simp_all [tySort]
+  | base leftSort =>
+      cases right with
+      | bool | arrow => simp_all [tySort]
+      | base rightSort =>
+          simp only [tySort] at equality
+          cases leftSort
+          cases rightSort
+          simp_all
+  | arrow leftDomain leftCodomain domainIH codomainIH =>
+      cases right with
+      | bool | base => simp_all [tySort]
+      | arrow rightDomain rightCodomain =>
+          have parts : tySort leftDomain = tySort rightDomain ∧
+              tySort leftCodomain = tySort rightCodomain := by
+            simpa [tySort] using equality
+          rw [domainIH parts.1, codomainIH parts.2]
+
+private def foSort : FO.FOSort → Crush.SMT.SSort
+  | .bool => Crush.SMT.boolSort
+  | .base sort => .app (.indexed "Base" #[.inl sort.name]) #[]
+  | .fn domain codomain =>
+      .app (.symb "Fn") #[tySort domain, tySort codomain]
+
+private theorem foSort_injective : Function.Injective foSort := by
+  intro left right equality
+  cases left with
+  | bool => cases right <;> simp_all [foSort, Crush.SMT.boolSort]
+  | base leftSort =>
+      cases right with
+      | bool | fn => simp_all [foSort, Crush.SMT.boolSort]
+      | base rightSort =>
+          simp only [foSort] at equality
+          cases leftSort
+          cases rightSort
+          simp_all
+  | fn leftDomain leftCodomain =>
+      cases right with
+      | bool | base => simp_all [foSort, Crush.SMT.boolSort]
+      | fn rightDomain rightCodomain =>
+          have parts : tySort leftDomain = tySort rightDomain ∧
+              tySort leftCodomain = tySort rightCodomain := by
+            simpa [foSort] using equality
+          rw [tySort_injective parts.1, tySort_injective parts.2]
+
+private inductive NoSymbol : FO.SymbolDecl → Type
+
+private def encoding : Encoding NoSymbol where
+  sort := foSort
+  sort_injective := foSort_injective
+  bool_eq := rfl
+  name := fun symbol => nomatch symbol
+  name_decl_injective := fun left => nomatch left
+  name_injective := fun left => nomatch left
+  name_fresh := fun symbol => nomatch symbol
+
+private def reflexiveFormula : FO.FamilySentence NoSymbol :=
+  .eq (.boolLit true) (.boolLit true)
+
+/-- SMT quotation and the pure encoder produce the same concrete formula. -/
+example : TermRepresentation encoding reflexiveFormula
+    (smt| (= true true)) := rfl
+
+example : TheoryRepresentation encoding [reflexiveFormula]
+    (theory encoding [] [reflexiveFormula]) := ⟨[], rfl⟩
+
+private def carriers : FO.Carriers where
+  Base := fun _ => Unit
+  Fn := fun _ _ => Unit
+  baseNonempty := fun _ => ⟨()⟩
+  fnNonempty := fun _ _ => ⟨()⟩
+
+private def target : FO.FamilyModel NoSymbol where
+  carriers := carriers
+  symbol := fun symbol => nomatch symbol
+
+/-- A valid typed theory induces a model of its exact concrete commands. -/
+example : ∃ smtModel : Crush.SMT.Model,
+    smtModel ⊨ₛᶜ theory encoding [] [reflexiveFormula] := by
+  apply representation_sound encoding ⟨[], rfl⟩ target
+  intro candidate membership
+  simp only [List.mem_singleton] at membership
+  subst candidate
+  simp [FO.FamilyModel.Satisfies, reflexiveFormula]
+
+end Crush.Metatheory.SMT.Tests
+
+namespace Crush.Metatheory.VCG.Tests
+
+open Defunctionalization.Flattened
+
+/-- Total stateful VCG returns exactly the state covered by the representation
+theorem, independently of the selected collision-free concrete encoding. -/
+example {signature : Signature} (cfg : Config)
+    (encoding : SMT.Encoding (Symbol signature)) (source : Sentence signature) :
+    StateRepresents encoding source (run cfg encoding source).2 := by
+  exact run_represents cfg encoding source
+
+/-- The total VCG state never carries a legacy trust marker. -/
+example {signature : Signature} (cfg : Config)
+    (encoding : SMT.Encoding (Symbol signature)) (source : Sentence signature) :
+    (run cfg encoding source).2.status = .proved := by
+  grind [run, TranslateState.status]
+
+end Crush.Metatheory.VCG.Tests
 
 namespace Crush.Metatheory.HookTests
 

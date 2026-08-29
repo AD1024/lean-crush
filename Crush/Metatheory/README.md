@@ -1,113 +1,208 @@
 # Crush defunctionalization metatheory
 
-This directory is the proof-facing model of Crush's higher-order translation.
-The live translator still consumes Lean `Expr`; the metatheory deliberately
-separates semantic correctness from that reification/refinement boundary.
+This directory formalizes the supported path from Lean syntax to concrete SMT
+commands while keeping each semantic boundary explicit:
 
-## Mathematical notation
+```text
+Lean.Expr
+  -- structural reification --> HO.Term
+  -- total defunctionalization --> FO family theory
+  -- represented encoding --> SMT commands
+```
 
-Import `Crush.Metatheory.Notation` and write `open scoped Crush.Metatheory` to
-enable the proof-facing notation. Inline comments beside each declaration in
-`Notation.lean` give its precise meaning. The main forms are
-`⟦e⟧[M, ρ]` for denotation, `M ⊨ φ` and `M ⊨ᵀ T` for satisfaction,
-`𝒟⟦e⟧` for core defunctionalization, `⌊τ⌋` and `⌊Γ⌋^⋆` for erasure,
-`vₛ ≈[R, τ] vₜ` and `ρₛ ≈ᵥ[R] ρₜ` for the logical relations, and `FV(e)`
-for free-variable positions.
+The final conclusion is unsatisfiability of the reified HO sentence. There is no
+claimed denotation for arbitrary `Lean.Expr`, and solver correctness remains a
+separate concern.
 
-## Worklist status
+## Main results
 
-1. **Intrinsically typed HO and FO languages — complete.** See `HO/Core.lean`,
-   `FO/Core.lean`, and `FO/Family.lean`.
-2. **Model semantics — complete.** See `HO/Semantics.lean`, `FO/Semantics.lean`, and
-   `FO/FamilySemantics.lean`.
-3. **Total collection and classic defunctionalization — complete.** See
-   `Defunctionalization/Collect.lean`, `Annotate.lean`, and `Core.lean`.
-4. **Source/target logical relation — complete for the classic verified core.**
-   See `Defunctionalization/LogicalRelation.lean`.
-5. **Fundamental lemma — complete for every modeled source constructor.** See
-   `Defunctionalization/Fundamental.lean`.
-6. **Model extension and target-unsat implies source-unsat — complete.** Exact
-   capture reconstruction, closure validity, and the final contrapositive
-   are in `Defunctionalization/ModelExtension.lean`.
-7. **Flattened application and partial-application eta — complete at the typed
-   semantic layer.** `EtaCorrectness.lean` proves eta normalization preserves
-   denotation. `FlattenedApplication.lean` gives the production n-ary symbol a
-   canonical semantics and proves one-symbol application-spine preservation.
-8. **Guarded subtype encodings — complete for the generic contract, `Nat ↪ Int`,
-   and optional guarded fields.** See `Guarded/Encoding.lean`. The live
-   `wfCondition` and `guardSort` paths use named syntax constructors matching the
-   proved guard shapes.
-9. **Route the live translator through the verified pass — complete for the
-   modeled fragment, with explicit fallback outside it.**
-   `Bridge/Type.lean` reifies normalized nondependent arrows, proves their
-   flattened telescope and `FO.appDecl`, and production `arrowShape?` and
-   `declareArrowSort` now retain and consume that witness. `Bridge/Capture.lean`
-   proves exact occurrence membership and uniqueness for the total production
-   capture collector used by `emitClosure`, and defines the exact typed
-   `ClosureCaptureCertificate`. `Bridge/Term.lean` and `Bridge/Reify.lean` now
-   implement typed signature/context lookup, typed smart constructors for every
-   modeled term former, executable reification of the modeled Lean fragment, and
-   proof-producing closure certification. Production closure declarations route
-   capture types through these same `TypeBridge` values. `emitClosure` now invokes
-   `certifyLocalClosure?` and consumes its proof-backed context for the
-   modeled fragment, including finite signatures of nondependent uninterpreted
-   constants; unsupported closures take an explicit fallback. Full
-   `ProductionClosure.lean` proves the actual arbitrary-arity closure equation:
-   the exact-capture constructor followed by production's single flattened
-   `app` denotes the fully applied source lambda. `Bridge/Command.lean` makes live
-   app declarations, closure declarations, and guarded defining assertions
-   proof-carrying; `TranslateState` retains those command certificates plus the
-   dependent semantic closure proof referenced by each verified equation.
-   `emitCertifiedCommand` atomically emits the command stored in its certificate,
-   ruling out stateful command/certificate drift.
-   Production structural-symbol allocation now maintains a proof-carrying trace
-   with duplicate-free emitted names; `key_eq_of_name_eq` proves allocation
-   injectivity, and live tests cover fresh allocation and same-key reuse.
-   `LiveCertifiedConstant` now ties a live `Expr` to the exact de Bruijn constant
-   returned by its finite `SignatureBridge`, carries the constant-indexed
-   canonical semantic certificate, and is retained with the emitted production
-   symbol by `defaultApp`; live tests check that symbol against the injective
-   allocation trace. Every app declaration, closure declaration, and closure
-   equation now derives its principal structural dependencies from its own
-   `CommandCertificate`; `emitCertifiedStructuralCommand` snapshots the allocation
-   trace and retains a proof that each dependency belongs to it. The restricted
-   certified handler path described below runs before trusted lowerings.
-10. **Certified built-in and user-extension hooks — complete for restricted
-    flattened primitive mappings.**
-    `Hooks.lean` defines the arbitrary-arity `TermHookCertificate` preservation
-    contract and reuses guarded `Encoding` as `SortHookCertificate`. It also
-    defines `CanonicalTermHookCertificate`, which quantifies over every source
-    model and fixes Crush's actual canonical model-extension relation; this
-    prevents vacuous certification by choosing an always-true relation. Live
-    registry entries carry `HandlerTrust`; all existing unrestricted attributes
-    are explicitly `.trustedBoundary`, never implicitly certified.
-    `CanonicalConstantHookCertificate` further indexes the contract by the exact
-    intrinsic constant, and `flattenedDenote_canonical_related` proves the
-    production flattened interpretation satisfies it at every modeled type.
-    The live reifier constructs and retains this certificate for supported
-    `defaultApp` declarations. `PrimitiveHookCertificate` separates the proved
-    canonical preservation theorem from the explicit `LeanDeclarationDenotes`
-    and `SolverSymbolDenotes` assumptions. The proof-erased
-    `CertifiedPrimitiveMapping` constructor preserves those declaration/symbol
-    indices at runtime; `@[crush_certified_lower]` registers only that restricted
-    mapping, derives its handler mechanically, checks flattened arity, and records
-    successful dispatch. Boolean `Not` dogfoods the path, and `Test.Extension`
-    constructs and executes a user-defined certified primitive. Arbitrary
-    metaprogram handlers remain explicitly trusted rather than certified.
+The flattened intrinsic translation is total and proof-producing:
 
-## Current trusted/refinement boundary
+- `Defunctionalization/TranslationResult.lean` retains the translated term,
+  declarations, closure equations, guards, extensionality formulas, and
+  primitive constraints in source order.
+- `Defunctionalization/Flattened/Translate.lean` defines total `translate`.
+- `Flattened/Currying.lean` proves `flatApp_eq_unarySpine`,
+  `completeApp_denote`, and `etaClosure_eq_partialSpine`.
+- `Flattened/Denotation.lean` proves `translate_denote` and
+  `flattened_refines_unary` in `canonicalModel`.
+- `Flattened/Theory.lean` proves simultaneous `generated_valid`,
+  `model_extension`, and `target_unsat_implies_source_unsat`.
 
-The proofs do not assume that arbitrary live `Expr` translation is correct.
-They prove the typed core transformations and expose the following obligations
-for the executable bridge:
+The concrete representation layer is deliberately relational; the existing raw
+SMT DSL is not made intrinsically typed:
 
-- reify supported nondependent Lean types and terms into the intrinsic source
-  language;
-- extend the current verified arrow witness through emitted SMT sort translation;
-- show those emitted finite declarations reify `ProductionSymbol`;
-- extend the restricted certified DSL when additional handler shapes are needed;
-  arbitrary metaprogram handlers intentionally remain trusted extensions;
-- connect production well-formedness discovery for recursive datatypes to a
-  recursively constructed guarded `Encoding`.
+- `SMT/Semantics.lean` defines the required raw-term and command semantics,
+  including semantic `CommandsUnsatisfiable`.
+- `SMT/Representation.lean` defines `SortRepresentation`,
+  `SymbolRepresentation`, `TermRepresentation`, `TheoryRepresentation`, and the
+  pure encoder. Term construction uses `(smt| ...)` wherever its syntax supports
+  the required dynamic expression.
+- `SMT/Soundness.lean` proves `representation_sound` and
+  `commands_unsat_implies_theory_unsat`.
 
-All theorems in this directory are free of proof placeholders.
+The live boundary is split by role:
+
+- `Reification/` recognizes the supported nondependent Lean fragment and returns
+  intrinsically typed terms with exact signature, context, constructor, and
+  capture witnesses. Reification is partial because unsupported Lean syntax is
+  outside the modeled fragment.
+- `VCG/Generate.lean` composes total HO-to-FO translation with FO-to-SMT encoding.
+- `VCG/Stateful.lean` defines total `VCG.run`; `run_represents` proves that its
+  exact `TranslateState.commands` represents the complete intrinsic theory.
+- `VCG/Soundness.lean` proves `encoded_unsat_implies_source_unsat` and the direct
+  executable specialization `run_unsat_implies_source_unsat`.
+
+The earlier unary encoding remains under the core defunctionalization modules as
+an independent semantic reference, with its logical-relation and model-extension
+proofs intact.
+
+## Core correctness theorems
+
+The main correctness argument is the following composition. Names below are
+shown relative to `Crush.Metatheory`.
+
+1. **Flattened term preservation**
+
+   `Defunctionalization.Flattened.translate_denote` in
+   [`Defunctionalization/Flattened/Denotation.lean`](Defunctionalization/Flattened/Denotation.lean)
+   proves that a translated FO term and its HO source have the same denotation
+   in the canonical model, after the source value is embedded in its target
+   representation.
+
+2. **Validity of generated obligations**
+
+   `Defunctionalization.Flattened.generated_valid` in
+   [`Defunctionalization/Flattened/Theory.lean`](Defunctionalization/Flattened/Theory.lean)
+   proves that every closure equation, guard, extensionality formula, and
+   primitive constraint generated by `translate` holds in the canonical target
+   model.
+
+3. **Source-model extension**
+
+   `Defunctionalization.Flattened.model_extension` in
+   [`Defunctionalization/Flattened/Theory.lean`](Defunctionalization/Flattened/Theory.lean)
+   combines term preservation and generated validity: every model satisfying a
+   closed HO formula extends to a model satisfying its complete translated FO
+   theory.
+
+4. **Defunctionalization unsatisfiability reflection**
+
+   `Defunctionalization.Flattened.target_unsat_implies_source_unsat` in
+   [`Defunctionalization/Flattened/Theory.lean`](Defunctionalization/Flattened/Theory.lean)
+   proves that unsatisfiability of the complete translated FO theory implies
+   unsatisfiability of the source HO sentence.
+
+5. **Exact FO-to-SMT representation**
+
+   `VCG.commands_represents` in
+   [`VCG/Generate.lean`](VCG/Generate.lean) proves that the concrete commands
+   returned by the pure VCG encoder are exactly a `TheoryRepresentation` of the
+   complete translated FO theory. The underlying encoder theorem is
+   `SMT.encode_translation` in
+   [`SMT/Representation.lean`](SMT/Representation.lean).
+
+6. **Semantic soundness of SMT representation**
+
+   `SMT.representation_sound` in
+   [`SMT/Soundness.lean`](SMT/Soundness.lean) proves that every model of a
+   represented typed FO theory induces a model satisfying the exact raw SMT
+   command sequence. Its contrapositive-facing corollary
+   `SMT.commands_unsat_implies_theory_unsat` reflects semantic command
+   unsatisfiability to FO-theory unsatisfiability.
+
+7. **Exact stateful execution**
+
+   `VCG.run_represents` in
+   [`VCG/Stateful.lean`](VCG/Stateful.lean) proves that the exact command array in
+   the fresh `TranslateState` returned by `VCG.run` represents the complete
+   translated theory, including command order.
+
+8. **Composed intrinsic VCG soundness**
+
+   `VCG.StateRepresents.unsat_source` and
+   `VCG.run_unsat_implies_source_unsat` in
+   [`VCG/Soundness.lean`](VCG/Soundness.lean) compose the preceding results:
+
+   ```text
+   semantic unsatisfiability of VCG.run's exact SMT commands
+       ⇒ unsatisfiability of the represented FO theory
+       ⇒ unsatisfiability of the intrinsic HO source sentence
+   ```
+
+9. **Structural Lean boundary**
+
+   `VCG.encoded_unsat_implies_source_unsat` in
+   [`VCG/Soundness.lean`](VCG/Soundness.lean) additionally accepts a
+   `Reification.Reifies` witness for a `Lean.Expr`. Its conclusion deliberately
+   remains unsatisfiability of the reified HO sentence: the witness establishes
+   typed structural correspondence, not a denotational semantics for arbitrary
+   Lean expressions.
+
+The principal supporting application and closure results are
+`Defunctionalization.Flattened.TypedArguments.flatApp_eq_unarySpine`,
+`Defunctionalization.Flattened.TargetArguments.completeApp_denote`, and
+`Defunctionalization.Flattened.etaClosure_eq_partialSpine` in
+[`Defunctionalization/Flattened/Currying.lean`](Defunctionalization/Flattened/Currying.lean).
+
+Here `Crush.SMT.CommandsUnsatisfiable` is a semantic proposition about the
+command sequence. These theorems do not assert that an external solver's
+reported `unsat` verdict is correct. They also apply to the total intrinsic
+`VCG.run` route, not automatically to the legacy direct `emitTerm` procedure
+described below.
+
+## Proved and trusted execution
+
+`VCG.TranslationStatus` makes the boundary structural:
+
+- `proved` retains the intrinsic source, exact commands, and
+  `TheoryRepresentation` theorem;
+- `trusted` retains commands and nonempty `TrustReason`s but exposes no semantic
+  representation theorem.
+
+The legacy production `emitTerm : Lean.Expr → TranslateM SMT.Term` is always
+marked `TrustReason.direct` at its root. Local certified closures and primitives
+still retain useful typed evidence, but they do not promote that combined,
+extensible direct route to a whole-run proof. Unrestricted term/sort handlers,
+lowerings, result lowerings, uncertified closures/constants, and native-HO mode
+record additional trust reasons.
+
+After successful `Reification.reifySentence?`, `VCG.run` is the non-partial
+defunctionalization and command-generation route. It starts with fresh translation
+bookkeeping and therefore cannot inherit commands or trust markers from a legacy
+run.
+
+## Notation
+
+Import `Crush.Metatheory.Notation` and write
+`open scoped Crush.Metatheory` to enable the shared mathematical notation:
+
+| Notation | Meaning |
+|---|---|
+| `⟦e⟧[M, ρ]` | denotation of `e` in model `M` under valuation `ρ` |
+| `M ⊨ φ` | model satisfaction of a closed formula |
+| `M ⊨ᵀ T` | model satisfaction of every formula in a theory |
+| `⌊τ⌋` | first-order erasure of a higher-order type |
+| `⌊Γ⌋^⋆` | pointwise first-order erasure of a context |
+| `𝒟⟦e⟧` | classic unary defunctionalization |
+| `𝓕⟦e⟧` | total flattened translation result; declared by `Flattened/Translate.lean` |
+| `vₛ ≈[R, τ] vₜ` | source and target values related at type `τ` |
+| `ρₛ ≈ᵥ[R] ρₜ` | pointwise related source and target valuations |
+| `FV(e)` | duplicate-free free-variable positions of `e` |
+
+The flattened development also uses named type shorthands where notation would
+hide too much structure:
+
+| Shorthand | Expanded type |
+|---|---|
+| `TargetTerm σ Γ τ` | a family FO term over flattened symbols in `⌊Γ⌋^⋆`, of sort `⌊τ⌋` |
+| `TargetFormula σ Γ` | a Boolean flattened target term in `⌊Γ⌋^⋆` |
+| `TargetSentence σ` | a closed flattened target formula |
+| `TargetTheory σ` | a list of flattened target sentences |
+| `TargetValuation M Γ` | a valuation of `⌊Γ⌋^⋆` in `canonicalModel M` |
+
+Proof-oriented code follows the usual binder convention: `σ` for a signature,
+`Γ` and `Δ` for contexts, `τ` for a type, `φ` for a formula, `M` for a model,
+`ρ` for a source valuation or renaming, and `ν` for a target valuation. Longer
+descriptive names remain preferable in executable translation code and whenever
+two objects of the same mathematical role must be distinguished.

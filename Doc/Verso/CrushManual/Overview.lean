@@ -248,7 +248,7 @@ Different extension points affect different pipeline stages:
 
 * Use `u[f]`, `d[f]`, `@[crush_unfold]`, or `@[crush_defeq]` when ordinary Lean
   equations are enough.
-* Use `crush_map`, `@[crush_lower]`, or `@[crush_translate]` when the solver
+* Use `crush_map`, `@[crush_translate_head]`, or `@[crush_translate]` when the solver
   should see a custom SMT operation.
 * Use `crush_map_sort` or `@[crush_translate_sort]` when a Lean type itself
   should use an SMT theory sort.

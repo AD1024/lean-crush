@@ -216,12 +216,12 @@ def UnsignedGreater {width : Nat} (x y : BitVec width) : Prop :=
 def UnsignedGreaterEqual {width : Nat} (x y : BitVec width) : Prop :=
   x ≥ y
 
-@[crush_lower UnsignedGreater]
+@[crush_translate_head UnsignedGreater]
 def lowerUnsignedGreater : LoweringHandler := fun ctx => do
   let #[_, x, y] := ctx.args | return none
   return some (smt| (bvugt $(← ctx.emitTerm x) $(← ctx.emitTerm y)))
 
-@[crush_lower UnsignedGreaterEqual]
+@[crush_translate_head UnsignedGreaterEqual]
 def lowerUnsignedGreaterEqual : LoweringHandler := fun ctx => do
   let #[_, x, y] := ctx.args | return none
   return some (smt| (bvuge $(← ctx.emitTerm x) $(← ctx.emitTerm y)))
@@ -232,12 +232,12 @@ def SignedGreater {width : Nat} (x y : BitVec width) : Prop :=
 def SignedGreaterEqual {width : Nat} (x y : BitVec width) : Prop :=
   BitVec.sle y x
 
-@[crush_lower SignedGreater]
+@[crush_translate_head SignedGreater]
 def lowerSignedGreater : LoweringHandler := fun ctx => do
   let #[_, x, y] := ctx.args | return none
   return some (smt| (bvsgt $(← ctx.emitTerm x) $(← ctx.emitTerm y)))
 
-@[crush_lower SignedGreaterEqual]
+@[crush_translate_head SignedGreaterEqual]
 def lowerSignedGreaterEqual : LoweringHandler := fun ctx => do
   let #[_, x, y] := ctx.args | return none
   return some (smt| (bvsge $(← ctx.emitTerm x) $(← ctx.emitTerm y)))
@@ -245,7 +245,7 @@ def lowerSignedGreaterEqual : LoweringHandler := fun ctx => do
 def TripleDistinct (x y z : Int) : Prop :=
   x ≠ y ∧ x ≠ z ∧ y ≠ z
 
-@[crush_lower TripleDistinct]
+@[crush_translate_head TripleDistinct]
 def lowerTripleDistinct : LoweringHandler := fun ctx => do
   let #[x, y, z] := ctx.args | return none
   return some

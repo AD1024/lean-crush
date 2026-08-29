@@ -22,16 +22,27 @@ import Crush.Metatheory.Defunctionalization.Fundamental
 import Crush.Metatheory.Defunctionalization.ModelExtension
 import Crush.Metatheory.Defunctionalization.FlattenedApplication
 import Crush.Metatheory.Defunctionalization.ProductionClosure
+import Crush.Metatheory.Defunctionalization.Flattened.Denotation
+import Crush.Metatheory.Defunctionalization.Flattened.Theory
 import Crush.Metatheory.Guarded.Encoding
 import Crush.Metatheory.Hooks
-import Crush.Metatheory.Bridge.Type
-import Crush.Metatheory.Bridge.Command
-import Crush.Metatheory.Bridge.Capture
-import Crush.Metatheory.Bridge.Term
-import Crush.Metatheory.Bridge.Reify
+import Crush.Metatheory.SMT.Semantics
+import Crush.Metatheory.SMT.Representation
+import Crush.Metatheory.SMT.Soundness
+import Crush.Metatheory.Reification.Type
+import Crush.Metatheory.VCG.Command
+import Crush.Metatheory.Reification.Capture
+import Crush.Metatheory.Reification.Term
+import Crush.Metatheory.Reification.Reify
+import Crush.Metatheory.Reification.Witness
+import Crush.Metatheory.VCG.Trust
+import Crush.Metatheory.VCG.Status
+import Crush.Metatheory.VCG.Generate
 import Crush.Frontend.Config
 import Crush.Frontend.Collect
 import Crush.Translation.Monad
+import Crush.Metatheory.VCG.Stateful
+import Crush.Metatheory.VCG.Soundness
 import Crush.Translation.Attr
 import Crush.Translation.Unfold
 import Crush.Translation.Preprocess
@@ -54,7 +65,7 @@ a user-extensible, metaprogrammed translation layer.
 This root module re-exports the public API. `import Crush` gives you:
 
 * the `crush` tactic (`Crush.Frontend.Tactic`),
-* the `@[crush_translate]` and `@[crush_lower]` attributes, `(smt| ...)` quotations,
+* the `@[crush_translate]` and `@[crush_translate_head]` attributes, `(smt| ...)` quotations,
   and `crush_map`/`crush_map_sort` sugar
   (`Crush.Translation.Attr`, `Crush.SMT.Quote`, `Crush.Translation.Builtins`),
 * the `@[crush_reconstruct]` attribute for extending checked proof replay

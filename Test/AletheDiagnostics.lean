@@ -9,7 +9,7 @@ open Crush Crush.SMT
 def MultipleOfFive (value : Int) : Prop :=
   value % 5 = 0
 
-@[crush_lower MultipleOfFive]
+@[crush_translate_head MultipleOfFive]
 def lowerMultipleOfFive : LoweringHandler := fun ctx => do
   let #[value] := ctx.args | return none
   return some (.app (.indexed "divisible" #[.inr 5]) #[← ctx.emitTerm value])

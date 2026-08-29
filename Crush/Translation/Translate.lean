@@ -5,7 +5,7 @@ import Crush.Translation.Monad
 import Crush.Translation.Attr
 import Crush.Translation.Theories
 import Crush.Translation.HOEncoding
-import Crush.Metatheory.Bridge.Reify
+import Crush.Metatheory.Reification.Reify
 open Lean Meta
 
 /-!
@@ -586,10 +586,14 @@ mutual
   partial def emitSort (e : Expr) : TranslateM SSort := do
     let e ← instantiateMVars e
     let handlers ← if ← hasSortHandlers then getSortHandlers else pure #[]
-    if let some s ← trySortHandlers handlers e then return s
+    if let some s ← trySortHandlers handlers e then
+      TranslateM.markTrusted (.sortHandler e)
+      return s
     let normalized ← whnf e
     if normalized != e then
-      if let some s ← trySortHandlers handlers normalized then return s
+      if let some s ← trySortHandlers handlers normalized then
+        TranslateM.markTrusted (.sortHandler normalized)
+        return s
     let e := normalized
     match e with
     | .const ``Bool _ => return .app (.symb "Bool") #[]
@@ -668,15 +672,15 @@ mutual
       TranslateM.emitCommand (.declSort sortName 0)
       -- `app` takes the function value plus the flattened argument sorts.
       let ⟨argumentImages, argumentBridges⟩ ←
-        Metatheory.Bridge.mapSortImagesM
+        Metatheory.VCG.mapSortImagesM
           (fun bridge => emitSort bridge.expr) shape.verified.flatten.1
       let resultBridge := shape.verified.flatten.2
-      let resultImage : Metatheory.Bridge.SortImage :=
+      let resultImage : Metatheory.VCG.SortImage :=
         { bridge := resultBridge, smt := ← emitSort resultBridge.expr }
       let argSorts := (argumentImages.map (·.smt)).toArray
       let resSort := resultImage.smt
       let appCommand := productionAppDeclaration appName sort argSorts resSort
-      TranslateM.emitCertifiedStructuralCommand (.app {
+      TranslateM.emitStructuralCommand (.app {
         arrow := shape.verified
         name := appName
         functionSort := sort
@@ -807,25 +811,26 @@ mutual
     -- Retain the same typed bridge used by `ClosureCaptureCertificate` and its
     -- `closureDecl_args` theorem. `preserveExpr` keeps production's existing
     -- sort-dispatch identity while the bridge supplies the intrinsic type.
-    let certifiedClosure? ← Metatheory.Bridge.certifyLocalClosure? lam captures
-    let verifiedClosureIndex : Option Nat ←
+    let certifiedClosure? ← Metatheory.Reification.certifyLocalClosure? lam captures
+    let evidence : Metatheory.VCG.ClosureEvidence ←
       match certifiedClosure? with
-      | some certified => do
-          let index ← TranslateM.recordVerifiedClosure (Dynamic.mk certified)
-          pure (some index)
-      | none => pure none
+      | some certified => pure (.proved certified)
+      | none => do
+          let reason := Metatheory.VCG.TrustReason.closure lam
+          TranslateM.markTrusted reason
+          pure (.trusted reason)
     let captureTypes ←
       match certifiedClosure? with
       | some certified => pure certified.captureTypes
       | none => captures.mapM fun fid => do
-          Metatheory.Bridge.reifyType (← fid.getType) (preserveExpr := true)
+          Metatheory.Reification.reifyType (← fid.getType) (preserveExpr := true)
     let ⟨captureImages, captureBridges⟩ ←
-      Metatheory.Bridge.mapSortImagesM
+      Metatheory.VCG.mapSortImagesM
         (fun bridge => emitSort bridge.expr) captureTypes.toList
     let capSorts := (captureImages.map (·.smt)).toArray
     let (arrowSort, _) ← declareArrowSort lamTy
     let closureCommand := productionClosureDeclaration cloName capSorts arrowSort
-    TranslateM.emitCertifiedStructuralCommand (.closure {
+    TranslateM.emitStructuralCommand (.closure {
       arrow := shape.verified
       name := cloName
       captures := captureImages
@@ -851,7 +856,7 @@ mutual
     let rawEquation := productionClosureEquation appName cloApp parameterRefs bodyTerm
     -- The defining equation holds at well-formed arguments and captures only; the body is
     -- a Lean term and has no meaning at a value outside the encoded type's image.
-    let captureTys := captureTypes.map Metatheory.Bridge.TypeBridge.expr
+    let captureTys := captureTypes.map Metatheory.Reification.TypeBridge.expr
     let guard ← binderGuard ((binders ++ paramBinders).map (·.1))
       (captureTys ++ shape.args)
     let axiomBody :=
@@ -860,7 +865,7 @@ mutual
       | some g => SMT.Term.symbApp "=>" #[g, rawEquation]
     let allBinders := binders ++ paramBinders
     let equationCommand := productionClosureAssertion allBinders axiomBody
-    TranslateM.emitCertifiedStructuralCommand (.closureEquation {
+    TranslateM.emitStructuralCommand (.closureEquation {
       arrow := shape.verified
       appName
       closure := cloApp
@@ -872,7 +877,7 @@ mutual
       guardedEquation := axiomBody
       guardedEquation_eq := rfl
       binders := allBinders
-      verifiedClosureIndex
+      evidence
       command := equationCommand
       command_eq := rfl })
     let capArgs ← captures.mapM fun fid => emitTerm (.fvar fid)
@@ -1215,6 +1220,7 @@ mutual
   array-empty check. -/
   partial def emitTerm (e : Expr) : TranslateM SMT.Term := do
     let e ← instantiateMVars e
+    TranslateM.markDirect e
     -- A quantifier-bound variable renders as its SMT name, never a declaration.
     if let .fvar fid := e then
       if let some vname ← TranslateM.boundVar? fid then
@@ -1230,12 +1236,24 @@ mutual
         declare  := declareViaThunk }
       for h in (← getTranslationHandlers) do
         if let some t ← h ctx then
+          TranslateM.markTrusted (.termHandler e)
           return t
     -- Head-indexed lowerings are the efficient extension path for one specific
     -- constant. General handlers above retain first refusal so existing user
     -- overrides continue to supersede built-in lowerings.
     let (fn, args) := getAppFnArgs' e
     if let .const head _ := fn then
+      if ← hasCertifiedDef head then
+        let ctx : TranslationCtx := {
+          fn, args
+          emitTerm := emitTerm
+          emitSort := emitSort
+          declare  := declareViaThunk }
+        let some result ← CertifiedPrimitiveMapping.lowerDef head ctx
+          | throwError "crush: `@[crush_certified_def]` could not reduce `{head}` at \
+              this application. For symbolic recursion, register its proved equations \
+              with `@[crush_unfold]` or `@[crush_defeq]` instead."
+        return result
       if ← hasCertifiedLoweringsFor head then
         let ctx : TranslationCtx := {
           fn, args
@@ -1243,9 +1261,10 @@ mutual
           emitSort := emitSort
           declare  := declareViaThunk }
         for mapping in (← getCertifiedLoweringsFor head) do
-          if let some t ← mapping.handler ctx then
-            TranslateM.recordCertifiedHookUse mapping.declaration mapping.targetSymbol
-            return t
+          if let some result ← mapping.lower ctx then
+            if let some targetSymbol := result.targetSymbol? then
+              TranslateM.recordCertifiedHookUse mapping.declaration targetSymbol
+            return result.term
       if ← hasLoweringsFor head then
         let ctx : TranslationCtx := {
           fn, args
@@ -1254,6 +1273,7 @@ mutual
           declare  := declareViaThunk }
         for lowering in (← getLoweringsFor head) do
           if let some t ← lowering ctx then
+            TranslateM.markTrusted (.lowering head)
             return t
     -- Result-indexed lowerings cover terms whose application head is unstable.
     -- Direct type heads are cheap; only syntactic function types require opening
@@ -1269,6 +1289,7 @@ mutual
             declare  := declareViaThunk }
           for lowering in (← getResultLoweringsFor resultHead) do
             if let some t ← lowering ctx then
+              TranslateM.markTrusted (.resultLowering resultHead)
               return t
     let logicalClassProjection ← isLogicalClassProjection fn
     -- A logical class field may itself return a predicate/relation before all
@@ -1333,6 +1354,7 @@ mutual
       -- non-dependent `ArrowShape`.
       if (← arrowShape? (← inferType e)).isSome then
         if mode == .native then
+          TranslateM.markTrusted (.nativeHO e)
           return some (← emitNativeLambda e)
         return some (← emitClosure e)
       return none
@@ -1366,6 +1388,7 @@ mutual
         let sargs ← args.mapM emitTerm
         -- In native mode the variable *is* a function: apply it directly.
         if mode == .native then
+          TranslateM.markTrusted (.nativeHO e)
           return some (.app (.symb vname) sargs)
         return some (.app (.symb appSym) (#[.const vname] ++ sargs))
     -- (4) A non-symbol head (`(if c then f else g) x`, a projection, a let, ...)
@@ -1378,6 +1401,7 @@ mutual
             let sfn ← emitFunValue fn
             let sargs ← args.mapM emitTerm
             if mode == .native then
+              TranslateM.markTrusted (.nativeHO e)
               -- SMT-LIB application syntax requires an identifier in head position.
               -- A local `let` gives an arbitrary function value such a name.
               let name ← TranslateM.freshSymbol "hof"
@@ -1393,12 +1417,15 @@ mutual
         -- need it asserted explicitly (verified load-bearing).
         if mode != .native then
           emitExtensionality ty
+        else
+          TranslateM.markTrusted (.nativeHO e)
         return some (smt| (= $(← emitFunValue a) $(← emitFunValue b)))
       return none
     | _ => return none
 
   /-- A native higher-order `lambda` term, for HO-capable backends. -/
   partial def emitNativeLambda (lam : Expr) : TranslateM SMT.Term := do
+    TranslateM.markTrusted (.nativeHO lam)
     let lamTy ← whnf (← inferType lam)
     let some shape ← arrowShape? lamTy
       | throwError "crush: internal — native lambda of non-arrow type {lamTy}"
@@ -1411,6 +1438,8 @@ mutual
   partial def emitFunValue (e : Expr) : TranslateM SMT.Term := do
     let e ← instantiateMVars e
     let mode := (← TranslateM.getConfig).hoMode
+    if mode == .native then
+      TranslateM.markTrusted (.nativeHO e)
     if e.isLambda then
       return ← if mode == .native then emitNativeLambda e else emitClosure e
     if let .fvar fid := e then
@@ -1901,9 +1930,11 @@ mutual
     -- behavior. Success ties `fn` to an exact intrinsic constant reference and
     -- its canonical flattened semantic certificate.
     let certifiedConstant? ← try
-      let .pack signatureBridge ← Metatheory.Bridge.reifyTermSignature appExpr
-      pure (Metatheory.Bridge.certifyConstantIn? signatureBridge fn)
+      let .pack signatureBridge ← Metatheory.Reification.reifyTermSignature appExpr
+      pure (Metatheory.Reification.certifyConstantIn? signatureBridge fn)
     catch _ => pure none
+    if certifiedConstant?.isNone then
+      TranslateM.markTrusted (.constant fn)
     -- Preserve aliases for `emitSort`: a user sort handler may intentionally target a
     -- `def`-defined type. Structural keys normalize type components separately.
     let resTy ← instantiateMVars (← inferType appExpr)
@@ -1931,7 +1962,7 @@ mutual
       let resSort ← emitSort resTy
       TranslateM.emitCommand (.declFun name argSorts resSort)
       if let some certified := certifiedConstant? then
-        let emission : Metatheory.Bridge.LiveCertifiedConstantEmission := {
+        let emission : Metatheory.Reification.LiveCertifiedConstantEmission := {
           symbol := name
           constant := certified }
         let _ ← TranslateM.recordVerifiedConstant (Dynamic.mk emission)

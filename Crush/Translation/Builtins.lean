@@ -30,7 +30,7 @@ uninterpreted symbol (with its declaration), write a full handler and use the
 Core logical forms and heavily type-directed theory mappings remain in the
 structural translator in `Crush/Translation/Translate.lean`. Library-level defaults
 that fit head dispatch, including the supported `String` operations, dogfood
-`@[crush_lower]` in `Crush/Translation/DefaultLowerings.lean`. A general user handler
+`@[crush_translate_head]` in `Crush/Translation/DefaultLowerings.lean`. A general user handler
 still runs before both paths and can override either.
 -/
 
