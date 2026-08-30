@@ -57,18 +57,22 @@ of the production run:
 
 - `CertifiedDataEnv.Representation`;
 - `CertifiedDataEnv.GuardRepresentation`;
-- `ProductionAgreement`, including the complete
-  `GuardedTheoryRepresentation` after annotation normalization.
+- the shared encoding and datatype/guard representation premises needed by
+  `ProductionAgreement.build?`.
 
 Consequently, the reflection theorem for `CertifiedDataEnv.emitted` exists, but
-live production cannot yet construct its `ProductionAgreement` automatically.
+live production cannot yet supply all inputs to its executable agreement check.
+Once those static representation witnesses exist, `ProductionAgreement.build?`
+compares the complete normalized production snapshot with the exact intrinsic
+encoding and returns proof-carrying agreement only when structural equality
+succeeds.
 
 Required completion criterion:
 
 1. build the shared `SMT.Encoding`, datatype representation, guard
    representation, and declaration trace from the final allocator state;
-2. construct `ProductionAgreement`, including command order and every
-   surrounding assertion/declaration;
+2. run `ProductionAgreement.build?`, whose structural comparison checks command
+   order and every surrounding assertion/declaration;
 3. expose semantic reflection only from a `TranslateState` carrying that
    completed witness.
 
@@ -185,8 +189,8 @@ exhaustiveness, and rank properties separately.
 
 1. Construct production `SMT.Encoding` and block/guard representations from
    final allocator evidence.
-2. Construct whole-array `ProductionAgreement` during the live run; the exact
-   intrinsic sentence and reflection theorem are now retained.
+2. Run the proof-producing whole-array `ProductionAgreement.build?` during the
+   live run; the exact intrinsic sentence and reflection theorem are retained.
 3. Construct production `GuardRepresentation` and `GuardInterpretation` from final
    allocator evidence; the semantic constructors and unrestricted reflection
    theorem are now available.

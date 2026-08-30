@@ -255,4 +255,11 @@ instance : DecidableEq FunDef := fun left right => by
               injection equal with nameEq argsEq resultEq bodyEq
               exact ⟨nameEq, argsEq, resultEq, bodyEq⟩)
 
+/- Exact command equality becomes decidable once recursive terms, attributes,
+and function definitions have their explicit instances. Production agreement
+uses this instance to turn a successful whole-array comparison into an equality
+proof rather than comparing rendered strings or hashes. A regular comment is
+intentional: Lean documentation comments cannot attach to `deriving instance`. -/
+deriving instance DecidableEq for Command
+
 end Crush.SMT

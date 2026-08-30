@@ -137,8 +137,10 @@ The datatype extension now has a proved native-command core:
   When a whole fact is supported, the certificate also retains an exact
   environment-indexed `ReifiedSentenceFor`. `VCG/Production.lean` defines
   `ProductionAgreement`, which connects that sentence to the final live command
-  snapshot and derives source reflection; production still has to construct the
-  shared encoding and agreement witnesses from its final allocator state.
+  snapshot and derives source reflection. Its `build?` function performs an
+  exact structural whole-array check and returns the agreement proof on success;
+  production still has to construct the shared encoding and representation
+  witnesses from its final allocator state.
 - Production discovery first builds one read-only `DatatypePlan` containing the
   complete mutual member, constructor, and ground-field structure. Only after
   discovery finishes does `declareDatatype` allocate names and emit commands,

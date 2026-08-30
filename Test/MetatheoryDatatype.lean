@@ -627,6 +627,14 @@ example (certificate : CertifiedDataEnv)
     (guarding : SMT.Guarding
       (Symbol (certificate.env.signature ++ certificate.tail)))
     (represented : certificate.Representation guarding.encoding)
+    (guarded : certificate.GuardRepresentation guarding represented) :
+    Option (ProductionAgreement.Checked certificate guarding represented guarded) :=
+  ProductionAgreement.build?
+
+example (certificate : CertifiedDataEnv)
+    (guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail)))
+    (represented : certificate.Representation guarding.encoding)
     (guarded : certificate.GuardRepresentation guarding represented)
     (reified : Reification.ReifiedSentenceFor certificate.source certificate.env
       certificate.bridge)

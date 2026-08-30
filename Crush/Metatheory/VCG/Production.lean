@@ -97,6 +97,46 @@ structure ProductionAgreement (certificate : CertifiedDataEnv)
 
 namespace ProductionAgreement
 
+/-- The exact retained sentence together with checked whole-array production
+agreement. This packages the existential result of `build?` as data while the
+agreement itself remains proof-irrelevant. -/
+structure Checked (certificate : CertifiedDataEnv)
+    (guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail)))
+    (represented : certificate.Representation guarding.encoding)
+    (guarded : certificate.GuardRepresentation guarding represented) where
+  reified : ReifiedSentenceFor certificate.source certificate.env
+    certificate.bridge
+  agreement : ProductionAgreement certificate guarding represented guarded
+    reified
+
+/-- Check the completed production array against the exact guarded intrinsic
+array and return proof-carrying agreement only on structural equality. The
+reified fact is obtained from the environment-indexed certificate itself, so a
+caller cannot substitute a different intrinsic sentence. -/
+def build? {certificate : CertifiedDataEnv}
+    {guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail))}
+    {represented : certificate.Representation guarding.encoding}
+    {guarded : certificate.GuardRepresentation guarding represented} :
+    Option (Checked certificate guarding represented guarded) := by
+  cases retained : certificate.reified with
+  | none => exact none
+  | some reified =>
+      let expected := guardedCommands guarding certificate.guardCommands
+        reified.source
+      if equal : certificate.emitted.map stripAssertionAnnotation = expected then
+        exact some {
+          reified
+          agreement := {
+            retained
+            representation := by
+              rw [equal]
+              exact guardedCommands_represents guarding certificate.guardCommands
+                reified.source }}
+      else
+        exact none
+
 /-- Unsatisfiability of the exact live production snapshot reflects to the
 retained intrinsic sentence, provided the production encoding has one uniform
 guard interpretation for all datatype-lawful source models. -/
