@@ -62,7 +62,7 @@ first-order formulas by the untyped production SMT syntax, and the precise
 soundness theorem proved in Lean. It is written as a guide to the proof: every
 language and semantic object is introduced before its correctness theorem, and
 the final roadmap separates completed results from remaining trust boundaries.
-The theorem justifies the reified higher-order sentence and the exact commands
+The theorem justifies the reified higher-order theory and the exact semantic command set
 produced by the proved VCG route; it does not assume that an external solver's
 answer is correct and does not assign a denotation to arbitrary
 \texttt{Lean.Expr}.
@@ -92,14 +92,14 @@ The second and third arrows are total on their typed inputs. The principal
 semantic conclusion is:
 
 \begin{quote}
-If the exact raw commands returned by the proved VCG route are semantically
-unsatisfiable, then the reified higher-order source sentence is unsatisfiable.
+If the raw command set returned by the proved VCG route is semantically
+unsatisfiable, then the reified higher-order source theory is unsatisfiable.
 \end{quote}
 
 The proof is by countermodel construction. Starting from any model of the
 higher-order sentence, Lean constructs a model of the flattened first-order
-theory, then constructs a relational SMT model satisfying the exact encoded
-commands. Taking the contrapositive of those two constructions yields the
+theory, then constructs a relational SMT model satisfying every encoded
+command obligation. Taking the contrapositive of those two constructions yields the
 desired reflection of unsatisfiability.
 
 \subsection{Proof stages}
@@ -113,7 +113,7 @@ The argument is organized into five stages:
   \item Interpret the target in a canonical model built from a source model and
         prove term preservation plus validity of every generated obligation.
   \item Encode the typed target theory into raw SMT syntax and prove that every
-        target model induces a model of the exact command sequence.
+        target model induces a model of the exact semantic command set.
   \item Retain structural evidence for Lean reification and exact stateful VCG
         execution, while marking the remaining trusted paths explicitly.
 \end{enumerate}
@@ -816,7 +816,7 @@ return no result rather than entering the proved route.
 
 \begin{definition}[Proved VCG commands]
 For encoding $\mathcal E$ and source sentence $\varphi$, the pure VCG function
-computes $\flattr{\varphi}$ and then the exact command array
+computes $\flattr{\varphi}$ and then its command array
 $\Commands(\mathcal E,\varphi)$. Its result retains the theorem
 \[
  \Rep(\mathcal E,\Theory(\varphi),\Commands(\mathcal E,\varphi)).
@@ -964,8 +964,11 @@ conclusions are stated about the reified HO sentence.}
        generated obligation is valid in that same model.
  \item Every source model extends to a model of the complete flattened theory;
        hence target-theory unsatisfiability reflects to source unsatisfiability.
- \item The pure encoder produces an exact ordered representation in raw SMT
+ \item The pure encoder produces the exact semantic command set in raw SMT
        syntax, and every typed target model lifts to a model of those commands.
+       Production ordering and duplicate elimination are admitted because raw
+       satisfaction is membership-based; script validation separately checks
+       declaration-before-use ordering.
  \item Fresh stateful VCG execution retains the exact representation theorem and
        composes both reflection results.
  \item Supported Lean expressions retain typed structural reification evidence;

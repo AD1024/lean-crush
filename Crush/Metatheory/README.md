@@ -55,9 +55,12 @@ SMT DSL is not made intrinsically typed:
   including semantic `CommandsUnsatisfiable`.
 - `SMT/Representation.lean` defines the shared `Encoding`, the pure and
   guard-parameterized term encoders, and `TheoryRepresentation`. Exact syntax is
-  stated directly instead of being hidden behind equality-only representation
-  predicates. Term construction uses `(smt| ...)` wherever its syntax supports
-  the required dynamic expression.
+  retained as an exact semantic command set instead of an unachievable sequence
+  equality: production interleaves declarations/assertions and removes duplicate
+  occurrences, while raw command satisfaction is order- and multiplicity-free.
+  `checkScript` separately enforces concrete declaration-before-use ordering.
+  Term construction uses `(smt| ...)` wherever its syntax supports the required
+  dynamic expression.
 - `SMT/Model.lean` constructs the one induced raw model used by every encoded
   component. `ExtraGraph` adds derived native symbols only when their graph is
   disjoint from every encoded source identifier; `ModelExtension.lean` proves
@@ -138,9 +141,10 @@ The datatype extension now has a proved native-command core:
   for custom model-indexed guard constructions.
   Common-environment reification uses `ReifiedSentencesFor` and `reifyTheory?`
   to retain the exact ordered fact array. `VCG/Production.lean` defines
-  `TheoryAgreement`, whose `build?` performs an exact structural whole-array
-  check and whose reflection theorem covers the complete intrinsic source
-  theory. `SingleFactAgreement` is the singleton specialization for a retained
+  `TheoryAgreement`, whose `build?` performs an exact semantic command-set check
+  and whose reflection theorem covers the complete intrinsic source theory.
+  This admits production's interleaving and duplicate elimination, but no
+  missing or extra obligation. `SingleFactAgreement` is the singleton specialization for a retained
   fact. Production still has to invoke and store the aggregate witness and
   construct the shared encoding and representation witnesses from its final
   allocator state.
@@ -253,8 +257,8 @@ shown relative to `Crush.Metatheory`.
 
    `VCG.commands_represents` and `theoryCommands_represents` in
    [`VCG/Generate.lean`](VCG/Generate.lean) proves that the concrete commands
-   returned by the pure VCG encoder are exactly a `TheoryRepresentation` of the
-   complete translated FO theory. The underlying encoder theorem is
+   returned by the pure VCG encoder represent exactly the complete translated
+   FO command set. The underlying encoder theorem is
    `SMT.encode_translation` and `SMT.encode_theories` in
    [`SMT/Representation.lean`](SMT/Representation.lean). For enlarged carriers,
    `VCG.guardedTheoryCommands_represents` records the finite theory with exact
@@ -280,7 +284,7 @@ shown relative to `Crush.Metatheory`.
    `VCG.runTheory_represents` in
    [`VCG/Stateful.lean`](VCG/Stateful.lean) proves that the exact command array in
    the fresh `TranslateState` returned by `VCG.runTheory` represents the complete
-   translated theory, including command order.
+   translated theory command set.
    `VCG.runGuardedTheory_represents` establishes the guarded aggregate array in
    the same way.
 

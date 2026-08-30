@@ -620,7 +620,19 @@ example (certificate : CertifiedDataEnv) (cfg : Crush.Config)
   runGuarded_unsat_implies_source_unsat cfg represented guarded interpretation
     formula unsat
 
-/-- The live production theorem is indexed by the exact retained fact and final
+/-- Production agreement follows semantic command-set equality: declaration
+and assertion interleaving plus duplicate elimination do not change the raw
+model obligations. -/
+private def commandA : Crush.SMT.Command := .declSort "A" 0
+private def commandB : Crush.SMT.Command := .assert (smt| true)
+
+example : sameCommandSet? #[commandA, commandB]
+    #[commandB, commandA, commandB] = true := by native_decide
+
+example : sameCommandSet? #[commandA] #[commandA, commandB] = false := by
+  native_decide
+
+/-- The live singleton theorem is indexed by the exact retained fact and final
 command snapshot; `:named` root annotations are erased only through their proved
 semantic transparency theorem. -/
 example (certificate : CertifiedDataEnv)
@@ -630,6 +642,18 @@ example (certificate : CertifiedDataEnv)
     (guarded : certificate.GuardRepresentation guarding represented) :
     Option (SingleFactAgreement.Checked certificate guarding represented guarded) :=
   SingleFactAgreement.build?
+
+example (certificate : CertifiedDataEnv)
+    (guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail)))
+    (represented : certificate.Representation guarding.encoding)
+    (guarded : certificate.GuardRepresentation guarding represented)
+    {expressions : List Lean.Expr}
+    (reified : Reification.ReifiedSentencesFor certificate.env
+      certificate.bridge expressions) :
+    Option (PLift
+      (TheoryAgreement certificate guarding represented guarded reified)) :=
+  TheoryAgreement.build? reified
 
 example (certificate : CertifiedDataEnv)
     (guarding : SMT.Guarding

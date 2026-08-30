@@ -1498,8 +1498,9 @@ theorem guarded_lift (guarding : Guarding symbols)
     (derivedValid : (modelWith guarding.encoding target extra).SatisfiesCommands
       derived) :
     ∃ smtModel : Crush.SMT.Model, smtModel.SatisfiesCommands commands := by
-  rcases represented with ⟨declarations, rfl⟩
-  refine ⟨modelWith guarding.encoding target extra, ?_⟩
+  rcases represented with ⟨declarations, same⟩
+  refine ⟨modelWith guarding.encoding target extra,
+    ((modelWith guarding.encoding target extra).satisfiesCommands_congr same).2 ?_⟩
   simp only [Guarding.theory]
   rw [Crush.SMT.Model.satisfiesCommands_append,
     Crush.SMT.Model.satisfiesCommands_append]

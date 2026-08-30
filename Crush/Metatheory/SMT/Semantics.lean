@@ -542,16 +542,40 @@ def Model.SatisfiesCommand (model : Model) : Command → Prop
       command.Supported ∧ FunsRecHold model definitions
   | command => command.Supported
 
-/-- Satisfaction of an ordered command sequence by one global SMT model. -/
+/-- Satisfaction of every command in an array by one global SMT model. The raw
+semantics is deliberately insensitive to order and repeated occurrences. -/
 def Model.SatisfiesCommands (model : Model) (commands : Array Command) : Prop :=
   ∀ command ∈ commands.toList, model.SatisfiesCommand command
+
+/-- Two arrays impose exactly the same semantic command obligations. Command
+order and duplicate occurrences are intentionally irrelevant here; concrete
+SMT-LIB scope/order is checked separately by the script validator. -/
+def SameCommandSet (left right : Array Command) : Prop :=
+  (∀ command ∈ left.toList, command ∈ right.toList) ∧
+  (∀ command ∈ right.toList, command ∈ left.toList)
+
+namespace SameCommandSet
+
+theorem refl (commands : Array Command) : SameCommandSet commands commands := by
+  exact ⟨fun _ member => member, fun _ member => member⟩
+
+theorem symm {left right : Array Command}
+    (same : SameCommandSet left right) : SameCommandSet right left :=
+  ⟨same.2, same.1⟩
+
+theorem of_eq {left right : Array Command} (equal : left = right) :
+    SameCommandSet left right := by
+  subst right
+  exact refl left
+
+end SameCommandSet
 
 set_option quotPrecheck false
 
 /-- A concrete SMT formula holds in a model with no free variables. -/
 scoped notation:50 model:51 " ⊨ₛ " formula:51 => Holds model [] formula
 
-/-- A concrete SMT model satisfies an ordered command sequence. -/
+/-- A concrete SMT model satisfies every command obligation in an array. -/
 scoped notation:50 model:51 " ⊨ₛᶜ " commands:51 =>
   Model.SatisfiesCommands model commands
 
@@ -571,6 +595,16 @@ theorem Model.satisfiesCommands_append (model : Model)
   unfold Model.SatisfiesCommands
   simp only [Array.toList_append, List.mem_append]
   grind
+
+/-- Raw command satisfaction depends only on the command set. -/
+theorem Model.satisfiesCommands_congr (model : Model)
+    {left right : Array Command} (same : SameCommandSet left right) :
+    model.SatisfiesCommands left ↔ model.SatisfiesCommands right := by
+  constructor
+  · intro valid command member
+    exact valid command (same.2 command member)
+  · intro valid command member
+    exact valid command (same.1 command member)
 
 /-- A model of an extended command sequence is a model of its prefix. -/
 theorem Model.satisfiesCommands_weaken (model : Model)

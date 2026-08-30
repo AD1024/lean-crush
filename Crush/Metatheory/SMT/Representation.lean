@@ -231,13 +231,15 @@ def theory {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
     declared ∉ ordinaryDecls encoding declarations := by
   simp [ordinaryDecls, native]
 
-/-- A command sequence represents a typed theory when it is exactly the pure
-encoding for some explicit ordered declaration trace. -/
+/-- A command array represents a typed theory when it carries exactly the
+semantic command set produced from an explicit ordered declaration trace.
+Script validation remains responsible for declaration-before-use ordering;
+the model semantics deliberately ignores order and duplicate occurrences. -/
 def TheoryRepresentation {symbols : FO.SymbolFamily}
     (encoding : Encoding symbols) (source : FO.FamilyTheory symbols)
     (commands : Array Command) : Prop :=
   ∃ declarations : List (Declaration symbols),
-    commands = theory encoding declarations source
+    Crush.SMT.SameCommandSet commands (theory encoding declarations source)
 
 /-- Convert the flattened translator's declaration package to the generic
 representation package without changing order or symbol identity. -/
@@ -277,7 +279,7 @@ theorem encode_translation {signature : Signature}
     (result : TranslationResult signature [] .bool) :
     TheoryRepresentation encoding (completeTheory result)
       (encode encoding result) :=
-  ⟨result.declarations.map ofDeclared, rfl⟩
+  ⟨result.declarations.map ofDeclared, Crush.SMT.SameCommandSet.refl _⟩
 
 /-! ## Finite source theories -/
 
@@ -302,6 +304,6 @@ theorem encode_theories {signature : Signature}
     (encoding : Encoding (Symbol signature)) (source : Theory signature) :
     TheoryRepresentation encoding (translatedTheories source)
       (encodeTheories encoding source) :=
-  ⟨translatedDeclarations source, rfl⟩
+  ⟨translatedDeclarations source, Crush.SMT.SameCommandSet.refl _⟩
 
 end Crush.Metatheory.SMT

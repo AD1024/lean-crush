@@ -71,7 +71,8 @@ theorem guardedCommands_represents {signature : Signature}
     (derived : Array Crush.SMT.Command) (source : Sentence signature) :
     SMT.GuardedTheoryRepresentation guarding derived (translatedTheory source)
       (guardedCommands guarding derived source) :=
-  ⟨𝓕⟦source⟧.declarations.map SMT.ofDeclared, rfl⟩
+  ⟨𝓕⟦source⟧.declarations.map SMT.ofDeclared,
+    Crush.SMT.SameCommandSet.refl _⟩
 
 /-- Unsatisfiability of commands from total proved VCG reflects to the
 intrinsic HO sentence. -/
@@ -117,7 +118,7 @@ theorem guardedTheoryCommands_represents {signature : Signature}
     (derived : Array Crush.SMT.Command) (source : Theory signature) :
     SMT.GuardedTheoryRepresentation guarding derived (translatedTheories source)
       (guardedTheoryCommands guarding derived source) :=
-  ⟨SMT.translatedDeclarations source, rfl⟩
+  ⟨SMT.translatedDeclarations source, Crush.SMT.SameCommandSet.refl _⟩
 
 /-- Unsatisfiability of the finite-theory VCG reflects to the complete
 intrinsic source theory. -/

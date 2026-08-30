@@ -1,4 +1,5 @@
 import Crush.Metatheory.VCG.Soundness
+import Crush.SMT.TermEq
 
 /-!
 # Live production agreement
@@ -107,6 +108,18 @@ theorem commandsUnsatisfiable_setLogic (logic : String)
   · intro unsat model valid
     exact unsat model ((satisfiesCommands_setLogic model logic commands).mp valid)
 
+/-- Executable equality of semantic command sets. This follows the raw command
+semantics exactly: order and duplicate occurrences do not add obligations. -/
+def sameCommandSet? (left right : Array Crush.SMT.Command) : Bool :=
+  (left.toList.all fun command => decide (command ∈ right.toList)) &&
+    (right.toList.all fun command => decide (command ∈ left.toList))
+
+@[simp] theorem sameCommandSet?_eq_true
+    (left right : Array Crush.SMT.Command) :
+    sameCommandSet? left right = true ↔ Crush.SMT.SameCommandSet left right := by
+  simp only [sameCommandSet?, Bool.and_eq_true, List.all_eq_true,
+    decide_eq_true_eq, Crush.SMT.SameCommandSet]
+
 /-! ## Whole-theory production agreement -/
 
 /-- Whole-array refinement evidence for an exact ordered list of reified facts
@@ -139,12 +152,11 @@ def build? {certificate : CertifiedDataEnv}
       (TheoryAgreement certificate guarding represented guarded reified)) := by
   let expected := guardedTheoryCommands guarding certificate.guardCommands
     reified.sources
-  if equal : certificate.emitted.map stripAssertionAnnotation = expected then
+  let actual := certificate.emitted.map stripAssertionAnnotation
+  if same : sameCommandSet? actual expected = true then
     exact some ⟨{
-        representation := by
-          rw [equal]
-          exact guardedTheoryCommands_represents guarding certificate.guardCommands
-            reified.sources }⟩
+      representation := ⟨SMT.translatedDeclarations reified.sources,
+        (sameCommandSet?_eq_true actual expected).mp same⟩ }⟩
   else
     exact none
 
@@ -193,8 +205,9 @@ end TheoryAgreement
 /-- Whole-array refinement evidence for one live production certificate and its
 exact retained intrinsic sentence. Native declarations, recursive guard
 definitions, all ordinary declarations, and every assertion must occur in the
-guarded encoder's exact order. The only ignored syntax is the root provenance
-annotation proved semantically transparent above. -/
+guarded encoder's semantic command set. Production order and duplicate
+elimination follow the raw model semantics; the only erased syntax is the root
+provenance annotation proved semantically transparent above. -/
 structure SingleFactAgreement (certificate : CertifiedDataEnv)
     (guarding : SMT.Guarding
       (Symbol (certificate.env.signature ++ certificate.tail)))
@@ -221,8 +234,8 @@ structure Checked (certificate : CertifiedDataEnv)
   agreement : SingleFactAgreement certificate guarding represented guarded
     reified
 
-/-- Check the completed production array against the exact guarded intrinsic
-array and return proof-carrying agreement only on structural equality. The
+/-- Check the completed production array against the guarded intrinsic command
+set and return proof-carrying agreement only on exact mutual inclusion. The
 reified fact is obtained from the environment-indexed certificate itself, so a
 caller cannot substitute a different intrinsic sentence. -/
 def build? {certificate : CertifiedDataEnv}

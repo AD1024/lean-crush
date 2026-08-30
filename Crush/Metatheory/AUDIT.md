@@ -29,7 +29,7 @@ translation. This is the principal remaining soundness boundary.
 |---|---|---|
 | `Lean.Expr` to intrinsic HO | `Reification.reifySentence?`, `ReificationWitness` | Executably type-checked and shape-checked, but intentionally has no denotation theorem for arbitrary `Lean.Expr`. |
 | Intrinsic HO to flattened FO | `translate_denote`, `generated_valid`, `model_extension_theory` | Complete semantic preservation for each sentence and for a finite theory sharing one signature. |
-| Flattened FO to ordinary SMT | `TheoryRepresentation`, `representation_sound` | Exact syntax plus one-model semantic lifting. |
+| Flattened FO to ordinary SMT | `TheoryRepresentation`, `representation_sound` | Exact semantic command-set representation plus one-model lifting; script order is validated separately. |
 | Native datatype commands | `Datatype.command_sound`, `EnvRepresentation.native_valid` | Correct for source models satisfying `Datatype.Env.Lawful`; rank excludes cyclic values. |
 | Guarded/enlarged carriers | `guardTerm_rel_eval`, `guarded_lift` | Correct relative to an explicit carrier relation, guard semantics, derived graph, and native-command validity. |
 | Stateful intrinsic VCG | `runTheory_represents`, `runGuardedTheory_represents` | Exact for finite theories, but these functions build fresh pure states rather than refining a completed production run. |
@@ -63,8 +63,8 @@ The audit now supplies the missing aggregate specification and semantic proof:
   retain an exact combined target representation;
 - `commands_unsat_implies_source_theory_unsat` and
   `Representation.theory_unsat` prove unguarded and guarded reflection;
-- `TheoryAgreement.build?` checks the normalized completed production array
-  against that exact aggregate encoding. `SingleFactAgreement` now delegates to
+- `TheoryAgreement.build?` checks the normalized completed production command
+  set against that exact aggregate encoding. `SingleFactAgreement` now delegates to
   the singleton instance instead of maintaining a second proof path.
 
 The following witnesses still remain caller premises rather than products of
@@ -81,8 +81,8 @@ Consequently, the reflection theorem for `CertifiedDataEnv.emitted` exists, but
 live production cannot yet supply all inputs to its executable agreement check.
 Once those static representation witnesses exist, `TheoryAgreement.build?`
 compares the complete normalized production snapshot with the exact intrinsic
-encoding and returns proof-carrying agreement only when structural equality
-succeeds.
+semantic command set and returns proof-carrying agreement only when mutual
+inclusion succeeds.
 
 `SingleFactAgreement` remains only as a compatibility specialization for a
 script containing exactly the certificate's retained fact. `buildScript`
@@ -96,8 +96,9 @@ Required completion criterion:
    fact array rather than constructing independent fact-local signatures;
 2. build the shared `SMT.Encoding`, datatype representation, guard
    representation, and declaration trace from the final allocator state;
-3. run `TheoryAgreement.build?`, whose structural comparison checks command
-   order and every surrounding assertion/declaration;
+3. run `TheoryAgreement.build?`, whose command-set comparison checks every
+   surrounding assertion/declaration, while the existing script validator
+   checks declaration-before-use order;
 4. expose semantic reflection only from a `TranslateState` carrying that
    completed witness.
 
@@ -220,6 +221,12 @@ exhaustiveness, and rank properties separately.
 - Higher-order theory append/satisfiability helpers introduced during this work
   but unused by the proof were removed; only the source-theory satisfaction and
   unsatisfiability notions consumed by reflection remain.
+- `TheoryRepresentation` and `GuardedTheoryRepresentation` now follow the raw
+  command semantics rather than an unachievable byte-order equality. Production
+  interleaves declarations with fact assertions and suppresses repeated
+  declarations/equations; proved command-set equality accepts exactly those
+  semantic reorderings and duplicates while rejecting missing or extra
+  obligations. SMT-LIB scope/order remains the responsibility of `checkScript`.
 
 ## Naming and organization rules
 
@@ -229,9 +236,9 @@ exhaustiveness, and rank properties separately.
 - Reserve `Encoding` for the shared FO-to-SMT encoding. The block-local native
   datatype encoder is `SMT.Datatype.BlockEncoding`; use `dataEncoding` rather
   than the ambiguous local name `data` when both occur together.
-- Use `...Representation` for exact syntax/provenance and `...Semantics` or
-  `...Lawful` for model obligations. Do not call an equality wrapper a
-  representation.
+- Use `...Representation` for exact syntax/provenance or exact semantic command
+  sets, and `...Semantics` or `...Lawful` for model obligations. Do not call an
+  uninformative equality wrapper a representation.
 - Use `(smt| ...)` and `(smtSort| ...)` for literal SMT syntax. Use constructors
   directly only for dynamic indexed identifiers, dynamic binder arrays, or
   dynamic argument arrays that the quotations cannot express.

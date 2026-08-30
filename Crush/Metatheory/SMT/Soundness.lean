@@ -606,8 +606,9 @@ theorem lift_with_extra (encoding : Encoding symbols)
     (nativeValid : modelWith encoding target extra ⊨ₛᶜ
       encoding.nativeCommands) :
     ∃ smtModel : Crush.SMT.Model, smtModel ⊨ₛᶜ commands := by
-  rcases representation with ⟨declarations, rfl⟩
-  refine ⟨modelWith encoding target extra, ?_⟩
+  rcases representation with ⟨declarations, same⟩
+  refine ⟨modelWith encoding target extra,
+    ((modelWith encoding target extra).satisfiesCommands_congr same).2 ?_⟩
   simp only [theory]
   rw [satisfiesCommands_append]
   refine ⟨nativeValid, ?_⟩
@@ -625,8 +626,9 @@ theorem lift (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) (valid : target ⊨ᵀ source)
     (nativeValid : model encoding target ⊨ₛᶜ encoding.nativeCommands) :
     ∃ smtModel : Crush.SMT.Model, smtModel ⊨ₛᶜ commands := by
-  rcases representation with ⟨declarations, rfl⟩
-  refine ⟨model encoding target, ?_⟩
+  rcases representation with ⟨declarations, same⟩
+  refine ⟨model encoding target,
+    ((model encoding target).satisfiesCommands_congr same).2 ?_⟩
   simp only [theory]
   rw [satisfiesCommands_append]
   refine ⟨nativeValid, ?_⟩

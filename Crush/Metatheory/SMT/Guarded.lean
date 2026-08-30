@@ -67,13 +67,15 @@ def Guarding.theory {symbols : FO.SymbolFamily}
   guarding.encoding.nativeCommands ++
     (derived ++ guarding.theoryBody declarations source)
 
-/-- Exact syntax representation for a guarded theory and its certified derived
-command segment. -/
+/-- Semantic command-set representation for a guarded theory and its certified
+derived command segment. Production may interleave declarations and assertions
+or omit duplicate occurrences without changing this model-theoretic boundary. -/
 def GuardedTheoryRepresentation {symbols : FO.SymbolFamily}
     (guarding : Guarding symbols) (derived : Array Command)
     (source : FO.FamilyTheory symbols) (commands : Array Command) : Prop :=
   ∃ declarations : List (Declaration symbols),
-    commands = guarding.theory derived declarations source
+    Crush.SMT.SameCommandSet commands
+      (guarding.theory derived declarations source)
 
 /-- The ordinary encoder is the empty-guard specialization. -/
 def Guarding.none {symbols : FO.SymbolFamily} (encoding : Encoding symbols) :

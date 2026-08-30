@@ -729,7 +729,8 @@ example : (Guarding.none encoding).term reflexiveFormula =
   exact Guarding.none_term encoding reflexiveFormula
 
 example : TheoryRepresentation encoding [reflexiveFormula]
-    (theory encoding [] [reflexiveFormula]) := ⟨[], rfl⟩
+    (theory encoding [] [reflexiveFormula]) :=
+  ⟨[], Crush.SMT.SameCommandSet.refl _⟩
 
 private def carriers : FO.Carriers where
   Base := fun _ => Unit
@@ -794,7 +795,7 @@ example : Crush.SMT.Eval
 /-- A valid typed theory induces a model of its exact concrete commands. -/
 example : ∃ smtModel : Crush.SMT.Model,
     smtModel ⊨ₛᶜ theory encoding [] [reflexiveFormula] := by
-  apply lift encoding ⟨[], rfl⟩ target
+  apply lift encoding ⟨[], Crush.SMT.SameCommandSet.refl _⟩ target
   intro candidate membership
   simp only [List.mem_singleton] at membership
   subst candidate
