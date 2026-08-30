@@ -320,12 +320,11 @@ described below.
 
 ## Proved and trusted execution
 
-`VCG.TranslationStatus` makes the boundary structural:
-
-- `proved` retains the intrinsic source, exact commands, and
-  `TheoryRepresentation` theorem;
-- `trusted` retains commands and nonempty `TrustReason`s but exposes no semantic
-  representation theorem.
+`TranslateState.status` exposes the operational classification used by both
+routes: a state is `proved` exactly when its trust-reason array is empty. This
+classification alone is not semantic evidence. `VCG.StateRepresents` is the
+separate proof object that retains the intrinsic source and exact
+`TheoryRepresentation` theorem.
 
 The legacy production `emitTerm : Lean.Expr → TranslateM SMT.Term` is always
 marked `TrustReason.direct` at its root. Local certified closures and primitives
@@ -335,8 +334,9 @@ lowerings, result lowerings, uncertified closures/constants, and native-HO mode
 record additional trust reasons.
 
 After successful `Reification.reifySentence?`, `VCG.run` is the non-partial
-defunctionalization and command-generation route. It starts with fresh translation
-bookkeeping and therefore cannot inherit commands or trust markers from a legacy
+defunctionalization and command-generation route. It returns one fresh
+`TranslateState`, and `run_represents` certifies that exact state. Fresh
+bookkeeping prevents it from inheriting commands or trust markers from a legacy
 run.
 
 ## Notation

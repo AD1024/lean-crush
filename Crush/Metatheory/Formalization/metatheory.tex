@@ -864,14 +864,15 @@ original \texttt{Lean.Expr}.
 
 \subsection{Proved versus trusted status}
 
-\texttt{VCG.TranslationStatus} makes the boundary structural. A
-\texttt{proved} result stores the intrinsic sentence, exact commands, and their
-representation theorem. A \texttt{trusted} result stores commands and a
-nonempty list of trust reasons but exposes no theorem for reflecting command
-unsatisfiability. The legacy extensible \texttt{emitTerm} route is marked trusted
-at its root; unrestricted handlers, uncertified constants or closures, and
-native-HO emission add more specific reasons.
-\leanfiles{VCG/Trust.lean and VCG/Status.lean}
+\texttt{TranslateState.status} classifies a live state as \texttt{proved}
+exactly when its trust-reason array is empty; otherwise it retains the nonempty
+reasons in its \texttt{trusted} constructor. This operational classification is
+not itself semantic evidence. The separate \texttt{VCG.StateRepresents} object
+stores the intrinsic sentence's exact representation theorem. The legacy
+extensible \texttt{emitTerm} route is marked trusted at its root; unrestricted
+handlers, uncertified constants or closures, and native-HO emission add more
+specific reasons.
+\leanfiles{VCG/Trust.lean, Translation/Monad.lean, and VCG/Stateful.lean}
 
 \section{Interpreted operations and guarded carriers}
 \sectioncontents{What is modeled now; semantic contracts for extensions; limitations of the proved command fragment.}

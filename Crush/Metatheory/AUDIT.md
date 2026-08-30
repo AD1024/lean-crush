@@ -166,6 +166,9 @@ exhaustiveness, and rank properties separately.
 - The proof records formerly named `CertifiedDataTrace.Represents` and
   `CertifiedDataEnv.Represents` are now `...Representation`, matching
   `TheoryRepresentation`, `GuardRepresentation`, and their exact-syntax role.
+- The unused parallel `VCG.TranslationStatus` hierarchy was removed. The pure
+  route now returns one `TranslateState`; `StateRepresents` carries semantic
+  evidence, while `TranslateState.status` remains the operational trust marker.
 
 ## Naming and organization rules
 

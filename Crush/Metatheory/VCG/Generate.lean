@@ -1,6 +1,6 @@
 import Crush.Metatheory.Reification.Witness
 import Crush.Metatheory.SMT.Guarded
-import Crush.Metatheory.VCG.Status
+import Crush.Metatheory.SMT.Soundness
 
 /-!
 # Proved verification-condition generation
@@ -73,18 +73,6 @@ theorem guardedCommands_represents {signature : Signature}
       (guardedCommands guarding derived source) :=
   ⟨𝓕⟦source⟧.declarations.map SMT.ofDeclared, rfl⟩
 
-/-- Classify total intrinsic VCG as proved and retain its representation. -/
-def generate {signature : Signature}
-    (encoding : SMT.Encoding (Symbol signature))
-    (source : Sentence signature) : TranslationStatus encoding :=
-  .proved source (commands encoding source) (commands_represents encoding source)
-
-theorem generate_proves {signature : Signature}
-    (encoding : SMT.Encoding (Symbol signature))
-    (source : Sentence signature) :
-    (generate encoding source).Proves source := by
-  exact ⟨commands encoding source, commands_represents encoding source, rfl⟩
-
 /-- Unsatisfiability of commands from total proved VCG reflects to the
 intrinsic HO sentence. -/
 theorem commands_unsat_implies_source_unsat {signature : Signature}
@@ -94,7 +82,7 @@ theorem commands_unsat_implies_source_unsat {signature : Signature}
     (native : EnvRepresentation encoding data.toModelEnv)
     (unsat : Crush.SMT.CommandsUnsatisfiable (commands encoding source)) :
     Datatype.Env.Unsatisfiable data.toModelEnv source := by
-  exact TranslationStatus.unsat_source (generate encoding source)
-    (generate_proves encoding source) native unsat
+  exact SMT.commands_unsat_implies_source_unsat encoding native source
+    (commands_represents encoding source) unsat
 
 end Crush.Metatheory.VCG

@@ -59,7 +59,6 @@ import Crush.Metatheory.Reification.Term
 import Crush.Metatheory.Reification.Reify
 import Crush.Metatheory.Reification.Witness
 import Crush.Metatheory.VCG.Trust
-import Crush.Metatheory.VCG.Status
 import Crush.Metatheory.VCG.Generate
 import Crush.Frontend.Config
 import Crush.Frontend.Collect

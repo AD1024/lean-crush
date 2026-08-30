@@ -552,7 +552,7 @@ be supplied at this boundary. -/
 example (cfg : Crush.Config) (data : Reification.DataBridge σ)
     (native : EnvRepresentation fo data.toModelEnv) (formula : Sentence σ)
     (unsat : Crush.SMT.CommandsUnsatisfiable
-      (run cfg fo formula).2.commands) :
+      (run cfg fo formula).commands) :
     Datatype.Env.Unsatisfiable data.toModelEnv formula :=
   run_unsat_implies_source_unsat cfg fo formula data native unsat
 
@@ -563,7 +563,7 @@ example (cfg : Crush.Config) {env : Datatype.Env σ}
     (position : Nat) :
     let trace := run_dataTrace cfg fo formula native
     trace.indices[position]?.bind
-        (fun index => (run cfg fo formula).2.commands[index]?) =
+        (fun index => (run cfg fo formula).commands[index]?) =
       trace.commands[position]? := by
   exact (run_dataTrace cfg fo formula native).commands_at position
 

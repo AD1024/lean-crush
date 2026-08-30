@@ -34,7 +34,7 @@ theorem run_unsat_implies_source_unsat
     (datatypes : DataBridge signature)
     (native : EnvRepresentation encoding datatypes.toModelEnv)
     (unsat : Crush.SMT.CommandsUnsatisfiable
-      (run cfg encoding source).2.commands) :
+      (run cfg encoding source).commands) :
     Datatype.Env.Unsatisfiable datatypes.toModelEnv source := by
   exact (run_represents cfg encoding source).unsat_source native unsat
 

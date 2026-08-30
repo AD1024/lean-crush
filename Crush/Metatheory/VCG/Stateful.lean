@@ -29,23 +29,18 @@ translation bookkeeping starts fresh, so the resulting state cannot inherit a
 trusted fallback or commands from an earlier direct run. -/
 def run {signature : Signature} (cfg : Config)
     (encoding : SMT.Encoding (Symbol signature))
-    (source : Sentence signature) : TranslationStatus encoding × TranslateState :=
-  (generate encoding source, { cfg, commands := commands encoding source })
-
-@[simp] theorem run_status {signature : Signature} (cfg : Config)
-    (encoding : SMT.Encoding (Symbol signature))
-    (source : Sentence signature) :
-    (run cfg encoding source).1 = generate encoding source := rfl
+    (source : Sentence signature) : TranslateState :=
+  { cfg, commands := commands encoding source }
 
 @[simp] theorem run_commands {signature : Signature} (cfg : Config)
     (encoding : SMT.Encoding (Symbol signature))
     (source : Sentence signature) :
-    (run cfg encoding source).2.commands = commands encoding source := rfl
+    (run cfg encoding source).commands = commands encoding source := rfl
 
 @[simp] theorem run_proved {signature : Signature} (cfg : Config)
     (encoding : SMT.Encoding (Symbol signature))
     (source : Sentence signature) :
-    (run cfg encoding source).2.status = .proved := by
+    (run cfg encoding source).status = .proved := by
   simp [run, TranslateState.status]
 
 /-- The actual state returned by total VCG represents the complete intrinsic
@@ -53,7 +48,7 @@ theory, in its exact emitted order. -/
 theorem run_represents {signature : Signature} (cfg : Config)
     (encoding : SMT.Encoding (Symbol signature))
     (source : Sentence signature) :
-    StateRepresents encoding source (run cfg encoding source).2 := by
+    StateRepresents encoding source (run cfg encoding source) := by
   exact ⟨rfl, commands_represents encoding source⟩
 
 /-- Native commands form the first segment of the exact pure VCG array. All
@@ -73,7 +68,7 @@ def run_dataTrace {signature : Signature} (cfg : Config)
     (encoding : SMT.Encoding (Symbol signature))
     (source : Sentence signature) {env : Datatype.Env signature}
     (represented : SMT.Datatype.EnvRepresentation encoding env) :
-    CertifiedDataTrace (run cfg encoding source).2.commands env := by
+    CertifiedDataTrace (run cfg encoding source).commands env := by
   apply CertifiedDataTrace.fromPrefix represented.blocks
     (suffix := commandBody encoding source)
   rw [run_commands, commands_split, represented.native_eq]

@@ -28,7 +28,6 @@ import Crush.Metatheory.Hooks
 import Crush.Metatheory.SMT.Soundness
 import Crush.Metatheory.SMT.Guarded
 import Crush.Metatheory.SMT.GuardedSoundness
-import Crush.Metatheory.VCG.Status
 import Crush.Metatheory.VCG.Generate
 import Crush.Metatheory.VCG.Stateful
 import Crush.Metatheory.VCG.Soundness
@@ -807,13 +806,13 @@ open Defunctionalization.Flattened
 theorem, independently of the selected collision-free concrete encoding. -/
 example {signature : Signature} (cfg : Config)
     (encoding : SMT.Encoding (Symbol signature)) (source : Sentence signature) :
-    StateRepresents encoding source (run cfg encoding source).2 := by
+    StateRepresents encoding source (run cfg encoding source) := by
   exact run_represents cfg encoding source
 
 /-- The total VCG state never carries a legacy trust marker. -/
 example {signature : Signature} (cfg : Config)
     (encoding : SMT.Encoding (Symbol signature)) (source : Sentence signature) :
-    (run cfg encoding source).2.status = .proved := by
+    (run cfg encoding source).status = .proved := by
   grind [run, TranslateState.status]
 
 end Crush.Metatheory.VCG.Tests
