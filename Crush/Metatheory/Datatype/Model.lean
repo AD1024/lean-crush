@@ -222,6 +222,13 @@ abbrev Unsatisfiable {signature : Signature} (env : Env signature)
     (formula : Sentence signature) : Prop :=
   UnsatisfiableUnder (fun model => Lawful model env) formula
 
+/-- Semantic unsatisfiability of a complete source theory in every model lawful
+for the datatype environment. -/
+abbrev TheoryUnsatisfiable {signature : Signature} (env : Env signature)
+    (theory : Theory signature) : Prop :=
+  ∀ model : Model signature, ∀ _lawful : Lawful model env,
+    ¬model.SatisfiesTheory theory
+
 end Env
 
 /-- With no native datatype components, environment-aware unsatisfiability is

@@ -136,6 +136,9 @@ abbrev ClosedTerm (signature : Signature) (ty : Ty) := Term signature [] ty
 /-- A closed formula over an uninterpreted signature. -/
 abbrev Sentence (signature : Signature) := Formula signature []
 
+/-- A finite collection of closed source formulas. -/
+abbrev Theory (signature : Signature) := List (Sentence signature)
+
 namespace Term
 
 /-- Formula-level truth. -/

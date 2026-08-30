@@ -273,6 +273,16 @@ where
     | .proj _ _ body => go body accumulator
     | _ => accumulator
 
+/-- Constants from several expressions in deterministic global
+first-occurrence order. -/
+def collectConstsOrderedMany (expressions : Array Expr) : Array Expr := Id.run do
+  let mut constants := #[]
+  for expression in expressions do
+    for constant in collectConstsOrdered expression do
+      unless constants.contains constant do
+        constants := constants.push constant
+  return constants
+
 def isLogicalConstant : Expr → Bool
   | .const name _ => name == ``True || name == ``False || name == ``Not ||
       name == ``And || name == ``Or || name == ``Iff || name == ``Eq ||
@@ -289,10 +299,12 @@ inductive SomeDataSignature where
   | pack (env : DatatypeEnv) {tail : Signature}
       (bridge : SignatureBridge tail) : SomeDataSignature
 
-/-- Collect ground datatype applications directly from elaborated type and
-constructor/projection syntax. This traversal does not infer the type of loose
-de Bruijn bodies, so binders remain safe to inspect before opening them. -/
-partial def collectDatatypeRoots (expression : Expr) : MetaM (Array Expr) := do
+/-- Add ground datatype applications from elaborated type and
+constructor/projection syntax to a stable occurrence set. This traversal does
+not infer the type of loose de Bruijn bodies, so binders remain safe to inspect
+before opening them. -/
+private partial def collectDatatypeRootsInto (expression : Expr)
+    (initial : Array Expr) : MetaM (Array Expr) := do
   let environment ← getEnv
   let push (roots : Array Expr) (root : Expr) :=
     if roots.contains root then roots else roots.push root
@@ -327,7 +339,21 @@ partial def collectDatatypeRoots (expression : Expr) : MetaM (Array Expr) := do
         visit body (← visit value (← visit type roots))
     | .mdata _ body | .proj _ _ body => visit body roots
     | _ => return roots
-  visit expression #[]
+  visit expression initial
+
+/-- Ground datatype applications in one expression, in first-occurrence
+order. -/
+partial def collectDatatypeRoots (expression : Expr) : MetaM (Array Expr) :=
+  collectDatatypeRootsInto expression #[]
+
+/-- Ground datatype applications shared by several expressions, in global
+first-occurrence order. -/
+partial def collectDatatypeRootsMany (expressions : Array Expr) :
+    MetaM (Array Expr) := do
+  let mut roots := #[]
+  for expression in expressions do
+    roots ← collectDatatypeRootsInto expression roots
+  return roots
 
 private def ownedConstant (env : DatatypeEnv) (constant : Expr) : MetaM Bool := do
   let .const name _ := constant | return false
@@ -374,23 +400,29 @@ partial def reifySignature (constants : List Expr) : MetaM SomeSignatureBridge :
       let type ← reifyType (← inferType constant) (preserveExpr := true)
       return .pack (.cons constant type tail)
 
-/-- Construct a certified datatype prefix and the remaining ordinary constant
-tail. Datatype-owned declarations occur exactly once and are reached only
-through their typed ownership references. -/
-partial def reifyDataSignature (expression : Expr) :
+/-- Construct one certified datatype prefix and ordinary constant tail shared
+by several terms. Datatype-owned declarations occur exactly once and are
+reached only through their typed ownership references. -/
+partial def reifyDataSignatureMany (expressions : Array Expr) :
     MetaM (Except DatatypeReject SomeDataSignature) := do
-  let roots ← collectDatatypeRoots expression
+  let roots ← collectDatatypeRootsMany expressions
   match ← reifyDatatypeEnv roots with
   | .error reason => return .error reason
   | .ok env =>
-      if let some reason ← dataTermReject? env expression then
-        return .error reason
-      let constants ← (collectConstsOrdered expression).filterM fun constant => do
+      for expression in expressions do
+        if let some reason ← dataTermReject? env expression then
+          return .error reason
+      let constants ← (collectConstsOrderedMany expressions).filterM fun constant => do
         if isLogicalConstant constant then return false
         if ← ownedConstant env constant then return false
         return !(← whnf (← inferType constant)).isSort
       let .pack bridge ← reifySignature constants.toList
       return .ok (.pack env bridge)
+
+/-- Single-expression specialization of the common-signature collector. -/
+partial def reifyDataSignature (expression : Expr) :
+    MetaM (Except DatatypeReject SomeDataSignature) :=
+  reifyDataSignatureMany #[expression]
 
 /-- Construct the finite intrinsic signature needed by the modeled fragment.
 Logical constants are core constructors; constants whose type is a universe are

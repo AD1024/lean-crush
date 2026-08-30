@@ -118,4 +118,52 @@ def runGuarded_dataTrace {signature : Signature} (cfg : Config)
   simp [runGuarded, guardedCommands, SMT.Guarding.theory,
     represented.native_eq]
 
+/-! ## Finite source theories -/
+
+/-- An emitted state contains exactly the commands representing one finite
+intrinsic source theory. -/
+structure TheoryStateRepresents {signature : Signature}
+    (encoding : SMT.Encoding (Symbol signature))
+    (source : Theory signature) (state : TranslateState) : Prop where
+  commands_eq : state.commands = theoryCommands encoding source
+  representation : SMT.TheoryRepresentation encoding
+    (translatedTheories source) state.commands
+
+/-- Total stateful VCG for a finite theory sharing one intrinsic signature. -/
+def runTheory {signature : Signature} (cfg : Config)
+    (encoding : SMT.Encoding (Symbol signature))
+    (source : Theory signature) : TranslateState :=
+  { cfg, commands := theoryCommands encoding source }
+
+@[simp] theorem runTheory_commands {signature : Signature} (cfg : Config)
+    (encoding : SMT.Encoding (Symbol signature))
+    (source : Theory signature) :
+    (runTheory cfg encoding source).commands = theoryCommands encoding source := rfl
+
+theorem runTheory_represents {signature : Signature} (cfg : Config)
+    (encoding : SMT.Encoding (Symbol signature))
+    (source : Theory signature) :
+    TheoryStateRepresents encoding source (runTheory cfg encoding source) :=
+  ⟨rfl, theoryCommands_represents encoding source⟩
+
+/-- Total guarded stateful VCG for a finite theory. -/
+def runGuardedTheory {signature : Signature} (cfg : Config)
+    (guarding : SMT.Guarding (Symbol signature))
+    (derived : Array Crush.SMT.Command) (source : Theory signature) :
+    TranslateState :=
+  { cfg, commands := guardedTheoryCommands guarding derived source }
+
+@[simp] theorem runGuardedTheory_commands {signature : Signature} (cfg : Config)
+    (guarding : SMT.Guarding (Symbol signature))
+    (derived : Array Crush.SMT.Command) (source : Theory signature) :
+    (runGuardedTheory cfg guarding derived source).commands =
+      guardedTheoryCommands guarding derived source := rfl
+
+theorem runGuardedTheory_represents {signature : Signature} (cfg : Config)
+    (guarding : SMT.Guarding (Symbol signature))
+    (derived : Array Crush.SMT.Command) (source : Theory signature) :
+    SMT.GuardedTheoryRepresentation guarding derived (translatedTheories source)
+      (runGuardedTheory cfg guarding derived source).commands :=
+  guardedTheoryCommands_represents guarding derived source
+
 end Crush.Metatheory.VCG

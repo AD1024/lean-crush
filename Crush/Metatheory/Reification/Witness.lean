@@ -236,6 +236,60 @@ partial def reifySentenceFor? (expression : Expr) (env : DatatypeEnv)
       return some { typeExpr, source, witness }
   | ⟨.pack (.base _ _) _, _⟩ | ⟨.pack (.arrow _ _ _) _, _⟩ => return none
 
+/-- Exact pointwise reification of an ordered expression list against one
+datatype environment and ordinary signature bridge. The index records the
+source list, so successful construction cannot reorder or omit a fact. -/
+inductive ReifiedSentencesFor (env : DatatypeEnv) {tail : Signature}
+    (bridge : SignatureBridge tail) : List Expr → Type where
+  | nil : ReifiedSentencesFor env bridge []
+  | cons {expression : Expr} {expressions : List Expr}
+      (head : ReifiedSentenceFor expression env bridge)
+      (tail : ReifiedSentencesFor env bridge expressions) :
+      ReifiedSentencesFor env bridge (expression :: expressions)
+
+namespace ReifiedSentencesFor
+
+/-- Intrinsic source theory retained by an exact ordered reification witness. -/
+def sources {env : DatatypeEnv} {tail : Signature}
+    {bridge : SignatureBridge tail} : {expressions : List Expr} →
+    ReifiedSentencesFor env bridge expressions →
+      Theory (env.signature ++ tail)
+  | [], .nil => []
+  | _ :: _, .cons head rest => head.source :: sources rest
+
+end ReifiedSentencesFor
+
+/-- Reify an exact expression list against an already selected common
+datatype/signature environment. -/
+partial def reifySentencesFor? (env : DatatypeEnv) {tail : Signature}
+    (bridge : SignatureBridge tail) : (expressions : List Expr) →
+    MetaM (Option (ReifiedSentencesFor env bridge expressions))
+  | [] => return some .nil
+  | expression :: rest => do
+      let some head ← reifySentenceFor? expression env bridge | return none
+      let some tail ← reifySentencesFor? env bridge rest | return none
+      return some (.cons head tail)
+
+/-- Existential common environment and exact pointwise witness for a finite
+array of closed Lean propositions. -/
+inductive ReifiedTheory (expressions : Array Expr) where
+  | pack (env : DatatypeEnv) {tail : Signature}
+      (bridge : SignatureBridge tail)
+      (sentences : ReifiedSentencesFor env bridge expressions.toList) :
+      ReifiedTheory expressions
+
+/-- Reify several closed propositions into one intrinsic theory. All terms
+share the datatype prefix and ordinary constant signature selected from the
+entire input array. -/
+partial def reifyTheory? (expressions : Array Expr) :
+    MetaM (Option (ReifiedTheory expressions)) := do
+  match ← reifyDataSignatureMany expressions with
+  | .error _ => return none
+  | .ok (.pack env bridge) =>
+      let some sentences ← reifySentencesFor? env bridge expressions.toList
+        | return none
+      return some (.pack env bridge sentences)
+
 /-- Existential intrinsic sentence obtained from a closed supported Lean
 proposition. The exact finite constant signature and structural witness remain
 available after unpacking. -/

@@ -669,5 +669,22 @@ theorem commands_unsat_implies_source_unsat {signature : Signature}
       (model_extension source formula sourceValid)
   exact unsat smtModel commandsValid
 
+/-- Unsatisfiability of one represented command array reflects through
+flattening and SMT encoding to the complete lawful source theory. -/
+theorem commands_unsat_implies_source_theory_unsat {signature : Signature}
+    (encoding : Encoding (Symbol signature))
+    {env : Datatype.Env signature}
+    (native : Datatype.EnvRepresentation encoding env)
+    (sourceTheory : Theory signature) {commands : Array Command}
+    (representation : TheoryRepresentation encoding
+      (translatedTheories sourceTheory) commands)
+    (unsat : Crush.SMT.CommandsUnsatisfiable commands) :
+    Datatype.Env.TheoryUnsatisfiable env sourceTheory := by
+  intro source lawful sourceValid
+  obtain ⟨smtModel, commandsValid⟩ :=
+    representation_sound encoding native representation source lawful
+      (model_extension_theory source sourceTheory sourceValid)
+  exact unsat smtModel commandsValid
+
 
 end Crush.Metatheory.SMT

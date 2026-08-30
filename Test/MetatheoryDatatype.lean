@@ -840,6 +840,22 @@ run_meta do
   | .ok env =>
       unless env.blocks.size == 2 && env.sorts.Nodup do
         throwError "`Option Int` and `Option Bool` were not kept distinct"
+  let reflexiveSentence (type : Expr) (name : Name) : MetaM Expr :=
+    withLocalDeclD name type fun value => do
+      let equality ← mkEq value value
+      mkForallFVars #[value] equality
+  let pointSentence ← reflexiveSentence (mkConst ``ReifiedPoint) `point
+  let treeSentence ← reflexiveSentence
+    (mkApp (mkConst ``ReifiedTree) int) `tree
+  let commonExpressions := #[pointSentence, treeSentence]
+  let some (.pack commonEnv _ commonSentences) ←
+      reifyTheory? commonExpressions
+    | throwError "common theory reification rejected two supported facts"
+  unless commonEnv.ownsHead ``ReifiedPoint &&
+      commonEnv.ownsHead ``ReifiedTree do
+    throwError "common theory reification did not retain both datatype blocks"
+  unless commonSentences.sources.length == commonExpressions.size do
+    throwError "common theory reification reordered or dropped a source fact"
   let loop := mkConst ``ReifiedLoop
   match ← reifyDatatypeEnv #[loop] with
   | .error (.nonproductive _) => pure ()

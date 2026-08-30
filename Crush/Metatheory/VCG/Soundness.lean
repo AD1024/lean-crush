@@ -76,4 +76,47 @@ theorem runGuarded_unsat_implies_source_unsat
   exact represented.unsat guarded interpretation formula
     (runGuarded_represents cfg guarding certificate.guardCommands formula) unsat
 
+/-! ## Finite source theories -/
+
+/-- Unsatisfiability of a finite-theory state reflects to its complete
+intrinsic source theory. -/
+theorem TheoryStateRepresents.unsat_source {signature : Signature}
+    {encoding : SMT.Encoding (Symbol signature)} {source : Theory signature}
+    {state : TranslateState}
+    (represented : TheoryStateRepresents encoding source state)
+    {env : Datatype.Env signature} (native : EnvRepresentation encoding env)
+    (unsat : Crush.SMT.CommandsUnsatisfiable state.commands) :
+    Datatype.Env.TheoryUnsatisfiable env source := by
+  exact SMT.commands_unsat_implies_source_theory_unsat encoding native source
+    represented.representation unsat
+
+/-- Executable specialization for the exact state returned by finite-theory
+VCG. -/
+theorem runTheory_unsat_implies_source_unsat
+    {signature : Signature} (cfg : Config)
+    (encoding : SMT.Encoding (Symbol signature)) (source : Theory signature)
+    (datatypes : DataBridge signature)
+    (native : EnvRepresentation encoding datatypes.toModelEnv)
+    (unsat : Crush.SMT.CommandsUnsatisfiable
+      (runTheory cfg encoding source).commands) :
+    Datatype.Env.TheoryUnsatisfiable datatypes.toModelEnv source := by
+  exact (runTheory_represents cfg encoding source).unsat_source native unsat
+
+/-- Guarded reflection for a finite source theory sharing the production
+certificate's one datatype environment, signature, and guard interpretation. -/
+theorem runGuardedTheory_unsat_implies_source_unsat
+    {certificate : CertifiedDataEnv} (cfg : Config)
+    {guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail))}
+    (represented : certificate.Representation guarding.encoding)
+    (guarded : certificate.GuardRepresentation guarding represented)
+    (interpretation : certificate.GuardInterpretation guarding represented guarded)
+    (source : Theory (certificate.env.signature ++ certificate.tail))
+    (unsat : Crush.SMT.CommandsUnsatisfiable
+      (runGuardedTheory cfg guarding certificate.guardCommands source).commands) :
+    Datatype.Env.TheoryUnsatisfiable certificate.data.toModelEnv source := by
+  exact represented.theory_unsat guarded interpretation source
+    (runGuardedTheory_represents cfg guarding certificate.guardCommands source)
+    unsat
+
 end Crush.Metatheory.VCG

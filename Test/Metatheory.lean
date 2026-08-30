@@ -505,6 +505,17 @@ example (formula : Sentence partialSignature)
     Unsatisfiable formula :=
   Flattened.target_unsat_implies_source_unsat formula targetUnsat
 
+example (model : Model partialSignature) (theory : Theory partialSignature)
+    (sourceValid : model.SatisfiesTheory theory) :
+    Flattened.canonicalModel model ⊨ᵀ Flattened.translatedTheories theory :=
+  Flattened.model_extension_theory model theory sourceValid
+
+example (theory : Theory partialSignature)
+    (targetUnsat : FO.FamilyTheoryUnsatisfiable
+      (Flattened.translatedTheories theory)) :
+    TheoryUnsatisfiable theory :=
+  Flattened.target_theories_unsat_implies_source_unsat theory targetUnsat
+
 /-- The complete semantic soundness theorem is exposed at the same abstract
 symbol-family level as the total classic pass. -/
 example (formula : Sentence partialSignature)

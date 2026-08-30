@@ -94,6 +94,11 @@ def Model.Satisfies {signature : Signature} (model : Model signature)
     (formula : Sentence signature) : Prop :=
   formula.denote model (Valuation.empty model.Base)
 
+/-- Satisfaction of every sentence in a source theory. -/
+def Model.SatisfiesTheory {signature : Signature} (model : Model signature)
+    (theory : Theory signature) : Prop :=
+  ∀ formula ∈ theory, model.Satisfies formula
+
 /-- Satisfiability among the source models carrying an additional semantic
 contract.  The contract is proof-relevant so clients may retain canonical
 carriers, isomorphisms, or other data used by a model-lifting proof. -/
@@ -116,6 +121,9 @@ def Satisfiable {signature : Signature} (formula : Sentence signature) : Prop :=
 /-- Unsatisfiability is stated semantically, independently of a solver. -/
 def Unsatisfiable {signature : Signature} (formula : Sentence signature) : Prop :=
   ∀ model : Model signature, ¬model.Satisfies formula
+
+def TheoryUnsatisfiable {signature : Signature} (theory : Theory signature) : Prop :=
+  ∀ model : Model signature, ¬model.SatisfiesTheory theory
 
 @[simp] theorem Term.denote_trueE {signature : Signature} (model : Model signature)
     {context : Context} (valuation : Valuation model.Base context) :

@@ -85,4 +85,51 @@ theorem commands_unsat_implies_source_unsat {signature : Signature}
   exact SMT.commands_unsat_implies_source_unsat encoding native source
     (commands_represents encoding source) unsat
 
+/-! ## Finite source theories -/
+
+/-- Exact concrete commands for a finite intrinsic source theory translated
+against one common signature. -/
+def theoryCommands {signature : Signature}
+    (encoding : SMT.Encoding (Symbol signature))
+    (source : Theory signature) : Array Crush.SMT.Command :=
+  SMT.encodeTheories encoding source
+
+/-- The finite-theory VCG represents the combined flattened target theory. -/
+theorem theoryCommands_represents {signature : Signature}
+    (encoding : SMT.Encoding (Symbol signature))
+    (source : Theory signature) :
+    SMT.TheoryRepresentation encoding (translatedTheories source)
+      (theoryCommands encoding source) :=
+  SMT.encode_theories encoding source
+
+/-- Exact guarded commands for a finite intrinsic source theory. -/
+def guardedTheoryCommands {signature : Signature}
+    (guarding : SMT.Guarding (Symbol signature))
+    (derived : Array Crush.SMT.Command) (source : Theory signature) :
+    Array Crush.SMT.Command :=
+  guarding.theory derived (SMT.translatedDeclarations source)
+    (translatedTheories source)
+
+/-- Guarded finite-theory generation retains exact declarations and assertions
+in source traversal order. -/
+theorem guardedTheoryCommands_represents {signature : Signature}
+    (guarding : SMT.Guarding (Symbol signature))
+    (derived : Array Crush.SMT.Command) (source : Theory signature) :
+    SMT.GuardedTheoryRepresentation guarding derived (translatedTheories source)
+      (guardedTheoryCommands guarding derived source) :=
+  ⟨SMT.translatedDeclarations source, rfl⟩
+
+/-- Unsatisfiability of the finite-theory VCG reflects to the complete
+intrinsic source theory. -/
+theorem theoryCommands_unsat_implies_source_unsat {signature : Signature}
+    (encoding : SMT.Encoding (Symbol signature))
+    (source : Theory signature)
+    (data : Reification.DataBridge signature)
+    (native : EnvRepresentation encoding data.toModelEnv)
+    (unsat : Crush.SMT.CommandsUnsatisfiable
+      (theoryCommands encoding source)) :
+    Datatype.Env.TheoryUnsatisfiable data.toModelEnv source := by
+  exact SMT.commands_unsat_implies_source_theory_unsat encoding native source
+    (theoryCommands_represents encoding source) unsat
+
 end Crush.Metatheory.VCG

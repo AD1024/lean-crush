@@ -1045,20 +1045,28 @@ The principal declarations, in proof order, are:
        extensionality formulas are valid.
  \item \path{Flattened.model_extension}: every satisfying source model
        extends to the complete flattened target theory.
+ \item \path{Flattened.model_extension_theory}: one source model satisfying a
+       finite theory extends to the combined flattened target theory.
  \item \path{Flattened.target_unsat_implies_source_unsat}: FO
        unsatisfiability reflects to the HO sentence.
+ \item \path{Flattened.target_theories_unsat_implies_source_unsat}: combined FO
+       unsatisfiability reflects to the complete finite HO theory.
  \item \path{SMT.encode_translation}: the pure encoder exactly represents
        the complete flattened theory.
+ \item \path{SMT.encode_theories}: the same exact representation for a finite
+       source theory sharing one intrinsic signature.
  \item \path{SMT.representation_sound}: every represented FO model induces
        a model of the exact raw commands.
- \item \path{SMT.commands_unsat_implies_theory_unsat}: semantic raw-command
-       unsatisfiability reflects to typed FO unsatisfiability.
- \item \path{VCG.run_represents}: the fresh state returned by the total VCG
-       contains the exact represented commands.
+ \item \path{SMT.commands_unsat_implies_source_theory_unsat}: semantic
+       raw-command unsatisfiability reflects to the lawful intrinsic HO theory.
+ \item \path{VCG.runTheory_represents}: the fresh state returned by the total
+       finite-theory VCG contains the exact represented commands.
  \item \path{VCG.run_unsat_implies_source_unsat}: the direct composition
        for stateful VCG.
  \item \path{VCG.runGuarded_unsat_implies_source_unsat}: guarded reflection over
        every datatype-lawful source model from one uniform guard interpretation.
+ \item \path{VCG.runGuardedTheory_unsat_implies_source_unsat}: the corresponding
+       guarded reflection for a finite source theory.
 \end{enumerate}
 
 The earlier unary results---\path{fundamental},

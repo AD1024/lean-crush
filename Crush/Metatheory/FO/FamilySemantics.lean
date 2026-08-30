@@ -159,6 +159,21 @@ def FamilyModel.SatisfiesTheory {symbols : SymbolFamily} (model : FamilyModel sy
     (theory : FamilyTheory symbols) : Prop :=
   ∀ formula ∈ theory, model.Satisfies formula
 
+theorem FamilyModel.satisfiesTheory_append {symbols : SymbolFamily}
+    (model : FamilyModel symbols) (left right : FamilyTheory symbols) :
+    model.SatisfiesTheory (left ++ right) ↔
+      model.SatisfiesTheory left ∧ model.SatisfiesTheory right := by
+  constructor
+  · intro valid
+    constructor
+    · intro formula member
+      exact valid formula (List.mem_append.mpr (Or.inl member))
+    · intro formula member
+      exact valid formula (List.mem_append.mpr (Or.inr member))
+  · rintro ⟨leftValid, rightValid⟩ formula member
+    exact (List.mem_append.mp member).elim (leftValid formula)
+      (rightValid formula)
+
 def FamilyTheorySatisfiable {symbols : SymbolFamily}
     (theory : FamilyTheory symbols) : Prop :=
   ∃ model : FamilyModel symbols, model.SatisfiesTheory theory

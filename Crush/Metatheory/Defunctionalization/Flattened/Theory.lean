@@ -397,19 +397,6 @@ theorem saturate_valid (M : Model signature)
         ((congrFun (correct tail) (fromCanonical M domain value)).trans
           rightStep.symm)
 
-theorem FO.FamilyModel.satisfiesTheory_append
-    {symbols : FO.SymbolFamily} (model : FO.FamilyModel symbols)
-    (left right : FO.FamilyTheory symbols) :
-    model ⊨ᵀ (left ++ right) ↔ model ⊨ᵀ left ∧ model ⊨ᵀ right := by
-  unfold FO.FamilyModel.SatisfiesTheory
-  constructor <;> intro valid
-  · constructor <;> intro formula membership
-    · exact valid formula (by simp only [List.mem_append]; exact Or.inl membership)
-    · exact valid formula (by simp only [List.mem_append]; exact Or.inr membership)
-  · intro formula membership
-    simp only [List.mem_append] at membership
-    grind
-
 /-- Componentwise validity of generated formulas; declarations carry no
 semantic obligation. -/
 structure GenValid (M : Model signature)
@@ -1049,6 +1036,13 @@ def translatedTheory (formula : Sentence signature) :
     TargetTheory signature :=
   𝓕⟦formula⟧.theory ++ [translatedSentence formula]
 
+/-- Complete target theory for a finite source theory. Each source sentence
+contributes its own generated equations, extensionality obligations, and
+translated sentence to one shared target signature. -/
+def translatedTheories (theory : Theory signature) :
+    TargetTheory signature :=
+  theory.flatMap translatedTheory
+
 /-- A satisfying source model extends to one canonical model satisfying the
 whole flattened target theory. -/
 theorem model_extension (M : Model signature) (formula : Sentence signature)
@@ -1065,6 +1059,25 @@ theorem model_extension (M : Model signature) (formula : Sentence signature)
     rw [translate_denote]
     exact sourceValid
 
+/-- A model satisfying every source sentence extends to one canonical target
+model satisfying their combined flattened theory. -/
+theorem model_extension_theory (M : Model signature)
+    (theory : Theory signature) (sourceValid : M.SatisfiesTheory theory) :
+    canonicalModel M ⊨ᵀ translatedTheories theory := by
+  induction theory with
+  | nil =>
+      intro formula membership
+      contradiction
+  | cons formula rest inductionHypothesis =>
+      rw [translatedTheories, List.flatMap_cons,
+        FO.FamilyModel.satisfiesTheory_append]
+      constructor
+      · exact model_extension M formula
+          (sourceValid formula List.mem_cons_self)
+      · apply inductionHypothesis
+        intro candidate membership
+        exact sourceValid candidate (List.mem_cons_of_mem formula membership)
+
 /-- Unsatisfiability of the flattened target theory reflects to the source
 sentence. -/
 theorem target_unsat_implies_source_unsat (formula : Sentence signature)
@@ -1073,5 +1086,15 @@ theorem target_unsat_implies_source_unsat (formula : Sentence signature)
   intro M sourceValid
   exact targetUnsat (canonicalModel M)
     (model_extension M formula sourceValid)
+
+/-- Unsatisfiability of one combined flattened theory reflects to
+unsatisfiability of the complete source theory. -/
+theorem target_theories_unsat_implies_source_unsat
+    (theory : Theory signature)
+    (targetUnsat : FO.FamilyTheoryUnsatisfiable (translatedTheories theory)) :
+    TheoryUnsatisfiable theory := by
+  intro M sourceValid
+  exact targetUnsat (canonicalModel M)
+    (model_extension_theory M theory sourceValid)
 
 end Crush.Metatheory.Defunctionalization.Flattened

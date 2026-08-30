@@ -279,4 +279,29 @@ theorem encode_translation {signature : Signature}
       (encode encoding result) :=
   ⟨result.declarations.map ofDeclared, rfl⟩
 
+/-! ## Finite source theories -/
+
+/-- Ordered occurrence trace of every flattened symbol declaration generated
+for a finite source theory. Repeated occurrences remain explicit, matching the
+single-sentence translator's declaration contract. -/
+def translatedDeclarations {signature : Signature}
+    (source : Theory signature) : List (Declaration (Symbol signature)) :=
+  source.flatMap fun formula => 𝓕⟦formula⟧.declarations.map ofDeclared
+
+/-- Pure SMT encoding of a complete finite source theory. Every sentence is
+flattened against the same intrinsic signature before their target theories
+are concatenated. -/
+def encodeTheories {signature : Signature}
+    (encoding : Encoding (Symbol signature))
+    (source : Theory signature) : Array Command :=
+  theory encoding (translatedDeclarations source) (translatedTheories source)
+
+/-- The finite-theory encoder represents exactly the combined flattened
+target theory by construction. -/
+theorem encode_theories {signature : Signature}
+    (encoding : Encoding (Symbol signature)) (source : Theory signature) :
+    TheoryRepresentation encoding (translatedTheories source)
+      (encodeTheories encoding source) :=
+  ⟨translatedDeclarations source, rfl⟩
+
 end Crush.Metatheory.SMT

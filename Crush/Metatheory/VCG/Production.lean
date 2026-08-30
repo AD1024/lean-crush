@@ -3,17 +3,17 @@ import Crush.Metatheory.VCG.Soundness
 /-!
 # Live production agreement
 
-This module is the refinement boundary for a completed single-fact direct
-production run.
+This module is the refinement boundary for a completed direct production run.
 The unrestricted `emitTerm` implementation is not proved correct merely by
-entering this module. Instead, `SingleFactAgreement` can be constructed only
-when the final command snapshot, after erasing semantically transparent
-top-level assertion attributes, is exactly the guarded intrinsic encoding of
-the exact reified fact retained by `CertifiedDataEnv`.
+entering this module. Instead, `TheoryAgreement` can be constructed only when
+the final command snapshot, after erasing semantically transparent top-level
+assertion attributes, is exactly the guarded intrinsic encoding of one exact
+ordered common-environment reification witness.
 
-The ordinary tactic query may contain several facts. Its final array cannot be
-certified by this fact-local object; a future whole-run certificate must retain
-one common intrinsic signature and the complete reified source theory.
+`SingleFactAgreement` is the compatibility specialization for the exact fact
+retained by `CertifiedDataEnv`. Production still has to construct the shared
+encoding/guard representations and retain common reification for the complete
+fact array before either executable check can succeed end to end.
 -/
 
 namespace Crush.Metatheory.VCG
@@ -107,6 +107,89 @@ theorem commandsUnsatisfiable_setLogic (logic : String)
   · intro unsat model valid
     exact unsat model ((satisfiesCommands_setLogic model logic commands).mp valid)
 
+/-! ## Whole-theory production agreement -/
+
+/-- Whole-array refinement evidence for an exact ordered list of reified facts
+sharing one production datatype environment and ordinary signature. -/
+structure TheoryAgreement (certificate : CertifiedDataEnv)
+    (guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail)))
+    (represented : certificate.Representation guarding.encoding)
+    (guarded : certificate.GuardRepresentation guarding represented)
+    {expressions : List Lean.Expr}
+    (reified : ReifiedSentencesFor certificate.env certificate.bridge
+      expressions) where
+  representation : SMT.GuardedTheoryRepresentation guarding
+    certificate.guardCommands (translatedTheories reified.sources)
+    (certificate.emitted.map stripAssertionAnnotation)
+
+namespace TheoryAgreement
+
+/-- Check the completed production array against the guarded encoding of an
+exact common-environment reification witness. -/
+def build? {certificate : CertifiedDataEnv}
+    {guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail))}
+    {represented : certificate.Representation guarding.encoding}
+    {guarded : certificate.GuardRepresentation guarding represented}
+    {expressions : List Lean.Expr}
+    (reified : ReifiedSentencesFor certificate.env certificate.bridge
+      expressions) :
+    Option (PLift
+      (TheoryAgreement certificate guarding represented guarded reified)) := by
+  let expected := guardedTheoryCommands guarding certificate.guardCommands
+    reified.sources
+  if equal : certificate.emitted.map stripAssertionAnnotation = expected then
+    exact some ⟨{
+        representation := by
+          rw [equal]
+          exact guardedTheoryCommands_represents guarding certificate.guardCommands
+            reified.sources }⟩
+  else
+    exact none
+
+/-- Unsatisfiability of the exact live production snapshot reflects to every
+fact in the retained intrinsic source theory. -/
+theorem unsat_source {certificate : CertifiedDataEnv}
+    {guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail))}
+    {represented : certificate.Representation guarding.encoding}
+    {guarded : certificate.GuardRepresentation guarding represented}
+    {expressions : List Lean.Expr}
+    {reified : ReifiedSentencesFor certificate.env certificate.bridge
+      expressions}
+    (agreement : TheoryAgreement certificate guarding represented guarded reified)
+    (interpretation : certificate.GuardInterpretation guarding represented guarded)
+    (unsat : Crush.SMT.CommandsUnsatisfiable certificate.emitted) :
+    Datatype.Env.TheoryUnsatisfiable certificate.data.toModelEnv
+      reified.sources := by
+  apply represented.theory_unsat guarded interpretation reified.sources
+    agreement.representation
+  exact (commandsUnsatisfiable_stripAssertionAnnotations
+    certificate.emitted).mpr unsat
+
+/-- Whole-theory reflection from the script returned by `buildScript`,
+including its leading logic-selection command. -/
+theorem unsat_source_script {certificate : CertifiedDataEnv}
+    {guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail))}
+    {represented : certificate.Representation guarding.encoding}
+    {guarded : certificate.GuardRepresentation guarding represented}
+    {expressions : List Lean.Expr}
+    {reified : ReifiedSentencesFor certificate.env certificate.bridge
+      expressions}
+    (agreement : TheoryAgreement certificate guarding represented guarded reified)
+    (interpretation : certificate.GuardInterpretation guarding represented guarded)
+    (logic : String)
+    (unsat : Crush.SMT.CommandsUnsatisfiable
+      (#[.setLogic logic] ++ certificate.emitted)) :
+    Datatype.Env.TheoryUnsatisfiable certificate.data.toModelEnv
+      reified.sources :=
+  agreement.unsat_source interpretation
+    ((commandsUnsatisfiable_setLogic logic certificate.emitted).mp unsat)
+
+end TheoryAgreement
+
 /-- Whole-array refinement evidence for one live production certificate and its
 exact retained intrinsic sentence. Native declarations, recursive guard
 definitions, all ordinary declarations, and every assertion must occur in the
@@ -120,9 +203,8 @@ structure SingleFactAgreement (certificate : CertifiedDataEnv)
     (reified : ReifiedSentenceFor certificate.source certificate.env
       certificate.bridge) where
   retained : certificate.reified = some reified
-  representation : SMT.GuardedTheoryRepresentation guarding
-    certificate.guardCommands (translatedTheory reified.source)
-    (certificate.emitted.map stripAssertionAnnotation)
+  theory : TheoryAgreement certificate guarding represented guarded
+    (.cons reified .nil)
 
 namespace SingleFactAgreement
 
@@ -152,19 +234,16 @@ def build? {certificate : CertifiedDataEnv}
   cases retained : certificate.reified with
   | none => exact none
   | some reified =>
-      let expected := guardedCommands guarding certificate.guardCommands
-        reified.source
-      if equal : certificate.emitted.map stripAssertionAnnotation = expected then
-        exact some {
-          reified
-          agreement := {
-            retained
-            representation := by
-              rw [equal]
-              exact guardedCommands_represents guarding certificate.guardCommands
-                reified.source }}
-      else
-        exact none
+      let witness : ReifiedSentencesFor certificate.env certificate.bridge
+          [certificate.source] := .cons reified .nil
+      match TheoryAgreement.build? (guarding := guarding)
+          (represented := represented) (guarded := guarded) witness
+      with
+      | none => exact none
+      | some checked =>
+          exact some {
+            reified
+            agreement := { retained, theory := checked.down }}
 
 /-- Unsatisfiability of the exact live production snapshot reflects to the
 retained intrinsic sentence, provided the production encoding has one uniform
@@ -181,10 +260,12 @@ theorem unsat_source {certificate : CertifiedDataEnv}
     (interpretation : certificate.GuardInterpretation guarding represented guarded)
     (unsat : Crush.SMT.CommandsUnsatisfiable certificate.emitted) :
     Datatype.Env.Unsatisfiable certificate.data.toModelEnv reified.source := by
-  apply represented.unsat guarded interpretation reified.source
-    agreement.representation
-  exact (commandsUnsatisfiable_stripAssertionAnnotations
-    certificate.emitted).mpr unsat
+  intro source lawful sourceValid
+  apply agreement.theory.unsat_source interpretation unsat source lawful
+  intro formula membership
+  simp only [ReifiedSentencesFor.sources, List.mem_singleton] at membership
+  subst formula
+  exact sourceValid
 
 /-- Reflection from the exact script returned by `buildScript`, including its
 leading logic-selection command. -/

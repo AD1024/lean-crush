@@ -894,6 +894,28 @@ theorem unsat {certificate : CertifiedDataEnv}
   exact represented.unsat_under guarded formula encoding unsat source
     ⟨lawful, interpretation.realize source lawful⟩ sourceValid
 
+/-- Reflection for a complete finite source theory translated against the
+certificate's one common signature and datatype environment. -/
+theorem theory_unsat {certificate : CertifiedDataEnv}
+    {guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail))}
+    (represented : certificate.Representation guarding.encoding)
+    (guarded : certificate.GuardRepresentation guarding represented)
+    (interpretation : certificate.GuardInterpretation guarding represented guarded)
+    (sourceTheory : Theory
+      (certificate.env.signature ++ certificate.tail))
+    {commands : Array Crush.SMT.Command}
+    (encoding : SMT.GuardedTheoryRepresentation guarding
+      certificate.guardCommands (translatedTheories sourceTheory) commands)
+    (unsat : Crush.SMT.CommandsUnsatisfiable commands) :
+    Datatype.Env.TheoryUnsatisfiable certificate.data.toModelEnv
+      sourceTheory := by
+  intro source lawful sourceValid
+  obtain ⟨target, valid⟩ := represented.sound guarded source lawful
+    (interpretation.realize source lawful) encoding
+    (model_extension_theory source sourceTheory sourceValid)
+  exact unsat target valid
+
 end Representation
 
 end CertifiedDataEnv

@@ -7,7 +7,7 @@ Audit baseline: `c04208d` (`Certify inductive datatype lowering metatheory`).
 The intrinsic lowering theorem is sound and well factored:
 
 ```text
-intrinsic HO sentence
+finite intrinsic HO theory
   -> total flattened FO theory
   -> exact raw SMT command representation
   -> semantic unsatisfiability reflection
@@ -28,17 +28,17 @@ translation. This is the principal remaining soundness boundary.
 | Boundary | Main evidence | Audit result |
 |---|---|---|
 | `Lean.Expr` to intrinsic HO | `Reification.reifySentence?`, `ReificationWitness` | Executably type-checked and shape-checked, but intentionally has no denotation theorem for arbitrary `Lean.Expr`. |
-| Intrinsic HO to flattened FO | `translate_denote`, `generated_valid`, `model_extension` | Complete semantic preservation for the intrinsic language. |
+| Intrinsic HO to flattened FO | `translate_denote`, `generated_valid`, `model_extension_theory` | Complete semantic preservation for each sentence and for a finite theory sharing one signature. |
 | Flattened FO to ordinary SMT | `TheoryRepresentation`, `representation_sound` | Exact syntax plus one-model semantic lifting. |
 | Native datatype commands | `Datatype.command_sound`, `EnvRepresentation.native_valid` | Correct for source models satisfying `Datatype.Env.Lawful`; rank excludes cyclic values. |
 | Guarded/enlarged carriers | `guardTerm_rel_eval`, `guarded_lift` | Correct relative to an explicit carrier relation, guard semantics, derived graph, and native-command validity. |
-| Stateful intrinsic VCG | `run_represents`, `runGuarded_represents` | Exact, but `run`/`runGuarded` build fresh pure states rather than refining a completed production run. |
-| Live production commands | `CertifiedDataEnv`, `SingleFactAgreement`, command-index traces | Exact single-fact reflection exists, but ordinary multi-fact runs lack an aggregate intrinsic theory and the live allocator does not construct representation witnesses. |
+| Stateful intrinsic VCG | `runTheory_represents`, `runGuardedTheory_represents` | Exact for finite theories, but these functions build fresh pure states rather than refining a completed production run. |
+| Live production commands | `CertifiedDataEnv`, `TheoryAgreement`, command-index traces | Exact whole-theory reflection and a proof-producing array check exist; `buildScript` does not yet retain the required common reification or construct allocator representation witnesses. |
 | Solver result | `CommandsUnsatisfiable` | Semantic premise only. External solver and proof-replay correctness remain separate. |
 
 ## Soundness findings
 
-### P0: production whole-run agreement is missing
+### P0: production cannot yet construct whole-run agreement
 
 `VCG.run` installs `VCG.commands` in a fresh `TranslateState`. It does not call
 the extensible production `emitTerm` procedure. The latter is deliberately
@@ -53,38 +53,50 @@ single-fact snapshot and proves reflection from `certificate.emitted`;
 top-level `:named` attributes and the leading `set-logic` command are removed
 only through proved semantic-equivalence theorems.
 
-However, the following witnesses remain caller premises rather than products
-of the production run:
+The audit now supplies the missing aggregate specification and semantic proof:
+
+- `reifyDataSignatureMany`, `ReifiedSentencesFor`, and `reifyTheory?` select one
+  environment and retain exact pointwise witnesses without reordering facts;
+- `translatedTheories` and `model_extension_theory` flatten the complete source
+  theory and extend one source model across every generated target obligation;
+- `encodeTheories`, `theoryCommands`, and their guarded/stateful counterparts
+  retain an exact combined target representation;
+- `commands_unsat_implies_source_theory_unsat` and
+  `Representation.theory_unsat` prove unguarded and guarded reflection;
+- `TheoryAgreement.build?` checks the normalized completed production array
+  against that exact aggregate encoding. `SingleFactAgreement` now delegates to
+  the singleton instance instead of maintaining a second proof path.
+
+The following witnesses still remain caller premises rather than products of
+the production run:
 
 - `CertifiedDataEnv.Representation`;
 - `CertifiedDataEnv.GuardRepresentation`;
 - the shared encoding and datatype/guard representation premises needed by
-  `SingleFactAgreement.build?`;
-- one common signature and reified intrinsic theory for all facts in an
-  ordinary production query.
+  `TheoryAgreement.build?`;
+- a retained invocation of common-signature reification for the exact fact
+  array consumed by `buildScript`.
 
 Consequently, the reflection theorem for `CertifiedDataEnv.emitted` exists, but
 live production cannot yet supply all inputs to its executable agreement check.
-Once those static representation witnesses exist, `SingleFactAgreement.build?`
+Once those static representation witnesses exist, `TheoryAgreement.build?`
 compares the complete normalized production snapshot with the exact intrinsic
 encoding and returns proof-carrying agreement only when structural equality
 succeeds.
 
-The agreement is deliberately named `SingleFactAgreement`: `buildScript`
+`SingleFactAgreement` remains only as a compatibility specialization for a
+script containing exactly the certificate's retained fact. `buildScript`
 normally combines hypotheses, selected premises, generated instances, and the
-negated goal in one state. A fact-local `ReifiedSentenceFor` cannot represent
-that combined assertion set, and unsatisfiability of the combined array cannot
-soundly be reflected to unsatisfiability of any one member. Whole-run completion
-must reify the complete fact array against one common signature before command
-agreement is checked.
+negated goal, so its sound conclusion must use `TheoryAgreement` and the
+complete common-signature theory.
 
 Required completion criterion:
 
-1. reify the complete production fact array against one common datatype and
-   constant signature;
+1. retain `reifyTheory?`/`ReifiedSentencesFor` for the exact complete production
+   fact array rather than constructing independent fact-local signatures;
 2. build the shared `SMT.Encoding`, datatype representation, guard
    representation, and declaration trace from the final allocator state;
-3. run an aggregate counterpart of `SingleFactAgreement.build?`, whose structural comparison checks command
+3. run `TheoryAgreement.build?`, whose structural comparison checks command
    order and every surrounding assertion/declaration;
 4. expose semantic reflection only from a `TranslateState` carrying that
    completed witness.
@@ -183,10 +195,10 @@ exhaustiveness, and rank properties separately.
   restricted model class is visible at the call site.
 - `𝒢⟦e⟧[G]` now parallels the ordinary `𝒶⟦e⟧[E]` notation, and theorem-facing
   notation follows the `σ`, `Γ`, `τ`, `e`, `φ`, `T`, `M`, `ρ` convention.
-- Production certificates retain an exact environment-indexed
-  `ReifiedSentenceFor`; `SingleFactAgreement` is isolated in
-  `VCG/Production.lean` and accounts explicitly for semantically transparent
-  root assertion annotations.
+- Production refinement is isolated in `VCG/Production.lean`.
+  `TheoryAgreement` consumes exact common-environment `ReifiedSentencesFor` and
+  accounts explicitly for semantically transparent root assertion annotations;
+  `SingleFactAgreement` is its retained-fact singleton specialization.
 - The proof records formerly named `CertifiedDataTrace.Represents` and
   `CertifiedDataEnv.Represents` are now `...Representation`, matching
   `TheoryRepresentation`, `GuardRepresentation`, and their exact-syntax role.
@@ -201,6 +213,13 @@ exhaustiveness, and rank properties separately.
 - The native block-local datatype `Encoding` was renamed `BlockEncoding`, and
   production projections now say `blockEncoding`; `SMT.Encoding` consequently
   refers only to the shared FO-to-SMT representation.
+- Finite theories now have one semantic and executable route from exact ordered
+  common-environment reification through combined flattening and SMT encoding.
+  The former one-fact production proof is a singleton specialization of
+  `TheoryAgreement`, not a duplicated reflection argument.
+- Higher-order theory append/satisfiability helpers introduced during this work
+  but unused by the proof were removed; only the source-theory satisfaction and
+  unsatisfiability notions consumed by reflection remain.
 
 ## Naming and organization rules
 
@@ -222,15 +241,16 @@ exhaustiveness, and rank properties separately.
 
 ## Ordered follow-up goal
 
-1. Construct production `SMT.Encoding` and block/guard representations from
+1. Redesign `SMT.Encoding` around finite support, or introduce a proved total
+   intrinsic allocator whose finite restriction drives production emission.
+2. Construct production `SMT.Encoding` and block/guard representations from
    final allocator evidence.
-2. Reify all production facts against one common signature and construct an
-   aggregate whole-array agreement; `SingleFactAgreement` remains the exact
-   specialization for one-fact scripts.
-3. Construct production `GuardRepresentation` and `GuardInterpretation` from final
+3. Retain the already-defined common-signature `ReifiedSentencesFor` and run
+   `TheoryAgreement.build?` for the exact fact array consumed by `buildScript`.
+4. Construct production `GuardRepresentation` and `GuardInterpretation` from final
    allocator evidence; the semantic constructors and unrestricted reflection
    theorem are now available.
-4. Store the completed agreement/interpretation in a proved production state
+5. Store the completed agreement/interpretation in a proved production state
    and select it before the unrestricted direct fallback.
-5. Only then attempt the raw-model transport abstraction that can shrink
+6. Only then attempt the raw-model transport abstraction that can shrink
    `DatatypeCarry`.
