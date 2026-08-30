@@ -466,7 +466,7 @@ block is external to, and unowned by, a later dependency step. -/
 structure CarriedBy
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding oldArity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
     (represented : Representation oldBlock oldSymbols fo data)
     (step : Step source) : Prop where
   sort : ∀ child : DataRef oldBlock,
@@ -486,7 +486,7 @@ structure CarriedBy
 theorem ctorApplies_unwrap (step : Step source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding oldArity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
     (represented : Representation oldBlock oldSymbols fo data)
     (carried : CarriedBy represented step)
     {child : DataRef oldBlock} {ctor : CtorDecl oldArity}
@@ -514,7 +514,7 @@ theorem ctorApplies_unwrap (step : Step source)
 theorem ctorApplies_wrap (step : Step source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding oldArity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
     (represented : Representation oldBlock oldSymbols fo data)
     (carried : CarriedBy represented step)
     {child : DataRef oldBlock} {ctor : CtorDecl oldArity}
@@ -544,7 +544,7 @@ theorem ctorApplies_wrap (step : Step source)
 theorem ctor_holds_carry (step : Step source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding oldArity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
     (represented : Representation oldBlock oldSymbols fo data)
     (carried : CarriedBy represented step)
     {child : DataRef oldBlock} {ctor : CtorDecl oldArity}
@@ -602,7 +602,7 @@ disjoint block. -/
 theorem sel_holds_carry (step : Step source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding oldArity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
     (represented : Representation oldBlock oldSymbols fo data)
     (carried : CarriedBy represented step)
     {child : DataRef oldBlock} {ctor : CtorDecl oldArity}
@@ -713,7 +713,7 @@ constructor after one later disjoint block. -/
 theorem test_holds_carry (step : Step source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding oldArity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
     (represented : Representation oldBlock oldSymbols fo data)
     (carried : CarriedBy represented step)
     {child : DataRef oldBlock} {ctor : CtorDecl oldArity}
@@ -771,7 +771,7 @@ theorem test_holds_carry (step : Step source)
 theorem ctor_laws_carry (step : Step source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding oldArity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
     (represented : Representation oldBlock oldSymbols fo data)
     (carried : CarriedBy represented step)
     {sort : Crush.SMT.SSort} {rawCtor : Crush.SMT.CtorDecl}
@@ -795,7 +795,7 @@ theorem ctor_laws_carry (step : Step source)
 theorem ctor_disjoint_carry (step : Step source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding oldArity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
     (represented : Representation oldBlock oldSymbols fo data)
     (carried : CarriedBy represented step)
     {leftSort rightSort : Crush.SMT.SSort}
@@ -831,7 +831,7 @@ theorem ctor_disjoint_carry (step : Step source)
 theorem test_disjoint_carry (step : Step source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding oldArity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
     (represented : Representation oldBlock oldSymbols fo data)
     (carried : CarriedBy represented step)
     {sort : Crush.SMT.SSort} {leftCtor rightCtor : Crush.SMT.CtorDecl}
@@ -895,7 +895,7 @@ theorem test_disjoint_carry (step : Step source)
 theorem exhaustive_carry (step : Step source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding oldArity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
     (represented : Representation oldBlock oldSymbols fo data)
     (carried : CarriedBy represented step)
     {name : String} {count : Nat} {decl : Crush.SMT.DatatypeDecl}
@@ -949,7 +949,7 @@ on every recursive field of an earlier constructor. -/
 theorem rank_lt_carry (step : Step source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding oldArity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
     (represented : Representation oldBlock oldSymbols fo data)
     (carried : CarriedBy represented step)
     (rank : SMT.Value step.prior.target → Nat)
@@ -992,7 +992,7 @@ an earlier native datatype declaration, with no datatype-specific re-modeling. -
 theorem data_hold_carry (step : Step source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding oldArity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
     (represented : Representation oldBlock oldSymbols fo data)
     (carried : CarriedBy represented step)
     (holds : Crush.SMT.DatatypesHold (SMT.model fo step.prior.target)
@@ -1026,7 +1026,7 @@ disjoint dependency block. -/
 theorem command_sound_carry (step : Step source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding oldArity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
     (represented : Representation oldBlock oldSymbols fo data)
     (carried : CarriedBy represented step)
     (valid : (SMT.model fo step.prior.target).SatisfiesCommand
@@ -1080,7 +1080,7 @@ the same external carrier isomorphism. -/
 theorem guardLaw_carry (step : Step source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding oldArity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
     (represented : Representation oldBlock oldSymbols fo data)
     (carried : CarriedBy represented step)
     (oldGuard : ∀ sort : FO.FOSort,
@@ -1189,8 +1189,8 @@ structure Before
     {earlierSymbols : Symbols signature earlierBlock}
     {laterSymbols : Symbols signature laterBlock}
     {fo : SMT.Encoding (Symbol signature)}
-    {earlierData : Encoding earlierArity}
-    {laterData : Encoding laterArity}
+    {earlierData : BlockEncoding earlierArity}
+    {laterData : BlockEncoding laterArity}
     (earlier : Representation earlierBlock earlierSymbols fo earlierData)
     (_later : Representation laterBlock laterSymbols fo laterData) : Prop where
   sort : ∀ child : DataRef earlierBlock,
@@ -1223,8 +1223,8 @@ theorem carried
     {earlierSymbols : Symbols signature earlierBlock}
     {laterSymbols : Symbols signature laterBlock}
     {fo : SMT.Encoding (Symbol signature)}
-    {earlierData : Encoding earlierArity}
-    {laterData : Encoding laterArity}
+    {earlierData : BlockEncoding earlierArity}
+    {laterData : BlockEncoding laterArity}
     {earlier : Representation earlierBlock earlierSymbols fo earlierData}
     {later : Representation laterBlock laterSymbols fo laterData}
     (before : Before earlier later)
@@ -1256,14 +1256,14 @@ inductive After
     {earlierArity : Nat} {earlierBlock : Block earlierArity}
     {earlierSymbols : Symbols signature earlierBlock}
     {fo : SMT.Encoding (Symbol signature)}
-    {earlierData : Encoding earlierArity}
+    {earlierData : BlockEncoding earlierArity}
     (earlier : Representation earlierBlock earlierSymbols fo earlierData) :
     {env : List (Entry signature)} →
       Represented fo env → Prop where
   | nil : After earlier .nil
   | cons {entry : Entry signature}
       {rest : List (Entry signature)}
-      {data : Encoding entry.arity}
+      {data : BlockEncoding entry.arity}
       {later : Representation entry.block entry.symbols fo data}
       {tail : Represented fo rest} :
       Before earlier later → After earlier tail →
@@ -1278,7 +1278,7 @@ inductive Ordered {fo : SMT.Encoding (Symbol signature)} :
   | nil : Ordered .nil
   | cons {entry : Entry signature}
       {rest : List (Entry signature)}
-      {data : Encoding entry.arity}
+      {data : BlockEncoding entry.arity}
       {head : Representation entry.block entry.symbols fo data}
       {tail : Represented fo rest} :
       After head tail → Ordered tail → Ordered (.cons head tail)
@@ -1287,7 +1287,7 @@ inductive Ordered {fo : SMT.Encoding (Symbol signature)} :
 names and binder are retained intrinsically, so semantic validation cannot
 drift from the raw command. -/
 structure GuardCommand
-    {entry : Entry signature} {data : Encoding entry.arity}
+    {entry : Entry signature} {data : BlockEncoding entry.arity}
     {guarding : SMT.Guarding (Symbol signature)}
     (_head : Representation entry.block entry.symbols guarding.encoding data)
     where
@@ -1304,7 +1304,7 @@ inductive GuardTrace (guarding : SMT.Guarding (Symbol signature)) :
       Represented guarding.encoding env → Type 1 where
   | nil : GuardTrace guarding .nil
   | cons {entry : Entry signature} {rest : List (Entry signature)}
-      {data : Encoding entry.arity}
+      {data : BlockEncoding entry.arity}
       {head : Representation entry.block entry.symbols guarding.encoding data}
       {tail : Represented guarding.encoding rest}
       (command : GuardCommand head)
@@ -1343,7 +1343,7 @@ namespace GuardCommand
 /-- Global unary-identifier injectivity and unique datatype sort ownership make
 the names of one mutual guard definition injective. -/
 theorem name_injective
-    {entry : Entry signature} {data : Encoding entry.arity}
+    {entry : Entry signature} {data : BlockEncoding entry.arity}
     {guarding : SMT.Guarding (Symbol signature)}
     {head : Representation entry.block entry.symbols guarding.encoding data}
     (command : GuardCommand head)
@@ -1370,7 +1370,7 @@ theorem After.command_valid
     {earlierArity : Nat} {earlierBlock : Block earlierArity}
     {earlierSymbols : Symbols signature earlierBlock}
     {fo : SMT.Encoding (Symbol signature)}
-    {earlierData : Encoding earlierArity}
+    {earlierData : BlockEncoding earlierArity}
     {earlier : Representation earlierBlock earlierSymbols fo earlierData}
     {env : List (Entry signature)}
     {tail : Represented fo env}
@@ -1419,7 +1419,7 @@ theorem After.guardLaw
     {earlierArity : Nat} {earlierBlock : Block earlierArity}
     {earlierSymbols : Symbols signature earlierBlock}
     {fo : SMT.Encoding (Symbol signature)}
-    {earlierData : Encoding earlierArity}
+    {earlierData : BlockEncoding earlierArity}
     {earlier : Representation earlierBlock earlierSymbols fo earlierData}
     {env : List (Entry signature)}
     {tail : Represented fo env}
@@ -1478,7 +1478,7 @@ theorem After.guardLaw
 dependency block has been installed. The canonical guard equation is derived at
 the installation step and transported internally through the suffix. -/
 theorem After.wfDefs_valid
-    {entry : Entry signature} {data : Encoding entry.arity}
+    {entry : Entry signature} {data : BlockEncoding entry.arity}
     {fo : SMT.Encoding (Symbol signature)}
     {head : Representation entry.block entry.symbols fo data}
     {env : List (Entry signature)} {tail : Represented fo env}
@@ -1690,7 +1690,7 @@ source symbol, and `ExtraGraph.source_fresh` excludes exactly those identifiers.
 theorem Representation.extra_inactive
     {signature : Signature} {arity : Nat} {block : Block arity}
     {symbols : Symbols signature block}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     (target : FO.FamilyModel (Symbol signature))
     (extra : SMT.ExtraGraph fo target) :
@@ -1768,7 +1768,7 @@ guards are installed over it once and supply all premises of `wfDefs_valid`. -/
 theorem Native.block_valid_with_guards
     {signature : Signature} {arity : Nat} {block : Block arity}
     {symbols : Symbols signature block}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {source prior : FO.FamilyModel (Symbol signature)}
     (law : FamilyLawful symbols.native source)
@@ -1828,7 +1828,7 @@ datatype symbols simultaneously. -/
 theorem Native.block_valid_with_int
     {signature : Signature} {arity : Nat} {block : Block arity}
     {symbols : Symbols signature block}
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {source prior : FO.FamilyModel (Symbol signature)}
     (law : FamilyLawful symbols.native source)

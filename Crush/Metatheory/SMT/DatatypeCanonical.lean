@@ -46,7 +46,7 @@ def fieldValue {source : Model signature} (law : Lawful symbols source)
 
 @[simp] theorem fieldSort_eq
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     (field : FieldDecl arity) :
     fieldSort (block := block) data field.sort =
       fo.sort (field.fo block) := by
@@ -279,7 +279,7 @@ theorem applyValues_curry {source : Model signature}
 source carrier value corresponding to the canonical constructor tree. -/
 theorem ctor_apply {source : Model signature} (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block child ctor)
     (args : Args block source.Base ctor.fields) :
@@ -325,7 +325,7 @@ theorem fieldValue_typed {source : Model signature}
 shared symbol graph. -/
 theorem sel_apply_ctor {source : Model signature} (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) {field : FieldDecl arity}
     (fieldRef : FieldRef ctor field)
@@ -367,7 +367,7 @@ theorem sel_apply_ctor {source : Model signature} (law : Lawful symbols source)
 selected constructor. -/
 theorem test_apply {source : Model signature} (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block child ctor) (value : Val block source.Base child) :
     (SMT.model fo
@@ -391,7 +391,7 @@ theorem test_apply {source : Model signature} (law : Lawful symbols source)
 @[simp] theorem test_apply_ctor {source : Model signature}
     (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block child ctor)
     (args : Args block source.Base ctor.fields) :
@@ -411,7 +411,7 @@ specialized through the declaration representation. -/
 theorem ctor_has_type {source : Model signature}
     (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block child ctor) :
     Crush.SMT.SymbolHasType
@@ -432,7 +432,7 @@ theorem ctor_has_type {source : Model signature}
 theorem ctor_apply_inv {source : Model signature}
     (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block child ctor)
     {values : List (SMT.Value
@@ -481,7 +481,7 @@ model. -/
 theorem ctor_holds {source : Model signature}
     (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block child ctor) :
     Crush.SMT.ConstructorHolds
@@ -517,7 +517,7 @@ theorem ctor_holds {source : Model signature}
 theorem sel_has_type {source : Model signature}
     (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) {field : FieldDecl arity}
     (fieldRef : FieldRef ctor field) :
@@ -554,7 +554,7 @@ constructor field. -/
 theorem sel_holds {source : Model signature}
     (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) :
     Crush.SMT.SelectorsHold
@@ -591,7 +591,7 @@ theorem sel_holds {source : Model signature}
 theorem test_has_type {source : Model signature}
     (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block child ctor) :
     Crush.SMT.SymbolHasType
@@ -610,7 +610,7 @@ theorem test_has_type {source : Model signature}
 theorem test_apply_ne {source : Model signature}
     (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {leftCtor rightCtor : CtorDecl arity}
     (leftRef : CtorRef block child leftCtor)
     (rightRef : CtorRef block child rightCtor)
@@ -634,7 +634,7 @@ theorem test_apply_ne {source : Model signature}
 theorem test_holds {source : Model signature}
     (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block child ctor) :
     Crush.SMT.TesterHolds
@@ -655,7 +655,7 @@ constructor, selector, and tester laws in the shared model. -/
 theorem ctor_laws {source : Model signature}
     (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {sort : Crush.SMT.SSort} {rawCtor : Crush.SMT.CtorDecl}
     (member : (sort, rawCtor) ∈
       Crush.SMT.datatypeCtors (entries block data)) :
@@ -679,7 +679,7 @@ theorem ctor_laws {source : Model signature}
 theorem ctor_disjoint {source : Model signature}
     (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {leftSort rightSort : Crush.SMT.SSort}
     {leftCtor rightCtor : Crush.SMT.CtorDecl}
     (leftMem : (leftSort, leftCtor) ∈
@@ -738,7 +738,7 @@ theorem ctor_disjoint {source : Model signature}
 theorem test_disjoint {source : Model signature}
     (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {sort : Crush.SMT.SSort} {leftCtor rightCtor : Crush.SMT.CtorDecl}
     (leftMem : (sort, leftCtor) ∈
       Crush.SMT.datatypeCtors (entries block data))
@@ -784,7 +784,7 @@ from that exact native declaration. -/
 theorem exhaustive {source : Model signature}
     (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {name : String} {count : Nat} {decl : Crush.SMT.DatatypeDecl}
     (member : (name, count, decl) ∈ (entries block data).toList)
     (value : SMT.Value
@@ -880,7 +880,7 @@ classified as recursive. Structural well-formedness rules out an external
 base field merely reusing a datatype sort identity. -/
 theorem field_data_ref
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {parent : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block parent ctor) {field : FieldDecl arity}
     (fieldRef : FieldRef ctor field) (child : DataRef block)
@@ -912,7 +912,7 @@ rank. This is the well-foundedness clause required by native SMT datatypes. -/
 theorem rank_lt {source : Model signature}
     (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data)
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {sort : Crush.SMT.SSort} {rawCtor : Crush.SMT.CtorDecl}
     (member : (sort, rawCtor) ∈
       Crush.SMT.datatypeCtors (entries block data))
@@ -978,7 +978,7 @@ semantic law of one emitted native datatype block. -/
 theorem data_hold {source : Model signature}
     (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data) :
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data) :
     Crush.SMT.DatatypesHold
       (SMT.model fo
       (canonicalModel source))
@@ -1005,7 +1005,7 @@ raw SMT model used for all ordinary symbols and formulas. -/
 theorem command_sound {source : Model signature}
     (law : Lawful symbols source)
     {fo : SMT.Encoding (Symbol signature)}
-    {data : Encoding arity} (represented : Representation block symbols fo data) :
+    {data : BlockEncoding arity} (represented : Representation block symbols fo data) :
     (SMT.model fo
       (canonicalModel source)).SatisfiesCommand
       (command block data) := by

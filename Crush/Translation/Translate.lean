@@ -315,8 +315,8 @@ private def triple? {α : Type} (values : Array (Array (Array α)))
   row[third]?
 
 /-- The intrinsic native encoding determined by production's allocated names. -/
-def encoding {arity : Nat} (names : AllocatedDataNames arity) :
-    Metatheory.SMT.Datatype.Encoding arity where
+def blockEncoding {arity : Nat} (names : AllocatedDataNames arity) :
+    Metatheory.SMT.Datatype.BlockEncoding arity where
   name
     | .sort data => names.sorts[data.val]'(by
         rw [names.sorts_size]
@@ -337,7 +337,7 @@ the canonical command computed from its typed reified block. -/
 def certifyDataCommand? (block : Metatheory.Reification.DatatypeBlock)
     (names : AllocatedDataNames block.arity) :
     Option Metatheory.VCG.CertifiedDataCommand :=
-  let encoding := names.encoding
+  let encoding := names.blockEncoding
   let command := Metatheory.SMT.Datatype.command block.block encoding
   let sortNames := List.ofFn fun data : Fin block.arity =>
     encoding.name (.sort data)
@@ -352,12 +352,12 @@ def certifyDataCommand? (block : Metatheory.Reification.DatatypeBlock)
           some {
             owner := block
             typed := {
-              encoding
+              blockEncoding := encoding
               command
               command_eq := rfl
               wf := {
                 blockWF := block.wf
-                names := Metatheory.SMT.Datatype.Encoding.wf_of_names
+                names := Metatheory.SMT.Datatype.BlockEncoding.wf_of_names
                   encoding nameNodup
                 sorts_fresh := by
                   intro data

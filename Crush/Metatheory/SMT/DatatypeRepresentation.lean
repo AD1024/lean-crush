@@ -24,7 +24,7 @@ encoding. No parallel term encoder or ownership record is needed. -/
 structure Representation {signature : Signature} {arity : Nat}
     (block : Block arity) (symbols : Symbols signature block)
     (fo : SMT.Encoding (Symbol signature))
-    (data : Encoding arity) where
+    (data : BlockEncoding arity) where
   wf : CommandWF block data
   /-- One flattened symbol cannot simultaneously play two native datatype
   roles. Reification establishes this from distinct source-constant ownership;
@@ -65,7 +65,7 @@ namespace Representation
 variable {signature : Signature} {arity : Nat}
 variable {block : Block arity} {symbols : Symbols signature block}
 variable {fo : SMT.Encoding (Symbol signature)}
-variable {data : Encoding arity}
+variable {data : BlockEncoding arity}
 
 @[simp] theorem SMT.Encoding.ident_cast
     {family : FO.SymbolFamily} (encoding : SMT.Encoding family)
@@ -168,7 +168,7 @@ inductive Represented {signature : Signature}
     Env signature → Type 1 where
   | nil : Represented fo []
   | cons {entry : Entry signature} {rest : Env signature}
-      {data : Encoding entry.arity}
+      {data : BlockEncoding entry.arity}
       (head : Representation entry.block entry.symbols fo data)
       (tail : Represented fo rest) : Represented fo (entry :: rest)
 

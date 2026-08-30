@@ -25,7 +25,7 @@ inductive NameKey (arity : Nat) where
 
 /-- Concrete names for datatype-owned entities and concrete sorts for external
 constructor fields. -/
-structure Encoding (arity : Nat) where
+structure BlockEncoding (arity : Nat) where
   name : NameKey arity → String
   baseSort : BaseSort → Crush.SMT.SSort
 
@@ -33,23 +33,23 @@ structure Encoding (arity : Nat) where
 selector, and cross-component freshness is checked once on the exact emitted
 symbol list by `CommandWF`, rather than redundantly requiring behavior at
 out-of-range natural-number keys. -/
-def Encoding.WF {arity : Nat} (encoding : Encoding arity) : Prop :=
+def BlockEncoding.WF {arity : Nat} (encoding : BlockEncoding arity) : Prop :=
   Function.Injective fun data : Fin arity => encoding.name (.sort data)
 
 /-- Nullary raw SMT sort owned by one datatype declaration. -/
-def dataSort {arity : Nat} (encoding : Encoding arity)
+def dataSort {arity : Nat} (encoding : BlockEncoding arity)
     (data : Fin arity) : Crush.SMT.SSort :=
   .app (.symb (encoding.name (.sort data))) #[]
 
 /-- Raw SMT representation of one constructor field sort. -/
 def fieldSort {arity : Nat} {block : Block arity}
-    (encoding : Encoding arity) : FieldSort arity → Crush.SMT.SSort
+    (encoding : BlockEncoding arity) : FieldSort arity → Crush.SMT.SSort
   | .base sort => encoding.baseSort sort
   | .data child => dataSort encoding child
 
 /-- Raw declaration of one constructor, including positional selectors. -/
 def ctorDecl {arity : Nat} {block : Block arity}
-    (encoding : Encoding arity) (data : Fin arity) (ctorIndex : Nat)
+    (encoding : BlockEncoding arity) (data : Fin arity) (ctorIndex : Nat)
     (ctor : Datatype.CtorDecl arity) : Crush.SMT.CtorDecl :=
   { name := encoding.name (.ctor data ctorIndex)
     selDecls := (ctor.fields.mapIdx fun fieldIndex field =>
@@ -58,14 +58,14 @@ def ctorDecl {arity : Nat} {block : Block arity}
 
 /-- Raw monomorphic body of one datatype declaration. -/
 def dataDecl {arity : Nat} {block : Block arity}
-    (encoding : Encoding arity) (data : Fin arity) : Crush.SMT.DatatypeDecl :=
+    (encoding : BlockEncoding arity) (data : Fin arity) : Crush.SMT.DatatypeDecl :=
   { params := #[]
     ctors := ((block.decl data).ctors.mapIdx fun ctorIndex ctor =>
       ctorDecl (block := block) encoding data ctorIndex ctor).toArray }
 
 /-- Exact ordered entries of one mutual `declare-datatypes` block. -/
 def entries {arity : Nat} (block : Block arity)
-    (encoding : Encoding arity) :
+    (encoding : BlockEncoding arity) :
     Array (String × Nat × Crush.SMT.DatatypeDecl) :=
   ((List.ofFn fun data : Fin arity => data).map fun data =>
     (encoding.name (.sort data), 0,
@@ -73,7 +73,7 @@ def entries {arity : Nat} (block : Block arity)
 
 /-- One native command representing the complete intrinsic block. -/
 def command {arity : Nat} (block : Block arity)
-    (encoding : Encoding arity) : Crush.SMT.Command :=
+    (encoding : BlockEncoding arity) : Crush.SMT.Command :=
   .declDatatypes (entries block encoding)
 
 /-! ## Guarded datatype predicate syntax -/
@@ -114,12 +114,12 @@ def wfDef (name binder : String) (sort : Crush.SMT.SSort)
   body := wfBody parts }
 
 @[simp] theorem entries_size {arity : Nat} (block : Block arity)
-    (encoding : Encoding arity) :
+    (encoding : BlockEncoding arity) :
     (entries block encoding).size = arity := by
   simp [entries]
 
 @[simp] theorem ctor_get {arity : Nat} {block : Block arity}
-    (encoding : Encoding arity) {data : DataRef block}
+    (encoding : BlockEncoding arity) {data : DataRef block}
     {ctor : Datatype.CtorDecl arity}
     (ref : CtorRef block data ctor) :
     (dataDecl (block := block) encoding data).ctors[Ref.index ref]? =
@@ -131,7 +131,7 @@ def wfDef (name binder : String) (sort : Crush.SMT.SSort)
   simp [dataDecl, get]
 
 @[simp] theorem sel_get {arity : Nat} {block : Block arity}
-    (encoding : Encoding arity) {data : DataRef block}
+    (encoding : BlockEncoding arity) {data : DataRef block}
     {ctor : Datatype.CtorDecl arity}
     (ctorRef : CtorRef block data ctor) {field : FieldDecl arity}
     (fieldRef : FieldRef ctor field) :

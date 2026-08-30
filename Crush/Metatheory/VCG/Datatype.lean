@@ -23,10 +23,10 @@ abbrev Command := Crush.SMT.Command
 This is the proof-relevant core retained after production metadata has served
 its discovery purpose. -/
 structure DataCommand (owner : SomeBlock) where
-  encoding : SMT.Datatype.Encoding owner.arity
+  blockEncoding : SMT.Datatype.BlockEncoding owner.arity
   command : Command
-  command_eq : command = SMT.Datatype.command owner.block encoding
-  wf : SMT.Datatype.CommandWF owner.block encoding
+  command_eq : command = SMT.Datatype.command owner.block blockEncoding
+  wf : SMT.Datatype.CommandWF owner.block blockEncoding
 
 /-- One exact native datatype command, including the allocator-selected names,
 its typed reified block, and the well-formedness evidence consumed by canonical
@@ -44,20 +44,20 @@ namespace CertifiedDataCommand
 @[reducible] def block (certificate : CertifiedDataCommand) : DatatypeBlock :=
   certificate.owner
 
-@[reducible] def encoding (certificate : CertifiedDataCommand) :
-    SMT.Datatype.Encoding certificate.owner.arity :=
-  certificate.typed.encoding
+@[reducible] def blockEncoding (certificate : CertifiedDataCommand) :
+    SMT.Datatype.BlockEncoding certificate.owner.arity :=
+  certificate.typed.blockEncoding
 
 @[reducible] def command (certificate : CertifiedDataCommand) : Command :=
   certificate.typed.command
 
 theorem command_eq (certificate : CertifiedDataCommand) :
     certificate.command =
-      SMT.Datatype.command certificate.block.block certificate.encoding :=
+      SMT.Datatype.command certificate.block.block certificate.blockEncoding :=
   certificate.typed.command_eq
 
 theorem wf (certificate : CertifiedDataCommand) :
-    SMT.Datatype.CommandWF certificate.block.block certificate.encoding :=
+    SMT.Datatype.CommandWF certificate.block.block certificate.blockEncoding :=
   certificate.typed.wf
 
 /-- Recover a command indexed by a requested reified block only after checking
@@ -81,7 +81,8 @@ def typedFor? (certificate : CertifiedDataCommand) (target : DatatypeBlock) :
 identifiers reuse their constructor name inside `(_ is C)` and therefore do not
 allocate another symbol. -/
 def names (certificate : CertifiedDataCommand) : Array String :=
-  let entries := SMT.Datatype.entries certificate.block.block certificate.encoding
+  let entries := SMT.Datatype.entries certificate.block.block
+    certificate.blockEncoding
   let sorts := entries.toList.map (·.1)
   let members := entries.toList.flatMap fun entry =>
     entry.2.2.ctors.toList.flatMap fun ctor =>
@@ -194,7 +195,7 @@ private def fromAt {signature : Signature} {emitted : Array Command}
   | nil => exact .nil
   | @cons entry rest data head tail =>
       let command : DataCommand ⟨entry.arity, entry.block⟩ := {
-        encoding := data
+        blockEncoding := data
         command := SMT.Datatype.command entry.block data
         command_eq := rfl
         wf := head.wf }
@@ -254,7 +255,7 @@ def cons {signature : Signature} {emitted : Array Command}
     {commandAt : emitted[commandIndex]? = some command.command}
     {tail : CertifiedDataTrace emitted restEnv}
     (head : SMT.Datatype.Representation entry.block entry.symbols fo
-      command.encoding)
+      command.blockEncoding)
     (rest : Representation fo tail)
     (after : SMT.Datatype.Native.Step.After head rest.blocks) :
     Representation fo (.cons command commandIndex commandAt tail) := {

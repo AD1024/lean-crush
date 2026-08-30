@@ -140,7 +140,7 @@ def wfParts (guarding : SMT.Guarding (Symbol signature))
 /-- One simultaneous recursive-definition array for every member of a mutual
 datatype block, in declaration order. -/
 def wfDefs (guarding : SMT.Guarding (Symbol signature))
-    (encoding : Encoding arity) (guardName binder : DataRef block → String) :
+    (encoding : BlockEncoding arity) (guardName binder : DataRef block → String) :
     Array Crush.SMT.FunDef :=
   ((List.finRange arity).map fun data : DataRef block =>
     wfDef (guardName data) (binder data)
@@ -445,7 +445,7 @@ theorem dataParts_eval {target : FO.FamilyModel (Symbol signature)}
 datatype representation. -/
 theorem Representation.native_test_ident
     {symbols : Symbols signature block}
-    {fo : SMT.Encoding (Symbol signature)} {encoding : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {data : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block data ctor) :
@@ -456,7 +456,7 @@ theorem Representation.native_test_ident
 /-- Exact represented constructor clauses for one datatype member. -/
 def Representation.guardParts
     {symbols : Symbols signature block}
-    {fo : SMT.Encoding (Symbol signature)} {encoding : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {target : FO.FamilyModel (Symbol signature)}
     {guarding : SMT.Guarding (Symbol signature)}
@@ -480,7 +480,7 @@ selector symbols. It is independent of raw syntax and is therefore the compact
 invariant transported through later dependency blocks. -/
 def Representation.GuardLaw
     {symbols : Symbols signature block}
-    {fo : SMT.Encoding (Symbol signature)} {encoding : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (_represented : Representation block symbols fo encoding)
     (target : FO.FamilyModel (Symbol signature))
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop) : Prop :=
@@ -495,7 +495,7 @@ def Representation.GuardLaw
 /-- Pointwise-equivalent predicates satisfy the same datatype guard equation. -/
 theorem Representation.GuardLaw.congr
     {symbols : Symbols signature block}
-    {fo : SMT.Encoding (Symbol signature)} {encoding : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     {represented : Representation block symbols fo encoding}
     {target : FO.FamilyModel (Symbol signature)}
     {left right : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
@@ -524,7 +524,7 @@ derived from the free-datatype tester and selector laws, rather than supplied
 as an assumption to the final soundness theorem. -/
 theorem Representation.guardLaw_extend
     {symbols : Symbols signature block}
-    {fo : SMT.Encoding (Symbol signature)} {encoding : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {source prior : FO.FamilyModel (Symbol signature)}
     (law : FamilyLawful symbols.native source)
@@ -584,7 +584,7 @@ theorem Representation.guardLaw_extend
 used to build the raw `wf_T` body. -/
 theorem Representation.guardParts_iff_guard
     {symbols : Symbols signature block}
-    {fo : SMT.Encoding (Symbol signature)} {encoding : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {target : FO.FamilyModel (Symbol signature)}
     {guarding : SMT.Guarding (Symbol signature)}
@@ -611,7 +611,7 @@ theorem Representation.guardParts_iff_guard
 denotation. -/
 theorem Representation.guardParts_eval
     {symbols : Symbols signature block}
-    {fo : SMT.Encoding (Symbol signature)} {encoding : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {target : FO.FamilyModel (Symbol signature)}
     {guarding : SMT.Guarding (Symbol signature)}
@@ -640,7 +640,7 @@ theorem Representation.guardParts_eval
 to the owned datatype sort's shared carrier guard. -/
 theorem Representation.guardParts_eval_wf
     {symbols : Symbols signature block}
-    {fo : SMT.Encoding (Symbol signature)} {encoding : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {source prior : FO.FamilyModel (Symbol signature)}
     (law : FamilyLawful symbols.native source)
@@ -685,7 +685,7 @@ theorem Representation.guardParts_eval_wf
 graph equation in the guarded native model. -/
 theorem wfDef_valid
     {symbols : Symbols signature block}
-    {fo : SMT.Encoding (Symbol signature)} {encoding : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {source prior : FO.FamilyModel (Symbol signature)}
     (law : FamilyLawful symbols.native source)
@@ -737,7 +737,7 @@ the suffix-stable interface; the canonical one-step theorem below discharges
 `correct` from free-datatype semantics. -/
 theorem wfDefs_valid_of_guard
     {symbols : Symbols signature block}
-    {fo : SMT.Encoding (Symbol signature)} {encoding : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {target : FO.FamilyModel (Symbol signature)}
     (guarding : SMT.Guarding (Symbol signature))
@@ -808,7 +808,7 @@ theorem wfDefs_valid_of_guard
 valid in the same guarded model as its native datatype declaration. -/
 theorem wfDefs_valid
     {symbols : Symbols signature block}
-    {fo : SMT.Encoding (Symbol signature)} {encoding : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {source prior : FO.FamilyModel (Symbol signature)}
     (law : FamilyLawful symbols.native source)

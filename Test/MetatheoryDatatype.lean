@@ -65,7 +65,7 @@ example : valueField.sel optionBlock optionData =
 example : someCtor.test optionBlock optionData =
     { args := [.base optionDecl.sort], result := .bool } := rfl
 
-private def optionEncoding : Crush.Metatheory.SMT.Datatype.Encoding 1 where
+private def optionEncoding : Crush.Metatheory.SMT.Datatype.BlockEncoding 1 where
   name
     | .sort _ => "Option_Int"
     | .ctor _ 0 => "Option_Int_none"
@@ -455,7 +455,7 @@ open scoped Crush.Metatheory Crush.SMT
 
 variable {σ : Signature} {n : Nat} {block : Block n}
 variable {symbols : Symbols σ block} {source : Model σ}
-variable {fo : SMT.Encoding (Symbol σ)} {data : Encoding n}
+variable {fo : SMT.Encoding (Symbol σ)} {data : BlockEncoding n}
 
 example (law : Lawful symbols source)
     (represented : Representation block symbols fo data) :
@@ -1031,7 +1031,7 @@ run_meta do
     let some native := state.certifiedDataCommands[0]?
       | throwError "reserved datatype-name test lost its native certificate"
     let first : Fin native.block.arity := ⟨0, native.wf.blockWF.nonempty⟩
-    unless native.encoding.name (.sort first) != "Bool" do
+    unless native.blockEncoding.name (.sort first) != "Bool" do
       throwError "certified datatype allocator reused the built-in Bool sort"
 
   withLocalDeclD `leafValue int fun leafValue => do

@@ -10,7 +10,7 @@ open Crush.Metatheory.Datatype
 
 /-- Syntactic freshness retained by the allocator for one exact native block. -/
 structure CommandWF {arity : Nat} (block : Block arity)
-    (encoding : Encoding arity) : Prop where
+    (encoding : BlockEncoding arity) : Prop where
   blockWF : block.WF
   names : encoding.WF
   sorts_fresh : ∀ data : DataRef block,
@@ -23,7 +23,7 @@ structure CommandWF {arity : Nat} (block : Block arity)
       Crush.SMT.NotBuiltin symbol
 
 /-- Native datatype sorts retain their intrinsic mutual-block indices. -/
-theorem dataSort_injective {arity : Nat} {encoding : Encoding arity}
+theorem dataSort_injective {arity : Nat} {encoding : BlockEncoding arity}
     (wf : encoding.WF) : Function.Injective (dataSort encoding) := by
   intro left right equal
   unfold dataSort at equal
@@ -33,7 +33,7 @@ theorem dataSort_injective {arity : Nat} {encoding : Encoding arity}
 
 /-- A concrete list of mutual-block sort names discharges the only local
 injectivity condition required by the datatype carrier proof. -/
-theorem Encoding.wf_of_names {arity : Nat} (encoding : Encoding arity)
+theorem BlockEncoding.wf_of_names {arity : Nat} (encoding : BlockEncoding arity)
     (nodup : (List.ofFn fun data : Fin arity =>
       encoding.name (.sort data)).Nodup) : encoding.WF := by
   intro left right equal
@@ -47,7 +47,7 @@ theorem Encoding.wf_of_names {arity : Nat} (encoding : Encoding arity)
 
 /-- Every intrinsic constructor reference occurs in the raw command. -/
 theorem raw_ctor_mem {arity : Nat} {block : Block arity}
-    (encoding : Encoding arity) {data : DataRef block}
+    (encoding : BlockEncoding arity) {data : DataRef block}
     {ctor : CtorDecl arity} (ref : CtorRef block data ctor) :
     (dataSort encoding data,
       ctorDecl (block := block) encoding data ref.index ctor) ∈
@@ -72,7 +72,7 @@ private theorem mapIdx_snd {α β γ : Type} (values : List α)
   | cons value values ih => simp [List.mapIdx_cons, ih]
 
 @[simp] theorem raw_ctor_argSorts {arity : Nat} {block : Block arity}
-    (encoding : Encoding arity) (data : DataRef block) (index : Nat)
+    (encoding : BlockEncoding arity) (data : DataRef block) (index : Nat)
     (ctor : CtorDecl arity) :
     (ctorDecl (block := block) encoding data index ctor).argSorts =
       ctor.fields.map fun field =>
@@ -81,7 +81,7 @@ private theorem mapIdx_snd {α β γ : Type} (values : List α)
 
 /-- Every raw constructor comes from one intrinsic typed reference. -/
 theorem raw_ctor_ref {arity : Nat} {block : Block arity}
-    (encoding : Encoding arity) {sort : Crush.SMT.SSort}
+    (encoding : BlockEncoding arity) {sort : Crush.SMT.SSort}
     {rawCtor : Crush.SMT.CtorDecl}
     (member : (sort, rawCtor) ∈
       Crush.SMT.datatypeCtors (entries block encoding)) :
@@ -116,7 +116,7 @@ theorem raw_ctor_ref {arity : Nat} {block : Block arity}
 
 /-- Every raw datatype entry comes from one intrinsic datatype reference. -/
 theorem raw_entry_ref {arity : Nat} (block : Block arity)
-    (encoding : Encoding arity) {name : String} {count : Nat}
+    (encoding : BlockEncoding arity) {name : String} {count : Nat}
     {decl : Crush.SMT.DatatypeDecl}
     (member : (name, count, decl) ∈ (entries block encoding).toList) :
     ∃ data : DataRef block,
@@ -129,7 +129,7 @@ theorem raw_entry_ref {arity : Nat} (block : Block arity)
 
 /-- Every sort in one raw block comes from one intrinsic datatype reference. -/
 theorem raw_sort_ref {arity : Nat} (block : Block arity)
-    (encoding : Encoding arity) {sort : Crush.SMT.SSort}
+    (encoding : BlockEncoding arity) {sort : Crush.SMT.SSort}
     (member : sort ∈ Crush.SMT.datatypeSorts (entries block encoding)) :
     ∃ data : DataRef block, sort = dataSort encoding data := by
   simp only [Crush.SMT.datatypeSorts, entries, List.mem_map] at member
@@ -141,7 +141,7 @@ theorem raw_sort_ref {arity : Nat} (block : Block arity)
 /-- Structural and allocated-name well-formedness discharges the raw command's
 supported-fragment predicate. -/
 theorem supported {arity : Nat} {block : Block arity}
-    {encoding : Encoding arity} (wf : CommandWF block encoding)
+    {encoding : BlockEncoding arity} (wf : CommandWF block encoding)
     (productive : Productive block) :
     Crush.SMT.DatatypesSupported (entries block encoding) := by
   refine ⟨?_, ?_, wf.symbols, ?_⟩

@@ -318,7 +318,7 @@ theorem ctor_apply {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor)
@@ -409,7 +409,7 @@ theorem sel_apply_ctor {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) {field : FieldDecl arity}
@@ -438,7 +438,7 @@ theorem test_apply {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor)
@@ -460,7 +460,7 @@ theorem test_apply {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor)
@@ -482,7 +482,7 @@ theorem ctor_has_type {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) :
@@ -506,7 +506,7 @@ theorem ctor_apply_inv {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor)
@@ -554,7 +554,7 @@ theorem ctor_holds {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) :
@@ -597,7 +597,7 @@ theorem sel_has_type {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) {field : FieldDecl arity}
@@ -633,7 +633,7 @@ theorem sel_holds {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) :
@@ -679,7 +679,7 @@ theorem test_has_type {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) :
@@ -700,7 +700,7 @@ theorem test_apply_ne {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {child : DataRef block} {leftCtor rightCtor : CtorDecl arity}
     (leftRef : CtorRef block child leftCtor)
@@ -727,7 +727,7 @@ theorem test_holds {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) :
@@ -754,7 +754,7 @@ theorem ctor_laws {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {sort : Crush.SMT.SSort} {rawCtor : Crush.SMT.CtorDecl}
     (member : (sort, rawCtor) ∈
@@ -779,7 +779,7 @@ theorem ctor_disjoint {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {leftSort rightSort : Crush.SMT.SSort}
     {leftCtor rightCtor : Crush.SMT.CtorDecl}
@@ -846,7 +846,7 @@ theorem test_disjoint {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {sort : Crush.SMT.SSort} {leftCtor rightCtor : Crush.SMT.CtorDecl}
     (leftMem : (sort, leftCtor) ∈
@@ -893,7 +893,7 @@ theorem exhaustive {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {name : String} {count : Nat} {decl : Crush.SMT.DatatypeDecl}
     (member : (name, count, decl) ∈ (entries block data).toList)
@@ -992,7 +992,7 @@ theorem rank_lt {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data)
     {sort : Crush.SMT.SSort} {rawCtor : Crush.SMT.CtorDecl}
     (member : (sort, rawCtor) ∈
@@ -1065,7 +1065,7 @@ theorem data_hold {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data) :
     Crush.SMT.DatatypesHold
       (SMT.model fo (law.extend wf productive prior priorRel priorModels))
@@ -1098,7 +1098,7 @@ theorem command_sound {symbols : Symbols signature block}
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data) :
     (SMT.model fo (law.extend wf productive prior priorRel priorModels)).SatisfiesCommand
       (command block data) :=
@@ -1111,7 +1111,7 @@ theorem extend_sound {symbols : Symbols signature block}
     {source : FO.FamilyModel (Symbol signature)}
     (law : FamilyLawful symbols.native source)
     (prior : Lifted source) (wf : block.WF) (productive : Productive block)
-    {fo : SMT.Encoding (Symbol signature)} {data : Encoding arity}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data) :
     (SMT.model fo (prior.extend law wf productive).target).SatisfiesCommand
       (command block data) := by

@@ -76,6 +76,17 @@ Required completion criterion:
 3. expose semantic reflection only from a `TranslateState` carrying that
    completed witness.
 
+The key construction mismatch is now explicit. `SMT.Encoding` is a total,
+globally injective assignment for every intrinsic `FOSort` and flattened
+`Symbol`; the production allocator records only the finite Lean-keyed names
+encountered in one run. The finite trace cannot justify the total fields by
+itself, and filling unobserved cases with arbitrary defaults would invalidate
+injectivity. Completion therefore needs either (a) one proved total intrinsic
+allocator whose finite restriction drives command emission, or (b) a redesign
+of the raw-model theorem around a finite supported symbol/sort environment. The
+current evidence should not be coerced into a global `SMT.Encoding` by an
+unchecked cast.
+
 ### Repaired: guarded reflection no longer restricts the quantified model class
 
 The lower-level `runGuarded_unsat_under` accurately concludes
@@ -174,15 +185,18 @@ exhaustiveness, and rank properties separately.
   certificates remain in `Hooks.lean`; carrying semantic functions inside the
   globally name-injective structural symbol family was both unnecessary and an
   obstacle to constructing a concrete encoding.
+- The native block-local datatype `Encoding` was renamed `BlockEncoding`, and
+  production projections now say `blockEncoding`; `SMT.Encoding` consequently
+  refers only to the shared FO-to-SMT representation.
 
 ## Naming and organization rules
 
 - Use `σ`, `Γ`, `τ`, `e`, `φ`, `T`, `M`, and `ρ` in compact mathematical
   notation and theorem statements; use descriptive English in executable
   state/allocation code.
-- Reserve `Encoding` for the shared FO-to-SMT encoding. A future broad rename
-  should change `SMT.Datatype.Encoding` to `BlockEncoding`; until that change is
-  made, use `dataEncoding` rather than the ambiguous local name `data`.
+- Reserve `Encoding` for the shared FO-to-SMT encoding. The block-local native
+  datatype encoder is `SMT.Datatype.BlockEncoding`; use `dataEncoding` rather
+  than the ambiguous local name `data` when both occur together.
 - Use `...Representation` for exact syntax/provenance and `...Semantics` or
   `...Lawful` for model obligations. Do not call an equality wrapper a
   representation.
