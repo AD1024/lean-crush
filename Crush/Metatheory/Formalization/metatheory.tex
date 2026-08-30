@@ -50,6 +50,7 @@
 \newcommand{\Lawful}{\mathsf{Lawful}}
 \newcommand{\Val}{\mathsf{Val}}
 \newcommand{\WF}{\mathsf{WF}}
+\newcommand{\dsort}[2]{\beta_{#1,#2}}
 \newcommand{\args}{\mathsf{args}}
 \newcommand{\res}{\mathsf{res}}
 \newcommand{\FV}{\mathsf{FV}}
@@ -326,7 +327,7 @@ The Lean definitions are \texttt{Unsatisfiable},
 \end{definition}
 
 \section{Datatype-aware source semantics}
-\sectioncontents{Intrinsic mutual blocks; finite free values; source-symbol ownership; lawful model environments.}
+\sectioncontents{Intrinsic mutual blocks; their embedding as HO base sorts and constants; finite free values; lawful model environments.}
 
 Native datatype lowering strengthens the class of source models without
 changing the HO term language. Constructors, selectors, and testers remain
@@ -346,7 +347,8 @@ A field declaration pairs a descriptive name with $q$; a constructor is a
 name and an ordered field list; a datatype declaration is a base-sort identity
 and an ordered constructor list. A block $B$ assigns one datatype declaration
 to every $d\in\mathsf{Fin}(n)$. Typed positions, rather than names, identify
-members. After this definition we write
+members. We write $\dsort{B}{d}$ for the base-sort identity stored in the
+declaration at position $d$. After this definition we also write
 \[
  B\vdash_D d,\qquad B\vdash_C[d]K,\qquad K\vdash_F F
 \]
@@ -405,11 +407,39 @@ map a datatype carrier to one field carrier, and testers return $\Bool$.
 \leanfiles{Datatype/Syntax.lean and Datatype/Model.lean}
 \end{definition}
 
+\begin{definition}[Custom datatypes in the HO language]
+The HO grammar has no separate datatype type former. The member $d$ of a
+custom block $B$ is represented by the ordinary source type
+\[
+  \Base(\dsort{B}{d}).
+\]
+For a field sort $q$, define its HO type by
+\[
+ \mathsf{ty}_B(\mathsf{base}(\beta))=\Base(\beta),
+ \qquad
+ \mathsf{ty}_B(\mathsf{data}(d'))=\Base(\dsort{B}{d'}).
+\]
+If constructor $K$ of member $d$ has fields
+$q_1,\ldots,q_m$, its ownership witness selects an ordinary constant of type
+\[
+ \mathsf{ty}_B(q_1)\to\cdots\to\mathsf{ty}_B(q_m)
+   \to\Base(\dsort{B}{d}).
+\]
+A selector has type
+$\Base(\dsort{B}{d})\to\mathsf{ty}_B(q_i)$, and a tester has type
+$\Base(\dsort{B}{d})\to\Bool$. Consequently a datatype constructor,
+selector, or tester is not a new HO term form: it is an intrinsically typed
+constant application. An unowned $\Base(\beta)$ remains completely opaque;
+ownership by a datatype environment and the lawfulness condition below are
+what give a selected base sort free-datatype meaning.
+\leanfiles{Datatype/Syntax.lean, Datatype/Model.lean, and Datatype/Flattened.lean}
+\end{definition}
+
 \begin{definition}[Lawful datatype model]
 Let $S:\mathsf{Symbols}(\Sigma,B)$. A witness
 $\Lawful_B(S,M_s)$ contains an isomorphism
 \[
- M_s.B(d.\mathsf{sort})\cong\Val_B(M_s.B,d)
+ M_s.B(\dsort{B}{d})\cong\Val_B(M_s.B,d)
 \]
 for every datatype position $d$, identifies every owned constructor with its
 canonical curried interpretation, requires matching selectors to recover the
@@ -470,6 +500,37 @@ symbols with the same argument and result sorts. Thus the declaration is part
 of a symbol's type, while its identity remains separate from its declaration.
 \leanfile{FO/Family.lean}
 \end{definition}
+
+\begin{proposition}[FO image of datatype-owned source symbols]
+Datatype membership does not change erasure: for every member $d$ of $B$,
+\[
+ \erase{\Base(\dsort{B}{d})}=\Base(\dsort{B}{d}).
+\]
+The curried HO type of an owned constructor is flattened to one FO
+declaration
+\[
+ \bigl(
+   \erase{\mathsf{ty}_B(q_1)},\ldots,
+   \erase{\mathsf{ty}_B(q_m)};
+   \Base(\dsort{B}{d})
+ \bigr).
+\]
+Owned selectors and testers similarly receive declarations
+\[
+ \begin{aligned}
+  d_{\mathsf{sel},i}
+    &=(\Base(\dsort{B}{d});\erase{\mathsf{ty}_B(q_i)}),\\
+  d_{\mathsf{test}}
+    &=(\Base(\dsort{B}{d});\Bool).
+ \end{aligned}
+\]
+The flattened symbol family retains these as
+the same source-constant identities selected by datatype ownership; only their
+types have been exposed as complete first-order argument telescopes. Thus a
+custom datatype is still a base carrier in FO, while its operations are
+ordinary, fully applied family symbols.
+\leanfile{Datatype/Flattened.lean}
+\end{proposition}
 
 \begin{definition}[Typed family arguments and symbol application]
 Terms and heterogeneous argument vectors are defined mutually. For a context
@@ -1044,7 +1105,8 @@ singleton counterpart.
 
 \begin{definition}[One represented native block]
 For a source block $B$, ownership map $S$, shared encoding $\mathcal E$, and
-allocated raw block encoding $A$, a
+allocated raw block encoding $A$, write $A_s(d)$ for the concrete SMT sort
+name allocated to member $d$. A
 $\mathsf{Representation}(B,S,\mathcal E,A)$ proves:
 \begin{itemize}[leftmargin=*]
  \item the exact emitted \texttt{declare-datatypes} command is well formed;
@@ -1056,6 +1118,38 @@ $\mathsf{Representation}(B,S,\mathcal E,A)$ proves:
 An environment representation lists such certificates in dependency order and
 proves that their command array is exactly $C_{\mathsf{native}}$.
 \leanfiles{SMT/DatatypeWF.lean and SMT/DatatypeRepresentation.lean}
+\end{definition}
+
+\begin{definition}[One custom datatype across HO, FO, and SMT]
+For an accepted ground Lean datatype instance, structural reification chooses
+a block member $d$ and its identity $\dsort{B}{d}$. The sort component of the
+lowering pipeline is
+\[
+ \boxed{\text{ground Lean datatype instance}}
+ \xrightarrow{\text{structural reification}}
+ \boxed{\Base(\dsort{B}{d})\text{ in HO}}
+\]
+\[
+ \boxed{\Base(\dsort{B}{d})\text{ in HO}}
+ \xrightarrow{\mathsf{erase}}
+ \boxed{\Base(\dsort{B}{d})\text{ in FO}}
+ \xrightarrow{\mathcal E_s}
+ \boxed{A_s(d)\text{ in raw SMT}}
+\]
+The first arrow records declaration structure and ownership; it is not a
+denotational semantics for arbitrary \texttt{Lean.Expr}. The semantic bridge
+begins with $\Lawful_B(S,M_s)$, which identifies the HO base carrier with the
+canonical finite value family $\Val_B(M_s.B,d)$.
+
+The operation component follows the same ownership map. An owned HO constructor,
+selector, or tester becomes its declaration-indexed FO source symbol, and
+$\mathcal E_i$ maps that symbol to the corresponding constructor, selector, or
+indexed tester identifier recorded by $A$. The native
+\texttt{declare-datatypes} command declares those identifiers together, so the
+same object is not also emitted as an ordinary uninterpreted sort or function.
+All other HO and FO syntax remains generic: datatype-specific meaning enters
+only through ownership, lawfulness, and the native representation certificate.
+\leanfiles{Reification/Datatype.lean, Datatype/Flattened.lean, SMT/Datatype.lean, and SMT/DatatypeRepresentation.lean}
 \end{definition}
 
 \begin{theorem}[Native command validity]
