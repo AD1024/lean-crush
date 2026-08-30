@@ -14,20 +14,6 @@ The final conclusion is unsatisfiability of an exact finite intrinsic HO theory
 whose sentences share one signature. There is no claimed denotation for
 arbitrary `Lean.Expr`, and solver correctness remains a separate concern.
 
-## Active worklist
-
-The current soundness and consolidation audit is in
-[`AUDIT.md`](AUDIT.md). It distinguishes the complete intrinsic theorem from
-the still-missing whole-production-run refinement and gives dependency-ordered
-completion criteria.
-
-The dependency-ordered plan for certifying monomorphized user-defined inductive
-datatypes is in
-[`INDUCTIVE_DATATYPE_PLAN.md`](INDUCTIVE_DATATYPE_PLAN.md). It covers intrinsic
-datatype descriptions and free-algebra semantics, Lean declaration reification,
-native SMT `declare-datatypes` representation, model lifting, production
-agreement, guarded fields, and end-to-end tests.
-
 ## Main results
 
 The flattened intrinsic translation is total and proof-producing:
