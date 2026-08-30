@@ -21,10 +21,6 @@ core table as an error would make the public lowering API artificially closed.
 
 namespace Crush.SMT
 
-private def boolSort : SSort := .app (.symb "Bool") #[]
-private def intSort : SSort := .app (.symb "Int") #[]
-private def stringSort : SSort := .app (.symb "String") #[]
-
 private structure FunSig where
   args : Array SSort
   res  : SSort

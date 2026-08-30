@@ -16,6 +16,11 @@ separate concern.
 
 ## Active worklist
 
+The current soundness and consolidation audit is in
+[`AUDIT.md`](AUDIT.md). It distinguishes the complete intrinsic theorem from
+the still-missing whole-production-run refinement and gives dependency-ordered
+completion criteria.
+
 The dependency-ordered plan for certifying monomorphized user-defined inductive
 datatypes is in
 [`INDUCTIVE_DATATYPE_PLAN.md`](INDUCTIVE_DATATYPE_PLAN.md). It covers intrinsic
@@ -47,9 +52,10 @@ SMT DSL is not made intrinsically typed:
   contracts instead of defining a second kind of HO model.
 - `SMT/Semantics.lean` defines the required raw-term and command semantics,
   including semantic `CommandsUnsatisfiable`.
-- `SMT/Representation.lean` defines `SortRepresentation`,
-  `SymbolRepresentation`, `TermRepresentation`, `TheoryRepresentation`, and the
-  pure encoder. Term construction uses `(smt| ...)` wherever its syntax supports
+- `SMT/Representation.lean` defines the shared `Encoding`, the pure and
+  guard-parameterized term encoders, and `TheoryRepresentation`. Exact syntax is
+  stated directly instead of being hidden behind equality-only representation
+  predicates. Term construction uses `(smt| ...)` wherever its syntax supports
   the required dynamic expression.
 - `SMT/Model.lean` constructs the one induced raw model used by every encoded
   component. `ExtraGraph` adds derived native symbols only when their graph is
@@ -164,9 +170,10 @@ The datatype extension now has a proved native-command core:
 The live boundary is split by role:
 
 - `Reification/` recognizes the supported nondependent Lean fragment and returns
-  intrinsically typed terms with exact signature, context, constructor, and
-  capture witnesses. Reification is partial because unsupported Lean syntax is
-  outside the modeled fragment.
+  intrinsically typed terms with exact signature, context, and capture
+  witnesses. Reification is partial because unsupported Lean syntax is outside
+  the modeled fragment. Its recursive shape check is operational evidence, not
+  a denotational theorem about `Lean.Expr`.
 - `VCG/Generate.lean` composes total HO-to-FO translation with FO-to-SMT encoding.
   `guardedCommands_represents` is the exact guarded counterpart, with the
   certified derived-command segment stated explicitly.
@@ -174,14 +181,14 @@ The live boundary is split by role:
   exact `TranslateState.commands` represents the complete intrinsic theory.
   `runGuarded`, `runGuarded_represents`, and `runGuarded_dataTrace` give the
   guarded route a fresh proved state and exact native command positions.
-- `VCG/Soundness.lean` proves `encoded_unsat_implies_source_unsat` and the direct
-  executable specialization `run_unsat_implies_source_unsat`. Each theorem takes
-  one `EnvRepresentation` indexed by the same `DataBridge` that owns the reified
+- `VCG/Soundness.lean` proves `StateRepresents.unsat_source` and the executable
+  specialization `run_unsat_implies_source_unsat`. Each theorem takes one
+  `EnvRepresentation` indexed by the same `DataBridge` that owns the intrinsic
   source constants; no unrelated datatype environment or datatype-only theorem
   variant can be supplied. An empty bridge covers ordinary encodings, while a
   nonempty representation certifies the native datatype prefix.
-  `runGuarded_unsat` reflects the guarded run under the combined datatype and
-  interpreted-carrier contract represented by `UnsatisfiableUnder`.
+  `runGuarded_unsat_under` reflects the guarded run under the combined datatype
+  and interpreted-carrier contract represented by `UnsatisfiableUnder`.
 
 The earlier unary encoding remains under the core defunctionalization modules as
 an independent semantic reference, with its logical-relation and model-extension
@@ -272,19 +279,18 @@ shown relative to `Crush.Metatheory`.
 
    The datatype environment is an ordinary parameter of this result. With
    `env = []`, `Datatype.Env.unsatisfiable_nil_iff` recovers the original source
-   proposition. For interpreted base carriers, `VCG.runGuarded_unsat` concludes
-   `UnsatisfiableUnder` the combined datatype and `GuardModel` contract, making
-   the strengthened model class explicit rather than introducing another HO
-   model type.
+   proposition. For interpreted base carriers, `VCG.runGuarded_unsat_under`
+   concludes `UnsatisfiableUnder` the combined datatype and `GuardModel`
+   contract, making the strengthened model class explicit rather than
+   introducing another HO model type.
 
 9. **Structural Lean boundary**
 
-   `VCG.encoded_unsat_implies_source_unsat` in
-   [`VCG/Soundness.lean`](VCG/Soundness.lean) additionally accepts a
-   `Reification.Reifies` witness for a `Lean.Expr`. Its conclusion deliberately
-   remains unsatisfiability of the reified HO sentence: the witness establishes
-   typed structural correspondence, not a denotational semantics for arbitrary
-   Lean expressions.
+   `Reification.reifySentence?` packages the accepted `Lean.Expr`, its exact
+   intrinsic sentence, datatype bridge, and recursive shape witness. There is
+   deliberately no theorem that adds this witness as an unused premise to the
+   intrinsic soundness result: without a denotation for `Lean.Expr`, such a
+   theorem would not establish an additional semantic conclusion.
 
 The principal supporting application and closure results are
 `Defunctionalization.Flattened.TypedArguments.flatApp_eq_unarySpine`,
@@ -333,6 +339,8 @@ Import `Crush.Metatheory.Notation` and write
 | `⌊Γ⌋^⋆` | pointwise first-order erasure of a context |
 | `𝒟⟦e⟧` | classic unary defunctionalization |
 | `𝓕⟦e⟧` | total flattened translation result; declared by `Flattened/Translate.lean` |
+| `𝒶⟦e⟧[E]` | ordinary raw SMT encoding under representation `E` |
+| `𝒢⟦e⟧[G]` | raw SMT encoding under guarding policy `G` |
 | `vₛ ≈[R, τ] vₜ` | source and target values related at type `τ` |
 | `ρₛ ≈ᵥ[R] ρₜ` | pointwise related source and target valuations |
 | `FV(e)` | duplicate-free free-variable positions of `e` |

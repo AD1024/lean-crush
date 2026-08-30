@@ -202,8 +202,8 @@ noncomputable def Lawful.flattened {signature : Signature} {arity : Nat}
 
 namespace Env
 
-/-- Structural well-formedness for every dependency block. This is kept
-separate from `Env.WF`, which records global sort ownership uniqueness. -/
+/-- Structural well-formedness for every dependency block. Cross-block
+ownership and dependency order are retained by `Native.Step.Ordered`. -/
 inductive BlocksWF {signature : Signature} : Env signature → Type where
   | nil : BlocksWF []
   | cons {entry : Entry signature} {rest : Env signature} :

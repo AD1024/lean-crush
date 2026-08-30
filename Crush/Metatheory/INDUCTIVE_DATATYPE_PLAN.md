@@ -467,7 +467,7 @@ datatype environment explicitly or inherit it from its model.
 | VCG | `run_represents` | the stateful command array is the exact representation |
 | VCG | `run_unsat_implies_source_unsat` | raw semantic unsat reflects to the intrinsic source |
 | Guarded VCG | `runGuarded_represents` | the native, derived, and guarded array is exact |
-| Guarded VCG | `runGuarded_unsat` | raw unsat reflects under the combined datatype/interpreted model contract |
+| Guarded VCG | `runGuarded_unsat_under` | raw unsat reflects under the combined datatype/interpreted model contract |
 
 No theorem in this list claims that cvc5 is correct, or that arbitrary
 `Lean.Expr` has the same denotation as the intrinsic term. Those remain separate

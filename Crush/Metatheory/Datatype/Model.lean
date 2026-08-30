@@ -168,17 +168,6 @@ theorem Lawful.productive {signature : Signature} {arity : Nat}
   let ⟨value⟩ := model.baseNonempty data.decl.sort
   exact ⟨((law.carrier data).to value).map fun _ _ => ()⟩
 
-/-- Datatype-aware satisfaction quantifies over models satisfying the structural
-contract instead of arbitrary interpretations of datatype-owned constants. -/
-abbrev Satisfiable {signature : Signature} {arity : Nat} {block : Block arity}
-    (symbols : Symbols signature block) (formula : Sentence signature) : Prop :=
-  SatisfiableUnder (Lawful symbols) formula
-
-/-- Semantic unsatisfiability in every lawful datatype source model. -/
-abbrev Unsatisfiable {signature : Signature} {arity : Nat} {block : Block arity}
-    (symbols : Symbols signature block) (formula : Sentence signature) : Prop :=
-  UnsatisfiableUnder (Lawful symbols) formula
-
 /-! ## Multiple monomorphic datatype blocks -/
 
 /-- One datatype block and the HO constants it owns in a shared signature. -/
@@ -219,14 +208,6 @@ def inRight {signature : Signature} (env : Env signature)
   unfold inRight
   simp
 
-/-- All datatype base-sort identities in block order. -/
-def sorts {signature : Signature} (env : Env signature) : List BaseSort :=
-  env.flatMap fun entry => entry.block.sorts
-
-/-- Distinct monomorphic datatype instances own distinct base sorts. -/
-def WF {signature : Signature} (env : Env signature) : Prop :=
-  env.sorts.Nodup
-
 /-- A shared source model is lawful for every datatype block in the environment. -/
 inductive Lawful {signature : Signature} (model : Model signature) :
     Env signature → Type where
@@ -234,11 +215,6 @@ inductive Lawful {signature : Signature} (model : Model signature) :
   | cons {entry : Entry signature} {rest : Env signature} :
       Datatype.Lawful entry.symbols model → Lawful model rest →
         Lawful model (entry :: rest)
-
-/-- Datatype-aware satisfaction for all blocks in one environment. -/
-abbrev Satisfiable {signature : Signature} (env : Env signature)
-    (formula : Sentence signature) : Prop :=
-  SatisfiableUnder (fun model => Lawful model env) formula
 
 /-- Semantic unsatisfiability in every model lawful for the complete datatype
 environment. -/

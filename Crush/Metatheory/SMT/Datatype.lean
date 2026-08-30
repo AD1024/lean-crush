@@ -110,17 +110,8 @@ def wfDef (name binder : String) (sort : Crush.SMT.SSort)
     (parts : Array (String × Array Crush.SMT.Term)) : Crush.SMT.FunDef := {
   name
   args := #[(binder, sort)]
-  resSort := .app (.symb "Bool") #[]
+  resSort := Crush.SMT.boolSort
   body := wfBody parts }
-
-/-- Exact syntactic representation relation for one datatype block. -/
-def Represents {arity : Nat} (block : Block arity)
-    (encoding : Encoding arity) (target : Crush.SMT.Command) : Prop :=
-  target = command block encoding
-
-@[simp] theorem command_represents {arity : Nat} (block : Block arity)
-    (encoding : Encoding arity) :
-    Represents block encoding (command block encoding) := rfl
 
 @[simp] theorem entries_size {arity : Nat} (block : Block arity)
     (encoding : Encoding arity) :

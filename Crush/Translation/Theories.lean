@@ -65,9 +65,6 @@ def bvWidthOf? (e : Expr) : MetaM (Option Nat) := do
 def isStringType (ty : Expr) : MetaM Bool := do
   return (← whnf ty).isConstOf ``String
 
-/-- The SMT sort `(_ BitVec w)`. -/
-def bvSort (w : Nat) : SSort := .app (.indexed "BitVec" #[.inr w]) #[]
-
 /-- A bit-vector literal for `n` at width `w`, reduced mod `2 ^ w` exactly as
 Lean's `BitVec.ofNat`/`OfNat` do (verified: `(300 : BitVec 8) = 0x2c`). -/
 def bvLit (w n : Nat) : SMT.Term := .lit (.bitvec w (n % 2 ^ w))

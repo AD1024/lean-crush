@@ -45,18 +45,6 @@ structure Encoding (symbols : FO.SymbolFamily) where
   ordinary_ident : ∀ {decl : FO.SymbolDecl} (symbol : symbols decl),
     nativeSymbol symbol = false → ident symbol = .symb (name symbol)
 
-/-- A concrete SMT sort is exactly the selected representation of an intrinsic
-FO sort. -/
-def SortRepresentation {symbols : FO.SymbolFamily}
-    (encoding : Encoding symbols) (sort : FO.FOSort) (smt : SSort) : Prop :=
-  smt = encoding.sort sort
-
-/-- A concrete SMT identifier is exactly the selected name of a typed symbol. -/
-def SymbolRepresentation {symbols : FO.SymbolFamily}
-    (encoding : Encoding symbols) {decl : FO.SymbolDecl}
-    (symbol : symbols decl) (identifier : Crush.SMT.Ident) : Prop :=
-  identifier = encoding.ident symbol
-
 /-- Numeric de Bruijn index of an intrinsic FO variable. -/
 def varIndex : {context : FO.Context} → {sort : FO.FOSort} →
     FO.Var context sort → Nat
@@ -64,60 +52,84 @@ def varIndex : {context : FO.Context} → {sort : FO.FOSort} →
   | _ :: _, _, .there ref => varIndex ref + 1
 
 mutual
-  /-- Pure encoding of an intrinsically typed family term. -/
-  def term {symbols : FO.SymbolFamily} (encoding : Encoding symbols) :
+  /-- Shared FO term encoder parameterized only by the optional guard inserted
+  at quantifier boundaries. -/
+  def encodeTerm {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
+      (guard : FO.FOSort → STerm → Option STerm) :
       {context : FO.Context} → {sort : FO.FOSort} →
         FO.FamilyTerm symbols context sort → STerm
     | _, _, .var ref => .bvar (varIndex ref)
     | _, _, .symbol symbol args =>
         .app (encoding.ident symbol)
-          (arguments encoding args)
+          (encodeArguments encoding guard args)
     | _, _, .boolLit false => (smt| false)
     | _, _, .boolLit true => (smt| true)
     | _, _, .not body =>
-        let body := term encoding body
+        let body := encodeTerm encoding guard body
         (smt| (not $body))
     | _, _, .and left right =>
-        let left := term encoding left
-        let right := term encoding right
+        let left := encodeTerm encoding guard left
+        let right := encodeTerm encoding guard right
         (smt| (and $left $right))
     | _, _, .or left right =>
-        let left := term encoding left
-        let right := term encoding right
+        let left := encodeTerm encoding guard left
+        let right := encodeTerm encoding guard right
         (smt| (or $left $right))
     | _, _, .imp left right =>
-        let left := term encoding left
-        let right := term encoding right
+        let left := encodeTerm encoding guard left
+        let right := encodeTerm encoding guard right
         (smt| (=> $left $right))
     | _, _, .iff left right =>
-        let left := term encoding left
-        let right := term encoding right
+        let left := encodeTerm encoding guard left
+        let right := encodeTerm encoding guard right
         (smt| (= $left $right))
     | _, _, .eq left right =>
-        let left := term encoding left
-        let right := term encoding right
+        let left := encodeTerm encoding guard left
+        let right := encodeTerm encoding guard right
         (smt| (= $left $right))
     | _, _, .forallE (domain := domain) body =>
-        .forallE #[("x", encoding.sort domain)] (term encoding body)
+        let body := encodeTerm encoding guard body
+        let value := Crush.SMT.Term.bvar 0
+        let guarded := match guard domain value with
+          | none => body
+          | some condition => (smt| (=> $condition $body))
+        .forallE #[("x", encoding.sort domain)] guarded
     | _, _, .existsE (domain := domain) body =>
-        .existsE #[("x", encoding.sort domain)] (term encoding body)
+        let body := encodeTerm encoding guard body
+        let value := Crush.SMT.Term.bvar 0
+        let guarded := match guard domain value with
+          | none => body
+          | some condition => (smt| (and $condition $body))
+        .existsE #[("x", encoding.sort domain)] guarded
 
-  /-- Pure encoding of a typed argument telescope in source order. -/
-  def arguments {symbols : FO.SymbolFamily} (encoding : Encoding symbols) :
+  /-- Shared encoding of a typed argument telescope in source order. -/
+  def encodeArguments {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
+      (guard : FO.FOSort → STerm → Option STerm) :
       {context : FO.Context} → {sorts : List FO.FOSort} →
         FO.FamilyArgs symbols context sorts → Array STerm
     | _, _, .nil => #[]
     | _, _, .cons argument rest =>
-        #[term encoding argument] ++ arguments encoding rest
+        #[encodeTerm encoding guard argument] ++
+          encodeArguments encoding guard rest
 end
 
-attribute [simp] term arguments
+/-- Pure encoding is the shared encoder with no quantifier guards. -/
+def term {symbols : FO.SymbolFamily} (encoding : Encoding symbols) :
+    {context : FO.Context} → {sort : FO.FOSort} →
+      FO.FamilyTerm symbols context sort → STerm :=
+  encodeTerm encoding fun _ _ => none
 
-/-- A concrete SMT term is exactly the encoding of an intrinsic FO term. -/
-def TermRepresentation {symbols : FO.SymbolFamily}
-    (encoding : Encoding symbols) {context : FO.Context} {sort : FO.FOSort}
-    (source : FO.FamilyTerm symbols context sort) (target : STerm) : Prop :=
-  target = term encoding source
+/-- Pure argument encoding uses the same empty guard policy. -/
+def arguments {symbols : FO.SymbolFamily} (encoding : Encoding symbols) :
+    {context : FO.Context} → {sorts : List FO.FOSort} →
+      FO.FamilyArgs symbols context sorts → Array STerm :=
+  encodeArguments encoding fun _ _ => none
+
+attribute [simp]
+  encodeTerm.eq_1 encodeTerm.eq_2 encodeTerm.eq_3 encodeTerm.eq_4
+  encodeTerm.eq_5 encodeTerm.eq_6 encodeTerm.eq_7 encodeTerm.eq_8
+  encodeTerm.eq_9 encodeTerm.eq_10 encodeTerm.eq_11 encodeTerm.eq_12
+  encodeArguments.eq_1 encodeArguments.eq_2 term arguments
 
 /-- Existential package for a typed symbol declaration. -/
 structure Declaration (symbols : FO.SymbolFamily) where

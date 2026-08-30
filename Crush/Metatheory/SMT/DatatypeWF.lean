@@ -138,32 +138,6 @@ theorem raw_sort_ref {arity : Nat} (block : Block arity)
   cases entryEq
   exact ⟨data, sortEq.symm⟩
 
-private theorem nodup_map_of_inj {α β : Type} {values : List α}
-    {image : α → β} (nodup : values.Nodup)
-    (injective : Function.Injective image) : (values.map image).Nodup := by
-  induction nodup with
-  | nil => exact .nil
-  | @cons value values fresh nodup ih =>
-      apply List.Pairwise.cons
-      · intro mapped member equal
-        rw [List.mem_map] at member
-        rcases member with ⟨other, otherMem, imageEq⟩
-        exact fresh other otherMem (injective (equal.trans imageEq.symm))
-      · exact ih
-
-private theorem finRange_nodup (arity : Nat) :
-    (List.finRange arity).Nodup := by
-  induction arity with
-  | zero => simp
-  | succ arity ih =>
-      rw [List.finRange_succ]
-      exact List.Pairwise.cons (by
-        intro value member equal
-        rw [List.mem_map] at member
-        rcases member with ⟨source, sourceMem, rfl⟩
-        exact Fin.succ_ne_zero source equal.symm)
-        (nodup_map_of_inj ih fun left right equal => Fin.succ_inj.mp equal)
-
 /-- Structural and allocated-name well-formedness discharges the raw command's
 supported-fragment predicate. -/
 theorem supported {arity : Nat} {block : Block arity}
@@ -179,7 +153,7 @@ theorem supported {arity : Nat} {block : Block arity}
     omega
   · have dataNodup : (List.ofFn fun data : Fin arity => data).Nodup :=
       finRange_nodup arity
-    have nameNodup := nodup_map_of_inj dataNodup fun left right equal =>
+    have nameNodup := nodup_map dataNodup fun left right equal =>
       wf.names equal
     simpa [entries, Function.comp_def] using nameNodup
   · intro name count decl member

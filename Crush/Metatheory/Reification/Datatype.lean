@@ -115,7 +115,7 @@ def ownsHead (env : DatatypeEnv) (head : Name) : Bool :=
 def signature (env : DatatypeEnv) : Signature :=
   env.blocks.toList.flatMap fun entry : DatatypeBlock => entry.block.symbolTypes
 
-private def coreBlocks : (blocks : List DatatypeBlock) →
+private def modelEntries : (blocks : List DatatypeBlock) →
     Datatype.Env (blocks.flatMap fun entry : DatatypeBlock => entry.block.symbolTypes)
   | [] => []
   | block :: blocks =>
@@ -123,26 +123,26 @@ private def coreBlocks : (blocks : List DatatypeBlock) →
         block := block.block
         symbols := block.block.symbols.inLeft
           (blocks.flatMap fun entry : DatatypeBlock => entry.block.symbolTypes) } ::
-      (coreBlocks blocks).inRight block.block.symbolTypes
+      (modelEntries blocks).inRight block.block.symbolTypes
 
-private theorem coreBlocks_length (blocks : List DatatypeBlock) :
-    (coreBlocks blocks).length = blocks.length := by
+private theorem modelEntries_length (blocks : List DatatypeBlock) :
+    (modelEntries blocks).length = blocks.length := by
   induction blocks with
   | nil => rfl
   | cons block blocks ih =>
-      change Nat.succ ((coreBlocks blocks).inRight
+      change Nat.succ ((modelEntries blocks).inRight
         block.block.symbolTypes).length = Nat.succ blocks.length
       rw [Datatype.Env.inRight_length, ih]
 
 /-- Canonical datatype ownership environment over `signature`; datatype terms
 remain ordinary source constants in this compact signature. -/
-def core (env : DatatypeEnv) : Datatype.Env env.signature :=
-  coreBlocks env.blocks.toList
+def toModelEnv (env : DatatypeEnv) : Datatype.Env env.signature :=
+  modelEntries env.blocks.toList
 
-@[simp] theorem core_length (env : DatatypeEnv) :
-    env.core.length = env.blocks.size := by
-  change (coreBlocks env.blocks.toList).length = env.blocks.size
-  rw [coreBlocks_length]
+@[simp] theorem toModelEnv_length (env : DatatypeEnv) :
+    env.toModelEnv.length = env.blocks.size := by
+  change (modelEntries env.blocks.toList).length = env.blocks.size
+  rw [modelEntries_length]
   simp
 
 /-- A typed position of one reified mutual block in its dependency-ordered
@@ -224,13 +224,13 @@ def of (env : DatatypeEnv) (tail : Signature) :
   { env, tail, signature_eq := rfl }
 
 /-- The ownership environment weakened across the ordinary signature tail. -/
-def core {signature : Signature} (bridge : DataBridge signature) :
+def toModelEnv {signature : Signature} (bridge : DataBridge signature) :
     Datatype.Env signature :=
-  bridge.signature_eq.symm ▸ bridge.env.core.inLeft bridge.tail
+  bridge.signature_eq.symm ▸ bridge.env.toModelEnv.inLeft bridge.tail
 
-@[simp] theorem of_core_length (env : DatatypeEnv) (tail : Signature) :
-    (DataBridge.of env tail).core.length = env.blocks.size := by
-  simp [core, of, Datatype.Env.inLeft]
+@[simp] theorem of_toModelEnv_length (env : DatatypeEnv) (tail : Signature) :
+    (DataBridge.of env tail).toModelEnv.length = env.blocks.size := by
+  simp [toModelEnv, of, Datatype.Env.inLeft]
 
 /-- Lift the exact ownership map of a found block through the complete source
 signature represented by this bridge. -/

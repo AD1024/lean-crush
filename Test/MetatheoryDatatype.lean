@@ -549,10 +549,10 @@ example {env : Datatype.Env σ} (represented : EnvRepresentation fo env)
 that owns the reified source constants; an unrelated datatype environment cannot
 be supplied at this boundary. -/
 example (cfg : Crush.Config) (data : Reification.DataBridge σ)
-    (native : EnvRepresentation fo data.core) (formula : Sentence σ)
+    (native : EnvRepresentation fo data.toModelEnv) (formula : Sentence σ)
     (unsat : Crush.SMT.CommandsUnsatisfiable
       (run cfg fo formula).2.commands) :
-    Datatype.Env.Unsatisfiable data.core formula :=
+    Datatype.Env.Unsatisfiable data.toModelEnv formula :=
   run_unsat_implies_source_unsat cfg fo formula data native unsat
 
 /-- The same pure run retains exact native command positions, not only a
@@ -581,7 +581,7 @@ example (certificate : CertifiedDataEnv)
       (Symbol (certificate.env.signature ++ certificate.tail)))
     (trace : certificate.trace.Represents encoding)
     (native : encoding.nativeCommands = certificate.nativeCommands) :
-    EnvRepresentation encoding certificate.data.core :=
+    EnvRepresentation encoding certificate.data.toModelEnv :=
   ({ trace, native_eq := native } :
     certificate.Represents encoding).env
 
@@ -598,10 +598,10 @@ example (certificate : CertifiedDataEnv) (cfg : Crush.Config)
       (runGuarded cfg guarding certificate.guardCommands formula).commands) :
     UnsatisfiableUnder
       (fun source =>
-        Σ lawful : Datatype.Env.Lawful source certificate.data.core,
+        Σ lawful : Datatype.Env.Lawful source certificate.data.toModelEnv,
           certificate.GuardModel guarding represented guarded source lawful)
       formula :=
-  runGuarded_unsat cfg represented guarded formula unsat
+  runGuarded_unsat_under cfg represented guarded formula unsat
 
 end Crush.Metatheory.SMT.Datatype.Tests
 
@@ -821,7 +821,6 @@ run_meta do
       | _ => false do
     throwError "production fallback lost the quotient rejection"
 
-  let point := mkConst ``ReifiedPoint
   let pointMk := mkConst ``ReifiedPoint.mk
   let pointX := mkConst ``ReifiedPoint.x
   withLocalDeclD `x int fun x => do
@@ -844,13 +843,9 @@ run_meta do
           let some certified ← reifySentence? sentence
             | throwError "sentence witness rejected a certified point"
           match certified with
-          | .pack _ data _ _ witness =>
+          | .pack _ data _ _ _ =>
               unless data.env.ownsHead ``ReifiedPoint do
                 throwError "sentence witness lost its datatype environment"
-              match witness.dataTrace with
-              | .certified _ uses =>
-                  unless uses.length == 2 do
-                    throwError "sentence witness lost its constructor/selector trace"
           let fact : Crush.Fact := {
             prop := sentence
             proof := none
@@ -999,14 +994,10 @@ run_meta do
     let eqConst ← mkConstWithFreshMVarLevels ``Eq
     let equal := mkApp3 eqConst treeInt leaf leaf
     let sentence ← mkForallFVars #[leafValue] equal
-    let some (.pack _ data _ _ witness) ← reifySentence? sentence
+    let some (.pack _ data _ _ _) ← reifySentence? sentence
       | throwError "recursive constructor sentence was not certified"
     unless data.env.ownsHead ``ReifiedTree do
       throwError "recursive constructor sentence lost its datatype block"
-    match witness.dataTrace with
-    | .certified _ uses =>
-        unless uses.length == 2 do
-          throwError "recursive constructor sentence lost exact constructor uses"
 
   withLocalDeclD `box (mkConst ``ReifiedFnBox) fun box => do
     let eqConst ← mkConstWithFreshMVarLevels ``Eq

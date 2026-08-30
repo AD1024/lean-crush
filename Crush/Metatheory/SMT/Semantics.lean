@@ -18,19 +18,6 @@ the command fragment instead of receiving a vacuous semantics.
 
 namespace Crush.SMT
 
-/-- Standard nullary SMT Boolean sort. -/
-def boolSort : SSort := .app (.symb "Bool") #[]
-
-/-- Standard nullary SMT integer sort. -/
-def intSort : SSort := .app (.symb "Int") #[]
-
-/-- Standard nullary SMT string sort. -/
-def stringSort : SSort := .app (.symb "String") #[]
-
-/-- SMT bit-vector sort of a fixed width. -/
-def bitvecSort (width : Nat) : SSort :=
-  .app (.indexed "BitVec" #[.inr width]) #[]
-
 /-- Sort assigned to a literal by the supported fragment. -/
 def Literal.sort : Literal → SSort
   | .bool _ => boolSort
@@ -58,6 +45,25 @@ inductive ValuesTyped (model : Model) : List SSort → List model.Value → Prop
       {values : List model.Value} :
       model.inSort sort value → ValuesTyped model sorts values →
         ValuesTyped model (sort :: sorts) (value :: values)
+
+namespace ValuesTyped
+
+/-- An empty sort telescope types only the empty value list. -/
+theorem eq_nil {model : Model} {values : List model.Value}
+    (typed : ValuesTyped model [] values) : values = [] := by
+  cases typed
+  rfl
+
+/-- Invert one typed value-list constructor. -/
+theorem exists_cons {model : Model} {sort : SSort} {sorts : List SSort}
+    {values : List model.Value}
+    (typed : ValuesTyped model (sort :: sorts) values) :
+    ∃ value rest, values = value :: rest ∧ model.inSort sort value ∧
+      ValuesTyped model sorts rest := by
+  cases typed
+  exact ⟨_, _, rfl, by assumption, by assumption⟩
+
+end ValuesTyped
 
 /-- Values selected for a binder telescope, in binder declaration order. -/
 abbrev Bindings := ValuesTyped

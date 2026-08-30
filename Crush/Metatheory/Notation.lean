@@ -8,6 +8,12 @@ language, first-order target language, and defunctionalization proofs. The notat
 scoped: import this module and use `open scoped Crush.Metatheory` to enable it.
 The later `𝓕⟦e⟧` notation is declared beside the total translator because its
 definition cannot be imported here without introducing an import cycle.
+
+Mathematical binders follow one convention throughout theorem-facing notation:
+`σ` for signatures, `Γ` for contexts, `τ` for types/sorts, `e` for terms, `φ`
+for formulas, `T` for theories, `M` for models, and `ρ` for valuations. Longer
+English names remain preferable in executable code where the role is operational
+rather than mathematical.
 -/
 
 namespace Crush.Metatheory.Defunctionalization
@@ -45,15 +51,15 @@ scoped notation:50 M:51 " ⊨ " φ:51 => (M).Satisfies φ
 scoped notation:50 M:51 " ⊨ᵀ " T:51 => (M).SatisfiesTheory T
 
 /-- `⌊τ⌋` is the first-order sort obtained by erasing higher-order type `τ`. -/
-scoped notation:max "⌊" ty "⌋" => FO.FOSort.ofTy ty
+scoped notation:max "⌊" τ "⌋" => FO.FOSort.ofTy τ
 
 /-- `𝒟⟦e⟧` is the first-order syntax produced by core defunctionalization of `e`.
 Unlike semantic brackets, these brackets denote a syntax-to-syntax translation. -/
-scoped notation:max "𝒟⟦" term "⟧" => Defunctionalization.defunctionalizeCore term
+scoped notation:max "𝒟⟦" e "⟧" => Defunctionalization.defunctionalizeCore e
 
 /-- `⌊Γ⌋^⋆` is the pointwise first-order erasure of source context `Γ`.
 The star distinguishes context erasure from the single-type erasure `⌊τ⌋`. -/
-scoped notation:max "⌊" context "⌋^⋆" => Defunctionalization.targetContext context
+scoped notation:max "⌊" Γ "⌋^⋆" => Defunctionalization.targetContext Γ
 
 /-- `vₛ ≈[R, τ] vₜ` says that the source and target values are logically related
 at source type `τ` by source/target model relation `R`. -/
@@ -67,6 +73,6 @@ scoped notation:50 sourceValuation:51 " ≈ᵥ[" models "] " targetValuation:51 
 
 /-- `FV(e)` is the duplicate-free, left-to-right list of free de Bruijn positions
 occurring in `e`. -/
-scoped notation:max "FV(" term ")" => Defunctionalization.freeVarIndices term
+scoped notation:max "FV(" e ")" => Defunctionalization.freeVarIndices e
 
 end Crush.Metatheory

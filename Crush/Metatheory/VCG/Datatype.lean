@@ -413,8 +413,8 @@ structure CertifiedDataEnv where
   tail : Signature
   bridge : SignatureBridge tail
   emitted : Array Command
-  trace : CertifiedDataTrace emitted (DataBridge.of env tail).core
-  guardTrace : CertifiedGuardTrace emitted (DataBridge.of env tail).core
+  trace : CertifiedDataTrace emitted (DataBridge.of env tail).toModelEnv
+  guardTrace : CertifiedGuardTrace emitted (DataBridge.of env tail).toModelEnv
 
 namespace CertifiedDataEnv
 
@@ -426,9 +426,9 @@ def build? (source : Lean.Expr) (env : DatatypeEnv) {tail : Signature}
     (storedGuards : Array DataGuardEncoding) (guardIndices : Array Nat) :
     Option CertifiedDataEnv := do
   let trace ← CertifiedDataTrace.ofEnv? emitted stored indices
-    (DataBridge.of env tail).core
+    (DataBridge.of env tail).toModelEnv
   let guardTrace ← CertifiedGuardTrace.ofEnv? emitted storedGuards guardIndices
-    (DataBridge.of env tail).core
+    (DataBridge.of env tail).toModelEnv
   return { source, env, tail, bridge, emitted, trace, guardTrace }
 
 /-- Reconnect an existing fact-local certificate to a later production command
@@ -438,9 +438,9 @@ def withCommands? (certificate : CertifiedDataEnv) (emitted : Array Command)
     (storedGuards : Array DataGuardEncoding) (guardIndices : Array Nat) :
     Option CertifiedDataEnv := do
   let trace ← CertifiedDataTrace.ofEnv? emitted stored indices
-    (DataBridge.of certificate.env certificate.tail).core
+    (DataBridge.of certificate.env certificate.tail).toModelEnv
   let guardTrace ← CertifiedGuardTrace.ofEnv? emitted storedGuards guardIndices
-    (DataBridge.of certificate.env certificate.tail).core
+    (DataBridge.of certificate.env certificate.tail).toModelEnv
   return {
     source := certificate.source
     env := certificate.env
@@ -538,7 +538,7 @@ def Represents.env {certificate : CertifiedDataEnv}
     {fo : SMT.Encoding
       (Symbol (certificate.env.signature ++ certificate.tail))}
     (represented : certificate.Represents fo) :
-    SMT.Datatype.EnvRepresentation fo certificate.data.core := {
+    SMT.Datatype.EnvRepresentation fo certificate.data.toModelEnv := {
   blocks := represented.trace.blocks
   native_eq := by
     calc
@@ -557,7 +557,7 @@ structure GuardModel (certificate : CertifiedDataEnv)
     (represented : certificate.Represents guarding.encoding)
     (guarded : certificate.GuardRepresentation guarding represented)
     (source : Model (certificate.env.signature ++ certificate.tail))
-    (lawful : Datatype.Env.Lawful source certificate.data.core) where
+    (lawful : Datatype.Env.Lawful source certificate.data.toModelEnv) where
   prior : Lifted (canonicalModel source)
   guards : SMT.UnaryGuards guarding.encoding
     (represented.env.liftedFrom source lawful prior).target
@@ -584,7 +584,7 @@ theorem lifted_valid {certificate : CertifiedDataEnv}
       (Symbol (certificate.env.signature ++ certificate.tail))}
     (represented : certificate.Represents fo)
     (source : Model (certificate.env.signature ++ certificate.tail))
-    (lawful : Datatype.Env.Lawful source certificate.data.core) :
+    (lawful : Datatype.Env.Lawful source certificate.data.toModelEnv) :
     (SMT.model fo (represented.env.lifted source lawful).target).SatisfiesCommands
       fo.nativeCommands :=
   represented.env.lifted_valid represented.trace.blocks_ordered source lawful
@@ -595,7 +595,7 @@ theorem liftedFrom_valid {certificate : CertifiedDataEnv}
       (Symbol (certificate.env.signature ++ certificate.tail))}
     (represented : certificate.Represents fo)
     (source : Model (certificate.env.signature ++ certificate.tail))
-    (lawful : Datatype.Env.Lawful source certificate.data.core)
+    (lawful : Datatype.Env.Lawful source certificate.data.toModelEnv)
     (prior : Lifted (canonicalModel source)) :
     (SMT.model fo
       (represented.env.liftedFrom source lawful prior).target).SatisfiesCommands
@@ -610,7 +610,7 @@ theorem lifted_valid_with {certificate : CertifiedDataEnv}
       (Symbol (certificate.env.signature ++ certificate.tail))}
     (represented : certificate.Represents fo)
     (source : Model (certificate.env.signature ++ certificate.tail))
-    (lawful : Datatype.Env.Lawful source certificate.data.core)
+    (lawful : Datatype.Env.Lawful source certificate.data.toModelEnv)
     (extra : SMT.ExtraGraph fo (represented.env.lifted source lawful).target) :
     (SMT.modelWith fo (represented.env.lifted source lawful).target extra).SatisfiesCommands
       fo.nativeCommands :=
@@ -623,7 +623,7 @@ theorem liftedFrom_valid_with {certificate : CertifiedDataEnv}
       (Symbol (certificate.env.signature ++ certificate.tail))}
     (represented : certificate.Represents fo)
     (source : Model (certificate.env.signature ++ certificate.tail))
-    (lawful : Datatype.Env.Lawful source certificate.data.core)
+    (lawful : Datatype.Env.Lawful source certificate.data.toModelEnv)
     (prior : Lifted (canonicalModel source))
     (extra : SMT.ExtraGraph fo
       (represented.env.liftedFrom source lawful prior).target) :
@@ -640,7 +640,7 @@ theorem guards_valid {certificate : CertifiedDataEnv}
     (represented : certificate.Represents guarding.encoding)
     (guarded : certificate.GuardRepresentation guarding represented)
     (source : Model (certificate.env.signature ++ certificate.tail))
-    (lawful : Datatype.Env.Lawful source certificate.data.core)
+    (lawful : Datatype.Env.Lawful source certificate.data.toModelEnv)
     (prior : Lifted (canonicalModel source))
     (guards : SMT.UnaryGuards guarding.encoding
       (represented.env.liftedFrom source lawful prior).target
@@ -678,7 +678,7 @@ theorem sound {certificate : CertifiedDataEnv}
     (represented : certificate.Represents guarding.encoding)
     (guarded : certificate.GuardRepresentation guarding represented)
     (source : Model (certificate.env.signature ++ certificate.tail))
-    (lawful : Datatype.Env.Lawful source certificate.data.core)
+    (lawful : Datatype.Env.Lawful source certificate.data.toModelEnv)
     (guardModel : certificate.GuardModel guarding represented guarded
       source lawful)
     {theory : FO.FamilyTheory
@@ -715,7 +715,7 @@ theorem unsat_under {certificate : CertifiedDataEnv}
     (unsat : Crush.SMT.CommandsUnsatisfiable commands) :
     UnsatisfiableUnder
       (fun source =>
-        Σ lawful : Datatype.Env.Lawful source certificate.data.core,
+        Σ lawful : Datatype.Env.Lawful source certificate.data.toModelEnv,
           certificate.GuardModel guarding represented guarded source lawful)
       formula := by
   intro source model sourceValid

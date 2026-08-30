@@ -1200,7 +1200,8 @@ theorem guardTerm_eval (guarding : Guarding symbols)
     (motive_2 := fun _ _ args =>
       GuardArgsValid guarding target extra guard args)
     (var := fun ref valuation environment related => by
-      simpa only [Guarding.term, FO.FamilyTerm.guardDenote.eq_1] using
+      simpa only [Guarding.term, encodeTerm,
+        FO.FamilyTerm.guardDenote.eq_1] using
         Crush.SMT.Eval.bvar (related.lookup target ref))
     (symbol := fun symbol args argsIH valuation environment related => by
       apply Crush.SMT.Eval.symbol (guarding.encoding.ident_fresh symbol)
@@ -1210,7 +1211,7 @@ theorem guardTerm_eval (guarding : Guarding symbols)
       rw [applyValues_guardArgValues]
       rfl)
     (boolLit := fun value valuation environment related => by
-      cases value <;> simpa only [Guarding.term,
+      cases value <;> simpa only [Guarding.term, encodeTerm,
         FO.FamilyTerm.guardDenote.eq_3, FO.FamilyTerm.guardDenote.eq_4,
         modelWith_bool, boolValue] using
           (Crush.SMT.Eval.boolLit
@@ -1355,8 +1356,8 @@ theorem guardTerm_eval (guarding : Guarding symbols)
         exact result)
     (nil := fun {_} valuation environment related => Crush.SMT.EvalList.nil)
     (cons := fun argument rest argumentIH restIH valuation environment related => by
-      rw [Guarding.arguments, Array.toList_append, List.singleton_append,
-        guardArgValues]
+      rw [Guarding.arguments, encodeArguments, Array.toList_append,
+        List.singleton_append, guardArgValues]
       exact Crush.SMT.EvalList.cons
         (argumentIH valuation environment related)
         (restIH valuation environment related))

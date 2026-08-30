@@ -148,32 +148,6 @@ def wfDefs (guarding : SMT.Guarding (Symbol signature))
       (wfParts (native := native) guarding data
         (fun ref => encoding.name (.ctor data ref.index)))).toArray
 
-private theorem nodup_map {alpha beta : Type} {values : List alpha}
-    {image : alpha → beta} (nodup : values.Nodup)
-    (injective : Function.Injective image) : (values.map image).Nodup := by
-  induction nodup with
-  | nil => exact .nil
-  | @cons value values fresh nodup ih =>
-      apply List.Pairwise.cons
-      · intro mapped member equal
-        rw [List.mem_map] at member
-        rcases member with ⟨other, otherMem, imageEq⟩
-        exact fresh other otherMem (injective (equal.trans imageEq.symm))
-      · exact ih
-
-private theorem dataRefs_nodup (arity : Nat) :
-    (List.finRange arity).Nodup := by
-  induction arity with
-  | zero => simp
-  | succ arity ih =>
-      rw [List.finRange_succ]
-      exact List.Pairwise.cons (by
-        intro value member equal
-        rw [List.mem_map] at member
-        rcases member with ⟨source, sourceMem, rfl⟩
-        exact Fin.succ_ne_zero source equal.symm)
-        (nodup_map ih fun left right equal => Fin.succ_inj.mp equal)
-
 /-- Erasing semantic evidence from typed constructor clauses recovers the pure
 `wf_T` syntax exactly. -/
 theorem dataParts_parts {target : FO.FamilyModel (Symbol signature)}
@@ -802,7 +776,7 @@ theorem wfDefs_valid_of_guard
       exact (Nat.ne_of_gt represented.wf.blockWF.nonempty) zero
     · dsimp [definitions, wfDefs]
       simp only [List.map_map, Function.comp_def, wfDef]
-      exact nodup_map (dataRefs_nodup arity) nameInj
+      exact nodup_map (finRange_nodup arity) nameInj
     · intro definition member
       dsimp [definitions, wfDefs] at member
       rw [List.mem_map] at member
@@ -885,7 +859,7 @@ theorem wfDefs_valid
       exact (Nat.ne_of_gt wf.nonempty) zero
     · dsimp [definitions, wfDefs]
       simp only [List.map_map, Function.comp_def, wfDef]
-      exact nodup_map (dataRefs_nodup arity) nameInj
+      exact nodup_map (finRange_nodup arity) nameInj
     · intro definition member
       dsimp [definitions, wfDefs] at member
       rw [List.mem_map] at member

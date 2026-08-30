@@ -204,6 +204,34 @@ theorem mem_mapIdx {α : Type u} {β : Type v} {values : List α} {value : α}
 
 end Ref
 
+/-- An injective map preserves duplicate-freedom. Kept here because datatype
+encoders use the same fact for intrinsic positions and allocated names. -/
+theorem nodup_map {α β : Type} {values : List α} {image : α → β}
+    (nodup : values.Nodup) (injective : Function.Injective image) :
+    (values.map image).Nodup := by
+  induction nodup with
+  | nil => exact .nil
+  | @cons value values fresh _ ih =>
+      apply List.Pairwise.cons
+      · intro mapped member equal
+        rw [List.mem_map] at member
+        rcases member with ⟨other, otherMem, imageEq⟩
+        exact fresh other otherMem (injective (equal.trans imageEq.symm))
+      · exact ih
+
+/-- The canonical finite enumeration contains each position once. -/
+theorem finRange_nodup (arity : Nat) : (List.finRange arity).Nodup := by
+  induction arity with
+  | zero => simp
+  | succ arity ih =>
+      rw [List.finRange_succ]
+      exact List.Pairwise.cons (by
+        intro value member equal
+        rw [List.mem_map] at member
+        rcases member with ⟨source, sourceMem, rfl⟩
+        exact Fin.succ_ne_zero source equal.symm)
+        (nodup_map ih fun left right equal => Fin.succ_inj.mp equal)
+
 /-- Sort of a constructor field. An external field is interpreted by a carrier
 supplied to the block; a recursive field points into the current mutual block. -/
 inductive FieldSort (arity : Nat) where

@@ -734,16 +734,16 @@ mutual
         return s
     let e := normalized
     match e with
-    | .const ``Bool _ => return .app (.symb "Bool") #[]
-    | .const ``Nat _  => return .app (.symb "Int") #[]
-    | .const ``Int _  => return .app (.symb "Int") #[]
-    | .const ``String _ => return .app (.symb "String") #[]
+    | .const ``Bool _ => return boolSort
+    | .const ``Nat _  => return intSort
+    | .const ``Int _  => return intSort
+    | .const ``String _ => return stringSort
     -- `Prop` is the sort of propositions and maps to SMT `Bool`. A *larger* universe
     -- does not: mapping `Type` to `Bool` would put every Lean type into a
     -- two-element set, so three distinct types would have to collide and the solver
     -- could "prove" type equalities that are false. Such a position gets an opaque
     -- sort instead, which is uninterpreted and therefore sound.
-    | .sort l => if l.isZero then return .app (.symb "Bool") #[]
+    | .sort l => if l.isZero then return boolSort
                  else declareUninterpretedSort e
     | _ =>
     -- Lean arrays are finite sequences, not their implementation-level `List`
@@ -756,7 +756,7 @@ mutual
     -- `(_ BitVec w)`. A symbolic width has no SMT counterpart, so it falls through
     -- to an opaque sort (where `BitVec` ops will not be recognized either).
     match ← bvWidthOfType? e with
-    | some w => return bvSort w
+    | some w => return bitvecSort w
     | none =>
     -- An arrow type is a *function sort*: an uninterpreted `Fn` sort paired with an
     -- `app` symbol (higher-order encoding). Emitting it as a plain opaque sort is
@@ -1121,7 +1121,7 @@ mutual
     let enc ← finiteArrayEncodingNames sortName sentinel
     markSortDeclared sortName
     let elemSort ← emitSort elem
-    let intSort := SSort.app (.symb "Int") #[]
+    let intSort := SMT.intSort
     let dataSort := SSort.app (.symb "Array") #[intSort, elemSort]
     TranslateM.emitCommand (.declDatatypes #[(sortName, 0, {
       ctors := #[{
@@ -1158,7 +1158,7 @@ mutual
         $(SMT.Term.forallE #[(iName, intSort)] pointwise)))
       let wf ← reserveWfSymbol sortName
       TranslateM.emitCommand (.defFun false wf #[(xName, sort)]
-        (.app (.symb "Bool") #[]) body)
+        SMT.boolSort body)
     return enc
 
   /-- Declare a supported inductive as an SMT datatype (idempotent); return its

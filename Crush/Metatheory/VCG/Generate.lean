@@ -91,9 +91,9 @@ theorem commands_unsat_implies_source_unsat {signature : Signature}
     (encoding : SMT.Encoding (Symbol signature))
     (source : Sentence signature)
     (data : Reification.DataBridge signature)
-    (native : EnvRepresentation encoding data.core)
+    (native : EnvRepresentation encoding data.toModelEnv)
     (unsat : Crush.SMT.CommandsUnsatisfiable (commands encoding source)) :
-    Datatype.Env.Unsatisfiable data.core source := by
+    Datatype.Env.Unsatisfiable data.toModelEnv source := by
   exact TranslationStatus.unsat_source (generate encoding source)
     (generate_proves encoding source) native unsat
 

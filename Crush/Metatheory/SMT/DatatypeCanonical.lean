@@ -103,19 +103,6 @@ theorem argValues_typed {source : Model signature}
       | base value rest => exact ih rest
       | data value rest => exact ih rest
 
-private theorem typed_nil (model : Crush.SMT.Model) {values : List model.Value}
-    (typed : Crush.SMT.ValuesTyped model [] values) : values = [] := by
-  cases typed
-  rfl
-
-private theorem typed_cons (model : Crush.SMT.Model) (sort : Crush.SMT.SSort)
-    (sorts : List Crush.SMT.SSort) {values : List model.Value}
-    (typed : Crush.SMT.ValuesTyped model (sort :: sorts) values) :
-    ∃ value rest, values = value :: rest ∧ model.inSort sort value ∧
-      Crush.SMT.ValuesTyped model sorts rest := by
-  cases typed
-  exact ⟨_, _, rfl, by assumption, by assumption⟩
-
 /-- Every generic raw list typed by a constructor telescope comes from one
 canonical intrinsic argument telescope. -/
 theorem typed_args {source : Model signature}
@@ -132,12 +119,12 @@ theorem typed_args {source : Model signature}
     ∃ args : Args block source.Base fields, values = argValues law args := by
   induction fields generalizing values with
   | nil =>
-      have equal := typed_nil _ typed
+      have equal := typed.eq_nil
       subst values
       exact ⟨.nil, rfl⟩
   | cons field fields ih =>
       obtain ⟨headValue, tailValues, rfl, head, tail⟩ :=
-        typed_cons _ _ _ typed
+        typed.exists_cons
       cases field with
       | mk name sort =>
           cases sort with

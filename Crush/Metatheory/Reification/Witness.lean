@@ -127,81 +127,43 @@ def shapesMatch : ExprShape → TermShape → Bool
   | .metadata source, target => shapesMatch source target
   | _, _ => false
 
-/-- The live type inferred for a source expression after the executable reifier
-accepted it as definitionally equal to `expected`.  This records the checked
-metaprogramming boundary; it is not a kernel theorem about `Lean.Expr`. -/
-structure TypeCorrespondence (expression expected : Expr) where
-  inferred : Expr
-
-/-- One exact datatype-owned declaration used by a reified term. -/
-inductive DataUse (env : DatatypeEnv) where
-  | ctor (found : DatatypeEnv.FoundBlock env.blocks.toList)
-      (ctor : found.Ctor)
-  | sel (found : DatatypeEnv.FoundBlock env.blocks.toList)
-      (ctor : found.Ctor) (field : ctor.Field)
-
-/-- Erase only certified datatype type parameters while retaining exact typed
-ownership references for every constructor and selector encountered. -/
+/-- Erase only certified datatype type parameters before comparing the source
+and intrinsic constructor trees. Exact ownership remains in the intrinsically
+typed term and its `DataBridge`; a second, unused occurrence trace added no
+soundness evidence. -/
 partial def eraseData (env : DatatypeEnv) (expression : Expr) :
-    MetaM (Expr × List (DataUse env)) := do
+    MetaM Expr := do
   if let some app ← env.ctorApp? expression then
     let mut erased : Array Expr := #[]
-    let mut uses : List (DataUse env) := [.ctor app.found app.ctor]
     for argument in app.values do
-      let (term, nested) ← eraseData env argument
-      erased := erased.push term
-      uses := uses ++ nested
-    return (mkAppN app.head erased, uses)
+      erased := erased.push (← eraseData env argument)
+    return mkAppN app.head erased
   if let some app ← env.projApp? expression then
-    let (target, nested) ← eraseData env app.target
-    return (mkApp app.head target, .sel app.found app.ctor app.field :: nested)
+    return mkApp app.head (← eraseData env app.target)
   match expression with
   | .app fn argument =>
-      let (fn, fnUses) ← eraseData env fn
-      let (argument, argumentUses) ← eraseData env argument
-      return (.app fn argument, fnUses ++ argumentUses)
+      return .app (← eraseData env fn) (← eraseData env argument)
   | .lam name type body info =>
-      let (body, uses) ← eraseData env body
-      return (.lam name type body info, uses)
+      return .lam name type (← eraseData env body) info
   | .forallE name type body info =>
-      let (type, typeUses) ← eraseData env type
-      let (body, bodyUses) ← eraseData env body
-      return (.forallE name type body info, typeUses ++ bodyUses)
+      return .forallE name (← eraseData env type) (← eraseData env body) info
   | .letE name type value body nondep =>
-      let (value, valueUses) ← eraseData env value
-      let (body, bodyUses) ← eraseData env body
-      return (.letE name type value body nondep, valueUses ++ bodyUses)
+      return .letE name type (← eraseData env value) (← eraseData env body) nondep
   | .mdata data body =>
-      let (body, uses) ← eraseData env body
-      return (.mdata data body, uses)
+      return .mdata data (← eraseData env body)
   | .proj name index body =>
-      let (body, uses) ← eraseData env body
-      return (.proj name index body, uses)
-  | _ => return (expression, [])
-
-/-- Datatype declaration evidence retained at the metaprogramming refinement
-boundary. `none` is the original uninterpreted-only route. -/
-inductive DataTrace {signature : Signature} :
-    Option (DataBridge signature) → Type where
-  | none : DataTrace none
-  | certified (bridge : DataBridge signature)
-      (uses : List (DataUse bridge.env)) : DataTrace (some bridge)
-
-structure ShapeResult {signature : Signature}
-    (datatypes : Option (DataBridge signature)) where
-  shape : ExprShape
-  trace : DataTrace datatypes
+      return .proj name index (← eraseData env body)
+  | _ => return expression
 
 private partial def sourceShape {signature : Signature} (expression : Expr) :
-    (datatypes : Option (DataBridge signature)) → MetaM (ShapeResult datatypes)
-  | none => return ⟨exprShape expression, .none⟩
+    Option (DataBridge signature) → MetaM ExprShape
+  | none => return exprShape expression
   | some bridge => do
-      let (erased, uses) ← eraseData bridge.env expression
-      return ⟨exprShape erased, .certified bridge uses⟩
+      return exprShape (← eraseData bridge.env expression)
 
-/-- Exact recursive constructor correspondence after erasing only the certified
+/-- Recursive shape correspondence after erasing only the certified
 datatype parameters recorded in the witness. -/
-def ConstructorCorrespondence {signature : Signature} {context : Context}
+def ShapeCorrespondence {signature : Signature} {context : Context}
     (source : ExprShape) (term : PackedTerm signature context) : Prop :=
   shapesMatch source term.shape = true
 
@@ -211,14 +173,8 @@ structure ReificationWitness {signature : Signature} {context : Context}
     (contextBridge : ContextBridge context) (expression : Expr)
     (term : PackedTerm signature context)
     (datatypes : Option (DataBridge signature) := none) where
-  typeCorrespondence : TypeCorrespondence expression term.type.expr
-  contextCorrespondence : ContextBridge context
-  context_eq : contextCorrespondence = contextBridge
   sourceShape : ExprShape
-  constructorCorrespondence : ConstructorCorrespondence sourceShape term
-  dataTrace : DataTrace datatypes
-  constantsCorrespond : SignatureBridge signature
-  constants_eq : constantsCorrespond = signatureBridge
+  shapeCorrespondence : ShapeCorrespondence sourceShape term
 
 /-- Existential typed result of proof-facing reification. -/
 structure Reified {signature : Signature} {context : Context}
@@ -244,21 +200,14 @@ partial def reify? {signature : Signature} {context : Context}
     MetaM (Option (Reified signatureBridge contextBridge expression datatypes)) := do
   let some term ← reifyTerm? signatureBridge contextBridge expression datatypes
     | return none
-  let inferred ← inferType expression
   let shape ← sourceShape expression datatypes
   if correspondence :
-      shapesMatch shape.shape term.shape = true then
+      shapesMatch shape term.shape = true then
     return some {
       term
       witness := {
-        typeCorrespondence := { inferred }
-        contextCorrespondence := contextBridge
-        context_eq := rfl
-        sourceShape := shape.shape
-        constructorCorrespondence := correspondence
-        dataTrace := shape.trace
-        constantsCorrespond := signatureBridge
-        constants_eq := rfl } }
+        sourceShape := shape
+        shapeCorrespondence := correspondence } }
   return none
 
 /-- Existential intrinsic sentence obtained from a closed supported Lean

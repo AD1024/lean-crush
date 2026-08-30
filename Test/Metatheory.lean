@@ -687,8 +687,7 @@ private def reflexiveFormula : FO.FamilySentence NoSymbol :=
   .eq (.boolLit true) (.boolLit true)
 
 /-- SMT quotation and the pure encoder produce the same concrete formula. -/
-example : TermRepresentation encoding reflexiveFormula
-    (smt| (= true true)) := rfl
+example : term encoding reflexiveFormula = (smt| (= true true)) := rfl
 
 private def guarded : Guarding NoSymbol where
   encoding

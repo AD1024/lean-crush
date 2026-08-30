@@ -35,6 +35,26 @@ inductive SSort where
   | app  : Ident → Array SSort → SSort
   deriving BEq, Inhabited, Repr
 
+/-- Shallow quotation for a nullary SMT sort symbol. -/
+syntax "(smtSort|" ident ")" : term
+
+macro_rules
+  | `(term| (smtSort| $name:ident)) =>
+      `(SSort.app (.symb $(quote name.getId.toString)) #[])
+
+/-- Standard nullary SMT Boolean sort. -/
+def boolSort : SSort := (smtSort| Bool)
+
+/-- Standard nullary SMT integer sort. -/
+def intSort : SSort := (smtSort| Int)
+
+/-- Standard nullary SMT string sort. -/
+def stringSort : SSort := (smtSort| String)
+
+/-- SMT bit-vector sort of a fixed width. -/
+def bitvecSort (width : Nat) : SSort :=
+  .app (.indexed "BitVec" #[.inr width]) #[]
+
 namespace SSort
 
 mutual

@@ -152,7 +152,7 @@ private theorem eval_and (encoding : Encoding symbols)
     (rightEval : Crush.SMT.Eval (model encoding target) environment right
       ((model encoding target).bool rightValue)) :
     Crush.SMT.Eval (model encoding target) environment
-      (.symbApp "and" #[left, right])
+      (smt| (and $left $right))
       ((model encoding target).bool (leftValue && rightValue)) := by
   simpa using Crush.SMT.Eval.and
     (Crush.SMT.EvalList.cons leftEval
@@ -167,7 +167,7 @@ private theorem eval_or (encoding : Encoding symbols)
     (rightEval : Crush.SMT.Eval (model encoding target) environment right
       ((model encoding target).bool rightValue)) :
     Crush.SMT.Eval (model encoding target) environment
-      (.symbApp "or" #[left, right])
+      (smt| (or $left $right))
       ((model encoding target).bool (leftValue || rightValue)) := by
   simpa using Crush.SMT.Eval.or
     (Crush.SMT.EvalList.cons leftEval
@@ -201,7 +201,7 @@ theorem term_eval (encoding : Encoding symbols)
     (motive_2 := fun _ _ args => ArgsValid encoding target args)
     (var := fun ref => by
       intro valuation environment related
-      simpa only [term, FO.FamilyTerm.denote.eq_1] using
+      simpa only [term, encodeTerm, FO.FamilyTerm.denote.eq_1] using
         Crush.SMT.Eval.bvar (related.lookup target ref))
     (symbol := fun symbol args argsIH => by
       intro valuation environment related
@@ -212,10 +212,11 @@ theorem term_eval (encoding : Encoding symbols)
           (argsIH valuation environment related)
         refine ⟨_, symbol, rfl, ?_⟩
         rw [applyValues_argumentValues]
-      simpa only [term, FO.FamilyTerm.denote.eq_2] using result)
+      simpa only [term, encodeTerm, arguments,
+        FO.FamilyTerm.denote.eq_2] using result)
     (boolLit := fun value => by
       intro valuation environment related
-      cases value <;> simpa only [term, FO.FamilyTerm.denote.eq_3,
+      cases value <;> simpa only [term, encodeTerm, FO.FamilyTerm.denote.eq_3,
         FO.FamilyTerm.denote.eq_4, model, boolValue] using
           (Crush.SMT.Eval.boolLit (model := model encoding target)
             (environment := environment) _))
@@ -396,7 +397,8 @@ theorem term_eval (encoding : Encoding symbols)
       exact Crush.SMT.EvalList.nil)
     (cons := fun argument rest argumentIH restIH => by
       intro valuation environment related
-      rw [arguments, Array.toList_append, List.singleton_append, argumentValues]
+      rw [arguments, encodeArguments, Array.toList_append,
+        List.singleton_append, argumentValues]
       change Crush.SMT.EvalList (model encoding target) environment
         (term encoding argument :: (arguments encoding rest).toList)
         (Value.typed _ ⟦argument⟧[target, valuation] ::
@@ -405,19 +407,6 @@ theorem term_eval (encoding : Encoding symbols)
         (argumentIH valuation environment related)
         (restIH valuation environment related))
     source
-
-/-- Syntactically represented terms have the denotation established by
-`term_eval`. -/
-theorem term_representation_sound (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) {context : FO.Context} {sort : FO.FOSort}
-    (source : FO.FamilyTerm symbols context sort) (encoded : STerm)
-    (representation : TermRepresentation encoding source encoded)
-    (valuation : FO.FamilyValuation target context)
-    (environment : List (Value target)) (related : Env target valuation environment) :
-    Crush.SMT.Eval (model encoding target) environment encoded
-      (.typed sort ⟦source⟧[target, valuation]) := by
-  subst encoded
-  exact term_eval encoding target source valuation environment related
 
 /-- The intrinsic FO encoder uses only Boolean literals. Other source
 constants are typed family symbols, so native components may give raw SMT
@@ -433,7 +422,7 @@ theorem term_literalFree (encoding : Encoding symbols)
     (var := fun ref => .bvar _)
     (symbol := fun symbol args argsFree => .app argsFree)
     (boolLit := fun value => by
-      cases value <;> simp only [term] <;> exact .bool _)
+      cases value <;> simp only [term, encodeTerm] <;> exact .bool _)
     (not := fun body bodyFree => .app (.cons bodyFree .nil))
     (and := fun left right leftFree rightFree =>
       .app (.cons leftFree (.cons rightFree .nil)))
@@ -449,7 +438,8 @@ theorem term_literalFree (encoding : Encoding symbols)
     (existsE := fun body bodyFree => .existsE bodyFree)
     (nil := .nil)
     (cons := fun argument rest argumentFree restFree => by
-      rw [arguments, Array.toList_append, List.singleton_append]
+      rw [arguments, encodeArguments, Array.toList_append,
+        List.singleton_append]
       exact .cons argumentFree restFree)
     source
 

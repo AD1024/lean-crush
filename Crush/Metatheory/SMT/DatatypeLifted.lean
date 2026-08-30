@@ -108,19 +108,6 @@ theorem argValues_typed {source prior : FO.FamilyModel (Symbol signature)}
                     (argValues_typed law wf productive priorRel priorModels fo ctorRef rest
                       (fun ref => refs (.there ref)) tail)
 
-private theorem typed_nil (model : Crush.SMT.Model) {values : List model.Value}
-    (typed : Crush.SMT.ValuesTyped model [] values) : values = [] := by
-  cases typed
-  rfl
-
-private theorem typed_cons (model : Crush.SMT.Model) (sort : Crush.SMT.SSort)
-    (sorts : List Crush.SMT.SSort) {values : List model.Value}
-    (typed : Crush.SMT.ValuesTyped model (sort :: sorts) values) :
-    ∃ value rest, values = value :: rest ∧ model.inSort sort value ∧
-      Crush.SMT.ValuesTyped model sorts rest := by
-  cases typed
-  exact ⟨_, _, rfl, by assumption, by assumption⟩
-
 /-- Every raw list typed by a constructor telescope in the enlarged model is
 the embedding of one intrinsic payload telescope. -/
 theorem typed_args {source prior : FO.FamilyModel (Symbol signature)}
@@ -140,12 +127,12 @@ theorem typed_args {source prior : FO.FamilyModel (Symbol signature)}
       ∃ args : Args block prior.carriers.Base fields,
         values = argValues law wf productive priorRel priorModels ctorRef fields refs args
   | [], _, values, typed => by
-      have equal := typed_nil _ typed
+      have equal := typed.eq_nil
       subst values
       exact ⟨.nil, rfl⟩
   | field :: rest, refs, values, typed => by
       obtain ⟨headValue, tailValues, rfl, headTyped, tailTyped⟩ :=
-        typed_cons _ _ _ typed
+        typed.exists_cons
       cases field with
       | mk name sort =>
           cases sort with

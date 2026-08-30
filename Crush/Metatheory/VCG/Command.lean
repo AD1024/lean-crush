@@ -1,5 +1,5 @@
 import Crush.Metatheory.VCG.Trust
-import Crush.SMT.Syntax
+import Crush.SMT.Quote
 
 /-!
 # Syntax witnesses for emitted defunctionalization commands
@@ -70,14 +70,15 @@ structure ClosureEquationEncoding where
   parameters : Array SMT.Term
   body : SMT.Term
   rawEquation : SMT.Term
-  rawEquation_eq : rawEquation = SMT.Term.symbApp "=" #[
-    SMT.Term.app (.symb appName) (#[closure] ++ parameters), body]
+  rawEquation_eq : rawEquation =
+    let applied := SMT.Term.app (.symb appName) (#[closure] ++ parameters)
+    (smt| (= $applied $body))
   guard : Option SMT.Term
   guardedEquation : SMT.Term
   guardedEquation_eq : guardedEquation =
     match guard with
     | none => rawEquation
-    | some condition => SMT.Term.symbApp "=>" #[condition, rawEquation]
+    | some condition => (smt| (=> $condition $rawEquation))
   binders : Array (String × SMT.SSort)
   /-- Typed proof for the modeled path, or an explicit trusted-boundary reason. -/
   evidence : ClosureEvidence

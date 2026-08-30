@@ -197,19 +197,6 @@ theorem values_unwrap (step : Step source)
   | _, _, .cons head tail =>
       .cons (step.unwrap_inSort fo head) (step.values_unwrap fo tail)
 
-private theorem typed_nil (model : Crush.SMT.Model) {values : List model.Value}
-    (typed : Crush.SMT.ValuesTyped model [] values) : values = [] := by
-  cases typed
-  rfl
-
-private theorem typed_cons (model : Crush.SMT.Model) (sort : Crush.SMT.SSort)
-    (sorts : List Crush.SMT.SSort) {values : List model.Value}
-    (typed : Crush.SMT.ValuesTyped model (sort :: sorts) values) :
-    ∃ value rest, values = value :: rest ∧ model.inSort sort value ∧
-      Crush.SMT.ValuesTyped model sorts rest := by
-  cases typed
-  exact ⟨_, _, rfl, by assumption, by assumption⟩
-
 private theorem getElem?_map_some {α β : Type} (f : α → β)
     (values : List α) (index : Nat) (value : α)
     (atIndex : values[index]? = some value) :
@@ -255,7 +242,7 @@ theorem values_wrap_unwrap (step : Step source)
         (sorts.map fo.sort) values →
       (values.map step.unwrap).map step.wrap = values
   | [], external, values, typed => by
-      have equal := typed_nil _ (by simpa using typed)
+      have equal := Crush.SMT.ValuesTyped.eq_nil (by simpa using typed)
       subst values
       rfl
   | sort :: sorts, external, values, typed => by
@@ -263,7 +250,7 @@ theorem values_wrap_unwrap (step : Step source)
           (fo.sort sort :: sorts.map fo.sort) values := by
         simpa using typed
       obtain ⟨head, tail, rfl, headTyped, tailTyped⟩ :=
-        typed_cons _ _ _ normalized
+        normalized.exists_cons
       simp only [List.map]
       rw [step.wrap_unwrap_of_inSort fo (external sort (by simp)) head
         headTyped]
@@ -289,7 +276,7 @@ theorem applyValues_carry (step : Step source)
         BaseLift.wrapWith step.productive resultExternal
           (SMT.applyValues step.prior.target arguments function values)
   | [], _, argumentsExternal, resultExternal, function, values, typed => by
-      have equal := typed_nil _ (by simpa using typed)
+      have equal := Crush.SMT.ValuesTyped.eq_nil (by simpa using typed)
       subst values
       rfl
   | argument :: arguments, result, argumentsExternal, resultExternal,
@@ -299,7 +286,7 @@ theorem applyValues_carry (step : Step source)
           (fo.sort argument :: arguments.map fo.sort) values := by
         simpa using typed
       obtain ⟨head, tail, rfl, headTyped, tailTyped⟩ :=
-        typed_cons _ _ _ normalized
+        normalized.exists_cons
       have decoded := step.unwrap_decode_wrap fo
         (argumentsExternal argument (by simp)) head headTyped
       dsimp only [target, Lifted.extend] at decoded

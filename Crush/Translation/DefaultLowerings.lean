@@ -148,7 +148,7 @@ false in Lean.
 -/
 
 private def usesStringTheory (ctx : TranslationCtx) : TranslateM Bool := do
-  return (← ctx.emitSort (mkConst ``String)) == .app (.symb "String") #[]
+  return (← ctx.emitSort (mkConst ``String)) == stringSort
 
 /-- `String.length` counts Unicode codepoints, as does SMT `str.len`. -/
 @[crush_translate_head String.length]
@@ -264,7 +264,7 @@ def arrayReplicate : LoweringHandler := fun ctx => do
   let svalue ← ctx.emitTerm value
   withFiniteArrayType ctx arrayTy elem fun encoding => do
     let elemSort ← ctx.emitSort elem
-    let intSort := SSort.app (.symb "Int") #[]
+    let intSort := SMT.intSort
     let dataSort := SSort.app (.symb "Array") #[intSort, elemSort]
     let key : StructuralKey := {
       tag := "array-replicate-data", name := ``Array.replicate, typeExprs := #[elem]
