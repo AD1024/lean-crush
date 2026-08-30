@@ -799,11 +799,13 @@ If $\Rep(\mathcal E,T,C)$, then
 The executable reifier recognizes supported normalized Lean-expression
 constructors and returns an existentially typed source term. A witness records:
 \begin{itemize}[leftmargin=*]
- \item the inferred Lean type and the expected retained Lean type;
  \item exact correspondence of recognized expression and intrinsic-term shapes;
- \item the typed local-context bridge;
- \item the typed finite signature bridge for global constants.
+ \item indices fixing the typed local-context and finite-signature bridges used
+       by the reifier.
 \end{itemize}
+Lean's inferred type is checked executably at every accepted node; a former
+empty ``type correspondence'' record was removed because it retained no
+equality or other proof evidence.
 For a closed proposition, successful reification packages a source signature
 $\Sigma$, a sentence $\varphi$, and this witness.
 \leanfiles{Reification/Type.lean, Reification/Term.lean, Reification/Capture.lean, Reification/Reify.lean, and Reification/Witness.lean}
@@ -984,9 +986,11 @@ conclusions are stated about the reified HO sentence.}
  \item The legacy direct, extensible \texttt{emitTerm} pipeline does not acquire
        a whole-run theorem merely because some local closures or primitives are
        certified.
- \item Unsupported syntax, dependent function types, datatypes in the proved
-       raw-command fragment, unrestricted translation handlers, and native-HO
-       commands are outside the present proved route.
+ \item Unsupported syntax, dependent and function-valued datatype fields,
+       indexed or nonproductive inductives, unrestricted translation handlers,
+       and native-HO commands are outside the present proved route. Productive
+       ground inductive blocks and their recursive guards have a separate native
+       command representation and guarded reflection theorem.
 \end{itemize}
 
 \subsection{Prioritized roadmap}
@@ -1003,16 +1007,16 @@ conclusions are stated about the reified HO sentence.}
  This is the missing step needed to state the final result directly about Lean's
  proposition rather than only about $\varphi$.
 
- \item[3. Certify interpreted theories.]
- Extend the raw SMT semantics, encoding record, and model-lifting proof for
- interpreted integers and other selected built-ins. Compose guarded carrier
- encodings such as $\mathbb N\hookrightarrow\mathbb Z$ with those representations.
+ \item[3. Certify additional interpreted theories.]
+ The integer literal/comparison graph and guarded
+ $\mathbb N\hookrightarrow\mathbb Z$ carrier are represented. Extend the same
+ component interface to other selected built-ins.
 
  \item[4. Expand structural coverage.]
- Add proof-facing datatype encodings, recursive datatype declarations, and
- selected value-indexed dependent forms. Each addition requires syntax,
- semantics, total reification, translation, and command representation---not
- only a new lowering rule.
+ Productive ground native datatypes and recursive datatype guards are now
+ represented. Add selected value-indexed dependent forms; each addition still
+ requires syntax, semantics, total reification, translation, and command
+ representation---not only a new lowering rule.
 
  \item[5. Integrate certified hooks compositionally.]
  Give certified head/family translations a representation theorem that can be
@@ -1056,8 +1060,8 @@ The principal declarations, in proof order, are:
        contains the exact represented commands.
  \item \path{VCG.run_unsat_implies_source_unsat}: the direct composition
        for stateful VCG.
- \item \path{VCG.encoded_unsat_implies_source_unsat}: the specialization
-       retaining a structural witness for the original Lean expression.
+ \item \path{VCG.runGuarded_unsat_implies_source_unsat}: guarded reflection over
+       every datatype-lawful source model from one uniform guard interpretation.
 \end{enumerate}
 
 The earlier unary results---\path{fundamental},

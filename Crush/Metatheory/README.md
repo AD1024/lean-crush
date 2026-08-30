@@ -103,7 +103,8 @@ The datatype extension now has a proved native-command core:
   one complete array containing native commands, exact certified derived
   definitions, ordinary declarations, and guarded assertions. Its only
   component premise is `Guarding.Semantics`; `UnaryGuards.semantics` discharges
-  that premise uniformly for fresh unary predicates such as datatype `wf_T`.
+  it when the unary family owns every nontrivial guard, while `IntView` composes
+  built-in integer nonnegativity with fresh datatype `wf_T` predicates.
 - `Reification/Datatype.lean` reifies productive ground Lean inductive blocks,
   preserves declaration order, collects dependencies, and rejects indexed,
   higher-order-field, nonproductive, and unsafe indirect-recursive cases.
@@ -126,9 +127,17 @@ The datatype extension now has a proved native-command core:
   `Representation` for every typed trace entry and assembles those witnesses
   into the single `EnvRepresentation` used by model lifting; it is not a second
   encoder. `CertifiedGuardTrace` performs the same exact final-state indexing
-  for recursive `wf_T` commands. `GuardModel` bundles the interpreted prior,
-  derived graph, and guard semantics for one source model; `Represents.sound`
-  and `Represents.unsat_under` are the combined model and reflection theorems.
+  for recursive `wf_T` commands. `GuardAllocation` retains its identifiers and
+  trace matching independently of a model; `GuardModel.ofIntView` constructs the
+  standard interpreted-integer/datatype package. A uniform `GuardInterpretation`
+  yields `Represents.unsat`, whose source-model quantification contains only
+  datatype lawfulness. `Represents.unsat_under` remains the lower-level theorem
+  for custom model-indexed guard constructions.
+  When a whole fact is supported, the certificate also retains an exact
+  environment-indexed `ReifiedSentenceFor`. `VCG/Production.lean` defines
+  `ProductionAgreement`, which connects that sentence to the final live command
+  snapshot and derives source reflection; production still has to construct the
+  shared encoding and agreement witnesses from its final allocator state.
 - Production discovery first builds one read-only `DatatypePlan` containing the
   complete mutual member, constructor, and ground-field structure. Only after
   discovery finishes does `declareDatatype` allocate names and emit commands,
@@ -187,8 +196,9 @@ The live boundary is split by role:
   source constants; no unrelated datatype environment or datatype-only theorem
   variant can be supplied. An empty bridge covers ordinary encodings, while a
   nonempty representation certifies the native datatype prefix.
-  `runGuarded_unsat_under` reflects the guarded run under the combined datatype
-  and interpreted-carrier contract represented by `UnsatisfiableUnder`.
+  `runGuarded_unsat_under` exposes the lower-level combined model contract;
+  `runGuarded_unsat_implies_source_unsat` uses a uniform `GuardInterpretation`
+  to reflect over every datatype-lawful source model.
 
 The earlier unary encoding remains under the core defunctionalization modules as
 an independent semantic reference, with its logical-relation and model-extension
@@ -280,9 +290,10 @@ shown relative to `Crush.Metatheory`.
    The datatype environment is an ordinary parameter of this result. With
    `env = []`, `Datatype.Env.unsatisfiable_nil_iff` recovers the original source
    proposition. For interpreted base carriers, `VCG.runGuarded_unsat_under`
-   concludes `UnsatisfiableUnder` the combined datatype and `GuardModel`
-   contract, making the strengthened model class explicit rather than
-   introducing another HO model type.
+   exposes the custom model-indexed contract. The stronger
+   `VCG.runGuarded_unsat_implies_source_unsat` consumes one uniform
+   `GuardInterpretation` and concludes datatype-lawful source unsatisfiability
+   without adding target construction evidence to the quantified model class.
 
 9. **Structural Lean boundary**
 

@@ -497,8 +497,10 @@ theorem wfDef_holds_core {encoding : Encoding symbols}
             ((bodyEval value).iff_eq functional).symm
 
 /-- A family of fresh unary predicates selecting guarded values. This is the
-shared shape used by recursive datatype `wf_T` symbols; sorts with no predicate
-must have a total guard. -/
+shared graph shape used by recursive datatype `wf_T` symbols. Whether a sort
+without such a predicate has a total guard is a property of a particular syntax
+component, not of the graph: interpreted components such as integer `>=` may
+guard the omitted sort instead. -/
 structure UnaryGuards (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop) where
@@ -506,7 +508,6 @@ structure UnaryGuards (encoding : Encoding symbols)
   ident_injective : ∀ {left right identifier},
     ident left = some identifier → ident right = some identifier →
       left = right
-  omitted : ∀ sort, ident sort = none → ∀ value, guard sort value
   notBuiltin : ∀ sort identifier, ident sort = some identifier →
     Crush.SMT.NotBuiltin identifier
   sourceFresh : ∀ sort identifier, ident sort = some identifier →
@@ -615,30 +616,50 @@ theorem applyUnique_over {encoding : Encoding symbols}
       subst rightValue
       exact leftEq.trans rightEq.symm
 
-/-- Unary syntax keeps its denotation when installed over another component. -/
+/-- Evaluation of an allocated unary guard does not depend on how omitted sorts
+are handled by other syntax components. -/
+theorem encoded_over {encoding : Encoding symbols}
+    {target : FO.FamilyModel symbols}
+    {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
+    (guards : UnaryGuards encoding target guard)
+    (base : ExtraGraph encoding target)
+    {sort : FO.FOSort} {raw : Crush.SMT.Term}
+    {value : sort.Denote target.carriers} {environment : List (Value target)}
+    {condition : Crush.SMT.Term}
+    (rawEval : Crush.SMT.Eval (modelWith encoding target (guards.over base))
+      environment raw (.typed sort value))
+    (guardEq : guards.guarding.guard sort raw = some condition) :
+    Crush.SMT.Eval (modelWith encoding target (guards.over base)) environment
+      condition (.typed .bool (guard sort value)) := by
+  unfold guarding at guardEq
+  cases identEq : guards.ident sort with
+  | none => simp [identEq] at guardEq
+  | some identifier =>
+      simp only [identEq, Option.map_some] at guardEq
+      cases guardEq
+      apply Crush.SMT.Eval.symbol (guards.notBuiltin sort identifier identEq)
+      · exact Crush.SMT.EvalList.cons rawEval .nil
+      · exact Or.inr (Or.inr ⟨sort, value, identEq, rfl, rfl⟩)
+
+/-- Unary syntax keeps its denotation when installed over another component,
+provided sorts omitted by this component really have a total guard. -/
 theorem termSemantics_over {encoding : Encoding symbols}
     {target : FO.FamilyModel symbols}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (guards : UnaryGuards encoding target guard)
-    (base : ExtraGraph encoding target) :
+    (base : ExtraGraph encoding target)
+    (omitted : ∀ sort, guards.ident sort = none →
+      ∀ value, guard sort value) :
     guards.guarding.TermSemantics target (guards.over base) guard where
   omitted := by
     intro sort raw guardEq value
     unfold guarding at guardEq
     cases identEq : guards.ident sort with
-    | none => exact guards.omitted sort identEq value
+    | none => exact omitted sort identEq value
     | some identifier => simp [identEq] at guardEq
   encoded := by
     intro sort raw value environment condition rawEval guardEq
-    unfold guarding at guardEq
-    cases identEq : guards.ident sort with
-    | none => simp [identEq] at guardEq
-    | some identifier =>
-        simp only [identEq, Option.map_some] at guardEq
-        cases guardEq
-        apply Crush.SMT.Eval.symbol (guards.notBuiltin sort identifier identEq)
-        · exact Crush.SMT.EvalList.cons rawEval .nil
-        · exact Or.inr (Or.inr ⟨sort, value, identEq, rfl, rfl⟩)
+    exact guards.encoded_over base rawEval guardEq
 
 /-- Every unary symbol remains typed over a fresh base component. -/
 theorem hasType_over {encoding : Encoding symbols}
@@ -741,17 +762,20 @@ theorem applyUnique {encoding : Encoding symbols}
     subst rightValue
     exact leftEq.trans rightEq.symm
 
-/-- Fresh unary guard syntax composes with every typed raw term evaluation. -/
+/-- Fresh unary guard syntax composes with every typed raw term evaluation when
+the unary component is responsible for every nontrivial guard. -/
 theorem termSemantics {encoding : Encoding symbols}
     {target : FO.FamilyModel symbols}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
-    (guards : UnaryGuards encoding target guard) :
+    (guards : UnaryGuards encoding target guard)
+    (omitted : ∀ sort, guards.ident sort = none →
+      ∀ value, guard sort value) :
     guards.guarding.TermSemantics target guards.extra guard where
   omitted := by
     intro sort raw guardEq value
     unfold guarding at guardEq
     cases identEq : guards.ident sort with
-    | none => exact guards.omitted sort identEq value
+    | none => exact omitted sort identEq value
     | some identifier => simp [identEq] at guardEq
   encoded := by
     intro sort raw value environment condition rawEval guardEq
@@ -770,9 +794,11 @@ guard in the canonical extension graph. -/
 theorem semantics {encoding : Encoding symbols}
     {target : FO.FamilyModel symbols}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
-    (guards : UnaryGuards encoding target guard) :
+    (guards : UnaryGuards encoding target guard)
+    (omitted : ∀ sort, guards.ident sort = none →
+      ∀ value, guard sort value) :
     guards.guarding.Semantics target guards.extra guard :=
-  guards.termSemantics.toSemantics
+  (guards.termSemantics omitted).toSemantics
 
 /-- Every allocated unary guard is a total, functional Boolean symbol in the
 extended graph. Identifier injectivity is what prevents two sort guards from

@@ -33,7 +33,7 @@ translation. This is the principal remaining soundness boundary.
 | Native datatype commands | `Datatype.command_sound`, `EnvRepresentation.native_valid` | Correct for source models satisfying `Datatype.Env.Lawful`; rank excludes cyclic values. |
 | Guarded/enlarged carriers | `guardTerm_rel_eval`, `guarded_lift` | Correct relative to an explicit carrier relation, guard semantics, derived graph, and native-command validity. |
 | Stateful intrinsic VCG | `run_represents`, `runGuarded_represents` | Exact, but `run`/`runGuarded` build fresh pure states rather than refining a completed production run. |
-| Live production commands | `CertifiedDataEnv`, command-index traces | Component provenance only; no whole-run representation theorem yet. |
+| Live production commands | `CertifiedDataEnv`, `ProductionAgreement`, command-index traces | Exact reflection interface now exists, but the live allocator does not yet construct its representation witnesses. |
 | Solver result | `CommandsUnsatisfiable` | Semantic premise only. External solver and proof-replay correctness remain separate. |
 
 ## Soundness findings
@@ -46,44 +46,58 @@ marked with `TrustReason.direct`.
 
 `CertifiedDataEnv` improves the production boundary substantially: every
 native datatype and recursive guard command is linked to an exact position in
-the final command snapshot. However, the following witnesses remain caller
-premises rather than products of the production run:
+the final command snapshot, and it now retains `ReifiedSentenceFor` indexed by
+that exact datatype environment, signature tail, and bridge whenever the whole
+fact reifies. `ProductionAgreement` links that sentence to the complete final
+snapshot and proves reflection from `certificate.emitted`; top-level `:named`
+attributes are removed only through a proved semantic-equivalence theorem.
+
+However, the following witnesses remain caller premises rather than products
+of the production run:
 
 - `CertifiedDataEnv.Represents`;
 - `CertifiedDataEnv.GuardRepresentation`;
-- `GuardedTheoryRepresentation` for the complete production command array.
+- `ProductionAgreement`, including the complete
+  `GuardedTheoryRepresentation` after annotation normalization.
 
-Consequently, `CertifiedDataEnv.emitted` cannot yet be substituted for the
-fresh array returned by `runGuarded` without a new agreement theorem.
+Consequently, the reflection theorem for `CertifiedDataEnv.emitted` exists, but
+live production cannot yet construct its `ProductionAgreement` automatically.
 
 Required completion criterion:
 
-1. retain the exact `ReifiedSentence` associated with each proved production
-   fact;
-2. build the shared `SMT.Encoding`, datatype representation, guard
+1. build the shared `SMT.Encoding`, datatype representation, guard
    representation, and declaration trace from the final allocator state;
-3. prove `GuardedTheoryRepresentation ... state.commands`, including command
-   order and every surrounding assertion/declaration;
-4. expose semantic reflection only from a `TranslateState` carrying that
+2. construct `ProductionAgreement`, including command order and every
+   surrounding assertion/declaration;
+3. expose semantic reflection only from a `TranslateState` carrying that
    completed witness.
 
-### P0: guarded reflection is conditional on an unconstructed model package
+### Repaired: guarded reflection no longer restricts the quantified model class
 
-`runGuarded_unsat_under` accurately concludes `UnsatisfiableUnder` a sigma
-contract containing `GuardModel`. This theorem is valid, but it does not by
-itself show unsatisfiability in every datatype-lawful source model: if no
-`GuardModel` exists for a source model, that source model is outside the
+The lower-level `runGuarded_unsat_under` accurately concludes
+`UnsatisfiableUnder` a sigma contract containing `GuardModel`. In the audited
+baseline this was the only guarded corollary, so failure to construct a
+`GuardModel` silently removed a datatype-lawful source model from the
 quantification.
 
-`GuardModel` currently requires a caller to supply an interpreted prior,
-derived graph, graph uniqueness, freshness, exact unary guards, term semantics,
-and trace matching. Tests exercise the abstract API, but production does not
-construct this package.
+The follow-up repair separates the layers:
 
-Required completion criterion: define the intended source-side interpreted
-carrier contract independently of `GuardModel`, construct a `GuardModel` for
-every source model satisfying that contract, and derive a corollary whose
-quantified model class no longer contains target-model construction evidence.
+- `UnaryGuards` records only a fresh unary graph; absence of a unary identifier
+  no longer incorrectly asserts that the whole semantic guard is total. This is
+  essential when built-in integer `>=` guards a sort omitted by the unary graph.
+- `GuardAllocation` records identifier injectivity, freshness, and exact trace
+  matching once, independently of any model.
+- `GuardModel.ofIntView` derives graph uniqueness, graph freshness, and composed
+  term semantics for the standard integer-plus-datatype combination.
+- `GuardInterpretation` realizes that static allocation for every lawful source
+  model. `runGuarded_unsat_implies_source_unsat` therefore concludes ordinary
+  `Datatype.Env.Unsatisfiable`; its quantified model class contains no target
+  construction evidence.
+
+The remaining production task is to construct `GuardAllocation` and a uniform
+`GuardInterpretation` from the final live allocator evidence. This is now an
+explicit encoding-level premise, rather than a hidden restriction on source
+models, and belongs to the whole-run agreement work above.
 
 ### P1: the Lean boundary is structural, not semantic
 
@@ -141,6 +155,10 @@ exhaustiveness, and rank properties separately.
   restricted model class is visible at the call site.
 - `𝒢⟦e⟧[G]` now parallels the ordinary `𝒶⟦e⟧[E]` notation, and theorem-facing
   notation follows the `σ`, `Γ`, `τ`, `e`, `φ`, `T`, `M`, `ρ` convention.
+- Production certificates retain an exact environment-indexed
+  `ReifiedSentenceFor`; `ProductionAgreement` is isolated in
+  `VCG/Production.lean` and accounts explicitly for semantically transparent
+  root assertion annotations.
 
 ## Naming and organization rules
 
@@ -164,11 +182,12 @@ exhaustiveness, and rank properties separately.
 
 1. Construct production `SMT.Encoding` and block/guard representations from
    final allocator evidence.
-2. Retain the reified intrinsic sentence in the corresponding production fact
-   certificate.
-3. Prove whole-array production agreement.
-4. Construct `GuardModel` from a source-side interpreted-carrier contract.
-5. Add the production unsatisfiability-reflection corollary.
-6. Only then attempt the raw-model transport abstraction that can shrink
+2. Construct whole-array `ProductionAgreement` during the live run; the exact
+   intrinsic sentence and reflection theorem are now retained.
+3. Construct production `GuardAllocation` and `GuardInterpretation` from final
+   allocator evidence; the semantic constructors and unrestricted reflection
+   theorem are now available.
+4. Store the completed agreement/interpretation in a proved production state
+   and select it before the unrestricted direct fallback.
+5. Only then attempt the raw-model transport abstraction that can shrink
    `DatatypeCarry`.
-

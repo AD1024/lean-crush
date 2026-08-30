@@ -13,6 +13,7 @@ import Crush.Metatheory.SMT.DatatypeRepresentation
 import Crush.Metatheory.SMT.Soundness
 import Crush.Metatheory.SMT.Semantics
 import Crush.Metatheory.VCG.Soundness
+import Crush.Metatheory.VCG.Production
 import Crush.Frontend.Tactic
 
 /-!
@@ -603,6 +604,39 @@ example (certificate : CertifiedDataEnv) (cfg : Crush.Config)
       formula :=
   runGuarded_unsat_under cfg represented guarded formula unsat
 
+/-- A uniform interpretation removes target-model construction evidence from
+the model class quantified by guarded reflection. -/
+example (certificate : CertifiedDataEnv) (cfg : Crush.Config)
+    (guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail)))
+    (represented : certificate.Represents guarding.encoding)
+    (guarded : certificate.GuardRepresentation guarding represented)
+    (interpretation : certificate.GuardInterpretation guarding represented guarded)
+    (formula : Sentence
+      (certificate.env.signature ++ certificate.tail))
+    (unsat : Crush.SMT.CommandsUnsatisfiable
+      (runGuarded cfg guarding certificate.guardCommands formula).commands) :
+    Datatype.Env.Unsatisfiable certificate.data.toModelEnv formula :=
+  runGuarded_unsat_implies_source_unsat cfg represented guarded interpretation
+    formula unsat
+
+/-- The live production theorem is indexed by the exact retained fact and final
+command snapshot; `:named` root annotations are erased only through their proved
+semantic transparency theorem. -/
+example (certificate : CertifiedDataEnv)
+    (guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail)))
+    (represented : certificate.Represents guarding.encoding)
+    (guarded : certificate.GuardRepresentation guarding represented)
+    (reified : Reification.ReifiedSentenceFor certificate.source certificate.env
+      certificate.bridge)
+    (agreement : ProductionAgreement certificate guarding represented guarded
+      reified)
+    (interpretation : certificate.GuardInterpretation guarding represented guarded)
+    (unsat : Crush.SMT.CommandsUnsatisfiable certificate.emitted) :
+    Datatype.Env.Unsatisfiable certificate.data.toModelEnv reified.source :=
+  agreement.unsat_source interpretation unsat
+
 end Crush.Metatheory.SMT.Datatype.Tests
 
 /-! ## Executable Lean declaration reification -/
@@ -877,6 +911,8 @@ run_meta do
             | throwError "opt-in datatype certificate disappeared"
           unless live.source == sentence do
             throwError "stored datatype certificate refers to another fact"
+          if live.reified.isNone then
+            throwError "stored datatype certificate lost the intrinsic sentence"
           unless live.emitted.map Crush.SMT.commandToString ==
               certifiedState.commands.map Crush.SMT.commandToString do
             throwError "stored datatype certificate did not retain the final command array"
@@ -921,6 +957,8 @@ run_meta do
         throwError "{label}: expected one finalized fact-local datatype certificate"
       let some certificate := state.datatypeCertificates[0]?
         | throwError "{label}: finalized datatype certificate disappeared"
+      if certificate.reified.isNone then
+        throwError "{label}: finalized certificate lost its intrinsic sentence"
       unless certificate.emitted.size == state.commands.size do
         throwError "{label}: datatype certificate retained an intermediate command prefix"
       unless certificate.nativeCommands.size == nativeCount do

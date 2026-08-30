@@ -744,7 +744,6 @@ private def unaryGuards : UnaryGuards encoding target (fun _ _ => True) where
   ident_injective := by
     intro left right identifier leftEq rightEq
     cases left <;> cases right <;> simp_all
-  omitted := by intros; trivial
   notBuiltin := by
     intro sort identifier equal
     cases sort with
@@ -785,7 +784,8 @@ example : Crush.SMT.Eval
       ((quantifiedReflexive true).guardDenote target (fun _ _ => True)
         (FO.Valuation.empty target.carriers))) := by
   exact guardTerm_eval unaryGuards.guarding target unaryGuards.extra _
-    unaryGuards.semantics (quantifiedReflexive true) _ [] (Env.empty target)
+    (unaryGuards.semantics (by intros; trivial))
+      (quantifiedReflexive true) _ [] (Env.empty target)
 
 /-- A valid typed theory induces a model of its exact concrete commands. -/
 example : ∃ smtModel : Crush.SMT.Model,

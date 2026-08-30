@@ -202,7 +202,9 @@ def guardWith (view : IntView encoding target)
 component-independent `TermSemantics` contract. -/
 theorem termSemantics_withGuards (view : IntView encoding target)
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
-    (guards : UnaryGuards encoding target guard) :
+    (guards : UnaryGuards encoding target guard)
+    (omitted : ∀ sort, sort ≠ view.sort → guards.ident sort = none →
+      ∀ value, guard sort value) :
     (view.withGuards guards).TermSemantics target
       (guards.over view.extra) (view.guardWith guards) where
   omitted := by
@@ -211,9 +213,11 @@ theorem termSemantics_withGuards (view : IntView encoding target)
     split at guardEq
     · contradiction
     next unequal =>
-      have omitted := (guards.termSemantics_over view.extra).omitted
-        sort raw guardEq input
-      simpa [guardWith, unequal] using omitted
+      unfold UnaryGuards.guarding at guardEq
+      cases identEq : guards.ident sort with
+      | none =>
+          simpa [guardWith, unequal] using omitted sort unequal identEq input
+      | some identifier => simp [identEq] at guardEq
   encoded := by
     intro sort raw input environment condition rawEval guardEq
     simp only [withGuards] at guardEq
@@ -235,8 +239,7 @@ theorem termSemantics_withGuards (view : IntView encoding target)
           .typed view.sort (view.«from» 0), rfl, rfl, ?_⟩
         simp [guardWith, value, view.to_from]
     next unequal =>
-      have evaluated := (guards.termSemantics_over view.extra).encoded
-        sort raw input environment condition rawEval guardEq
+      have evaluated := guards.encoded_over view.extra rawEval guardEq
       simpa [withGuards, UnaryGuards.guarding, guardWith, unequal] using evaluated
 
 /-- Functionality of the complete interpreted-integer/unary-predicate graph. -/

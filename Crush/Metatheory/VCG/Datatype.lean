@@ -1,4 +1,5 @@
 import Crush.Metatheory.Reification.Datatype
+import Crush.Metatheory.Reification.Witness
 import Crush.Metatheory.SMT.DatatypeCarry
 import Crush.Metatheory.SMT.DatatypeRepresentation
 import Crush.Metatheory.VCG.Command
@@ -412,6 +413,10 @@ structure CertifiedDataEnv where
   env : DatatypeEnv
   tail : Signature
   bridge : SignatureBridge tail
+  /-- Exact intrinsic sentence retained when the whole fact, rather than only
+  its datatype component, belongs to the supported reification fragment. Its
+  type fixes this certificate's datatype prefix, tail, and constant bridge. -/
+  reified : Option (ReifiedSentenceFor source env bridge)
   emitted : Array Command
   trace : CertifiedDataTrace emitted (DataBridge.of env tail).toModelEnv
   guardTrace : CertifiedGuardTrace emitted (DataBridge.of env tail).toModelEnv
@@ -421,7 +426,9 @@ namespace CertifiedDataEnv
 /-- Construct a fact-local certificate only when every entry in its exact typed
 environment is linked to a matching command in the supplied production state. -/
 def build? (source : Lean.Expr) (env : DatatypeEnv) {tail : Signature}
-    (bridge : SignatureBridge tail) (emitted : Array Command)
+    (bridge : SignatureBridge tail)
+    (reified : Option (ReifiedSentenceFor source env bridge))
+    (emitted : Array Command)
     (stored : Array CertifiedDataCommand) (indices : Array Nat)
     (storedGuards : Array DataGuardEncoding) (guardIndices : Array Nat) :
     Option CertifiedDataEnv := do
@@ -429,7 +436,7 @@ def build? (source : Lean.Expr) (env : DatatypeEnv) {tail : Signature}
     (DataBridge.of env tail).toModelEnv
   let guardTrace ← CertifiedGuardTrace.ofEnv? emitted storedGuards guardIndices
     (DataBridge.of env tail).toModelEnv
-  return { source, env, tail, bridge, emitted, trace, guardTrace }
+  return { source, env, tail, bridge, reified, emitted, trace, guardTrace }
 
 /-- Reconnect an existing fact-local certificate to a later production command
 snapshot without changing its intrinsic environment. -/
@@ -446,6 +453,7 @@ def withCommands? (certificate : CertifiedDataEnv) (emitted : Array Command)
     env := certificate.env
     tail := certificate.tail
     bridge := certificate.bridge
+    reified := certificate.reified
     emitted
     trace
     guardTrace }
@@ -533,6 +541,47 @@ structure GuardRepresentation (certificate : CertifiedDataEnv)
   trace : SMT.Datatype.Native.Step.GuardTrace guarding represented.trace.blocks
   commands_eq : trace.commands = certificate.guardCommands
 
+/-- Static allocation of every recursive datatype-guard identifier. Unlike a
+`UnaryGuards` graph, this certificate is independent of a source or target
+model; it can therefore be retained once by production and instantiated for
+every semantic source model quantified by the reflection theorem. -/
+structure GuardAllocation (certificate : CertifiedDataEnv)
+    (guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail)))
+    (represented : certificate.Represents guarding.encoding)
+    (guarded : certificate.GuardRepresentation guarding represented) where
+  ident : FO.FOSort → Option Crush.SMT.Ident
+  ident_injective : ∀ {left right identifier},
+    ident left = some identifier → ident right = some identifier → left = right
+  notBuiltin : ∀ sort identifier, ident sort = some identifier →
+    Crush.SMT.NotBuiltin identifier
+  sourceFresh : ∀ sort identifier, ident sort = some identifier →
+    ∀ {decl : FO.SymbolDecl}
+      (symbol : Symbol (certificate.env.signature ++ certificate.tail) decl),
+      identifier ≠ guarding.encoding.ident symbol
+  linked : guarded.trace.Matches ident
+
+namespace GuardAllocation
+
+/-- Instantiate one static production allocation with the semantic predicate
+appropriate to a particular target model. -/
+def toUnaryGuards {certificate : CertifiedDataEnv}
+    {guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail))}
+    {represented : certificate.Represents guarding.encoding}
+    {guarded : certificate.GuardRepresentation guarding represented}
+    (allocation : certificate.GuardAllocation guarding represented guarded)
+    (target : FO.FamilyModel
+      (Symbol (certificate.env.signature ++ certificate.tail)))
+    (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop) :
+    SMT.UnaryGuards guarding.encoding target guard where
+  ident := allocation.ident
+  ident_injective := allocation.ident_injective
+  notBuiltin := allocation.notBuiltin
+  sourceFresh := allocation.sourceFresh
+
+end GuardAllocation
+
 /-- Forget production provenance after entering the shared semantic theorem. -/
 def Represents.env {certificate : CertifiedDataEnv}
     {fo : SMT.Encoding
@@ -559,21 +608,135 @@ structure GuardModel (certificate : CertifiedDataEnv)
     (source : Model (certificate.env.signature ++ certificate.tail))
     (lawful : Datatype.Env.Lawful source certificate.data.toModelEnv) where
   prior : Lifted (canonicalModel source)
-  guards : SMT.UnaryGuards guarding.encoding
-    (represented.env.liftedFrom source lawful prior).target
-    (fun sort => ((represented.env.liftedFrom source lawful prior).relation
-      sort).guard)
+  allocation : certificate.GuardAllocation guarding represented guarded
   base : SMT.ExtraGraph guarding.encoding
     (represented.env.liftedFrom source lawful prior).target
   baseUnique : Crush.SMT.ApplyUnique
     (SMT.modelWith guarding.encoding
       (represented.env.liftedFrom source lawful prior).target base)
-  fresh : guards.Fresh base
+  fresh : (allocation.toUnaryGuards
+    (represented.env.liftedFrom source lawful prior).target
+    (fun sort => ((represented.env.liftedFrom source lawful prior).relation
+      sort).guard)).Fresh base
   semantics : guarding.TermSemantics
-    (represented.env.liftedFrom source lawful prior).target (guards.over base)
+    (represented.env.liftedFrom source lawful prior).target
+    ((allocation.toUnaryGuards
+      (represented.env.liftedFrom source lawful prior).target
+      (fun sort => ((represented.env.liftedFrom source lawful prior).relation
+        sort).guard)).over base)
     (fun sort => ((represented.env.liftedFrom source lawful prior).relation
       sort).guard)
-  linked : guarded.trace.Matches guards
+
+namespace GuardModel
+
+/-- Model-indexed unary graph obtained from the retained static allocation. -/
+@[reducible] noncomputable def guards {certificate : CertifiedDataEnv}
+    {guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail))}
+    {represented : certificate.Represents guarding.encoding}
+    {guarded : certificate.GuardRepresentation guarding represented}
+    {source : Model (certificate.env.signature ++ certificate.tail)}
+    {lawful : Datatype.Env.Lawful source certificate.data.toModelEnv}
+    (model : certificate.GuardModel guarding represented guarded source lawful) :
+    SMT.UnaryGuards guarding.encoding
+      (represented.env.liftedFrom source lawful model.prior).target
+      (fun sort => ((represented.env.liftedFrom source lawful model.prior).relation
+        sort).guard) :=
+  model.allocation.toUnaryGuards
+    (represented.env.liftedFrom source lawful model.prior).target
+    (fun sort => ((represented.env.liftedFrom source lawful model.prior).relation
+      sort).guard)
+
+/-- Construct the complete guarded model for the production combination of one
+interpreted integer carrier and the statically allocated recursive datatype
+predicates. The remaining premises are source-side carrier facts: integer
+nonnegativity represents the distinguished relation guard, and every other sort
+omitted by the unary allocation has a total relation guard. All raw graph,
+functionality, freshness, and guard-term semantics fields are derived here. -/
+noncomputable def ofIntView {certificate : CertifiedDataEnv}
+    {guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail))}
+    {represented : certificate.Represents guarding.encoding}
+    {guarded : certificate.GuardRepresentation guarding represented}
+    {source : Model (certificate.env.signature ++ certificate.tail)}
+    {lawful : Datatype.Env.Lawful source certificate.data.toModelEnv}
+    (prior : Lifted (canonicalModel source))
+    (allocation : certificate.GuardAllocation guarding represented guarded)
+    (view : SMT.IntView guarding.encoding
+      (represented.env.liftedFrom source lawful prior).target)
+    (guard_eq : guarding.guard = (view.withGuards
+      (allocation.toUnaryGuards
+        (represented.env.liftedFrom source lawful prior).target
+        (fun sort => ((represented.env.liftedFrom source lawful prior).relation
+          sort).guard))).guard)
+    (separate : ∀ sort identifier,
+      allocation.ident sort = some identifier → identifier ≠ .symb ">=")
+    (omitted : ∀ sort, sort ≠ view.sort → allocation.ident sort = none →
+      ∀ value,
+        ((represented.env.liftedFrom source lawful prior).relation sort).guard
+          value)
+    (integerGuard : ∀ value,
+      0 ≤ view.toInt value ↔
+        ((represented.env.liftedFrom source lawful prior).relation
+          view.sort).guard value) :
+    certificate.GuardModel guarding represented guarded source lawful := by
+  let lifted := represented.env.liftedFrom source lawful prior
+  let guards := allocation.toUnaryGuards lifted.target
+    (fun sort => (lifted.relation sort).guard)
+  have total : ∀ sort, sort ≠ view.sort → guards.ident sort = none →
+      ∀ value, (lifted.relation sort).guard value := by
+    intro sort unequal absent value
+    exact omitted sort unequal absent value
+  have guardEqual : ∀ sort value,
+      view.guardWith guards sort value ↔ (lifted.relation sort).guard value := by
+    intro sort value
+    simp only [SMT.IntView.guardWith]
+    split
+    next equal =>
+      subst sort
+      exact integerGuard value
+    next _ => rfl
+  have termSemantics : guarding.TermSemantics lifted.target
+      (guards.over view.extra)
+      (fun sort => (lifted.relation sort).guard) := by
+    have combined :=
+      (view.termSemantics_withGuards guards total).congr guardEqual
+    exact {
+      omitted := by
+        intro sort raw absent value
+        apply combined.omitted sort raw _ value
+        rw [← guard_eq]
+        exact absent
+      encoded := by
+        intro sort raw value environment condition rawEval present
+        apply combined.encoded sort raw value environment condition rawEval
+        rw [← guard_eq]
+        exact present }
+  exact {
+    prior
+    allocation
+    base := view.extra
+    baseUnique := view.applyUnique
+    fresh := view.guardsFresh guards separate
+    semantics := termSemantics }
+
+end GuardModel
+
+/-- One static production guard allocation realized for every datatype-lawful
+source model. Keeping this family outside the quantified source-model contract
+prevents the reflection theorem from silently discarding a lawful source model
+merely because target-model construction evidence was not bundled with it. -/
+structure GuardInterpretation (certificate : CertifiedDataEnv)
+    (guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail)))
+    (represented : certificate.Represents guarding.encoding)
+    (guarded : certificate.GuardRepresentation guarding represented) where
+  allocation : certificate.GuardAllocation guarding represented guarded
+  realize : ∀ (source : Model
+      (certificate.env.signature ++ certificate.tail))
+      (lawful : Datatype.Env.Lawful source certificate.data.toModelEnv),
+    { model : certificate.GuardModel guarding represented guarded source lawful //
+      model.allocation = allocation }
 
 namespace Represents
 
@@ -656,7 +819,7 @@ theorem guards_valid {certificate : CertifiedDataEnv}
       (represented.env.liftedFrom source lawful prior).target (guards.over base)
       (fun sort => ((represented.env.liftedFrom source lawful prior).relation
         sort).guard))
-    (linked : guarded.trace.Matches guards) :
+    (linked : guarded.trace.Matches guards.ident) :
     (SMT.modelWith guarding.encoding
       (represented.env.liftedFrom source lawful prior).target
       (guards.over base)).SatisfiesCommands certificate.guardCommands := by
@@ -697,7 +860,7 @@ theorem sound {certificate : CertifiedDataEnv}
       (guardModel.guards.over guardModel.base)
   · exact represented.guards_valid guarded source lawful guardModel.prior
       guardModel.guards guardModel.base guardModel.baseUnique guardModel.fresh
-      guardModel.semantics guardModel.linked
+      guardModel.semantics guardModel.allocation.linked
 
 /-- Semantic unsatisfiability under the exact combined model contract. Unlike
 ordinary datatype unsatisfiability, this contract can restrict opaque source
@@ -723,6 +886,27 @@ theorem unsat_under {certificate : CertifiedDataEnv}
   obtain ⟨target, valid⟩ := represented.sound guarded source lawful
     guardModel encoding (model_extension source formula sourceValid)
   exact unsat target valid
+
+/-- Reflection over every datatype-lawful source model once the production
+guard interpretation is known uniformly. Unlike `unsat_under`, the quantified
+model class contains only the intrinsic source lawfulness contract; raw target
+construction evidence is supplied once by `GuardInterpretation`. -/
+theorem unsat {certificate : CertifiedDataEnv}
+    {guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail))}
+    (represented : certificate.Represents guarding.encoding)
+    (guarded : certificate.GuardRepresentation guarding represented)
+    (interpretation : certificate.GuardInterpretation guarding represented guarded)
+    (formula : Sentence
+      (certificate.env.signature ++ certificate.tail))
+    {commands : Array Crush.SMT.Command}
+    (encoding : SMT.GuardedTheoryRepresentation guarding
+      certificate.guardCommands (translatedTheory formula) commands)
+    (unsat : Crush.SMT.CommandsUnsatisfiable commands) :
+    Datatype.Env.Unsatisfiable certificate.data.toModelEnv formula := by
+  intro source lawful sourceValid
+  exact represented.unsat_under guarded formula encoding unsat source
+    ⟨lawful, (interpretation.realize source lawful).1⟩ sourceValid
 
 end Represents
 

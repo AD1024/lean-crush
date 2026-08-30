@@ -66,6 +66,7 @@ import Crush.Frontend.Collect
 import Crush.Translation.Monad
 import Crush.Metatheory.VCG.Stateful
 import Crush.Metatheory.VCG.Soundness
+import Crush.Metatheory.VCG.Production
 import Crush.Translation.Attr
 import Crush.Translation.Unfold
 import Crush.Translation.Preprocess

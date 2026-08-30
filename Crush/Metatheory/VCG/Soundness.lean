@@ -58,4 +58,22 @@ theorem runGuarded_unsat_under {certificate : CertifiedDataEnv} (cfg : Config)
   exact represented.unsat_under guarded formula
     (runGuarded_represents cfg guarding certificate.guardCommands formula) unsat
 
+/-- Guarded reflection over every datatype-lawful source model. The uniform
+guard interpretation is a property of the production encoding, rather than
+target-model evidence nested inside the quantified source-model contract. -/
+theorem runGuarded_unsat_implies_source_unsat
+    {certificate : CertifiedDataEnv} (cfg : Config)
+    {guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail))}
+    (represented : certificate.Represents guarding.encoding)
+    (guarded : certificate.GuardRepresentation guarding represented)
+    (interpretation : certificate.GuardInterpretation guarding represented guarded)
+    (formula : Sentence
+      (certificate.env.signature ++ certificate.tail))
+    (unsat : Crush.SMT.CommandsUnsatisfiable
+      (runGuarded cfg guarding certificate.guardCommands formula).commands) :
+    Datatype.Env.Unsatisfiable certificate.data.toModelEnv formula := by
+  exact represented.unsat guarded interpretation formula
+    (runGuarded_represents cfg guarding certificate.guardCommands formula) unsat
+
 end Crush.Metatheory.VCG

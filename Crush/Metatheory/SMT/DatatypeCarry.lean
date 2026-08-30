@@ -1322,20 +1322,19 @@ def commands {guarding : SMT.Guarding (Symbol signature)} :
   | _ :: _, .cons _ _, .cons command rest =>
       #[command.command] ++ rest.commands
 
-/-- A single unary-predicate graph uses the exact names retained by every
-recursive guard command. -/
+/-- An identifier allocation uses the exact names retained by every recursive
+guard command. This is static syntax/provenance evidence and does not depend on
+a target model or semantic predicate. -/
 def Matches
     {guarding : SMT.Guarding (Symbol signature)}
-    {target : FO.FamilyModel (Symbol signature)}
-    {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
-    (guards : SMT.UnaryGuards guarding.encoding target guard) :
+    (ident : FO.FOSort → Option Crush.SMT.Ident) :
     {env : List (Entry signature)} →
       {represented : Represented guarding.encoding env} →
       GuardTrace guarding represented → Prop
   | [], .nil, .nil => True
   | _ :: _, .cons _ _, .cons command rest =>
-      (∀ child, guards.ident (.base child.decl.sort) =
-        some (.symb (command.name child))) ∧ rest.Matches guards
+      (∀ child, ident (.base child.decl.sort) =
+        some (.symb (command.name child))) ∧ rest.Matches ident
 
 end GuardTrace
 
@@ -1348,17 +1347,18 @@ theorem name_injective
     {guarding : SMT.Guarding (Symbol signature)}
     {head : Representation entry.block entry.symbols guarding.encoding data}
     (command : GuardCommand head)
-    {target : FO.FamilyModel (Symbol signature)}
-    {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
-    (guards : SMT.UnaryGuards guarding.encoding target guard)
-    (linked : ∀ child, guards.ident (.base child.decl.sort) =
+    (ident : FO.FOSort → Option Crush.SMT.Ident)
+    (ident_injective : ∀ {left right identifier},
+      ident left = some identifier → ident right = some identifier →
+        left = right)
+    (linked : ∀ child, ident (.base child.decl.sort) =
       some (.symb (command.name child))) :
     Function.Injective command.name := by
   intro left right equal
-  have rightMatch : guards.ident (.base right.decl.sort) =
+  have rightMatch : ident (.base right.decl.sort) =
       some (.symb (command.name left)) := by
     simpa [equal] using linked right
-  have sortEq := guards.ident_injective (linked left) rightMatch
+  have sortEq := ident_injective (linked left) rightMatch
   injection sortEq with baseEq
   exact head.wf.blockWF.data_eq baseEq
 
@@ -1576,7 +1576,7 @@ theorem Ordered.guards_valid
       (guards.over base)
       (fun sort => ((liftFrom sourceModel env lawful represented.blocksWF
         prior).relation sort).guard))
-    (linked : trace.Matches guards) :
+    (linked : trace.Matches guards.ident) :
     (SMT.modelWith guarding.encoding
       (liftFrom sourceModel env lawful represented.blocksWF prior).target
       (guards.over base)).SatisfiesCommands trace.commands := by
@@ -1604,7 +1604,8 @@ theorem Ordered.guards_valid
                   semantics
                   (guards.applyUnique_over base baseUnique fresh)
                   command.name command.binder
-                  (command.name_injective guards headLinked)
+                  (command.name_injective guards.ident guards.ident_injective
+                    headLinked)
                 · intro child
                   exact guards.notBuiltin _ _ (headLinked child)
                 · intro child
@@ -1778,6 +1779,8 @@ theorem Native.block_valid_with_guards
       (law.extend wf productive prior priorRel priorModels)
       (fun sort => (BaseLift.carrierRel wf productive priorRel law.carrier
         sort).guard))
+    (omitted : ∀ sort, guards.ident sort = none → ∀ value,
+      (BaseLift.carrierRel wf productive priorRel law.carrier sort).guard value)
     (base : SMT.ExtraGraph fo
       (law.extend wf productive prior priorRel priorModels))
     (baseUnique : Crush.SMT.ApplyUnique
@@ -1810,7 +1813,7 @@ theorem Native.block_valid_with_guards
   refine ⟨by simpa [target] using nativeWith, ?_⟩
   apply wfDefs_valid represented law represented.exclusive wf productive
     priorRel priorModels guards.guarding rfl (guards.over base)
-    (guards.termSemantics_over base)
+    (guards.termSemantics_over base omitted)
     (guards.applyUnique_over base baseUnique fresh) guardName binder nameInj
   · intro child
     exact guards.notBuiltin _ _ (guardIdent child)
@@ -1836,6 +1839,8 @@ theorem Native.block_valid_with_int
       (law.extend wf productive prior priorRel priorModels)
       (fun sort => (BaseLift.carrierRel wf productive priorRel law.carrier
         sort).guard))
+    (omitted : ∀ sort, guards.ident sort = none → ∀ value,
+      (BaseLift.carrierRel wf productive priorRel law.carrier sort).guard value)
     (view : SMT.IntView fo
       (law.extend wf productive prior priorRel priorModels))
     (separate : ∀ sort identifier, guards.ident sort = some identifier →
@@ -1853,7 +1858,7 @@ theorem Native.block_valid_with_int
       (.defFunsRec (wfDefs (native := symbols.native) guards.guarding
         data guardName binder)) :=
   Native.block_valid_with_guards represented law wf productive priorRel
-    priorModels guards view.extra view.applyUnique
+    priorModels guards omitted view.extra view.applyUnique
     (view.guardsFresh guards separate) guardName binder guardIdent nameInj
 
 /-- The exact native command prefix is valid after installing every datatype

@@ -210,6 +210,32 @@ partial def reify? {signature : Signature} {context : Context}
         shapeCorrespondence := correspondence } }
   return none
 
+/-- One closed intrinsic sentence reified against an already selected exact
+datatype prefix and ordinary signature tail. This is the production-facing
+form: its indices prevent a retained fact witness from drifting to a different
+datatype environment or constant bridge. -/
+structure ReifiedSentenceFor (expression : Expr) (env : DatatypeEnv)
+    {tail : Signature} (bridge : SignatureBridge tail) where
+  typeExpr : Expr
+  source : Sentence (env.signature ++ tail)
+  witness : ReificationWitness (bridge.prepend env.signature) ContextBridge.nil
+    expression (.pack (.bool typeExpr) source) (some (DataBridge.of env tail))
+
+/-- Reify a closed proposition using an exact datatype/signature selection
+already made by production. -/
+partial def reifySentenceFor? (expression : Expr) (env : DatatypeEnv)
+    {tail : Signature} (bridge : SignatureBridge tail) :
+    MetaM (Option (ReifiedSentenceFor expression env bridge)) := do
+  let signatureBridge := bridge.prepend env.signature
+  let datatypes := DataBridge.of env tail
+  let some reified ← reify? signatureBridge ContextBridge.nil expression
+      (some datatypes)
+    | return none
+  match reified with
+  | ⟨.pack (.bool typeExpr) source, witness⟩ =>
+      return some { typeExpr, source, witness }
+  | ⟨.pack (.base _ _) _, _⟩ | ⟨.pack (.arrow _ _ _) _, _⟩ => return none
+
 /-- Existential intrinsic sentence obtained from a closed supported Lean
 proposition. The exact finite constant signature and structural witness remain
 available after unpacking. -/
@@ -227,14 +253,9 @@ partial def reifySentence? (expression : Expr) :
   match ← reifyDataSignature expression with
   | .error _ => return none
   | .ok (.pack env tail) =>
-      let signatureBridge := tail.prepend env.signature
-      let datatypes := DataBridge.of env _
-      let some reified ← reify? signatureBridge ContextBridge.nil expression
-          (some datatypes)
+      let some reified ← reifySentenceFor? expression env tail
         | return none
-      match reified with
-      | ⟨.pack (.bool typeExpr) source, witness⟩ =>
-          return some (.pack signatureBridge datatypes typeExpr source witness)
-      | ⟨.pack (.base _ _) _, _⟩ | ⟨.pack (.arrow _ _ _) _, _⟩ => return none
+      return some (.pack (tail.prepend env.signature) (DataBridge.of env _)
+        reified.typeExpr reified.source reified.witness)
 
 end Crush.Metatheory.Reification

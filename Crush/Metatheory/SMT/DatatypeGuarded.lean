@@ -652,6 +652,8 @@ theorem Representation.guardParts_eval_wf
       (law.extend wf productive prior priorRel priorModels)
       (fun sort => (BaseLift.carrierRel wf productive priorRel law.carrier
         sort).guard))
+    (omitted : ∀ sort, guards.ident sort = none → ∀ value,
+      (BaseLift.carrierRel wf productive priorRel law.carrier sort).guard value)
     {environment : List
       (SMT.Value (law.extend wf productive prior priorRel priorModels))}
     (data : DataRef block) (valueTerm : Crush.SMT.Term)
@@ -674,7 +676,7 @@ theorem Representation.guardParts_eval_wf
     environment _ _
   simpa [Representation.guardParts] using
     (dataParts_eval_wf law exclusive wf productive priorRel priorModels
-      guards.termSemantics data
+      (guards.termSemantics omitted) data
       (fun ref => encoding.name (.ctor data ref.index))
       (fun ref => represented.native_test_ident ref)
       valueTerm value valueEval)

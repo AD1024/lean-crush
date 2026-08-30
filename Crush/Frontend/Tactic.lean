@@ -7,6 +7,7 @@ import Crush.Translation.Instantiate
 import Crush.Translation.Translate
 import Crush.Translation.DefaultLowerings
 import Crush.Metatheory.Reification.Reify
+import Crush.Metatheory.Reification.Witness
 import Crush.Util.Profile
 import Crush.Solver.Process
 import Crush.Solver.KernelCheck
@@ -112,8 +113,10 @@ def buildScript (cfg : Config) (facts : Array Fact) :
         | none => emitTerm fact.prop
         | some signature => TranslateM.withDataSignature signature (emitTerm fact.prop)
       if let some (.pack env bridge) := data? then
+        let reified? ← Metatheory.Reification.reifySentenceFor?
+          fact.prop env bridge
         let state ← get
-        let some certificate := CertifiedDataEnv.build? fact.prop env bridge
+        let some certificate := CertifiedDataEnv.build? fact.prop env bridge reified?
             state.commands state.certifiedDataCommands
             state.certifiedDataCommandIndices state.dataGuards
             state.dataGuardIndices
