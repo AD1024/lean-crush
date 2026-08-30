@@ -377,7 +377,7 @@ def markDatatypeTrusted
     markTrusted (.datatype reason)
 
 /-- Classify the legacy direct Lean-to-SMT route as trusted exactly once. The
-proved route instead enters through `Metatheory.VCG.emit`. -/
+proved route instead enters through `Metatheory.VCG.run`. -/
 def markDirect (source : Expr) : TranslateM Unit := do
   if (← get).directSource.isNone then
     modify fun state => { state with

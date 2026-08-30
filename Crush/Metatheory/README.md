@@ -130,8 +130,8 @@ The datatype extension now has a proved native-command core:
   identifiers and trace matching independently of a model;
   `GuardModel.ofIntView` constructs the
   standard interpreted-integer/datatype package. A uniform `GuardInterpretation`
-  yields `Represents.unsat`, whose source-model quantification contains only
-  datatype lawfulness. `Represents.unsat_under` remains the lower-level theorem
+  yields `Representation.unsat`, whose source-model quantification contains only
+  datatype lawfulness. `Representation.unsat_under` remains the lower-level theorem
   for custom model-indexed guard constructions.
   When a whole fact is supported, the certificate also retains an exact
   environment-indexed `ReifiedSentenceFor`. `VCG/Production.lean` defines
