@@ -1,376 +1,92 @@
-# Crush defunctionalization metatheory
-
-This directory formalizes the supported path from Lean syntax to concrete SMT
-commands while keeping each semantic boundary explicit:
-
-```text
-Lean.Expr
-  -- structural reification --> HO.Term
-  -- total defunctionalization --> FO family theory
-  -- represented encoding --> SMT commands
-```
-
-The final conclusion is unsatisfiability of an exact finite intrinsic HO theory
-whose sentences share one signature. There is no claimed denotation for
-arbitrary `Lean.Expr`, and solver correctness remains a separate concern.
-
-## Main results
-
-The flattened intrinsic translation is total and proof-producing:
-
-- `Defunctionalization/TranslationResult.lean` retains the translated term,
-  declarations, closure equations, and extensionality formulas in source order.
-- `Defunctionalization/Flattened/Translate.lean` defines total `translate`.
-- `Flattened/Currying.lean` proves `flatApp_eq_unarySpine`,
-  `completeApp_denote`, and `etaClosure_eq_partialSpine`.
-- `Flattened/Denotation.lean` proves `translate_denote` and
-  `flattened_refines_unary` in `canonicalModel`.
-- `Flattened/Theory.lean` proves simultaneous `generated_valid`,
-  `model_extension`, and `target_unsat_implies_source_unsat`, plus the finite
-  theory counterparts `model_extension_theory` and
-  `target_theories_unsat_implies_source_unsat`.
-
-The concrete representation layer is deliberately relational; the existing raw
-SMT DSL is not made intrinsically typed:
-
-- `HO/Semantics.lean` defines ordinary `Satisfiable`/`Unsatisfiable` and the
-  generic proof-relevant `SatisfiableUnder`/`UnsatisfiableUnder`. Datatype and
-  interpreted-carrier semantics instantiate the latter with their model
-  contracts instead of defining a second kind of HO model.
-- `SMT/Semantics.lean` defines the required raw-term and command semantics,
-  including semantic `CommandsUnsatisfiable`.
-- `SMT/Representation.lean` defines the shared `Encoding`, the pure and
-  guard-parameterized term encoders, and `TheoryRepresentation`. Exact syntax is
-  retained as an exact semantic command set instead of an unachievable sequence
-  equality: production interleaves declarations/assertions and removes duplicate
-  occurrences, while raw command satisfaction is order- and multiplicity-free.
-  `checkScript` separately enforces concrete declaration-before-use ordering.
-  Term construction uses `(smt| ...)` wherever its syntax supports the required
-  dynamic expression.
-- `SMT/Model.lean` constructs the one induced raw model used by every encoded
-  component. `ExtraGraph` adds derived native symbols only when their graph is
-  disjoint from every encoded source identifier; `ModelExtension.lean` proves
-  source typing and raw evaluation are preserved. `SMT/Soundness.lean` proves
-  the low-level composition lemmas `lift` and `lift_with_extra`, the complete
-  `representation_sound`, and
-  `commands_unsat_implies_source_unsat` and its finite-theory counterpart
-  `commands_unsat_implies_source_theory_unsat`.
-
-The datatype extension now has a proved native-command core:
-
-- `Datatype/Semantics.lean` defines finite free values and proves `ctor_inj`,
-  `ctor_ne`, `ctor_cases`, `sel_ctor`, `test_ctor`, and strict height decrease
-  for recursive fields.
-- `Datatype/Guarded.lean` lifts any pointwise guarded base representation through
-  an arbitrary productive recursive or mutual block. Its single structural
-  `Val.WF` predicate replaces the former `Option`-specific lifting and proves
-  both guarded encoding/decoding round trips. `Val.wf_iff_selWF` proves that
-  this structural predicate is exactly the production-shaped conjunction of
-  tester implications over matching selectors.
-- Raw `define-funs-rec` commands now have a non-vacuous simultaneous graph
-  semantics (`FunDef.Holds` and `FunsRecHold`). Production's datatype guard body
-  uses `.bvar 0`, so the raw evaluator reads its local argument directly while
-  the SMT-LIB printer continues to render the allocated binder name.
-- `SMT/DatatypeGuard.lean` proves `eval_andAll`, `eval_wfClause`, and
-  `eval_wfBody` for the exact shared syntax. `SMT/DatatypeGuarded.lean` then
-  connects every field clause to its typed guard and proves the exact mutual
-  `define-funs-rec` command in `wfDefs_valid`.
-- `FO/Guarded.lean` defines one guard-restricted denotation and proves
-  `FamilyTerm.guardDenote_lift`: variables, symbols, connectives, equality, and
-  both quantifiers in a lifted carrier model denote exactly the encoded source
-  term. The more general `FamilyTerm.guardDenote_rel` accepts one uniform
-  `ModelRel`, allowing native constructors to keep their free-algebra target
-  interpretation while satisfying the same per-symbol preservation contract.
-  `Datatype/Carrier.lean` constructs that enlarged carrier and proves the
-  constructor, selector, and tester obligations. Selectors preserve the source
-  model's unspecified value on nonmatching guarded inputs while still obeying
-  the native selector equation on every matching target constructor.
-  `Datatype/FamilyModel.lean` installs those operations through one typed
-  ownership map and proves `FamilyLawful.extend_rel` for every symbol;
-  `Datatype/Flattened.lean` derives its source laws for Crush's actual flattened
-  symbol family.
-  `SMT/GuardedSoundness.lean` proves `guardTerm_eval` for the exact raw syntax
-  and combines the layers in `guardTerm_rel_eval`. `guarded_lift` then validates
-  one complete array containing native commands, exact certified derived
-  definitions, ordinary declarations, and guarded assertions. Its only
-  component premise is `Guarding.Semantics`; `UnaryGuards.semantics` discharges
-  it when the unary family owns every nontrivial guard, while `IntView` composes
-  built-in integer nonnegativity with fresh datatype `wf_T` predicates.
-- `Reification/Datatype.lean` reifies productive ground Lean inductive blocks,
-  preserves declaration order, collects dependencies, and rejects indexed,
-  higher-order-field, nonproductive, and unsafe indirect-recursive cases.
-  Datatype recursors and quotient primitives are also rejected before they can
-  be mistaken for ordinary uninterpreted constants; their fallback reasons are
-  retained in production state.
-  `crush.datatype.certify` opts production into this acceptance check, exact
-  constructor/selector ownership, and a retained certificate for the native
-  datatype command. It is off by default; the option certifies the datatype
-  component rather than the surrounding extensible translation.
-- `VCG/Datatype.lean` packages each opt-in production `declare-datatypes`
-  command with its exact reified block, allocated encoding, and `CommandWF`
-  proof. Production emits and records that command atomically. `CertifiedDataEnv`
-  then retains one intrinsically indexed `CertifiedDataTrace`: block identity and
-  command count follow from its type, and every dependency-ordered native command
-  is proved equal to the command at its recorded production index. After all
-  facts are emitted, these traces are rebuilt against the exact final
-  `TranslateState.commands`, so no intermediate command prefix is exposed. The
-  `CertifiedDataEnv.Representation` boundary records one shared-encoding
-  `Representation` for every typed trace entry and assembles those witnesses
-  into the single `EnvRepresentation` used by model lifting; it is not a second
-  encoder. `CertifiedGuardTrace` performs the same exact final-state indexing
-  for recursive `wf_T` commands. `GuardRepresentation` also retains its
-  identifiers and trace matching independently of a model;
-  `GuardModel.ofIntView` constructs the
-  standard interpreted-integer/datatype package. A uniform `GuardInterpretation`
-  yields `Representation.unsat`, whose source-model quantification contains only
-  datatype lawfulness. `Representation.unsat_under` remains the lower-level theorem
-  for custom model-indexed guard constructions.
-  Common-environment reification uses `ReifiedSentencesFor` and `reifyTheory?`
-  to retain the exact ordered fact array. `VCG/Production.lean` defines
-  `TheoryAgreement`, whose `build?` performs an exact semantic command-set check
-  and whose reflection theorem covers the complete intrinsic source theory.
-  This admits production's interleaving and duplicate elimination, but no
-  missing or extra obligation. `SingleFactAgreement` is the singleton specialization for a retained
-  fact. Production still has to invoke and store the aggregate witness and
-  construct the shared encoding and representation witnesses from its final
-  allocator state.
-- Production discovery first builds one read-only `DatatypePlan` containing the
-  complete mutual member, constructor, and ground-field structure. Only after
-  discovery finishes does `declareDatatype` allocate names and emit commands,
-  preventing mutable allocator state from changing the declaration traversal.
-- Guard definitions enter the same `CommandEncoding` and global allocation-link
-  arrays as app declarations and closure equations. `DataGuardEncoding` retains
-  the exact mutual `FunDef` array and production command; no datatype-specific
-  command-trace mechanism was added.
-- `SMT/Datatype.lean` emits the exact monomorphic `declare-datatypes` command.
-  Its pure `wfBody` builder is also the single implementation of the compact
-  tester/selector guard syntax used by production, including omission of empty
-  clauses and singleton conjunctions.
-- `SMT/DatatypeCanonical.lean` proves native datatype laws in the ordinary
-  shared raw model; it does not introduce a second datatype-only value universe.
-  `ctor_laws`, `ctor_disjoint`, `exhaustive`, `test_disjoint`, and `rank_lt`
-  discharge the native datatype laws; `data_hold` combines them, and
-  `command_sound` proves that the canonical model satisfies the emitted command.
-  `supported` derives raw syntactic support from block well-formedness,
-  productivity, injective allocated names, and no-duplicate raw symbols.
-- `SMT/DatatypeLifted.lean` proves the same native command directly at one
-  dependency-extension step. `SMT/DatatypeCarry.lean` transports all of those
-  laws through later disjoint blocks; `command_sound_carry` is the one-step
-  theorem and `EnvRepresentation.lifted_valid` validates the complete native
-  prefix in the final folded target. `datatypeCommand_with_extra` then preserves
-  that prefix under fresh derived graphs. `block_valid_with_guards` validates one
-  native declaration and its exact `wf_T` command together,
-  `block_valid_with_int` installs the integer graph used by `Nat`, and
-  `EnvRepresentation.sound_with` is the identity-base whole-theory theorem.
-  `Lifted.ofBase`, `EnvRepresentation.liftedFrom_valid`, and
-  `EnvRepresentation.soundFrom` provide the same result over interpreted base
-  carriers such as `Nat → Int`.
-- `SMT.Datatype.EnvRepresentation.native_valid` proves the exact ordered native
-  command prefix valid for every lawful datatype environment. This is a local
-  component certificate, not a second soundness path: `SMT.representation_sound`
-  consumes it together with ordinary sort declarations, ordinary symbol
-  declarations, and assertions in the same induced model. The empty environment
-  is the ordinary no-datatype case.
-
-The live boundary is split by role:
-
-- `Reification/` recognizes the supported nondependent Lean fragment and returns
-  intrinsically typed terms with exact signature, context, and capture
-  witnesses. Reification is partial because unsupported Lean syntax is outside
-  the modeled fragment. Its recursive shape check is operational evidence, not
-  a denotational theorem about `Lean.Expr`.
-- `VCG/Generate.lean` composes total HO-to-FO translation with FO-to-SMT encoding.
-  `theoryCommands_represents` and `guardedTheoryCommands_represents` cover exact
-  finite theories, with the certified derived-command segment stated explicitly.
-- `VCG/Stateful.lean` defines total `runTheory`; `runTheory_represents` proves
-  that its exact `TranslateState.commands` represents the complete intrinsic
-  theory. `runGuardedTheory` and `runGuardedTheory_represents` give the guarded
-  aggregate route a fresh proved state. The sentence-level `run` and
-  `runGuarded` APIs remain singleton conveniences.
-- `VCG/Soundness.lean` proves `StateRepresents.unsat_source` and the executable
-  specialization `run_unsat_implies_source_unsat`. Each theorem takes one
-  `EnvRepresentation` indexed by the same `DataBridge` that owns the intrinsic
-  source constants; no unrelated datatype environment or datatype-only theorem
-  variant can be supplied. An empty bridge covers ordinary encodings, while a
-  nonempty representation certifies the native datatype prefix.
-  `runGuarded_unsat_under` exposes the lower-level combined model contract;
-  `runGuarded_unsat_implies_source_unsat` uses a uniform `GuardInterpretation`
-  to reflect over every datatype-lawful source model;
-  `runGuardedTheory_unsat_implies_source_unsat` proves the finite-theory result.
-
-The earlier unary encoding remains under the core defunctionalization modules as
-an independent semantic reference, with its logical-relation and model-extension
-proofs intact.
-
-## Core correctness theorems
-
-The main correctness argument is the following composition. Names below are
-shown relative to `Crush.Metatheory`.
-
-1. **Flattened term preservation**
-
-   `Defunctionalization.Flattened.translate_denote` in
-   [`Defunctionalization/Flattened/Denotation.lean`](Defunctionalization/Flattened/Denotation.lean)
-   proves that a translated FO term and its HO source have the same denotation
-   in the canonical model, after the source value is embedded in its target
-   representation.
-
-2. **Validity of generated obligations**
-
-   `Defunctionalization.Flattened.generated_valid` in
-   [`Defunctionalization/Flattened/Theory.lean`](Defunctionalization/Flattened/Theory.lean)
-   proves that every closure equation and extensionality formula generated by
-   `translate` holds in the canonical target model.
-
-3. **Source-model extension**
-
-   `Defunctionalization.Flattened.model_extension` and
-   `model_extension_theory` in
-   [`Defunctionalization/Flattened/Theory.lean`](Defunctionalization/Flattened/Theory.lean)
-   combines term preservation and generated validity: every model satisfying a
-   closed HO formula, or every formula in a finite HO theory, extends to a model
-   satisfying the corresponding complete translated FO theory.
-
-4. **Defunctionalization unsatisfiability reflection**
-
-   `Defunctionalization.Flattened.target_unsat_implies_source_unsat` and
-   `target_theories_unsat_implies_source_unsat` in
-   [`Defunctionalization/Flattened/Theory.lean`](Defunctionalization/Flattened/Theory.lean)
-   proves that unsatisfiability of the complete translated FO theory implies
-   unsatisfiability of the source HO sentence or finite theory.
-
-5. **Exact FO-to-SMT representation**
-
-   `VCG.commands_represents` and `theoryCommands_represents` in
-   [`VCG/Generate.lean`](VCG/Generate.lean) proves that the concrete commands
-   returned by the pure VCG encoder represent exactly the complete translated
-   FO command set. The underlying encoder theorem is
-   `SMT.encode_translation` and `SMT.encode_theories` in
-   [`SMT/Representation.lean`](SMT/Representation.lean). For enlarged carriers,
-   `VCG.guardedTheoryCommands_represents` records the finite theory with exact
-   derived commands and guard-aware quantifier syntax.
-
-6. **Semantic soundness of SMT representation**
-
-   `SMT.representation_sound` in
-   [`SMT/Soundness.lean`](SMT/Soundness.lean) is the single complete model-lifting
-   theorem. Given a lawful source model, an exact datatype environment
-   representation, and validity of the represented FO theory in the canonical
-   target model, it constructs one raw model satisfying every emitted component:
-   native datatype commands, ordinary sort declarations, ordinary symbol
-   declarations, and assertions. Its corollary
-   `SMT.commands_unsat_implies_source_theory_unsat` composes this construction
-   with `model_extension_theory` and reflects semantic command unsatisfiability
-   directly to datatype-environment-aware source-theory unsatisfiability. The guarded counterpart
-   is `SMT.guarded_lift`; `VCG.CertifiedDataEnv.Representation.sound` supplies its
-   native and recursive-guard premises from one datatype certificate.
-
-7. **Exact stateful execution**
-
-   `VCG.runTheory_represents` in
-   [`VCG/Stateful.lean`](VCG/Stateful.lean) proves that the exact command array in
-   the fresh `TranslateState` returned by `VCG.runTheory` represents the complete
-   translated theory command set.
-   `VCG.runGuardedTheory_represents` establishes the guarded aggregate array in
-   the same way.
-
-8. **Composed intrinsic VCG soundness**
-
-   `VCG.StateRepresents.unsat_source` and
-   `VCG.run_unsat_implies_source_unsat` in
-   [`VCG/Soundness.lean`](VCG/Soundness.lean) compose the preceding results:
-
-   ```text
-   semantic unsatisfiability of VCG.run's exact SMT commands
-       ⇒ no lawful source model can extend to the represented FO theory
-       ⇒ unsatisfiability of the intrinsic HO source sentence
-   ```
-
-   The datatype environment is an ordinary parameter of this result. With
-   `env = []`, `Datatype.Env.unsatisfiable_nil_iff` recovers the original source
-   proposition. For interpreted base carriers, `VCG.runGuarded_unsat_under`
-   exposes the custom model-indexed contract. The stronger
-   `VCG.runGuarded_unsat_implies_source_unsat` consumes one uniform
-   `GuardInterpretation` and concludes datatype-lawful source unsatisfiability
-   without adding target construction evidence to the quantified model class.
-
-9. **Structural Lean boundary**
-
-   `Reification.reifySentence?` packages the accepted `Lean.Expr`, its exact
-   intrinsic sentence, datatype bridge, and recursive shape witness. There is
-   deliberately no theorem that adds this witness as an unused premise to the
-   intrinsic soundness result: without a denotation for `Lean.Expr`, such a
-   theorem would not establish an additional semantic conclusion.
-
-The principal supporting application and closure results are
-`Defunctionalization.Flattened.TypedArguments.flatApp_eq_unarySpine`,
-`Defunctionalization.Flattened.TargetArguments.completeApp_denote`, and
-`Defunctionalization.Flattened.etaClosure_eq_partialSpine` in
-[`Defunctionalization/Flattened/Currying.lean`](Defunctionalization/Flattened/Currying.lean).
-
-Here `Crush.SMT.CommandsUnsatisfiable` is a semantic proposition about the
-command sequence. These theorems do not assert that an external solver's
-reported `unsat` verdict is correct. They also apply to the total intrinsic
-`VCG.run` route, not automatically to the legacy direct `emitTerm` procedure
-described below.
-
-## Proved and trusted execution
-
-`TranslateState.status` exposes the operational classification used by both
-routes: a state is `proved` exactly when its trust-reason array is empty. This
-classification alone is not semantic evidence. `VCG.StateRepresents` is the
-separate proof object that retains the intrinsic source and exact
-`TheoryRepresentation` theorem.
-
-The legacy production `emitTerm : Lean.Expr → TranslateM SMT.Term` is always
-marked `TrustReason.direct` at its root. Local certified closures and primitives
-still retain useful typed evidence, but they do not promote that combined,
-extensible direct route to a whole-run proof. Unrestricted term/sort handlers,
-lowerings, result lowerings, uncertified closures/constants, and native-HO mode
-record additional trust reasons.
-
-After successful `Reification.reifySentence?`, `VCG.run` is the non-partial
-defunctionalization and command-generation route. It returns one fresh
-`TranslateState`, and `run_represents` certifies that exact state. Fresh
-bookkeeping prevents it from inheriting commands or trust markers from a legacy
-run.
+# Crush metatheory
 
 ## Notation
 
-Import `Crush.Metatheory.Notation` and write
-`open scoped Crush.Metatheory` to enable the shared mathematical notation:
+Import [`Crush.Metatheory.Notation`](Notation.lean) and write
+`open scoped Crush.Metatheory` for the shared proof notation. Notation whose
+definition would introduce an import cycle is declared beside the corresponding
+construction.
 
-| Notation | Meaning |
-|---|---|
-| `⟦e⟧[M, ρ]` | denotation of `e` in model `M` under valuation `ρ` |
-| `M ⊨ φ` | model satisfaction of a closed formula |
-| `M ⊨ᵀ T` | model satisfaction of every formula in a theory |
-| `⌊τ⌋` | first-order erasure of a higher-order type |
-| `⌊Γ⌋^⋆` | pointwise first-order erasure of a context |
-| `𝒟⟦e⟧` | classic unary defunctionalization |
-| `𝓕⟦e⟧` | total flattened translation result; declared by `Flattened/Translate.lean` |
-| `𝒶⟦e⟧[E]` | ordinary raw SMT encoding under representation `E` |
-| `𝒢⟦e⟧[G]` | raw SMT encoding under guarding policy `G` |
-| `vₛ ≈[R, τ] vₜ` | source and target values related at type `τ` |
-| `ρₛ ≈ᵥ[R] ρₜ` | pointwise related source and target valuations |
-| `FV(e)` | duplicate-free free-variable positions of `e` |
-| `B ⊢ᴰ` | datatype positions in block `B` |
-| `B ⊢ᶜ[d] C` | references to constructor `C` of datatype `d` in `B` |
-| `C ⊢ᶠ F` | references to field `F` of constructor `C` |
+| Notation | Meaning | Lean definition |
+|---|---|---|
+| `⟦e⟧[M, ρ]` | Denotation of `e` in model `M` under valuation `ρ` | [`Notation.lean`](Notation.lean), [`HO/Semantics.lean`](HO/Semantics.lean), [`FO/FamilySemantics.lean`](FO/FamilySemantics.lean) |
+| `M ⊨ φ` | Satisfaction of a closed formula | [`Notation.lean`](Notation.lean) |
+| `M ⊨ᵀ T` | Satisfaction of every formula in a theory | [`Notation.lean`](Notation.lean) |
+| `⌊τ⌋` | First-order erasure of a higher-order type | [`Notation.lean`](Notation.lean), [`FO/Core.lean`](FO/Core.lean) |
+| `⌊Γ⌋^⋆` | Pointwise first-order erasure of a context | [`Notation.lean`](Notation.lean) |
+| `𝒟⟦e⟧` | Classic unary defunctionalization | [`Notation.lean`](Notation.lean), [`Defunctionalization/Translate.lean`](Defunctionalization/Translate.lean) |
+| `𝓕⟦e⟧` | Total flattened translation result | [`Defunctionalization/Flattened/Translate.lean`](Defunctionalization/Flattened/Translate.lean) |
+| `𝒶⟦e⟧[E]` | Ordinary raw SMT encoding under `E` | [`SMT/Representation.lean`](SMT/Representation.lean) |
+| `𝒢⟦e⟧[G]` | Guard-aware raw SMT encoding under `G` | [`SMT/Guarded.lean`](SMT/Guarded.lean) |
+| `vₛ ≈[R, τ] vₜ` | Logical relation between source and target values | [`Notation.lean`](Notation.lean), [`Defunctionalization/LogicalRelation.lean`](Defunctionalization/LogicalRelation.lean) |
+| `ρₛ ≈ᵥ[R] ρₜ` | Pointwise logical relation between valuations | [`Notation.lean`](Notation.lean) |
+| `FV(e)` | Duplicate-free free-variable positions of `e` | [`Notation.lean`](Notation.lean), [`Defunctionalization/Collect.lean`](Defunctionalization/Collect.lean) |
+| `B ⊢ᴰ` | Datatype positions in block `B` | [`Datatype/Core.lean`](Datatype/Core.lean) |
+| `B ⊢ᶜ[d] C` | References to constructor `C` of datatype `d` in `B` | [`Datatype/Core.lean`](Datatype/Core.lean) |
+| `C ⊢ᶠ F` | References to field `F` of constructor `C` | [`Datatype/Core.lean`](Datatype/Core.lean) |
 
-The flattened development also uses named type shorthands where notation would
-hide too much structure:
+Proof statements conventionally use `σ` for signatures, `Γ` and `Δ` for
+contexts, `τ` for types or sorts, `φ` for formulas, `T` for theories, `M` for
+models, `ρ` for source valuations or renamings, and `ν` for target valuations.
+Executable state and allocation code uses descriptive names when they convey
+more information.
 
-| Shorthand | Expanded type |
-|---|---|
-| `TargetTerm σ Γ τ` | a family FO term over flattened symbols in `⌊Γ⌋^⋆`, of sort `⌊τ⌋` |
-| `TargetFormula σ Γ` | a Boolean flattened target term in `⌊Γ⌋^⋆` |
-| `TargetSentence σ` | a closed flattened target formula |
-| `TargetTheory σ` | a list of flattened target sentences |
-| `TargetValuation M Γ` | a valuation of `⌊Γ⌋^⋆` in `canonicalModel M` |
+## Main results
 
-Proof-oriented code follows the usual binder convention: `σ` for a signature,
-`Γ` and `Δ` for contexts, `τ` for a type, `φ` for a formula, `M` for a model,
-`ρ` for a source valuation or renaming, and `ν` for a target valuation. Longer
-descriptive names remain preferable in executable translation code and whenever
-two objects of the same mathematical role must be distinguished.
+The proved endpoint is semantic unsatisfiability of an exact finite intrinsic
+higher-order theory sharing one signature. It does not assign a denotation to
+arbitrary `Lean.Expr`, and correctness of an external solver remains a separate
+boundary.
+
+1. `Flattened.translate_denote` proves preservation of term denotation by the
+   total flattened translation; `generated_valid` proves every generated
+   closure equation and extensionality formula in the same canonical model.
+   See [`Defunctionalization/Flattened/Denotation.lean`](Defunctionalization/Flattened/Denotation.lean)
+   and [`Defunctionalization/Flattened/Theory.lean`](Defunctionalization/Flattened/Theory.lean).
+
+2. `Flattened.model_extension_theory` extends one model of a finite source
+   theory to the combined flattened target theory, and
+   `target_theories_unsat_implies_source_unsat` reflects unsatisfiability back
+   to the complete source theory. See
+   [`Defunctionalization/Flattened/Theory.lean`](Defunctionalization/Flattened/Theory.lean).
+
+3. `SMT.encode_theories` gives an exact semantic command-set representation of
+   the combined flattened theory. `SMT.representation_sound` constructs one raw
+   SMT model satisfying native datatype commands, ordinary declarations, and
+   assertions; `commands_unsat_implies_source_theory_unsat` is the corresponding
+   reflection theorem. See [`SMT/Representation.lean`](SMT/Representation.lean)
+   and [`SMT/Soundness.lean`](SMT/Soundness.lean).
+
+4. `Datatype.ctor_inj`, `ctor_ne`, `ctor_cases`, `sel_ctor`, `test_ctor`, and
+   the strict-height theorem give productive monomorphic datatype blocks finite
+   free-algebra semantics. `SMT.Datatype.EnvRepresentation.native_valid` proves
+   the exact dependency-ordered native command prefix. See
+   [`Datatype/Semantics.lean`](Datatype/Semantics.lean),
+   [`SMT/DatatypeCanonical.lean`](SMT/DatatypeCanonical.lean), and
+   [`SMT/DatatypeRepresentation.lean`](SMT/DatatypeRepresentation.lean).
+
+5. `FO.FamilyTerm.guardDenote_rel` preserves terms across a common carrier and
+   symbol relation. `SMT.guardTerm_rel_eval` connects that semantics to the
+   guard-aware raw syntax, and `SMT.guarded_lift` validates native commands,
+   certified derived definitions, ordinary declarations, and guarded assertions
+   in one raw model. See [`FO/Guarded.lean`](FO/Guarded.lean) and
+   [`SMT/GuardedSoundness.lean`](SMT/GuardedSoundness.lean).
+
+6. `VCG.runTheory_represents` and `runGuardedTheory_represents` prove that fresh
+   stateful VCG runs retain the exact aggregate representation.
+   `TheoryStateRepresents.unsat_source` and
+   `runGuardedTheory_unsat_implies_source_unsat` compose the lowering proof to
+   intrinsic source-theory unsatisfiability. See
+   [`VCG/Stateful.lean`](VCG/Stateful.lean) and
+   [`VCG/Soundness.lean`](VCG/Soundness.lean).
+
+7. `Reification.reifyTheory?` retains an exact ordered fact list reified under
+   one datatype environment and ordinary signature bridge. Its witness is
+   structural, not a denotational theorem for arbitrary Lean expressions. See
+   [`Reification/Witness.lean`](Reification/Witness.lean).
+
+8. `VCG.TheoryAgreement.build?` checks mutual inclusion between a normalized
+   production snapshot and the intrinsic guarded command set. Its
+   `unsat_source` theorem reflects unsatisfiability of the complete live snapshot
+   to the retained intrinsic source theory; `SingleFactAgreement` is the
+   singleton specialization. See [`VCG/Production.lean`](VCG/Production.lean).
