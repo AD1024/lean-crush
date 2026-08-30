@@ -44,7 +44,7 @@ used by this exact command array. -/
 theorem runGuarded_unsat_under {certificate : CertifiedDataEnv} (cfg : Config)
     {guarding : SMT.Guarding
       (Symbol (certificate.env.signature ++ certificate.tail))}
-    (represented : certificate.Represents guarding.encoding)
+    (represented : certificate.Representation guarding.encoding)
     (guarded : certificate.GuardRepresentation guarding represented)
     (formula : Sentence
       (certificate.env.signature ++ certificate.tail))
@@ -65,7 +65,7 @@ theorem runGuarded_unsat_implies_source_unsat
     {certificate : CertifiedDataEnv} (cfg : Config)
     {guarding : SMT.Guarding
       (Symbol (certificate.env.signature ++ certificate.tail))}
-    (represented : certificate.Represents guarding.encoding)
+    (represented : certificate.Representation guarding.encoding)
     (guarded : certificate.GuardRepresentation guarding represented)
     (interpretation : certificate.GuardInterpretation guarding represented guarded)
     (formula : Sentence

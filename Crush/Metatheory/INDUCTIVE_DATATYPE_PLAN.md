@@ -329,7 +329,7 @@ falls back to the trusted route.
   every dependency-ordered native command is exactly the command at its recorded
   state index. Rebuild every trace after all facts are emitted, so the snapshot is
   the exact final `TranslateState.commands`, not an intermediate prefix.
-  `CertifiedDataEnv.Represents` now isolates the remaining conversion to the
+  `CertifiedDataEnv.Representation` now isolates the remaining conversion to the
   shared encoding: it stores a typed `Representation` for every trace entry and
   derives the one `EnvRepresentation` consumed by model lifting.
 - [x] Reserve the raw semantic built-in namespace under
@@ -403,7 +403,7 @@ Lean carriers such as `Nat` to a larger SMT carrier such as `Int` plus a guard.
   `block_valid_with_guards` proves one native declaration and its exact recursive
   guard command together; `block_valid_with_int` supplies the production integer
   graph; `Lifted.ofBase` constructs the interpreted prior; and
-  `CertifiedDataEnv.Represents.sound` feeds native commands, all recursive guard
+  `CertifiedDataEnv.Representation.sound` feeds native commands, all recursive guard
   commands, ordinary declarations, and guarded assertions to the generic
   `guarded_lift` theorem.
 - [x] Carry every earlier block's `wf_T` command through the remaining dependency

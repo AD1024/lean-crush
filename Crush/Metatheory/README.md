@@ -123,12 +123,13 @@ The datatype extension now has a proved native-command core:
   is proved equal to the command at its recorded production index. After all
   facts are emitted, these traces are rebuilt against the exact final
   `TranslateState.commands`, so no intermediate command prefix is exposed. The
-  `CertifiedDataEnv.Represents` boundary records one shared-encoding
+  `CertifiedDataEnv.Representation` boundary records one shared-encoding
   `Representation` for every typed trace entry and assembles those witnesses
   into the single `EnvRepresentation` used by model lifting; it is not a second
   encoder. `CertifiedGuardTrace` performs the same exact final-state indexing
-  for recursive `wf_T` commands. `GuardAllocation` retains its identifiers and
-  trace matching independently of a model; `GuardModel.ofIntView` constructs the
+  for recursive `wf_T` commands. `GuardRepresentation` also retains its
+  identifiers and trace matching independently of a model;
+  `GuardModel.ofIntView` constructs the
   standard interpreted-integer/datatype package. A uniform `GuardInterpretation`
   yields `Represents.unsat`, whose source-model quantification contains only
   datatype lawfulness. `Represents.unsat_under` remains the lower-level theorem
@@ -263,7 +264,7 @@ shown relative to `Crush.Metatheory`.
    `SMT.commands_unsat_implies_source_unsat` composes this construction with
    `model_extension` and reflects semantic command unsatisfiability directly to
    datatype-environment-aware source unsatisfiability. The guarded counterpart
-   is `SMT.guarded_lift`; `VCG.CertifiedDataEnv.Represents.sound` supplies its
+   is `SMT.guarded_lift`; `VCG.CertifiedDataEnv.Representation.sound` supplies its
    native and recursive-guard premises from one datatype certificate.
 
 7. **Exact stateful execution**

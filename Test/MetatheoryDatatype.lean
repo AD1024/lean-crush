@@ -580,18 +580,18 @@ through one representation boundary; no datatype-only solver theorem is added. -
 example (certificate : CertifiedDataEnv)
     (encoding : SMT.Encoding
       (Symbol (certificate.env.signature ++ certificate.tail)))
-    (trace : certificate.trace.Represents encoding)
+    (trace : certificate.trace.Representation encoding)
     (native : encoding.nativeCommands = certificate.nativeCommands) :
     EnvRepresentation encoding certificate.data.toModelEnv :=
   ({ trace, native_eq := native } :
-    certificate.Represents encoding).env
+    certificate.Representation encoding).env
 
 /-- Raw unsatisfiability of the exact guarded VCG run reflects to the intrinsic
 sentence under the combined datatype/interpreted-carrier contract. -/
 example (certificate : CertifiedDataEnv) (cfg : Crush.Config)
     (guarding : SMT.Guarding
       (Symbol (certificate.env.signature ++ certificate.tail)))
-    (represented : certificate.Represents guarding.encoding)
+    (represented : certificate.Representation guarding.encoding)
     (guarded : certificate.GuardRepresentation guarding represented)
     (formula : Sentence
       (certificate.env.signature ++ certificate.tail))
@@ -609,7 +609,7 @@ the model class quantified by guarded reflection. -/
 example (certificate : CertifiedDataEnv) (cfg : Crush.Config)
     (guarding : SMT.Guarding
       (Symbol (certificate.env.signature ++ certificate.tail)))
-    (represented : certificate.Represents guarding.encoding)
+    (represented : certificate.Representation guarding.encoding)
     (guarded : certificate.GuardRepresentation guarding represented)
     (interpretation : certificate.GuardInterpretation guarding represented guarded)
     (formula : Sentence
@@ -626,7 +626,7 @@ semantic transparency theorem. -/
 example (certificate : CertifiedDataEnv)
     (guarding : SMT.Guarding
       (Symbol (certificate.env.signature ++ certificate.tail)))
-    (represented : certificate.Represents guarding.encoding)
+    (represented : certificate.Representation guarding.encoding)
     (guarded : certificate.GuardRepresentation guarding represented)
     (reified : Reification.ReifiedSentenceFor certificate.source certificate.env
       certificate.bridge)

@@ -86,7 +86,7 @@ annotation proved semantically transparent above. -/
 structure ProductionAgreement (certificate : CertifiedDataEnv)
     (guarding : SMT.Guarding
       (Symbol (certificate.env.signature ++ certificate.tail)))
-    (represented : certificate.Represents guarding.encoding)
+    (represented : certificate.Representation guarding.encoding)
     (guarded : certificate.GuardRepresentation guarding represented)
     (reified : ReifiedSentenceFor certificate.source certificate.env
       certificate.bridge) where
@@ -103,7 +103,7 @@ guard interpretation for all datatype-lawful source models. -/
 theorem unsat_source {certificate : CertifiedDataEnv}
     {guarding : SMT.Guarding
       (Symbol (certificate.env.signature ++ certificate.tail))}
-    {represented : certificate.Represents guarding.encoding}
+    {represented : certificate.Representation guarding.encoding}
     {guarded : certificate.GuardRepresentation guarding represented}
     {reified : ReifiedSentenceFor certificate.source certificate.env
       certificate.bridge}

@@ -55,7 +55,7 @@ attributes are removed only through a proved semantic-equivalence theorem.
 However, the following witnesses remain caller premises rather than products
 of the production run:
 
-- `CertifiedDataEnv.Represents`;
+- `CertifiedDataEnv.Representation`;
 - `CertifiedDataEnv.GuardRepresentation`;
 - `ProductionAgreement`, including the complete
   `GuardedTheoryRepresentation` after annotation normalization.
@@ -85,8 +85,8 @@ The follow-up repair separates the layers:
 - `UnaryGuards` records only a fresh unary graph; absence of a unary identifier
   no longer incorrectly asserts that the whole semantic guard is total. This is
   essential when built-in integer `>=` guards a sort omitted by the unary graph.
-- `GuardAllocation` records identifier injectivity, freshness, and exact trace
-  matching once, independently of any model.
+- `GuardRepresentation` records identifier injectivity, freshness, exact trace
+  matching, and command syntax once, independently of any model.
 - `GuardModel.ofIntView` derives graph uniqueness, graph freshness, and composed
   term semantics for the standard integer-plus-datatype combination.
 - `GuardInterpretation` realizes that static allocation for every lawful source
@@ -94,7 +94,7 @@ The follow-up repair separates the layers:
   `Datatype.Env.Unsatisfiable`; its quantified model class contains no target
   construction evidence.
 
-The remaining production task is to construct `GuardAllocation` and a uniform
+The remaining production task is to construct `GuardRepresentation` and a uniform
 `GuardInterpretation` from the final live allocator evidence. This is now an
 explicit encoding-level premise, rather than a hidden restriction on source
 models, and belongs to the whole-run agreement work above.
@@ -159,6 +159,9 @@ exhaustiveness, and rank properties separately.
   `ReifiedSentenceFor`; `ProductionAgreement` is isolated in
   `VCG/Production.lean` and accounts explicitly for semantically transparent
   root assertion annotations.
+- The proof records formerly named `CertifiedDataTrace.Represents` and
+  `CertifiedDataEnv.Represents` are now `...Representation`, matching
+  `TheoryRepresentation`, `GuardRepresentation`, and their exact-syntax role.
 
 ## Naming and organization rules
 
@@ -184,7 +187,7 @@ exhaustiveness, and rank properties separately.
    final allocator evidence.
 2. Construct whole-array `ProductionAgreement` during the live run; the exact
    intrinsic sentence and reflection theorem are now retained.
-3. Construct production `GuardAllocation` and `GuardInterpretation` from final
+3. Construct production `GuardRepresentation` and `GuardInterpretation` from final
    allocator evidence; the semantic constructors and unrestricted reflection
    theorem are now available.
 4. Store the completed agreement/interpretation in a proved production state
