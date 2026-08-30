@@ -3,12 +3,17 @@ import Crush.Metatheory.VCG.Soundness
 /-!
 # Live production agreement
 
-This module is the refinement boundary for a completed direct production run.
+This module is the refinement boundary for a completed single-fact direct
+production run.
 The unrestricted `emitTerm` implementation is not proved correct merely by
-entering this module. Instead, `ProductionAgreement` can be constructed only
+entering this module. Instead, `SingleFactAgreement` can be constructed only
 when the final command snapshot, after erasing semantically transparent
 top-level assertion attributes, is exactly the guarded intrinsic encoding of
 the exact reified fact retained by `CertifiedDataEnv`.
+
+The ordinary tactic query may contain several facts. Its final array cannot be
+certified by this fact-local object; a future whole-run certificate must retain
+one common intrinsic signature and the complete reified source theory.
 -/
 
 namespace Crush.Metatheory.VCG
@@ -78,12 +83,36 @@ theorem commandsUnsatisfiable_stripAssertionAnnotations
     exact unsat model
       ((satisfiesCommands_stripAssertionAnnotations model commands).mp valid)
 
+/-- The logic-selection command is administrative in the raw model semantics. -/
+theorem satisfiesCommands_setLogic (model : Crush.SMT.Model) (logic : String)
+    (commands : Array Crush.SMT.Command) :
+    model.SatisfiesCommands (#[.setLogic logic] ++ commands) ↔
+      model.SatisfiesCommands commands := by
+  rw [Crush.SMT.Model.satisfiesCommands_append]
+  exact and_iff_right (by
+    intro command member
+    simp at member
+    subst command
+    trivial)
+
+/-- Semantic unsatisfiability is unchanged when the production script adds its
+leading logic-selection command. -/
+theorem commandsUnsatisfiable_setLogic (logic : String)
+    (commands : Array Crush.SMT.Command) :
+    Crush.SMT.CommandsUnsatisfiable (#[.setLogic logic] ++ commands) ↔
+      Crush.SMT.CommandsUnsatisfiable commands := by
+  constructor
+  · intro unsat model valid
+    exact unsat model ((satisfiesCommands_setLogic model logic commands).mpr valid)
+  · intro unsat model valid
+    exact unsat model ((satisfiesCommands_setLogic model logic commands).mp valid)
+
 /-- Whole-array refinement evidence for one live production certificate and its
 exact retained intrinsic sentence. Native declarations, recursive guard
 definitions, all ordinary declarations, and every assertion must occur in the
 guarded encoder's exact order. The only ignored syntax is the root provenance
 annotation proved semantically transparent above. -/
-structure ProductionAgreement (certificate : CertifiedDataEnv)
+structure SingleFactAgreement (certificate : CertifiedDataEnv)
     (guarding : SMT.Guarding
       (Symbol (certificate.env.signature ++ certificate.tail)))
     (represented : certificate.Representation guarding.encoding)
@@ -95,7 +124,7 @@ structure ProductionAgreement (certificate : CertifiedDataEnv)
     certificate.guardCommands (translatedTheory reified.source)
     (certificate.emitted.map stripAssertionAnnotation)
 
-namespace ProductionAgreement
+namespace SingleFactAgreement
 
 /-- The exact retained sentence together with checked whole-array production
 agreement. This packages the existential result of `build?` as data while the
@@ -107,7 +136,7 @@ structure Checked (certificate : CertifiedDataEnv)
     (guarded : certificate.GuardRepresentation guarding represented) where
   reified : ReifiedSentenceFor certificate.source certificate.env
     certificate.bridge
-  agreement : ProductionAgreement certificate guarding represented guarded
+  agreement : SingleFactAgreement certificate guarding represented guarded
     reified
 
 /-- Check the completed production array against the exact guarded intrinsic
@@ -147,7 +176,7 @@ theorem unsat_source {certificate : CertifiedDataEnv}
     {guarded : certificate.GuardRepresentation guarding represented}
     {reified : ReifiedSentenceFor certificate.source certificate.env
       certificate.bridge}
-    (agreement : ProductionAgreement certificate guarding represented guarded
+    (agreement : SingleFactAgreement certificate guarding represented guarded
       reified)
     (interpretation : certificate.GuardInterpretation guarding represented guarded)
     (unsat : Crush.SMT.CommandsUnsatisfiable certificate.emitted) :
@@ -157,6 +186,25 @@ theorem unsat_source {certificate : CertifiedDataEnv}
   exact (commandsUnsatisfiable_stripAssertionAnnotations
     certificate.emitted).mpr unsat
 
-end ProductionAgreement
+/-- Reflection from the exact script returned by `buildScript`, including its
+leading logic-selection command. -/
+theorem unsat_source_script {certificate : CertifiedDataEnv}
+    {guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail))}
+    {represented : certificate.Representation guarding.encoding}
+    {guarded : certificate.GuardRepresentation guarding represented}
+    {reified : ReifiedSentenceFor certificate.source certificate.env
+      certificate.bridge}
+    (agreement : SingleFactAgreement certificate guarding represented guarded
+      reified)
+    (interpretation : certificate.GuardInterpretation guarding represented guarded)
+    (logic : String)
+    (unsat : Crush.SMT.CommandsUnsatisfiable
+      (#[.setLogic logic] ++ certificate.emitted)) :
+    Datatype.Env.Unsatisfiable certificate.data.toModelEnv reified.source :=
+  agreement.unsat_source interpretation
+    ((commandsUnsatisfiable_setLogic logic certificate.emitted).mp unsat)
+
+end SingleFactAgreement
 
 end Crush.Metatheory.VCG

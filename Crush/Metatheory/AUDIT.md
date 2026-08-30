@@ -33,7 +33,7 @@ translation. This is the principal remaining soundness boundary.
 | Native datatype commands | `Datatype.command_sound`, `EnvRepresentation.native_valid` | Correct for source models satisfying `Datatype.Env.Lawful`; rank excludes cyclic values. |
 | Guarded/enlarged carriers | `guardTerm_rel_eval`, `guarded_lift` | Correct relative to an explicit carrier relation, guard semantics, derived graph, and native-command validity. |
 | Stateful intrinsic VCG | `run_represents`, `runGuarded_represents` | Exact, but `run`/`runGuarded` build fresh pure states rather than refining a completed production run. |
-| Live production commands | `CertifiedDataEnv`, `ProductionAgreement`, command-index traces | Exact reflection interface now exists, but the live allocator does not yet construct its representation witnesses. |
+| Live production commands | `CertifiedDataEnv`, `SingleFactAgreement`, command-index traces | Exact single-fact reflection exists, but ordinary multi-fact runs lack an aggregate intrinsic theory and the live allocator does not construct representation witnesses. |
 | Solver result | `CommandsUnsatisfiable` | Semantic premise only. External solver and proof-replay correctness remain separate. |
 
 ## Soundness findings
@@ -48,9 +48,10 @@ marked with `TrustReason.direct`.
 native datatype and recursive guard command is linked to an exact position in
 the final command snapshot, and it now retains `ReifiedSentenceFor` indexed by
 that exact datatype environment, signature tail, and bridge whenever the whole
-fact reifies. `ProductionAgreement` links that sentence to the complete final
-snapshot and proves reflection from `certificate.emitted`; top-level `:named`
-attributes are removed only through a proved semantic-equivalence theorem.
+fact reifies. `SingleFactAgreement` links that sentence to a complete final
+single-fact snapshot and proves reflection from `certificate.emitted`;
+top-level `:named` attributes and the leading `set-logic` command are removed
+only through proved semantic-equivalence theorems.
 
 However, the following witnesses remain caller premises rather than products
 of the production run:
@@ -58,22 +59,34 @@ of the production run:
 - `CertifiedDataEnv.Representation`;
 - `CertifiedDataEnv.GuardRepresentation`;
 - the shared encoding and datatype/guard representation premises needed by
-  `ProductionAgreement.build?`.
+  `SingleFactAgreement.build?`;
+- one common signature and reified intrinsic theory for all facts in an
+  ordinary production query.
 
 Consequently, the reflection theorem for `CertifiedDataEnv.emitted` exists, but
 live production cannot yet supply all inputs to its executable agreement check.
-Once those static representation witnesses exist, `ProductionAgreement.build?`
+Once those static representation witnesses exist, `SingleFactAgreement.build?`
 compares the complete normalized production snapshot with the exact intrinsic
 encoding and returns proof-carrying agreement only when structural equality
 succeeds.
 
+The agreement is deliberately named `SingleFactAgreement`: `buildScript`
+normally combines hypotheses, selected premises, generated instances, and the
+negated goal in one state. A fact-local `ReifiedSentenceFor` cannot represent
+that combined assertion set, and unsatisfiability of the combined array cannot
+soundly be reflected to unsatisfiability of any one member. Whole-run completion
+must reify the complete fact array against one common signature before command
+agreement is checked.
+
 Required completion criterion:
 
-1. build the shared `SMT.Encoding`, datatype representation, guard
+1. reify the complete production fact array against one common datatype and
+   constant signature;
+2. build the shared `SMT.Encoding`, datatype representation, guard
    representation, and declaration trace from the final allocator state;
-2. run `ProductionAgreement.build?`, whose structural comparison checks command
+3. run an aggregate counterpart of `SingleFactAgreement.build?`, whose structural comparison checks command
    order and every surrounding assertion/declaration;
-3. expose semantic reflection only from a `TranslateState` carrying that
+4. expose semantic reflection only from a `TranslateState` carrying that
    completed witness.
 
 The key construction mismatch is now explicit. `SMT.Encoding` is a total,
@@ -171,7 +184,7 @@ exhaustiveness, and rank properties separately.
 - `𝒢⟦e⟧[G]` now parallels the ordinary `𝒶⟦e⟧[E]` notation, and theorem-facing
   notation follows the `σ`, `Γ`, `τ`, `e`, `φ`, `T`, `M`, `ρ` convention.
 - Production certificates retain an exact environment-indexed
-  `ReifiedSentenceFor`; `ProductionAgreement` is isolated in
+  `ReifiedSentenceFor`; `SingleFactAgreement` is isolated in
   `VCG/Production.lean` and accounts explicitly for semantically transparent
   root assertion annotations.
 - The proof records formerly named `CertifiedDataTrace.Represents` and
@@ -211,8 +224,9 @@ exhaustiveness, and rank properties separately.
 
 1. Construct production `SMT.Encoding` and block/guard representations from
    final allocator evidence.
-2. Run the proof-producing whole-array `ProductionAgreement.build?` during the
-   live run; the exact intrinsic sentence and reflection theorem are retained.
+2. Reify all production facts against one common signature and construct an
+   aggregate whole-array agreement; `SingleFactAgreement` remains the exact
+   specialization for one-fact scripts.
 3. Construct production `GuardRepresentation` and `GuardInterpretation` from final
    allocator evidence; the semantic constructors and unrestricted reflection
    theorem are now available.

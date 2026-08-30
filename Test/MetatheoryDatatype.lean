@@ -628,8 +628,8 @@ example (certificate : CertifiedDataEnv)
       (Symbol (certificate.env.signature ++ certificate.tail)))
     (represented : certificate.Representation guarding.encoding)
     (guarded : certificate.GuardRepresentation guarding represented) :
-    Option (ProductionAgreement.Checked certificate guarding represented guarded) :=
-  ProductionAgreement.build?
+    Option (SingleFactAgreement.Checked certificate guarding represented guarded) :=
+  SingleFactAgreement.build?
 
 example (certificate : CertifiedDataEnv)
     (guarding : SMT.Guarding
@@ -638,12 +638,30 @@ example (certificate : CertifiedDataEnv)
     (guarded : certificate.GuardRepresentation guarding represented)
     (reified : Reification.ReifiedSentenceFor certificate.source certificate.env
       certificate.bridge)
-    (agreement : ProductionAgreement certificate guarding represented guarded
+    (agreement : SingleFactAgreement certificate guarding represented guarded
       reified)
     (interpretation : certificate.GuardInterpretation guarding represented guarded)
     (unsat : Crush.SMT.CommandsUnsatisfiable certificate.emitted) :
     Datatype.Env.Unsatisfiable certificate.data.toModelEnv reified.source :=
   agreement.unsat_source interpretation unsat
+
+/-- The leading `set-logic` command returned by `buildScript` is accounted for
+by semantic equivalence rather than silently dropped. -/
+example (certificate : CertifiedDataEnv)
+    (guarding : SMT.Guarding
+      (Symbol (certificate.env.signature ++ certificate.tail)))
+    (represented : certificate.Representation guarding.encoding)
+    (guarded : certificate.GuardRepresentation guarding represented)
+    (reified : Reification.ReifiedSentenceFor certificate.source certificate.env
+      certificate.bridge)
+    (agreement : SingleFactAgreement certificate guarding represented guarded
+      reified)
+    (interpretation : certificate.GuardInterpretation guarding represented guarded)
+    (logic : String)
+    (unsat : Crush.SMT.CommandsUnsatisfiable
+      (#[.setLogic logic] ++ certificate.emitted)) :
+    Datatype.Env.Unsatisfiable certificate.data.toModelEnv reified.source :=
+  agreement.unsat_source_script interpretation logic unsat
 
 end Crush.Metatheory.SMT.Datatype.Tests
 
