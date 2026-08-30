@@ -1,0 +1,258 @@
+import Crush.SMT.Syntax
+
+/-!
+# Decidable equality for recursive SMT terms
+
+`Term` and `Attr` recurse through arrays, so Lean's standard equality deriver
+cannot construct their instances directly.  The explicit list recursion below
+is used at proof-producing production boundaries that must compare retained raw
+commands without trusting rendered strings or hashes.
+-/
+
+namespace Crush.SMT
+
+instance : DecidableEq Literal := fun left right => by
+  cases left <;> cases right <;> simp <;> exact inferInstance
+
+namespace Term
+
+mutual
+  private def size : Term → Nat
+    | .lit _ | .bvar _ => 1
+    | .app _ arguments => listSize arguments.toList + 1
+    | .letE bindings body => bindingSize bindings.toList + size body + 1
+    | .forallE _ body | .existsE _ body | .lam _ body => size body + 1
+    | .annot body attributes => size body + attrListSize attributes.toList + 1
+
+  private def attrSize : Attr → Nat
+    | .named _ | .keyword _ _ => 1
+    | .pattern terms => listSize terms.toList + 1
+
+  private def listSize : List Term → Nat
+    | [] => 0
+    | term :: terms => size term + listSize terms + 1
+
+  private def attrListSize : List Attr → Nat
+    | [] => 0
+    | head :: tail => attrSize head + attrListSize tail + 1
+
+  private def bindingSize : List (String × Term) → Nat
+    | [] => 0
+    | (_, term) :: bindings => size term + bindingSize bindings + 1
+end
+
+mutual
+  private def decEq : (left right : Term) → Decidable (left = right)
+    | .lit left, .lit right =>
+        if equal : left = right then isTrue (by cases equal; rfl)
+        else isFalse fun assumed => by cases assumed; exact equal rfl
+    | .bvar left, .bvar right =>
+        if equal : left = right then isTrue (by cases equal; rfl)
+        else isFalse fun assumed => by cases assumed; exact equal rfl
+    | .app leftName leftArgs, .app rightName rightArgs =>
+        if namesEq : leftName = rightName then
+          match listDecEq leftArgs.toList rightArgs.toList with
+          | isFalse different => isFalse fun equal => by
+              injection equal with _ argsEq
+              exact different (congrArg Array.toList argsEq)
+          | isTrue argsEq => isTrue (by
+              cases namesEq
+              have arraysEq := Array.toList_inj.mp argsEq
+              cases arraysEq
+              rfl)
+        else isFalse fun equal => by
+          injection equal with equalNames
+          exact namesEq equalNames
+    | .letE leftBindings leftBody, .letE rightBindings rightBody =>
+        match bindingDecEq leftBindings.toList rightBindings.toList with
+        | isFalse different => isFalse fun equal => by
+            injection equal with bindingsEq
+            exact different (congrArg Array.toList bindingsEq)
+        | isTrue bindingsEq =>
+          match decEq leftBody rightBody with
+          | isFalse different => isFalse fun equal => by
+              injection equal with _ bodyEq
+              exact different bodyEq
+          | isTrue bodyEq => isTrue (by
+              have arraysEq := Array.toList_inj.mp bindingsEq
+              cases arraysEq
+              cases bodyEq
+              rfl)
+    | .forallE leftBinders leftBody, .forallE rightBinders rightBody
+    | .existsE leftBinders leftBody, .existsE rightBinders rightBody
+    | .lam leftBinders leftBody, .lam rightBinders rightBody =>
+        if bindersEq : leftBinders = rightBinders then
+          match decEq leftBody rightBody with
+          | isFalse different => isFalse fun equal => by
+              injection equal with _ bodyEq
+              exact different bodyEq
+          | isTrue bodyEq => isTrue (by
+              cases bindersEq
+              cases bodyEq
+              rfl)
+        else isFalse fun equal => by
+          injection equal with equalBinders
+          exact bindersEq equalBinders
+    | .annot leftBody leftAttrs, .annot rightBody rightAttrs =>
+        match decEq leftBody rightBody with
+        | isFalse different => isFalse fun equal => by
+            injection equal with bodyEq
+            exact different bodyEq
+        | isTrue bodyEq =>
+          match attrListDecEq leftAttrs.toList rightAttrs.toList with
+          | isFalse different => isFalse fun equal => by
+              injection equal with _ attrsEq
+              exact different (congrArg Array.toList attrsEq)
+          | isTrue attrsEq => isTrue (by
+              cases bodyEq
+              have arraysEq := Array.toList_inj.mp attrsEq
+              cases arraysEq
+              rfl)
+    | .lit _, .bvar _ | .lit _, .app _ _ | .lit _, .letE _ _
+    | .lit _, .forallE _ _ | .lit _, .existsE _ _ | .lit _, .lam _ _
+    | .lit _, .annot _ _ | .bvar _, .lit _ | .bvar _, .app _ _
+    | .bvar _, .letE _ _ | .bvar _, .forallE _ _ | .bvar _, .existsE _ _
+    | .bvar _, .lam _ _ | .bvar _, .annot _ _ | .app _ _, .lit _
+    | .app _ _, .bvar _ | .app _ _, .letE _ _ | .app _ _, .forallE _ _
+    | .app _ _, .existsE _ _ | .app _ _, .lam _ _ | .app _ _, .annot _ _
+    | .letE _ _, .lit _ | .letE _ _, .bvar _ | .letE _ _, .app _ _
+    | .letE _ _, .forallE _ _ | .letE _ _, .existsE _ _
+    | .letE _ _, .lam _ _ | .letE _ _, .annot _ _ | .forallE _ _, .lit _
+    | .forallE _ _, .bvar _ | .forallE _ _, .app _ _
+    | .forallE _ _, .letE _ _ | .forallE _ _, .existsE _ _
+    | .forallE _ _, .lam _ _ | .forallE _ _, .annot _ _
+    | .existsE _ _, .lit _ | .existsE _ _, .bvar _
+    | .existsE _ _, .app _ _ | .existsE _ _, .letE _ _
+    | .existsE _ _, .forallE _ _ | .existsE _ _, .lam _ _
+    | .existsE _ _, .annot _ _ | .lam _ _, .lit _ | .lam _ _, .bvar _
+    | .lam _ _, .app _ _ | .lam _ _, .letE _ _ | .lam _ _, .forallE _ _
+    | .lam _ _, .existsE _ _ | .lam _ _, .annot _ _ | .annot _ _, .lit _
+    | .annot _ _, .bvar _ | .annot _ _, .app _ _ | .annot _ _, .letE _ _
+    | .annot _ _, .forallE _ _ | .annot _ _, .existsE _ _
+    | .annot _ _, .lam _ _ => isFalse nofun
+  termination_by left right => size left + size right
+  decreasing_by all_goals
+    simp [size] <;> omega
+
+  private def attrDecEq : (left right : Attr) → Decidable (left = right)
+    | .named left, .named right =>
+        if equal : left = right then isTrue (by cases equal; rfl)
+        else isFalse fun assumed => by cases assumed; exact equal rfl
+    | .pattern left, .pattern right =>
+        match listDecEq left.toList right.toList with
+        | isFalse different => isFalse fun equal => by
+            injection equal with termsEq
+            exact different (congrArg Array.toList termsEq)
+        | isTrue termsEq => isTrue (by
+            have arraysEq := Array.toList_inj.mp termsEq
+            cases arraysEq
+            rfl)
+    | .keyword leftName leftValue, .keyword rightName rightValue =>
+        if nameEq : leftName = rightName then
+          if valueEq : leftValue = rightValue then
+            isTrue (by cases nameEq; cases valueEq; rfl)
+          else isFalse fun equal => by
+            injection equal with _ equalValue
+            exact valueEq equalValue
+        else isFalse fun equal => by
+          injection equal with equalName
+          exact nameEq equalName
+    | .named _, .pattern _ | .named _, .keyword _ _
+    | .pattern _, .named _ | .pattern _, .keyword _ _
+    | .keyword _ _, .named _ | .keyword _ _, .pattern _ => isFalse nofun
+  termination_by left right => attrSize left + attrSize right
+  decreasing_by all_goals
+    simp [attrSize] <;> omega
+
+  private def listDecEq : (left right : List Term) → Decidable (left = right)
+    | [], [] => isTrue rfl
+    | [], _ :: _ | _ :: _, [] => isFalse nofun
+    | left :: lefts, right :: rights =>
+        match decEq left right with
+        | isFalse different => isFalse fun equal => by
+            injection equal with headEq
+            exact different headEq
+        | isTrue headEq =>
+          match listDecEq lefts rights with
+          | isFalse different => isFalse fun equal => by
+              injection equal with _ tailEq
+              exact different tailEq
+          | isTrue tailEq => isTrue (by
+              cases headEq
+              cases tailEq
+              rfl)
+  termination_by left right => listSize left + listSize right
+  decreasing_by all_goals
+    simp [listSize] <;> omega
+
+  private def attrListDecEq :
+      (left right : List Attr) → Decidable (left = right)
+    | [], [] => isTrue rfl
+    | [], _ :: _ | _ :: _, [] => isFalse nofun
+    | left :: lefts, right :: rights =>
+        match attrDecEq left right with
+        | isFalse different => isFalse fun equal => by
+            injection equal with headEq
+            exact different headEq
+        | isTrue headEq =>
+          match attrListDecEq lefts rights with
+          | isFalse different => isFalse fun equal => by
+              injection equal with _ tailEq
+              exact different tailEq
+          | isTrue tailEq => isTrue (by
+              cases headEq
+              cases tailEq
+              rfl)
+  termination_by left right => attrListSize left + attrListSize right
+  decreasing_by all_goals
+    simp [attrListSize] <;> omega
+
+  private def bindingDecEq :
+      (left right : List (String × Term)) → Decidable (left = right)
+    | [], [] => isTrue rfl
+    | [], _ :: _ | _ :: _, [] => isFalse nofun
+    | (leftName, left) :: lefts, (rightName, right) :: rights =>
+        if nameEq : leftName = rightName then
+          match decEq left right with
+          | isFalse different => isFalse fun equal => by
+              injection equal with headEq
+              exact different (congrArg Prod.snd headEq)
+          | isTrue headEq =>
+            match bindingDecEq lefts rights with
+            | isFalse different => isFalse fun equal => by
+                injection equal with _ tailEq
+                exact different tailEq
+            | isTrue tailEq => isTrue (by
+                cases nameEq
+                cases headEq
+                cases tailEq
+                rfl)
+        else isFalse fun equal => by
+          injection equal with headEq
+          exact nameEq (congrArg Prod.fst headEq)
+  termination_by left right => bindingSize left + bindingSize right
+  decreasing_by all_goals
+    simp [bindingSize] <;> omega
+end
+
+end Term
+
+instance : DecidableEq Term := Term.decEq
+instance : DecidableEq Attr := Term.attrDecEq
+
+instance : DecidableEq FunDef := fun left right => by
+  cases left with
+  | mk leftName leftArgs leftResult leftBody =>
+    cases right with
+    | mk rightName rightArgs rightResult rightBody =>
+      exact decidable_of_iff
+        (leftName = rightName ∧ leftArgs = rightArgs ∧
+          leftResult = rightResult ∧ leftBody = rightBody) (by
+            constructor
+            · rintro ⟨rfl, rfl, rfl, rfl⟩
+              rfl
+            · intro equal
+              injection equal with nameEq argsEq resultEq bodyEq
+              exact ⟨nameEq, argsEq, resultEq, bodyEq⟩)
+
+end Crush.SMT

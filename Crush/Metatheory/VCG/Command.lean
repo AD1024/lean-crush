@@ -85,11 +85,21 @@ structure ClosureEquationEncoding where
   command_eq : command = .assert
     (if binders.isEmpty then guardedEquation else .forallE binders guardedEquation)
 
+/-- Exact production encoding of the mutually recursive well-formedness
+predicates associated with one certified datatype block. Semantic field-guard
+evidence is attached by the later representation layer. -/
+structure DataGuardEncoding where
+  owner : DatatypeBlock
+  definitions : Array SMT.FunDef
+  command : SMT.Command
+  command_eq : command = .defFunsRec definitions
+
 /-- Syntax witnesses retained by the stateful translation in emission order. -/
 inductive CommandEncoding where
   | app : AppDeclarationEncoding → CommandEncoding
   | closure : ClosureDeclarationEncoding → CommandEncoding
   | closureEquation : ClosureEquationEncoding → CommandEncoding
+  | dataGuard : DataGuardEncoding → CommandEncoding
 
 namespace CommandEncoding
 
@@ -97,6 +107,7 @@ def command : CommandEncoding → SMT.Command
   | .app encoding => encoding.command
   | .closure encoding => encoding.command
   | .closureEquation encoding => encoding.command
+  | .dataGuard encoding => encoding.command
 
 private def sortHead? : SMT.SSort → Option String
   | .app (.symb name) _ => some name
@@ -107,10 +118,10 @@ private def termHead? : SMT.Term → Option String
   | .app (.symb name) _ => some name
   | _ => none
 
-/-- Principal structural symbols determined by the encoding itself. Keeping
-this projection here prevents a stateful call site from supplying unrelated names
+/-- Principal allocated symbols determined by the encoding itself. Keeping this
+projection here prevents a stateful call site from supplying unrelated names
 while claiming command/allocation correspondence. -/
-def structuralSymbols : CommandEncoding → Array String
+def allocatedSymbols : CommandEncoding → Array String
   | .app encoding =>
       match sortHead? encoding.functionSort with
       | some functionSort => #[functionSort, encoding.name]
@@ -123,6 +134,7 @@ def structuralSymbols : CommandEncoding → Array String
       match termHead? encoding.closure with
       | some closureName => #[closureName, encoding.appName]
       | none => #[encoding.appName]
+  | .dataGuard encoding => encoding.definitions.map (·.name)
 
 end CommandEncoding
 

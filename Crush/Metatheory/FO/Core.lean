@@ -38,9 +38,9 @@ namespace FOSort
 
 /-- Erase a source type to its first-order representation. -/
 @[reducible] def ofTy : Ty → FOSort
-  | Crush.Metatheory.Ty.bool => FOSort.bool
-  | Crush.Metatheory.Ty.base baseSort => FOSort.base baseSort
-  | Crush.Metatheory.Ty.arrow domain codomain => FOSort.fn domain codomain
+  | .bool => .bool
+  | .base baseSort => .base baseSort
+  | .arrow domain codomain => .fn domain codomain
 
 end FOSort
 

@@ -187,6 +187,26 @@ unrelated datatypes are not added wholesale to `grind`.
 Other behaviour is controlled by `set_option`s (`crush.backend`, `crush.timeout`, and
 others); each carries its own documentation where it is declared.
 
+Certified datatype acceptance is deliberately opt-in while its coverage is
+being expanded, so existing benchmark translation remains unchanged:
+
+```lean
+inductive Reading where
+  | missing
+  | measured (value : Int)
+
+set_option crush.datatype.certify true in
+example (x y : Int)
+    (same : Reading.measured x = Reading.measured y)
+    (threshold : 10 ≤ x) : 10 ≤ y := by
+  crush
+```
+
+This switch certifies datatype discovery, typed constructor/selector ownership,
+and the exact native `declare-datatypes` command retained in translation state.
+The surrounding extensible Lean-to-SMT translation remains the existing
+production path.
+
 Library premise selection is opt-in and uses Lean's registered
 `LibrarySuggestions` engine:
 

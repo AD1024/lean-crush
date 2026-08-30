@@ -6,6 +6,7 @@ import Crush.Translation.Attr
 import Crush.Translation.Theories
 import Crush.Translation.HOEncoding
 import Crush.Metatheory.Reification.Reify
+import Crush.Metatheory.Reification.Datatype
 open Lean Meta
 
 /-!
@@ -54,6 +55,7 @@ solver are only search heuristics — not from reasoning about the translator it
 namespace Crush
 
 open SMT
+open Metatheory.SMT.Datatype (wfDef)
 
 /-- A legal, non-panicking symbol hint from a Lean name (last component, or a
 fallback for anonymous/numeric names). `Name.getString!` panics on those. -/
@@ -148,106 +150,97 @@ We require at least one constructor: SMT-LIB datatypes must be inhabited
 (z3 rejects `(declare-datatypes ((E 0)) (()))`), and more fundamentally every SMT
 sort is non-empty while `Empty` is not, so an empty Lean inductive cannot be
 modelled faithfully and must stay an opaque sort (see `isEmptyType`). -/
-def isSupportedDatatypeApp (n : Name) (typeArgs : Array Expr) : MetaM Bool := do
+private def legacyDatatypeApp (n : Name) (typeArgs : Array Expr) : MetaM Bool := do
   let env ← getEnv
   let some (.inductInfo iv) := env.find? n | return false
-  -- Indices (true dependent families) are unsupported; parameters are fine once
-  -- instantiated. The applied prefix must supply exactly the parameters.
   if iv.numIndices != 0 then return false
   if typeArgs.size != iv.numParams then return false
   if n == ``Nat || n == ``Int || n == ``Bool || n == ``String then return false
   if iv.ctors.isEmpty then return false
-  -- A type *class* (`HAdd`, `Inhabited`, …) is not data: its fields are typically
-  -- functions, and a value is an instance-dictionary chosen by synthesis, not
-  -- something to reason about structurally. Keep classes opaque; this also stops a
-  -- non-canonical operator instance from being datatype-encoded.
   if isClass env n then return false
-  -- Every parameter argument must itself be a *type* (`Sort`), and ground — a
-  -- remaining metavariable/fvar element type has no SMT sort. This is what keeps a
-  -- polymorphic `List α` opaque while `List Int` is a real datatype.
-  for a in typeArgs do
-    let aty ← whnf (← inferType a)
-    unless aty.isSort do return false
-    if (← instantiateMVars a).hasExprMVar then return false
-  -- Must live in `Type`, not `Prop` (propositions map to `Bool`). A
-  -- universe-polymorphic declaration such as `PUnit : Sort u` reports its *generic*
-  -- result as `.sort (u+1)` rather than `Type`, so accept a `.sort` whose level is
-  -- not literally `0`; that admits `PUnit`/`Unit` while still excluding `Prop`.
+  for argument in typeArgs do
+    let type ← whnf (← inferType argument)
+    unless type.isSort do return false
+    if (← instantiateMVars argument).hasExprMVar then return false
   unless (match iv.type.getForallBody with
-          | .sort l => !l.isZero
-          | _ => false) do
+      | .sort level => !level.isZero
+      | _ => false) do
     return false
-  -- Every constructor field, *instantiated at `typeArgs`*, must be translatable to a
-  -- non-function SMT sort. A field mentioning the datatype in a strictly positive,
-  -- direct way (`T ā` itself) is fine; a *function-typed* field cannot be a datatype
-  -- selector's range (SMT datatypes are first-order), so such a type stays opaque.
-  -- Fields must also be data, not proofs (a `Prop` field has no SMT sort).
   let fieldsOk ← iv.ctors.allM fun ctorName => do
-    let ci ← getConstInfoCtor ctorName
-    let ctorTy ← instantiateForall ci.type typeArgs
-    forallTelescopeReducing ctorTy fun args _ =>
-      args.allM fun a => do
-        let ty ← whnf (← inferType a)
-        if ty.isForall then return false
-        if ← isProp ty then return false
+    let info ← getConstInfoCtor ctorName
+    let ctorType ← instantiateForall info.type typeArgs
+    forallTelescopeReducing ctorType fun fields _ =>
+      fields.allM fun field => do
+        let type ← whnf (← inferType field)
+        if type.isForall then return false
+        if ← isProp type then return false
         return true
   unless fieldsOk do return false
-  -- Reject recursion that leaves `n`'s own mutual block and comes back
-  -- (`Rose ⊃ List Rose ⊃ Rose`). SMT-LIB requires mutually recursive datatypes to share one
-  -- `declare-datatypes` block. `declareDatatype` emits exactly `iv.all` — Lean's mutual
-  -- block — together, so `Tree`/`TreeList` are fine; but `Rose` and `List` are *not* one
-  -- Lean block, so `List` would be emitted as its own earlier block whose field
-  -- forward-references a sort that does not exist yet, and the solver rejects the whole
-  -- script ("unknown sort 'Rose_0'"). Keeping these opaque yields an uninterpreted sort:
-  -- less precise, but a *valid* query.
-  return !(← escapesBlock n iv.all.toArray typeArgs)
+  if ← escapesBlock n iv.all.toArray typeArgs then return false
+  return true
 where
-  /-- Whether some constructor field reaches back into `block` through a datatype *outside*
-  `block`. `block` is `n`'s Lean mutual block, which is emitted as a unit. -/
-  escapesBlock (n : Name) (block : Array Name) (typeArgs : Array Expr) : MetaM Bool := do
+  escapesBlock (n : Name) (block : Array Name) (typeArgs : Array Expr) :
+      MetaM Bool := do
     let inBlock : Std.HashSet Name := block.foldl (·.insert ·) {}
     let some (.inductInfo iv) := (← getEnv).find? n | return false
     iv.ctors.anyM fun ctorName => do
-      let ci ← getConstInfoCtor ctorName
-      let ctorTy ← instantiateForall ci.type typeArgs
-      forallTelescopeReducing ctorTy fun args _ =>
-        args.anyM fun a => do
-          let fty ← whnf (← inferType a)
-          -- A field in the same mutual block is emitted alongside `n`, so it is safe and
-          -- must not be descended into (that is the legitimate recursion).
-          match fty.getAppFn with
-          | .const m _ => if inBlock.contains m then return false
+      let info ← getConstInfoCtor ctorName
+      let ctorType ← instantiateForall info.type typeArgs
+      forallTelescopeReducing ctorType fun fields _ =>
+        fields.anyM fun field => do
+          let type ← whnf (← inferType field)
+          match type.getAppFn with
+          | .const member _ => if inBlock.contains member then return false
           | _ => pure ()
-          reaches inBlock fty 8 inBlock
+          reaches inBlock type 8 inBlock
 
-  /-- Whether `ty`'s constructor-field closure mentions any member of `targets`. -/
-  reaches (targets : Std.HashSet Name) (ty : Expr) (fuel : Nat)
+  reaches (targets : Std.HashSet Name) (type : Expr) (fuel : Nat)
       (visiting : Std.HashSet Name) : MetaM Bool := do
     match fuel with
     | 0 => return false
     | fuel + 1 =>
-      let ty ← whnf ty
-      let .const m _ := ty.getAppFn | return false
-      if targets.contains m then return true
-      if visiting.contains m then return false
-      let some (.inductInfo miv) := (← getEnv).find? m | return false
-      if miv.numIndices != 0 then return false
-      let margs := ty.getAppArgs
-      if margs.size != miv.numParams then return false
-      let visiting := visiting.insert m
-      miv.ctors.anyM fun c => do
-        let ci ← getConstInfoCtor c
-        let some cty ← (try pure (some (← instantiateForall ci.type margs))
-                        catch _ => pure none) | pure false
-        forallTelescopeReducing cty fun args _ =>
-          args.anyM fun a => do reaches targets (← inferType a) fuel visiting
+      let type ← whnf type
+      let .const name _ := type.getAppFn | return false
+      if targets.contains name then return true
+      if visiting.contains name then return false
+      let some (.inductInfo info) := (← getEnv).find? name | return false
+      if info.numIndices != 0 then return false
+      let typeArgs := type.getAppArgs
+      if typeArgs.size != info.numParams then return false
+      let visiting := visiting.insert name
+      info.ctors.anyM fun ctorName => do
+        let ctorInfo ← getConstInfoCtor ctorName
+        let some ctorType ← (try
+            pure (some (← instantiateForall ctorInfo.type typeArgs))
+          catch _ => pure none) | pure false
+        forallTelescopeReducing ctorType fun fields _ =>
+          fields.anyM fun field => do
+            reaches targets (← inferType field) fuel visiting
+
+/-- Select legacy or certified datatype acceptance explicitly. The legacy
+predicate remains the default so enabling the growing certified fragment cannot
+silently perturb production benchmarks. -/
+def isSupportedDatatypeApp (n : Name) (typeArgs : Array Expr)
+    (certified := false) : MetaM Bool := do
+  if certified then
+    return (← Metatheory.Reification.reifyDatatypeApp n typeArgs).isOk
+  legacyDatatypeApp n typeArgs
 
 /-- `isSupportedDatatypeApp` for a fully-applied type expression. -/
-def supportedDatatypeType? (e : Expr) : MetaM (Option (Name × Array Expr)) := do
+def supportedDatatypeType? (e : Expr) : TranslateM (Option (Name × Array Expr)) := do
   let e ← whnf e
   let .const n _ := e.getAppFn | return none
   let args := e.getAppArgs
-  if ← isSupportedDatatypeApp n args then return some (n, args) else return none
+  let certified := (← TranslateM.getConfig).certifyDatatype
+  if certified then
+    match ← Metatheory.Reification.reifyDatatypeApp n args with
+    | .ok _ => return some (n, args)
+    | .error reason =>
+        if let some (.inductInfo _) := (← getEnv).find? n then
+          TranslateM.markDatatypeTrusted reason
+        return none
+  if ← isSupportedDatatypeApp n args then return some (n, args)
+  return none
 
 
 /-- Whether `ty` is an *uninhabited* Lean type, which SMT cannot model: every SMT
@@ -260,7 +253,12 @@ def isEmptyType (ty : Expr) : MetaM Bool := do
   let ty ← whnf ty
   let .const n _ := ty.getAppFn | return false
   let some (.inductInfo iv) := (← getEnv).find? n | return false
-  return iv.ctors.isEmpty && iv.numIndices == 0
+  if iv.ctors.isEmpty && iv.numIndices == 0 then return true
+  if iv.numIndices != 0 || ty.getAppArgs.size != iv.numParams then return false
+  let some shape ← Metatheory.Reification.reifyDatatypeShape? n ty.getAppArgs
+    | return false
+  let some data := shape.find? n | return false
+  return (Metatheory.Datatype.seed? shape.block shape.arity data).isNone
 
 /-- Names of the SMT constructor / selector for a Lean constructor.
 
@@ -293,9 +291,149 @@ def reserveSelSymbol (sortName : String) (ctorName : Name) (i : Nat) : Translate
     index := some i
   } (selSymbol sortName ctorName i)
 
-/-- The SMT tester `((_ is C) x)`. -/
-def testerApp (ctorSym : String) (x : SMT.Term) : SMT.Term :=
-  .app (.indexed "is" #[.inl ctorSym]) #[x]
+/-- Allocator-selected names and external sort images for one reified mutual
+datatype block. Only sort positions need a size proof; constructor and selector
+positions are checked by exact command equality below. -/
+structure AllocatedDataNames (arity : Nat) where
+  sorts : Array String
+  sorts_size : sorts.size = arity
+  ctors : Array (Array String)
+  sels : Array (Array (Array String))
+  bases : List (Metatheory.BaseSort × SSort)
+
+namespace AllocatedDataNames
+
+private def nested? {α : Type} (values : Array (Array α))
+    (outer inner : Nat) : Option α := do
+  let row ← values[outer]?
+  row[inner]?
+
+private def triple? {α : Type} (values : Array (Array (Array α)))
+    (first second third : Nat) : Option α := do
+  let rows ← values[first]?
+  let row ← rows[second]?
+  row[third]?
+
+/-- The intrinsic native encoding determined by production's allocated names. -/
+def encoding {arity : Nat} (names : AllocatedDataNames arity) :
+    Metatheory.SMT.Datatype.Encoding arity where
+  name
+    | .sort data => names.sorts[data.val]'(by
+        rw [names.sorts_size]
+        exact data.isLt)
+    | .ctor data ctor =>
+        (nested? names.ctors data.val ctor).getD s!"__invalid_ctor_{data.val}_{ctor}"
+    | .sel data ctor field =>
+        (triple? names.sels data.val ctor field).getD
+          s!"__invalid_sel_{data.val}_{ctor}_{field}"
+  baseSort := fun sort =>
+    (names.bases.find? fun entry => entry.1 == sort).map (·.2) |>.getD
+      (.app (.symb sort.name) #[])
+
+end AllocatedDataNames
+
+/-- Check and retain exact agreement between one production native command and
+the canonical command computed from its typed reified block. -/
+def certifyDataCommand? (block : Metatheory.Reification.DatatypeBlock)
+    (names : AllocatedDataNames block.arity) :
+    Option Metatheory.VCG.CertifiedDataCommand :=
+  let encoding := names.encoding
+  let command := Metatheory.SMT.Datatype.command block.block encoding
+  let sortNames := List.ofFn fun data : Fin block.arity =>
+    encoding.name (.sort data)
+  let rawSymbols := SMT.datatypeSymbols
+    (Metatheory.SMT.Datatype.entries block.block encoding)
+  if nameNodup : sortNames.Nodup then
+    if sortsFresh : sortNames.all fun name =>
+        name != "Bool" && name != "Int" && name != "String" then
+      if symbolsNodup : rawSymbols.Nodup then
+        if symbolsFresh : rawSymbols.all fun symbol =>
+            decide (SMT.NotBuiltin symbol) then
+          some {
+            owner := block
+            typed := {
+              encoding
+              command
+              command_eq := rfl
+              wf := {
+                blockWF := block.wf
+                names := Metatheory.SMT.Datatype.Encoding.wf_of_names
+                  encoding nameNodup
+                sorts_fresh := by
+                  intro data
+                  have member : encoding.name (.sort data) ∈ sortNames := by
+                    exact List.mem_ofFn.mpr ⟨data, rfl⟩
+                  have checked := List.all_eq_true.mp sortsFresh _ member
+                  simp only [bne_iff_ne, Bool.and_eq_true] at checked
+                  rcases checked with ⟨⟨notBool, notInt⟩, notString⟩
+                  constructor
+                  · intro equal
+                    injection equal with identEqual
+                    injection identEqual with nameEqual
+                    exact notBool nameEqual
+                  · constructor
+                    · intro equal
+                      injection equal with identEqual
+                      injection identEqual with nameEqual
+                      exact notInt nameEqual
+                    · intro equal
+                      injection equal with identEqual
+                      injection identEqual with nameEqual
+                      exact notString nameEqual
+                symbols := symbolsNodup
+                symbols_fresh := by
+                  intro symbol member
+                  have checked := List.all_eq_true.mp symbolsFresh symbol member
+                  exact of_decide_eq_true checked } } }
+        else none
+      else none
+    else none
+  else none
+
+/-- One constructor discovered before datatype allocation mutates translation
+state. Field types are ground because both legacy and certified acceptance pass
+through `reifyDatatypeBlock?`. -/
+structure DataCtorPlan where
+  name : Name
+  fields : Array Expr
+
+/-- One member of a mutual datatype declaration plan. -/
+structure DataMemberPlan where
+  name : Name
+  ctors : Array DataCtorPlan
+
+/-- Read-only Lean declaration information consumed by `declareDatatype`.
+Separating this discovery value from allocation and emission prevents later
+state changes from affecting which constructors or fields are traversed. -/
+structure DatatypePlan where
+  head : Name
+  typeArgs : Array Expr
+  members : Array DataMemberPlan
+
+/-- Discover the complete mutual block without allocating names or emitting SMT
+commands. Accepted datatypes have nondependent ground fields, so their types can
+leave the temporary constructor telescope safely. -/
+partial def datatypePlan (head : Name) (typeArgs : Array Expr) :
+    MetaM DatatypePlan := do
+  let info ← getConstInfoInduct head
+  let mut members : Array DataMemberPlan := #[]
+  for name in info.all do
+    let memberInfo ← getConstInfoInduct name
+    let mut ctors : Array DataCtorPlan := #[]
+    for ctorName in memberInfo.ctors do
+      let ctorInfo ← getConstInfoCtor ctorName
+      let ctorType ← instantiateForall ctorInfo.type typeArgs
+      let fields ← forallTelescopeReducing ctorType fun args _ => do
+        let mut fields : Array Expr := #[]
+        for field in args do
+          let type ← instantiateMVars (← inferType field)
+          if args.any fun argument => type.containsFVar argument.fvarId! then
+            throwError "crush: datatype plan found dependent field in `{ctorName}`"
+          fields := fields.push type
+        return fields
+      ctors := ctors.push { name := ctorName, fields }
+    members := members.push { name, ctors }
+  return { head, typeArgs, members }
 
 /-- The well-formedness predicate symbol for a datatype sort. -/
 def wfSymbol (sortName : String) : String := s!"wf_{sortName}"
@@ -680,7 +818,7 @@ mutual
       let argSorts := (argumentImages.map (·.smt)).toArray
       let resSort := resultImage.smt
       let appCommand := productionAppDeclaration appName sort argSorts resSort
-      TranslateM.emitStructuralCommand (.app {
+      TranslateM.emitAllocatedCommand (.app {
         arrow := shape.verified
         name := appName
         functionSort := sort
@@ -830,7 +968,7 @@ mutual
     let capSorts := (captureImages.map (·.smt)).toArray
     let (arrowSort, _) ← declareArrowSort lamTy
     let closureCommand := productionClosureDeclaration cloName capSorts arrowSort
-    TranslateM.emitStructuralCommand (.closure {
+    TranslateM.emitAllocatedCommand (.closure {
       arrow := shape.verified
       name := cloName
       captures := captureImages
@@ -865,7 +1003,7 @@ mutual
       | some g => SMT.Term.symbApp "=>" #[g, rawEquation]
     let allBinders := binders ++ paramBinders
     let equationCommand := productionClosureAssertion allBinders axiomBody
-    TranslateM.emitStructuralCommand (.closureEquation {
+    TranslateM.emitAllocatedCommand (.closureEquation {
       arrow := shape.verified
       appName
       closure := cloApp
@@ -1046,53 +1184,98 @@ mutual
     let key : StructuralKey := { tag := "datatype", name := n, typeExprs := typeArgs }
     if let some name ← TranslateM.structuralSymbol? key then
       return name
+    let certify := (← TranslateM.getConfig).certifyDatatype
+    let certifiedBlock? : Option Metatheory.Reification.DatatypeBlock ←
+      if certify then
+        match (← get).activeDataSignature with
+        | some (.pack env _) =>
+            let some found ← env.find? n typeArgs
+              | throwError "crush: active datatype environment omitted `{n}`"
+            pure (some found.block)
+        | none =>
+            match ← Metatheory.Reification.reifyDatatypeApp n typeArgs with
+            | .ok accepted => pure (some accepted.block)
+            | .error reason =>
+                throwError "crush: certified datatype acceptance drift for `{n}`: \
+                  {repr reason}"
+      else
+        pure none
+    let plan ← datatypePlan n typeArgs
     -- Emit the whole mutual block together: SMT-LIB requires mutually-recursive
     -- datatypes in one `declare-datatypes` (`tree`'s selector range `treelist` must
     -- be in scope when `tree` is), and a member's `wf` axiom may reference a sibling's
     -- `wf`. `iv.all` is a singleton for an ordinary inductive, so that path is
     -- unchanged; a mutual block shares parameters, so the same structural
     -- arguments key every member.
-    let iv ← getConstInfoInduct n
     -- Reserve every member's sort name first, so a field mentioning a sibling resolves
     -- to it via the idempotent early-return above rather than recursing.
     let mut memberSorts : Array (Name × String) := #[]
-    for m in iv.all do
+    let mut sortNames : Array String := #[]
+    for member in plan.members do
       let memberKey : StructuralKey := {
-        tag := "datatype", name := m, typeExprs := typeArgs
+        tag := "datatype", name := member.name, typeExprs := typeArgs
       }
-      let mSort ← TranslateM.symbolForStructural memberKey (nameHint m)
+      let mSort ← TranslateM.symbolForStructural memberKey (nameHint member.name)
       markSortDeclared mSort
-      memberSorts := memberSorts.push (m, mSort)
+      memberSorts := memberSorts.push (member.name, mSort)
+      sortNames := sortNames.push mSort
     let mut dtInfos : Array (String × Nat × DatatypeDecl) := #[]
     let mut memberWF : Array (String × Array (String × Array (String × Expr))) := #[]
-    for (m, mSort) in memberSorts do
-      let miv ← getConstInfoInduct m
+    let mut ctorNames : Array (Array String) := #[]
+    let mut selNames : Array (Array (Array String)) := #[]
+    let mut baseSorts : List (Metatheory.BaseSort × SSort) := []
+    for (member, named) in plan.members.zip memberSorts do
+      let (m, mSort) := named
       let mut ctorDecls : Array CtorDecl := #[]
+      let mut memberCtors : Array String := #[]
+      let mut memberSels : Array (Array String) := #[]
       -- Field descriptors for the wf axiom: per ctor, the selectors needing a guard.
       let mut wfParts : Array (String × Array (String × Expr)) := #[]
-      for ctorName in miv.ctors do
-        let ctorSym ← reserveCtorSymbol mSort ctorName
-        let ctorInfo ← getConstInfoCtor ctorName
-        -- Instantiate the constructor's type at the datatype's parameters, so each
-        -- field type is ground (`Option.some : α → Option α` becomes `Int → Option Int`
-        -- at `typeArgs = #[Int]`).
-        let ctorTy ← instantiateForall ctorInfo.type typeArgs
-        let (selDecls, guards) ← forallTelescopeReducing ctorTy fun args _ => do
-          let mut sels : Array (String × SSort) := #[]
-          let mut gs : Array (String × Expr) := #[]
-          for i in [0:args.size] do
-            let fieldTy ← inferType args[i]!
-            let s ← emitSort fieldTy
-            let selName ← reserveSelSymbol mSort ctorName i
-            sels := sels.push (selName, s)
-            if (← needsWFGuard fieldTy) then
-              gs := gs.push (selName, fieldTy)
-          return (sels, gs)
+      for ctor in member.ctors do
+        let ctorSym ← reserveCtorSymbol mSort ctor.name
+        memberCtors := memberCtors.push ctorSym
+        let mut selDecls : Array (String × SSort) := #[]
+        let mut allocatedSels : Array String := #[]
+        let mut guards : Array (String × Expr) := #[]
+        let mut ctorBases : List (Metatheory.BaseSort × SSort) := []
+        for i in [0:ctor.fields.size] do
+          let fieldTy := ctor.fields[i]!
+          let s ← emitSort fieldTy
+          let selName ← reserveSelSymbol mSort ctor.name i
+          selDecls := selDecls.push (selName, s)
+          allocatedSels := allocatedSels.push selName
+          match ← Metatheory.Reification.reifyType fieldTy with
+          | .base _ base =>
+              unless ctorBases.any fun entry => entry.1 == base do
+                ctorBases := (base, s) :: ctorBases
+          | .bool _ | .arrow .. => pure ()
+          if (← needsWFGuard fieldTy) then
+            guards := guards.push (selName, fieldTy)
+        for entry in ctorBases do
+          unless baseSorts.any fun found => found.1 == entry.1 do
+            baseSorts := entry :: baseSorts
+        memberSels := memberSels.push allocatedSels
         ctorDecls := ctorDecls.push { name := ctorSym, selDecls }
         wfParts := wfParts.push (ctorSym, guards)
       dtInfos := dtInfos.push (mSort, 0, { ctors := ctorDecls })
       memberWF := memberWF.push (mSort, wfParts)
-    TranslateM.emitCommand (.declDatatypes dtInfos)
+      ctorNames := ctorNames.push memberCtors
+      selNames := selNames.push memberSels
+    if let some block := certifiedBlock? then
+      if sizeEq : sortNames.size = block.arity then
+        let names : AllocatedDataNames block.arity := {
+          sorts := sortNames
+          sorts_size := sizeEq
+          ctors := ctorNames
+          sels := selNames
+          bases := baseSorts }
+        let some certificate := certifyDataCommand? block names
+          | throwError "crush: allocated native command for `{n}` failed datatype certification"
+        let _ ← TranslateM.emitCertifiedDataCommand certificate
+      else
+        throwError "crush: certified mutual block size drift for `{n}`"
+    else
+      TranslateM.emitCommand (.declDatatypes dtInfos)
     -- Reserve all predicates before building any body, then define the whole mutual
     -- block with `define-funs-rec`. Quantified equations for recursive predicates make
     -- solvers return `unknown` even on unrelated ground queries.
@@ -1104,8 +1287,16 @@ mutual
     for (mSort, wfParts) in needDef do
       wfDefs := wfDefs.push (← datatypeWFDef mSort wfParts)
     unless wfDefs.isEmpty do
-      TranslateM.emitCommand (.defFunsRec wfDefs)
-    let some (_, nSort) := memberSorts.find? (·.1 == n)
+      let command := SMT.Command.defFunsRec wfDefs
+      if let some owner := certifiedBlock? then
+        TranslateM.emitAllocatedCommand (.dataGuard {
+          owner
+          definitions := wfDefs
+          command
+          command_eq := rfl })
+      else
+        TranslateM.emitCommand command
+    let some (_, nSort) := memberSorts.find? (·.1 == plan.head)
       | throwError "crush: internal — `{n}` missing from its own mutual block"
     return nSort
 
@@ -1165,30 +1356,17 @@ mutual
     let wf ← reserveWfSymbol sortName
     let sort := SSort.app (.symb sortName) #[]
     let v ← TranslateM.freshSymbol "d"
-    let x := SMT.Term.const v
-    let mut conjuncts : Array SMT.Term := #[]
+    -- Bodies in the raw syntax refer to the local argument by de Bruijn index.
+    let x := SMT.Term.bvar 0
+    let mut encoded : Array (String × Array SMT.Term) := #[]
     for (ctorSym, guards) in parts do
-      if guards.isEmpty then continue
       let mut fieldConds : Array SMT.Term := #[]
       for (selName, fieldTy) in guards do
         let selApp := SMT.Term.app (.symb selName) #[x]
         if let some c ← wfCondition fieldTy selApp then
           fieldConds := fieldConds.push c
-      if fieldConds.isEmpty then continue
-      let body := if fieldConds.size == 1 then fieldConds[0]!
-                  else SMT.Term.symbApp "and" fieldConds
-      let tester := testerApp ctorSym x
-      conjuncts := conjuncts.push (smt| (=> $tester $body))
-    let rhs :=
-      if conjuncts.isEmpty then (smt| true)
-      else if conjuncts.size == 1 then conjuncts[0]!
-      else SMT.Term.symbApp "and" conjuncts
-    return {
-      name := wf
-      args := #[(v, sort)]
-      resSort := .app (.symb "Bool") #[]
-      body := rhs
-    }
+      encoded := encoded.push (ctorSym, fieldConds)
+    return wfDef wf v sort encoded
 
   /-- The well-formedness condition on an SMT term of Lean type `ty`: `≥ 0` for
   `Nat`, `wf_T` for a guarded datatype, `none` when nothing is needed. -/
@@ -1488,6 +1666,13 @@ mutual
   is read off the structure argument's type, so `(p : Int × Int).1` selects from the
   monomorphized `Prod Int Int` sort. -/
   partial def projApp? (fn : Expr) (args : Array Expr) : TranslateM (Option SMT.Term) := do
+    if (← TranslateM.getConfig).certifyDatatype then
+      if let some (.pack data _) := (← get).activeDataSignature then
+        let some app ← data.projApp? (mkAppN fn args) | return none
+        let sortName ← declareDatatype app.ctorName.getPrefix app.typeArgs
+        let sel ← reserveSelSymbol sortName app.ctorName app.fieldIndex
+        let target ← emitTerm app.target
+        return some (.app (.symb sel) #[target])
     let .const pn _ := fn | return none
     let some info ← getProjectionFnInfo? pn | return none
     -- Projections take the structure as the argument after `info.numParams`.
@@ -1507,6 +1692,13 @@ mutual
   the *value* args (type parameters are dropped — they select the instantiation, not
   a field). The datatype is declared at that instantiation first. -/
   partial def ctorApp? (fn : Expr) (args : Array Expr) : TranslateM (Option SMT.Term) := do
+    if (← TranslateM.getConfig).certifyDatatype then
+      if let some (.pack data _) := (← get).activeDataSignature then
+        let some app ← data.ctorApp? (mkAppN fn args) | return none
+        let sortName ← declareDatatype app.induct app.typeArgs
+        let values ← app.values.mapM emitTerm
+        let ctor ← reserveCtorSymbol sortName app.name
+        return some (.app (.symb ctor) values)
     let .const cn _ := fn | return none
     let env ← getEnv
     let some (.ctorInfo ci) := env.find? cn | return none

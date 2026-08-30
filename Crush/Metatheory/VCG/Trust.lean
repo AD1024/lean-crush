@@ -24,6 +24,7 @@ inductive TrustReason where
   | closure (source : Expr)
   | constant (source : Expr)
   | nativeHO (source : Expr)
+  | datatype (reason : DatatypeReject)
   | unsupported (source : Expr)
   deriving Inhabited, Repr
 

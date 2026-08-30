@@ -19,21 +19,31 @@ abbrev Command := Crush.SMT.Command
 
 open Defunctionalization.Flattened
 
-/-- Concrete names and sorts assigned to one abstract typed FO symbol family.
-The injectivity fields rule out sort and symbol aliasing.  Built-in names are
-reserved for the logical constructors emitted directly by `term`. -/
+/-- One concrete representation of an abstract typed FO symbol family.
+
+Most symbols are emitted as ordinary `declare-fun` commands. Native SMT
+declarations (currently monomorphic datatype blocks) instead contribute a
+command prefix and mark the sorts and symbols that prefix declares. Keeping
+this policy here gives ordinary and datatype symbols one term encoder, one
+identifier namespace, and one semantic model. -/
 structure Encoding (symbols : FO.SymbolFamily) where
   sort : FO.FOSort → SSort
   sort_injective : Function.Injective sort
   bool_eq : sort .bool = Crush.SMT.boolSort
   name : {decl : FO.SymbolDecl} → symbols decl → String
-  name_decl_injective : ∀ {leftDecl rightDecl : FO.SymbolDecl}
+  ident : {decl : FO.SymbolDecl} → symbols decl → Crush.SMT.Ident
+  ident_decl_injective : ∀ {leftDecl rightDecl : FO.SymbolDecl}
     (left : symbols leftDecl) (right : symbols rightDecl),
-    name left = name right → leftDecl = rightDecl
-  name_injective : ∀ {decl : FO.SymbolDecl} (left right : symbols decl),
-    name left = name right → left = right
-  name_fresh : ∀ {decl : FO.SymbolDecl} (symbol : symbols decl),
-    Crush.SMT.NotBuiltin (.symb (name symbol))
+    ident left = ident right → leftDecl = rightDecl
+  ident_injective : ∀ {decl : FO.SymbolDecl} (left right : symbols decl),
+    ident left = ident right → left = right
+  ident_fresh : ∀ {decl : FO.SymbolDecl} (symbol : symbols decl),
+    Crush.SMT.NotBuiltin (ident symbol)
+  nativeSort : FO.FOSort → Bool
+  nativeSymbol : {decl : FO.SymbolDecl} → symbols decl → Bool
+  nativeCommands : Array Command
+  ordinary_ident : ∀ {decl : FO.SymbolDecl} (symbol : symbols decl),
+    nativeSymbol symbol = false → ident symbol = .symb (name symbol)
 
 /-- A concrete SMT sort is exactly the selected representation of an intrinsic
 FO sort. -/
@@ -45,7 +55,7 @@ def SortRepresentation {symbols : FO.SymbolFamily}
 def SymbolRepresentation {symbols : FO.SymbolFamily}
     (encoding : Encoding symbols) {decl : FO.SymbolDecl}
     (symbol : symbols decl) (identifier : Crush.SMT.Ident) : Prop :=
-  identifier = .symb (encoding.name symbol)
+  identifier = encoding.ident symbol
 
 /-- Numeric de Bruijn index of an intrinsic FO variable. -/
 def varIndex : {context : FO.Context} → {sort : FO.FOSort} →
@@ -60,8 +70,8 @@ mutual
         FO.FamilyTerm symbols context sort → STerm
     | _, _, .var ref => .bvar (varIndex ref)
     | _, _, .symbol symbol args =>
-        .app (.symb (encoding.name symbol))
-          (Crush.Metatheory.SMT.arguments encoding args)
+        .app (encoding.ident symbol)
+          (arguments encoding args)
     | _, _, .boolLit false => (smt| false)
     | _, _, .boolLit true => (smt| true)
     | _, _, .not body =>
@@ -114,7 +124,8 @@ structure Declaration (symbols : FO.SymbolFamily) where
   declaration : FO.SymbolDecl
   symbol : symbols declaration
 
-/-- Emit the concrete declaration selected for one typed symbol. -/
+/-- Emit the ordinary concrete declaration selected for one typed symbol.
+Callers establish that the symbol is not owned by a native command. -/
 def declaration {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
     (declared : Declaration symbols) : Command :=
   .declFun (encoding.name declared.symbol)
@@ -165,15 +176,48 @@ def sortDeclaration? {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
       if arguments.isEmpty then some (.declSort name 0) else none
   | _ => none
 
-/-- Pure command encoder: sort declarations, symbol declarations, then
-assertions, each in stable source order. -/
+/-- Ordinary sorts not already declared by a native command. -/
+def ordinarySorts {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
+    (declarations : List (Declaration symbols))
+    (source : FO.FamilyTheory symbols) : List FO.FOSort :=
+  (usedSorts declarations source).filter fun sort =>
+    sort != .bool && !encoding.nativeSort sort
+
+/-- Ordinary symbols not already declared by a native command. -/
+def ordinaryDecls {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
+    (declarations : List (Declaration symbols)) : List (Declaration symbols) :=
+  declarations.filter fun declared => !encoding.nativeSymbol declared.symbol
+
+/-- The non-native suffix of the pure command encoder: remaining sort and symbol
+declarations followed by assertions, each in stable source order. -/
+def theoryBody {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
+    (declarations : List (Declaration symbols))
+    (source : FO.FamilyTheory symbols) : Array Command :=
+  ((ordinarySorts encoding declarations source).filterMap
+      (sortDeclaration? encoding)).toArray ++
+    ((ordinaryDecls encoding declarations).map (declaration encoding)).toArray ++
+    (source.map fun formula => .assert (term encoding formula)).toArray
+
+/-- Pure command encoder: native declarations followed by the ordinary body. -/
 def theory {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
     (declarations : List (Declaration symbols))
     (source : FO.FamilyTheory symbols) : Array Command :=
-  let sorts := (usedSorts declarations source).filter (fun sort => sort != .bool)
-  (sorts.filterMap (sortDeclaration? encoding)).toArray ++
-    (declarations.map (declaration encoding)).toArray ++
-    (source.map fun formula => .assert (term encoding formula)).toArray
+  encoding.nativeCommands ++ theoryBody encoding declarations source
+
+@[simp] theorem native_sort_omitted {symbols : FO.SymbolFamily}
+    (encoding : Encoding symbols)
+    (declarations : List (Declaration symbols))
+    (source : FO.FamilyTheory symbols) (sort : FO.FOSort)
+    (native : encoding.nativeSort sort = true) :
+    sort ∉ ordinarySorts encoding declarations source := by
+  simp [ordinarySorts, native]
+
+@[simp] theorem native_decl_omitted {symbols : FO.SymbolFamily}
+    (encoding : Encoding symbols) (declarations : List (Declaration symbols))
+    (declared : Declaration symbols)
+    (native : encoding.nativeSymbol declared.symbol = true) :
+    declared ∉ ordinaryDecls encoding declarations := by
+  simp [ordinaryDecls, native]
 
 /-- A command sequence represents a typed theory when it is exactly the pure
 encoding for some explicit ordered declaration trace. -/

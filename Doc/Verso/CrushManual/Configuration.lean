@@ -213,6 +213,36 @@ It can avoid a large closure encoding, but cvc5 may not emit an Alethe
 certificate for the resulting higher-order proof; use core reconstruction or a
 trusting policy in that case.
 
+# Datatype Certification
+%%%
+tag := "configuration-datatype-certification"
+%%%
+
+{optionDocs crush.datatype.certify}
+
+The default `false` preserves the established production datatype acceptance
+path. Set the option to `true` to require the proof-facing datatype reifier to
+accept a monomorphized datatype block, including its dependency and productivity
+checks, before production emits it natively:
+
+```
+inductive Reading where
+  | missing
+  | measured (value : Int)
+
+set_option crush.datatype.certify true in
+example (x y : Int)
+    (same : Reading.measured x = Reading.measured y)
+    (threshold : 10 ≤ x) : 10 ≤ y := by
+  crush
+```
+
+This option certifies datatype discovery, typed constructor/selector ownership,
+and the exact native `declare-datatypes` command retained in translation state.
+It applies to the datatype component; the surrounding extensible translation
+continues to use the production path. Unsupported blocks retain the existing
+opaque-sort fallback.
+
 # Monomorphization
 %%%
 tag := "configuration-monomorphization"

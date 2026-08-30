@@ -6,6 +6,7 @@ import Crush.Translation.Monomorphize
 import Crush.Translation.Instantiate
 import Crush.Translation.Translate
 import Crush.Translation.DefaultLowerings
+import Crush.Metatheory.Reification.Reify
 import Crush.Util.Profile
 import Crush.Solver.Process
 import Crush.Solver.KernelCheck
@@ -48,6 +49,8 @@ Three discharge policies, selected by `crush.trust`:
 -/
 
 namespace Crush
+
+open Metatheory.VCG
 
 /-- The trust axiom, used only under `crush.trust`. Deliberately `Prop`-only (not
 `Sort u`), so it cannot be used to fabricate data, and auditable via
@@ -95,9 +98,30 @@ def buildScript (cfg : Config) (facts : Array Fact) :
     for fact in facts do
       let id ← TranslateM.recordFact fact.descr fact.proof (some fact.prop)
         fact.negationTransform fact.reconstructionProof fact.instanceOf
-      let body ← emitTerm fact.prop
+      let data? ←
+        if cfg.certifyDatatype then
+          match ← Metatheory.Reification.reifyDataSignature fact.prop with
+          | .error reason =>
+              TranslateM.markDatatypeTrusted reason
+              pure none
+          | .ok signature@(.pack env _) =>
+              if env.blocks.isEmpty then pure none else pure (some signature)
+        else
+          pure none
+      let body ← match data? with
+        | none => emitTerm fact.prop
+        | some signature => TranslateM.withDataSignature signature (emitTerm fact.prop)
+      if let some (.pack env bridge) := data? then
+        let state ← get
+        let some certificate := CertifiedDataEnv.build? fact.prop env bridge
+            state.commands state.certifiedDataCommands
+            state.certifiedDataCommandIndices state.dataGuards
+            state.dataGuardIndices
+          | throwError "crush: certified datatype environment lost an exact native block"
+        let _ ← TranslateM.recordDatatypeCertificate certificate
       let named := Term.annot body #[.named s!"{factNamePrefix}{id}"]
       TranslateM.emitCommand (.assert named)
+    TranslateM.finalizeDatatypeCertificates
   -- Prepend set-logic. Declarations are emitted eagerly on first use (before the
   -- assertion that references them), so command order already satisfies SMT-LIB's
   -- declare-before-reference rule.

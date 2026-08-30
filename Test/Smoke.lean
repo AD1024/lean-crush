@@ -9,6 +9,9 @@ sugar, config parsing, and a live solver round-trip.
 
 open Crush Crush.SMT
 
+/-- Certified datatype acceptance is opt-in, preserving the production default. -/
+example : ({} : Config).certifyDatatype = false := rfl
+
 /-- The live guard constructors are the exact syntax covered by the guarded
 metatheory. -/
 example (term : Term) : productionNatGuard term = (smt| (>= $term 0)) := rfl
@@ -135,15 +138,15 @@ example : True := by
         Crush.Metatheory.Reification.ContextBridge.nil (fun _ => false) identity).isSome do
       throwError "typed bridge failed to certify a closed lambda's capture list"
     let (_, translatedState) ← TranslateM.run {} (emitTerm identity)
-    unless translatedState.defunEncodings.size == 3 do
+    unless translatedState.commandEncodings.size == 3 do
       throwError "stateful defunctionalization did not retain all command encodings"
-    unless translatedState.defunAllocationLinks.map (·.encodingIndex) == #[0, 1, 2] do
+    unless translatedState.commandAllocationLinks.map (·.encodingIndex) == #[0, 1, 2] do
       throwError "defunctionalization allocation links drifted from encoding order"
-    let allocatedNames := translatedState.structuralAllocations.entries.map Prod.snd
-    unless translatedState.defunAllocationLinks.all fun link =>
+    let allocatedNames := translatedState.nameAllocations.names
+    unless translatedState.commandAllocationLinks.all fun link =>
         link.symbols.all fun symbol => allocatedNames.contains symbol do
-      throwError "an encoded defunctionalization command retained an unallocated symbol"
-    unless translatedState.defunAllocationLinks.map (·.symbols.size) == #[2, 2, 2] do
+      throwError "an encoded command retained an unallocated symbol"
+    unless translatedState.commandAllocationLinks.map (·.symbols.size) == #[2, 2, 2] do
       throwError "app/closure/equation structural dependencies were not fully linked"
     match translatedState.status with
     | .trusted reasons =>
@@ -156,8 +159,8 @@ example : True := by
         | _ => throwError "the direct translator retained the wrong trust reason"
     | .proved =>
         throwError "the legacy direct translator was incorrectly classified as proved"
-    match translatedState.defunEncodings[0]?, translatedState.defunEncodings[1]?,
-        translatedState.defunEncodings[2]? with
+    match translatedState.commandEncodings[0]?, translatedState.commandEncodings[1]?,
+        translatedState.commandEncodings[2]? with
     | some (Crush.Metatheory.VCG.CommandEncoding.app _),
         some (Crush.Metatheory.VCG.CommandEncoding.closure _),
         some (Crush.Metatheory.VCG.CommandEncoding.closureEquation equation) =>

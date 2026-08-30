@@ -1,4 +1,5 @@
 import Crush.Metatheory.Reification.Witness
+import Crush.Metatheory.SMT.Guarded
 import Crush.Metatheory.VCG.Status
 
 /-!
@@ -12,7 +13,8 @@ resulting status retains an exact representation theorem by construction.
 namespace Crush.Metatheory.VCG
 
 open Defunctionalization.Flattened
-open scoped Crush.Metatheory
+open SMT.Datatype
+open scoped Crush.Metatheory Crush.SMT
 
 /-- The SMT encoder's complete translated result is the flattened complete
 target theory for the same intrinsic source sentence. -/
@@ -26,6 +28,21 @@ def commands {signature : Signature}
     (source : Sentence signature) : Array Crush.SMT.Command :=
   SMT.encode encoding 𝓕⟦source⟧
 
+/-- Ordinary declarations and assertions following the encoding's native
+command prefix. -/
+def commandBody {signature : Signature}
+    (encoding : SMT.Encoding (Symbol signature))
+    (source : Sentence signature) : Array Crush.SMT.Command :=
+  SMT.theoryBody encoding
+    (𝓕⟦source⟧.declarations.map SMT.ofDeclared)
+    (SMT.completeTheory 𝓕⟦source⟧)
+
+@[simp] theorem commands_split {signature : Signature}
+    (encoding : SMT.Encoding (Symbol signature))
+    (source : Sentence signature) :
+    commands encoding source =
+      encoding.nativeCommands ++ commandBody encoding source := rfl
+
 /-- The proved VCG command sequence represents the complete flattened theory. -/
 theorem commands_represents {signature : Signature}
     (encoding : SMT.Encoding (Symbol signature))
@@ -34,6 +51,27 @@ theorem commands_represents {signature : Signature}
       (commands encoding source) := by
   rw [← completeTheory_translate source]
   exact SMT.encode_translation encoding 𝓕⟦source⟧
+
+/-! ## Guarded command generation -/
+
+/-- Exact concrete commands for a guarded intrinsic VCG run. `derived` is the
+certified recursive-definition segment, such as datatype `wf_T` commands. -/
+def guardedCommands {signature : Signature}
+    (guarding : SMT.Guarding (Symbol signature))
+    (derived : Array Crush.SMT.Command) (source : Sentence signature) :
+    Array Crush.SMT.Command :=
+  guarding.theory derived
+    (𝓕⟦source⟧.declarations.map SMT.ofDeclared)
+    (translatedTheory source)
+
+/-- Guarded generation retains exact declaration order and command syntax by
+construction. -/
+theorem guardedCommands_represents {signature : Signature}
+    (guarding : SMT.Guarding (Symbol signature))
+    (derived : Array Crush.SMT.Command) (source : Sentence signature) :
+    SMT.GuardedTheoryRepresentation guarding derived (translatedTheory source)
+      (guardedCommands guarding derived source) :=
+  ⟨𝓕⟦source⟧.declarations.map SMT.ofDeclared, rfl⟩
 
 /-- Classify total intrinsic VCG as proved and retain its representation. -/
 def generate {signature : Signature}
@@ -52,9 +90,11 @@ intrinsic HO sentence. -/
 theorem commands_unsat_implies_source_unsat {signature : Signature}
     (encoding : SMT.Encoding (Symbol signature))
     (source : Sentence signature)
+    (data : Reification.DataBridge signature)
+    (native : EnvRepresentation encoding data.core)
     (unsat : Crush.SMT.CommandsUnsatisfiable (commands encoding source)) :
-    Unsatisfiable source := by
+    Datatype.Env.Unsatisfiable data.core source := by
   exact TranslationStatus.unsat_source (generate encoding source)
-    (generate_proves encoding source) unsat
+    (generate_proves encoding source) native unsat
 
 end Crush.Metatheory.VCG

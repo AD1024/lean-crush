@@ -26,6 +26,8 @@ import Crush.Metatheory.Defunctionalization.ProductionClosure
 import Crush.Metatheory.Guarded.Encoding
 import Crush.Metatheory.Hooks
 import Crush.Metatheory.SMT.Soundness
+import Crush.Metatheory.SMT.Guarded
+import Crush.Metatheory.SMT.GuardedSoundness
 import Crush.Metatheory.VCG.Status
 import Crush.Metatheory.VCG.Generate
 import Crush.Metatheory.VCG.Stateful
@@ -551,16 +553,6 @@ example (left right : Nat → Nat)
     left = right :=
   nat_function_eq_of_nonnegative_pointwise left right pointwise
 
-/-- Recursive datatype guards preserve the `Nat` field invariant. -/
-example : natInt.option.guard (none : Option Int) := optionNat_guard_none
-
-example : ¬natInt.option.guard (some (-1 : Int)) := by
-  simp [Encoding.option, natInt]
-
-example (value : Option Nat) :
-    natInt.option.guard (natInt.option.encode value) :=
-  optionNat_guard_encode value
-
 /-- `emitResultWF` is valid for symbols with arbitrary argument carriers. -/
 example (fn : String → Nat) (argument : String) :
     natInt.guard (natInt.liftResult fn argument) :=
@@ -682,9 +674,14 @@ private def encoding : Encoding NoSymbol where
   sort_injective := foSort_injective
   bool_eq := rfl
   name := fun symbol => nomatch symbol
-  name_decl_injective := fun left => nomatch left
-  name_injective := fun left => nomatch left
-  name_fresh := fun symbol => nomatch symbol
+  ident := fun symbol => nomatch symbol
+  ident_decl_injective := fun left => nomatch left
+  ident_injective := fun left => nomatch left
+  ident_fresh := fun symbol => nomatch symbol
+  nativeSort := fun _ => false
+  nativeSymbol := fun symbol => nomatch symbol
+  nativeCommands := #[]
+  ordinary_ident := fun symbol => nomatch symbol
 
 private def reflexiveFormula : FO.FamilySentence NoSymbol :=
   .eq (.boolLit true) (.boolLit true)
@@ -692,6 +689,41 @@ private def reflexiveFormula : FO.FamilySentence NoSymbol :=
 /-- SMT quotation and the pure encoder produce the same concrete formula. -/
 example : TermRepresentation encoding reflexiveFormula
     (smt| (= true true)) := rfl
+
+private def guarded : Guarding NoSymbol where
+  encoding
+  guard := fun _ value => some (smt| (wf $value))
+
+private def quantifiedReflexive (universal : Bool) :
+    FO.FamilySentence NoSymbol :=
+  let body : FO.FamilyTerm NoSymbol [.base ⟨"Entity"⟩] .bool :=
+    .eq (.var .here) (.var .here)
+  if universal then .forallE body else .existsE body
+
+/-- Enlarged universal carriers use implication from the exact guard syntax. -/
+example : guarded.term (quantifiedReflexive true) =
+    let value : STerm := .bvar 0
+    let condition := (smt| (wf $value))
+    let body := (smt| (= $value $value))
+    let expected : STerm := .forallE
+      #[("x", encoding.sort (.base ⟨"Entity"⟩))]
+      (smt| (=> $condition $body))
+    expected := rfl
+
+/-- Enlarged existential carriers use conjunction with the exact guard syntax. -/
+example : guarded.term (quantifiedReflexive false) =
+    let value : STerm := .bvar 0
+    let condition := (smt| (wf $value))
+    let body := (smt| (= $value $value))
+    let expected : STerm := .existsE
+      #[("x", encoding.sort (.base ⟨"Entity"⟩))]
+      (smt| (and $condition $body))
+    expected := rfl
+
+/-- Disabling guards recovers the ordinary encoder exactly. -/
+example : (Guarding.none encoding).term reflexiveFormula =
+    term encoding reflexiveFormula := by
+  exact Guarding.none_term encoding reflexiveFormula
 
 example : TheoryRepresentation encoding [reflexiveFormula]
     (theory encoding [] [reflexiveFormula]) := ⟨[], rfl⟩
@@ -706,14 +738,65 @@ private def target : FO.FamilyModel NoSymbol where
   carriers := carriers
   symbol := fun symbol => nomatch symbol
 
+private def unaryGuards : UnaryGuards encoding target (fun _ _ => True) where
+  ident
+    | .bool => some (.symb "wf")
+    | _ => none
+  ident_injective := by
+    intro left right identifier leftEq rightEq
+    cases left <;> cases right <;> simp_all
+  omitted := by intros; trivial
+  notBuiltin := by
+    intro sort identifier equal
+    cases sort with
+    | bool =>
+        simp only [Option.some.injEq] at equal
+        subst identifier
+        exact .symb "wf" (by decide) (by decide) (by decide) (by decide) (by decide)
+    | base | fn => simp at equal
+  sourceFresh := by
+    intro sort identifier equal decl symbol
+    nomatch symbol
+
+/-- The shared recursive-definition theorem covers the exact production
+`wfDef` syntax; components need only prove their body denotation. -/
+example :
+    (SMT.Datatype.wfDef "wf" "x" (encoding.sort .bool) #[]).Holds
+      (modelWith encoding target unaryGuards.extra) := by
+  apply unaryGuards.wfDef_holds (sort := .bool) (binder := "x") rfl #[]
+  intro value
+  exact Crush.SMT.Eval.boolLit true
+
+/-- The generic guarded evaluator includes the exact empty-guard legacy path. -/
+example : Crush.SMT.Eval (modelWith encoding target (.nil encoding target)) []
+    ((Guarding.none encoding).term reflexiveFormula)
+    (.typed .bool
+      (reflexiveFormula.guardDenote target (fun _ _ => True)
+        (FO.Valuation.empty target.carriers))) := by
+  exact guardTerm_eval (Guarding.none encoding) target (.nil encoding target)
+    _ (Guarding.none_semantics encoding target _) reflexiveFormula _ []
+      (Env.empty target)
+
+/-- A fresh unary `wf` predicate discharges the same theorem with an actual
+guarded universal binder. -/
+example : Crush.SMT.Eval
+    (modelWith encoding target unaryGuards.extra) []
+    (unaryGuards.guarding.term (quantifiedReflexive true))
+    (.typed .bool
+      ((quantifiedReflexive true).guardDenote target (fun _ _ => True)
+        (FO.Valuation.empty target.carriers))) := by
+  exact guardTerm_eval unaryGuards.guarding target unaryGuards.extra _
+    unaryGuards.semantics (quantifiedReflexive true) _ [] (Env.empty target)
+
 /-- A valid typed theory induces a model of its exact concrete commands. -/
 example : ∃ smtModel : Crush.SMT.Model,
     smtModel ⊨ₛᶜ theory encoding [] [reflexiveFormula] := by
-  apply representation_sound encoding ⟨[], rfl⟩ target
+  apply lift encoding ⟨[], rfl⟩ target
   intro candidate membership
   simp only [List.mem_singleton] at membership
   subst candidate
   simp [FO.FamilyModel.Satisfies, reflexiveFormula]
+  exact Crush.SMT.Model.satisfiesCommands_empty _
 
 end Crush.Metatheory.SMT.Tests
 

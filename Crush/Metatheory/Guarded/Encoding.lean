@@ -32,9 +32,114 @@ structure Encoding where
   encode_decode : ∀ value (wellFormed : guard value),
     encode (decode value wellFormed) = value
 
+/-- The indexed form of a guarded encoding, used when source and target carrier
+families are already known. -/
+structure Rel (Source : Type u) (Target : Type v) where
+  sourceNonempty : Nonempty Source
+  encode : Source → Target
+  guard : Target → Prop
+  encode_guard : ∀ value, guard (encode value)
+  decode : (value : Target) → guard value → Source
+  decode_encode : ∀ value, decode (encode value) (encode_guard value) = value
+  encode_decode : ∀ value (wellFormed : guard value),
+    encode (decode value wellFormed) = value
+
+/-- The target carrier is inhabited because it contains every encoded source
+value. -/
+theorem Rel.targetNonempty {Source : Type u} {Target : Type v}
+    (rel : Rel Source Target) : Nonempty Target :=
+  let ⟨value⟩ := rel.sourceNonempty
+  ⟨rel.encode value⟩
+
+/-- Totalize an indexed relation's decoder outside its guarded image. -/
+noncomputable def Rel.decodeDefault {Source : Type u} {Target : Type v}
+    (rel : Rel Source Target) (value : Target) : Source := by
+  classical
+  exact if wellFormed : rel.guard value then rel.decode value wellFormed
+    else Classical.choice rel.sourceNonempty
+
+@[simp] theorem Rel.decodeDefault_encode {Source : Type u} {Target : Type v}
+    (rel : Rel Source Target) (value : Source) :
+    rel.decodeDefault (rel.encode value) = value := by
+  rw [Rel.decodeDefault]
+  simp only [dif_pos (rel.encode_guard value), rel.decode_encode]
+
+theorem Rel.encode_injective {Source : Type u} {Target : Type v}
+    (rel : Rel Source Target) : Function.Injective rel.encode := by
+  intro left right equal
+  have subtypeEqual :
+      (⟨rel.encode left, rel.encode_guard left⟩ : Subtype rel.guard) =
+        ⟨rel.encode right, rel.encode_guard right⟩ := Subtype.ext equal
+  have decoded := congrArg
+    (fun value : Subtype rel.guard => rel.decode value.1 value.2) subtypeEqual
+  simpa only [rel.decode_encode] using decoded
+
+/-- Equality is reflected and preserved by an indexed guarded relation. -/
+theorem Rel.encode_eq_iff {Source : Type u} {Target : Type v}
+    (rel : Rel Source Target) (left right : Source) :
+    rel.encode left = rel.encode right ↔ left = right :=
+  ⟨fun equal => rel.encode_injective equal, congrArg rel.encode⟩
+
+/-- Source universal quantification is target quantification restricted to the
+guarded image. -/
+theorem Rel.forall_iff {Source : Type u} {Target : Type v}
+    (rel : Rel Source Target) (sourceBody : Source → Prop)
+    (targetBody : Target → Prop)
+    (bodyRelated : ∀ value,
+      sourceBody value ↔ targetBody (rel.encode value)) :
+    (∀ value, sourceBody value) ↔
+      ∀ value, rel.guard value → targetBody value := by
+  constructor
+  · intro sourceForall targetValue guarded
+    have related := bodyRelated (rel.decode targetValue guarded)
+    rw [rel.encode_decode targetValue guarded] at related
+    exact related.mp (sourceForall _)
+  · intro targetForall sourceValue
+    exact (bodyRelated sourceValue).mpr
+      (targetForall (rel.encode sourceValue) (rel.encode_guard sourceValue))
+
+/-- Source existential quantification is target quantification restricted to
+the guarded image. -/
+theorem Rel.exists_iff {Source : Type u} {Target : Type v}
+    (rel : Rel Source Target) (sourceBody : Source → Prop)
+    (targetBody : Target → Prop)
+    (bodyRelated : ∀ value,
+      sourceBody value ↔ targetBody (rel.encode value)) :
+    (∃ value, sourceBody value) ↔
+      ∃ value, rel.guard value ∧ targetBody value := by
+  constructor
+  · rintro ⟨value, valid⟩
+    exact ⟨rel.encode value, rel.encode_guard value,
+      (bodyRelated value).mp valid⟩
+  · rintro ⟨value, guarded, valid⟩
+    refine ⟨rel.decode value guarded, ?_⟩
+    have related := bodyRelated (rel.decode value guarded)
+    rw [rel.encode_decode value guarded] at related
+    exact related.mpr valid
+
+/-- Identity relation used by carriers that need no enlargement. -/
+def Rel.refl (Carrier : Type u) [Nonempty Carrier] : Rel Carrier Carrier where
+  sourceNonempty := inferInstance
+  encode := id
+  guard := fun _ => True
+  encode_guard := by simp
+  decode := fun value _ => value
+  decode_encode := by simp
+  encode_decode := by simp
+
 namespace Encoding
 
 variable (encoding : Encoding)
+
+/-- Expose a bundled encoding as an indexed relation. -/
+def rel (encoding : Encoding) : Rel encoding.Source encoding.Target where
+  sourceNonempty := encoding.sourceNonempty
+  encode := encoding.encode
+  guard := encoding.guard
+  encode_guard := encoding.encode_guard
+  decode := encoding.decode
+  decode_encode := encoding.decode_encode
+  encode_decode := encoding.encode_decode
 
 /-- Production's universal-binder shape: `wf x ⇒ body`. -/
 def guardedForall (body : encoding.Target → Prop) : Prop :=
@@ -153,38 +258,6 @@ theorem function_eq_of_guarded_lift_eq
   simpa using pointwise (encoding.encode argument)
     (encoding.encode_guard argument)
 
-/-- Lift a guarded encoding through an optional datatype.  The target datatype
-is freely generated over the larger field carrier, and its recursive guard
-excludes precisely the constructors containing an ill-formed field.  This is the
-one-field instance of production's `needsWFGuard`/datatype `wf_T` construction. -/
-def option : Encoding where
-  Source := Option encoding.Source
-  Target := Option encoding.Target
-  sourceNonempty := ⟨none⟩
-  encode
-    | none => none
-    | some value => some (encoding.encode value)
-  guard
-    | none => True
-    | some value => encoding.guard value
-  encode_guard
-    | none => trivial
-    | some value => encoding.encode_guard value
-  decode
-    | none, _ => none
-    | some value, wellFormed => some (encoding.decode value wellFormed)
-  decode_encode := by
-    intro value
-    cases value with
-    | none => rfl
-    | some value => simp [encoding.decode_encode]
-  encode_decode := by
-    intro value wellFormed
-    cases value with
-    | none => rfl
-    | some value =>
-        exact congrArg some (encoding.encode_decode value wellFormed)
-
 end Encoding
 
 /-! ## The production `Nat ↪ Int` instance -/
@@ -247,15 +320,5 @@ extension fact used when a guarded target witness must be pulled back. -/
 theorem nonnegative_int_is_encoded_nat (value : Int) (wellFormed : 0 ≤ value) :
     ∃ sourceValue : Nat, Int.ofNat sourceValue = value :=
   ⟨value.toNat, Int.toNat_of_nonneg wellFormed⟩
-
-/-- Concrete recursive datatype guard generated for `Option Nat`. -/
-theorem optionNat_guard_none : natInt.option.guard none := trivial
-
-theorem optionNat_guard_some (value : Int) :
-    natInt.option.guard (some value) ↔ 0 ≤ value := Iff.rfl
-
-theorem optionNat_guard_encode (value : Option Nat) :
-    natInt.option.guard (natInt.option.encode value) :=
-  natInt.option.encode_guard value
 
 end Crush.Metatheory.Guarded

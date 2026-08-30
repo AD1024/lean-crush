@@ -22,7 +22,26 @@ namespace Crush.Metatheory
 /-- An identifier for a base sort whose elements and operations are left abstract. -/
 structure BaseSort where
   name : String
-  deriving BEq, DecidableEq, Hashable, Repr
+  deriving DecidableEq, Hashable, Repr
+
+instance : BEq BaseSort := ⟨fun left right => left.name == right.name⟩
+
+instance : LawfulBEq BaseSort where
+  rfl := by
+    intro sort
+    cases sort with
+    | mk name =>
+      change (name == name) = true
+      exact beq_iff_eq.mpr rfl
+  eq_of_beq := by
+    intro left right equal
+    cases left with
+    | mk leftName =>
+      cases right with
+      | mk rightName =>
+        change (leftName == rightName) = true at equal
+        cases beq_iff_eq.mp equal
+        rfl
 
 /-- Types of the higher-order core language.
 
@@ -48,6 +67,24 @@ inductive Ref : (types : List Ty) → Ty → Type where
   | here {ty : Ty} {types : List Ty} : Ref (ty :: types) ty
   | there {types : List Ty} {ty head : Ty} : Ref types ty → Ref (head :: types) ty
   deriving Repr
+
+namespace Ref
+
+/-- Embed a typed reference in the left side of an extended signature. -/
+def inLeft {types : List Ty} {type : Ty} (ref : Ref types type)
+    (tail : List Ty) : Ref (types ++ tail) type :=
+  match ref with
+  | .here => .here
+  | .there ref => .there (ref.inLeft tail)
+
+/-- Embed a typed reference after a newly prepended signature. -/
+def inRight (head : List Ty) {types : List Ty} {type : Ty}
+    (ref : Ref types type) : Ref (head ++ types) type :=
+  match head with
+  | [] => ref
+  | _ :: head => .there (ref.inRight head)
+
+end Ref
 
 /-- A typed reference to a locally bound variable. -/
 abbrev Var := Ref

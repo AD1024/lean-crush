@@ -1,4 +1,5 @@
-import Crush.Metatheory.SMT.Representation
+import Crush.Metatheory.SMT.ModelExtension
+import Crush.Metatheory.SMT.DatatypeCanonical
 
 /-!
 # Semantic soundness of FO-to-SMT representation
@@ -12,193 +13,24 @@ represented carriers.
 
 namespace Crush.Metatheory.SMT
 
+open Defunctionalization.Flattened
+open Crush.SMT.Model (satisfiesCommands_append)
 open scoped Crush.Metatheory
 open scoped Crush.SMT
 
 variable {symbols : FO.SymbolFamily}
 
-/-- Values in the induced untyped SMT universe. -/
-inductive Value (target : FO.FamilyModel symbols) where
-  | typed (sort : FO.FOSort) (value : sort.Denote target.carriers)
-  | raw (sort : SSort)
-
-/-- A canonical inhabitant of every intrinsic FO carrier. -/
-noncomputable def defaultValue (carriers : FO.Carriers) :
-    (sort : FO.FOSort) → sort.Denote carriers
-  | .bool => True
-  | .base sort => Classical.choice (carriers.baseNonempty sort)
-  | .fn domain codomain => Classical.choice (carriers.fnNonempty domain codomain)
-
-namespace Value
-
-/-- Sort membership for the induced SMT universe.  A raw value can inhabit only
-a sort outside the image of the typed encoding. -/
-def InSort (encoding : Encoding symbols) {target : FO.FamilyModel symbols}
-    (smtSort : SSort) : Value target → Prop
-  | .typed sort _ => encoding.sort sort = smtSort
-  | .raw rawSort => rawSort = smtSort ∧
-      ∀ sort, encoding.sort sort ≠ rawSort
-
-@[simp] theorem inSort_typed (encoding : Encoding symbols)
-    {target : FO.FamilyModel symbols} (sort : FO.FOSort)
-    (value : sort.Denote target.carriers) :
-    InSort encoding (encoding.sort sort) (.typed sort value) := rfl
-
-/-- Membership in a represented sort exposes a uniquely typed FO value. -/
-theorem exists_typed_of_inSort (encoding : Encoding symbols)
-    {target : FO.FamilyModel symbols} (sort : FO.FOSort)
-    (value : Value target) (typed : InSort encoding (encoding.sort sort) value) :
-    ∃ sourceValue, value = .typed sort sourceValue := by
-  cases value with
-  | typed other value =>
-      simp only [InSort] at typed
-      have equal := encoding.sort_injective typed
-      subst other
-      exact ⟨value, rfl⟩
-  | raw rawSort =>
-      simp only [InSort] at typed
-      exact False.elim (typed.2 sort (typed.1.symm))
-
-end Value
-
-/-- Boolean embedding used by the induced SMT model. -/
-def boolValue (target : FO.FamilyModel symbols) : Bool → Value target
-  | false => .typed .bool False
-  | true => .typed .bool True
-
-/-- Decode an induced SMT value at an expected intrinsic sort.  Semantic term
-evaluation reaches only the matching `typed` branch; the default cases make
-symbol graphs total over every well-sorted SMT argument. -/
-noncomputable def decode (target : FO.FamilyModel symbols)
-    (sort : FO.FOSort) : Value target → sort.Denote target.carriers
-  | .typed other value =>
-      if equal : other = sort then equal ▸ value
-      else defaultValue target.carriers sort
-  | .raw _ => defaultValue target.carriers sort
-
-@[simp] theorem decode_typed (target : FO.FamilyModel symbols)
-    (sort : FO.FOSort) (value : sort.Denote target.carriers) :
-    decode target sort (.typed sort value) = value := by
-  simp [decode]
-
-/-- Apply a curried typed symbol interpretation to an untyped value list. -/
-noncomputable def applyValues (target : FO.FamilyModel symbols) :
-    (sorts : List FO.FOSort) → {result : FO.FOSort} →
-      FO.SymbolDenote target.carriers sorts result →
-      List (Value target) → result.Denote target.carriers
-  | [], _, function, _ => function
-  | sort :: sorts, result, function, [] =>
-      applyValues target sorts (result := result)
-        (function (defaultValue target.carriers sort)) []
-  | sort :: sorts, result, function, value :: values =>
-      applyValues target sorts (result := result)
-        (function (decode target sort value)) values
-
-/-- Graph assigned to encoded user symbols in the induced SMT model. -/
-def Applies (encoding : Encoding symbols) (target : FO.FamilyModel symbols)
-    (identifier : Crush.SMT.Ident) (values : List (Value target))
-    (output : Value target) : Prop :=
-  ∃ (decl : FO.SymbolDecl) (symbol : symbols decl),
-    identifier = .symb (encoding.name symbol) ∧
-    output = .typed decl.result
-      (applyValues target decl.args (target.symbol symbol) values)
-
-/-- Interpretation of a non-Boolean literal at its concrete SMT sort. -/
-noncomputable def otherLiteralValue (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (literal : Crush.SMT.Literal) : Value target := by
-  classical
-  exact if represented : ∃ sort, encoding.sort sort = literal.sort then
-    let sort := Classical.choose represented
-    .typed sort (defaultValue target.carriers sort)
-  else
-    .raw literal.sort
-
-/-- Interpretation of literals.  If a non-Boolean literal's concrete sort is
-already represented, choose that carrier's canonical inhabitant; otherwise
-retain a raw value at the fresh SMT sort. -/
-noncomputable def literalValue (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) : Crush.SMT.Literal → Value target
-  | .bool value => boolValue target value
-  | literal@(.str _) => otherLiteralValue encoding target literal
-  | literal@(.num _) => otherLiteralValue encoding target literal
-  | literal@(.bitvec _ _) => otherLiteralValue encoding target literal
-
-/-- Concrete SMT model induced by an intrinsic FO family model. -/
-noncomputable def model (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) : Crush.SMT.Model where
-  Value := Value target
-  inSort := Value.InSort encoding
-  sortNonempty := fun smtSort => by
-    classical
-    by_cases represented : ∃ sort, encoding.sort sort = smtSort
-    · let sort := Classical.choose represented
-      have equality := Classical.choose_spec represented
-      exact ⟨Value.typed sort (defaultValue target.carriers sort), equality⟩
-    · exact ⟨Value.raw smtSort, rfl, by
-        intro sort equality
-        exact represented ⟨sort, equality⟩⟩
-  bool := boolValue target
-  boolTyped := fun value => by
-    cases value <;> simpa [boolValue, Value.InSort] using encoding.bool_eq
-  boolInjective := by
-    intro left right equality
-    cases left <;> cases right
-    · rfl
-    · have impossible : False = True := eq_of_heq (Value.typed.inj equality |>.2)
-      exact False.elim (Eq.mpr impossible trivial)
-    · have impossible : True = False := eq_of_heq (Value.typed.inj equality |>.2)
-      exact False.elim (Eq.mp impossible trivial)
-    · rfl
-  literal := literalValue encoding target
-  literalTyped := by
-    intro literal
-    cases literal with
-    | bool value =>
-        cases value <;> simpa [literalValue, Crush.SMT.Literal.sort, boolValue,
-          Value.InSort] using encoding.bool_eq
-    | str value | num value | bitvec width value =>
-        classical
-        rw [literalValue, otherLiteralValue]
-        split
-        next represented =>
-          simp only [Value.InSort]
-          exact Classical.choose_spec represented
-        next notRepresented =>
-          simp only [Value.InSort]
-          constructor
-          · trivial
-          · intro sort equality
-            exact notRepresented ⟨sort, equality⟩
-  apply := Applies encoding target
-
-/-- Each symbol declaration emitted by the pure encoder is satisfied by the
-induced model. -/
+/-- Each ordinary symbol declaration emitted by the pure encoder is satisfied
+by the same induced model used for native symbols. -/
 theorem declaration_valid (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (declared : Declaration symbols) :
+    (target : FO.FamilyModel symbols) (declared : Declaration symbols)
+    (ordinary : encoding.nativeSymbol declared.symbol = false) :
     (model encoding target).SatisfiesCommand (declaration encoding declared) := by
   rw [declaration]
   constructor
   · trivial
-  · intro values valuesTyped
-    let output := Value.typed declared.declaration.result
-      (applyValues target declared.declaration.args
-        (target.symbol declared.symbol) values)
-    refine ⟨output, ?_, ?_, ?_⟩
-    · dsimp only [output]
-      exact Value.inSort_typed (target := target) encoding
-        declared.declaration.result
-        (applyValues target declared.declaration.args
-          (target.symbol declared.symbol) values)
-    · exact ⟨declared.declaration, declared.symbol, rfl, rfl⟩
-    · intro other otherApplies
-      rcases otherApplies with ⟨otherDecl, otherSymbol, nameEqual, outputEqual⟩
-      have names : encoding.name declared.symbol = encoding.name otherSymbol := by
-        simpa using congrArg id nameEqual
-      have declEqual := encoding.name_decl_injective declared.symbol otherSymbol names
-      subst otherDecl
-      have symbolEqual := encoding.name_injective declared.symbol otherSymbol names
-      subst otherSymbol
-      exact outputEqual
+  · rw [← encoding.ordinary_ident declared.symbol ordinary]
+    exact symbol_has_type encoding target declared.symbol
 
 /-- Semantic argument values, tagged in the same order as their SMT terms. -/
 def argumentValues (target : FO.FamilyModel symbols)
@@ -374,9 +206,9 @@ theorem term_eval (encoding : Encoding symbols)
     (symbol := fun symbol args argsIH => by
       intro valuation environment related
       have result : Crush.SMT.Eval (model encoding target) environment
-          (.app (.symb (encoding.name symbol)) (arguments encoding args))
+          (.app (encoding.ident symbol) (arguments encoding args))
           (.typed _ (args.apply target valuation (target.symbol symbol))) := by
-        apply Crush.SMT.Eval.symbol (encoding.name_fresh symbol)
+        apply Crush.SMT.Eval.symbol (encoding.ident_fresh symbol)
           (argsIH valuation environment related)
         refine ⟨_, symbol, rfl, ?_⟩
         rw [applyValues_argumentValues]
@@ -587,6 +419,40 @@ theorem term_representation_sound (encoding : Encoding symbols)
   subst encoded
   exact term_eval encoding target source valuation environment related
 
+/-- The intrinsic FO encoder uses only Boolean literals. Other source
+constants are typed family symbols, so native components may give raw SMT
+numerals their interpreted meaning without changing encoded FO evaluations. -/
+theorem term_literalFree (encoding : Encoding symbols)
+    {context : FO.Context} {sort : FO.FOSort}
+    (source : FO.FamilyTerm symbols context sort) :
+    LiteralFree (𝒶⟦source⟧[encoding]) := by
+  exact FO.FamilyTerm.rec
+    (motive_1 := fun _ _ source => LiteralFree (term encoding source))
+    (motive_2 := fun _ _ args =>
+      LiteralFreeList (arguments encoding args).toList)
+    (var := fun ref => .bvar _)
+    (symbol := fun symbol args argsFree => .app argsFree)
+    (boolLit := fun value => by
+      cases value <;> simp only [term] <;> exact .bool _)
+    (not := fun body bodyFree => .app (.cons bodyFree .nil))
+    (and := fun left right leftFree rightFree =>
+      .app (.cons leftFree (.cons rightFree .nil)))
+    (or := fun left right leftFree rightFree =>
+      .app (.cons leftFree (.cons rightFree .nil)))
+    (imp := fun left right leftFree rightFree =>
+      .app (.cons leftFree (.cons rightFree .nil)))
+    (iff := fun left right leftFree rightFree =>
+      .app (.cons leftFree (.cons rightFree .nil)))
+    (eq := fun left right leftFree rightFree =>
+      .app (.cons leftFree (.cons rightFree .nil)))
+    (forallE := fun body bodyFree => .forallE bodyFree)
+    (existsE := fun body bodyFree => .existsE bodyFree)
+    (nil := .nil)
+    (cons := fun argument rest argumentFree restFree => by
+      rw [arguments, Array.toList_append, List.singleton_append]
+      exact .cons argumentFree restFree)
+    source
+
 /-- Every encoded assertion of a valid typed theory holds in the induced SMT
 model. -/
 theorem assertions_valid (encoding : Encoding symbols)
@@ -616,16 +482,20 @@ symbol graph. -/
 theorem declarations_valid (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) (declarations : List (Declaration symbols)) :
     model encoding target ⊨ₛᶜ
-      (declarations.map (declaration encoding)).toArray := by
+      ((ordinaryDecls encoding declarations).map
+        (declaration encoding)).toArray := by
   intro command membership
   have arrayMembership : command ∈
-      (declarations.map (declaration encoding)).toArray :=
+      ((ordinaryDecls encoding declarations).map
+        (declaration encoding)).toArray :=
     Array.mem_toList_iff.mp membership
   have listMembership : command ∈
-      declarations.map (declaration encoding) := by
+      (ordinaryDecls encoding declarations).map (declaration encoding) := by
     simpa using arrayMembership
   rcases List.mem_map.mp listMembership with ⟨declared, declaredMem, rfl⟩
-  exact declaration_valid encoding target declared
+  apply declaration_valid encoding target declared
+  have filtered := List.mem_filter.mp declaredMem
+  simpa using filtered.2
 
 /-- Sort declarations carry no constraint beyond belonging to the supported
 command fragment. -/
@@ -648,32 +518,165 @@ theorem sortDeclarations_valid (encoding : Encoding symbols)
   cases declarationEqual
   trivial
 
-/-- Semantic soundness of the pure FO-to-SMT representation: any typed target
-model lifts to a model of the exact represented command sequence. -/
-theorem representation_sound (encoding : Encoding symbols)
+/-! ## Composition with native derived symbols -/
+
+/-- Ordinary source-symbol declarations remain valid in an extended model. -/
+theorem declaration_valid_with (encoding : Encoding symbols)
+    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (declared : Declaration symbols)
+    (ordinary : encoding.nativeSymbol declared.symbol = false) :
+    (modelWith encoding target extra).SatisfiesCommand
+      (declaration encoding declared) := by
+  rw [declaration]
+  constructor
+  · trivial
+  · rw [← encoding.ordinary_ident declared.symbol ordinary]
+    exact symbol_has_type_with encoding target extra declared.symbol
+
+/-- Valid encoded assertions stay valid after installing a disjoint native
+graph. -/
+theorem assertions_valid_with (encoding : Encoding symbols)
+    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (source : FO.FamilyTheory symbols) (valid : target ⊨ᵀ source) :
+    modelWith encoding target extra ⊨ₛᶜ
+      (source.map fun formula => .assert (𝒶⟦formula⟧[encoding])).toArray := by
+  intro command membership
+  have arrayMembership : command ∈
+      (source.map fun formula => Crush.SMT.Command.assert
+        (𝒶⟦formula⟧[encoding])).toArray :=
+    Array.mem_toList_iff.mp membership
+  have listMembership : command ∈
+      source.map fun formula => Crush.SMT.Command.assert
+        (𝒶⟦formula⟧[encoding]) := by
+    simpa using arrayMembership
+  rcases List.mem_map.mp listMembership with ⟨formula, formulaMem, rfl⟩
+  constructor
+  · trivial
+  · have baseEval := eval_true encoding target
+        (term_eval encoding target formula
+          (FO.Valuation.empty target.carriers) [] (Env.empty target))
+        (valid formula formulaMem)
+    have extended := eval_with_extra encoding target extra
+      (term_literalFree encoding formula) baseEval
+    change Crush.SMT.Eval (modelWith encoding target extra) [] _
+      ((modelWith encoding target extra).bool true)
+    rw [modelWith_bool, ← model_bool]
+    exact extended
+
+/-- Every ordinary declaration in the represented trace is valid in the
+extended model. -/
+theorem declarations_valid_with (encoding : Encoding symbols)
+    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (declarations : List (Declaration symbols)) :
+    modelWith encoding target extra ⊨ₛᶜ
+      ((ordinaryDecls encoding declarations).map
+        (declaration encoding)).toArray := by
+  intro command membership
+  have arrayMembership : command ∈
+      ((ordinaryDecls encoding declarations).map
+        (declaration encoding)).toArray :=
+    Array.mem_toList_iff.mp membership
+  have listMembership : command ∈
+      (ordinaryDecls encoding declarations).map (declaration encoding) := by
+    simpa using arrayMembership
+  rcases List.mem_map.mp listMembership with ⟨declared, declaredMem, rfl⟩
+  apply declaration_valid_with encoding target extra declared
+  have filtered := List.mem_filter.mp declaredMem
+  simpa using filtered.2
+
+/-- Sort declarations are graph-independent. -/
+theorem sortDeclarations_valid_with (encoding : Encoding symbols)
+    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (sorts : List FO.FOSort) :
+    modelWith encoding target extra ⊨ₛᶜ
+      (sorts.filterMap (sortDeclaration? encoding)).toArray := by
+  intro command membership
+  have arrayMembership : command ∈
+      (sorts.filterMap (sortDeclaration? encoding)).toArray :=
+    Array.mem_toList_iff.mp membership
+  have listMembership : command ∈
+      sorts.filterMap (sortDeclaration? encoding) := by
+    simpa using arrayMembership
+  rcases List.mem_filterMap.mp listMembership with
+    ⟨sort, sortMem, declarationEqual⟩
+  unfold sortDeclaration? at declarationEqual
+  split at declarationEqual <;> try contradiction
+  split at declarationEqual <;> try contradiction
+  cases declarationEqual
+  trivial
+
+/-- Low-level composition for a shared model carrying additional native derived
+symbols. This is the extension point used by certified datatype guards; all
+ordinary declarations and assertions retain their existing proofs. -/
+theorem lift_with_extra (encoding : Encoding symbols)
     {source : FO.FamilyTheory symbols} {commands : Array Command}
     (representation : TheoryRepresentation encoding source commands)
-    (target : FO.FamilyModel symbols) (valid : target ⊨ᵀ source) :
+    (target : FO.FamilyModel symbols) (valid : target ⊨ᵀ source)
+    (extra : ExtraGraph encoding target)
+    (nativeValid : modelWith encoding target extra ⊨ₛᶜ
+      encoding.nativeCommands) :
+    ∃ smtModel : Crush.SMT.Model, smtModel ⊨ₛᶜ commands := by
+  rcases representation with ⟨declarations, rfl⟩
+  refine ⟨modelWith encoding target extra, ?_⟩
+  simp only [theory]
+  rw [satisfiesCommands_append]
+  refine ⟨nativeValid, ?_⟩
+  simp only [theoryBody]
+  rw [satisfiesCommands_append, satisfiesCommands_append]
+  exact ⟨⟨sortDeclarations_valid_with encoding target extra _,
+    declarations_valid_with encoding target extra declarations⟩,
+    assertions_valid_with encoding target extra source valid⟩
+
+/-- Low-level composition shared by every native component. Public soundness
+below obtains `nativeValid` from the exact component representation. -/
+theorem lift (encoding : Encoding symbols)
+    {source : FO.FamilyTheory symbols} {commands : Array Command}
+    (representation : TheoryRepresentation encoding source commands)
+    (target : FO.FamilyModel symbols) (valid : target ⊨ᵀ source)
+    (nativeValid : model encoding target ⊨ₛᶜ encoding.nativeCommands) :
     ∃ smtModel : Crush.SMT.Model, smtModel ⊨ₛᶜ commands := by
   rcases representation with ⟨declarations, rfl⟩
   refine ⟨model encoding target, ?_⟩
   simp only [theory]
-  rw [Crush.SMT.Model.satisfiesCommands_append,
-    Crush.SMT.Model.satisfiesCommands_append]
+  rw [satisfiesCommands_append]
+  refine ⟨nativeValid, ?_⟩
+  simp only [theoryBody]
+  rw [satisfiesCommands_append, satisfiesCommands_append]
   exact ⟨⟨sortDeclarations_valid encoding target _,
     declarations_valid encoding target declarations⟩,
     assertions_valid encoding target source valid⟩
 
-/-- Concrete command unsatisfiability reflects to the represented typed FO
-theory. -/
-theorem commands_unsat_implies_theory_unsat (encoding : Encoding symbols)
-    {source : FO.FamilyTheory symbols} {commands : Array Command}
-    (representation : TheoryRepresentation encoding source commands)
+/-- Single model-lifting theorem for the complete representation. Ordinary
+sorts, ordinary symbols, assertions, and every native datatype block are all
+validated in the same induced raw model. The empty datatype environment is the
+ordinary no-native case. -/
+theorem representation_sound {signature : Signature}
+    (encoding : Encoding (Symbol signature))
+    {env : Datatype.Env signature}
+    (native : Datatype.EnvRepresentation encoding env)
+    {theory : FO.FamilyTheory (Symbol signature)} {commands : Array Command}
+    (representation : TheoryRepresentation encoding theory commands)
+    (source : Model signature) (lawful : Datatype.Env.Lawful source env)
+    (valid : canonicalModel source ⊨ᵀ theory) :
+    ∃ smtModel : Crush.SMT.Model, smtModel ⊨ₛᶜ commands :=
+  lift encoding representation (canonicalModel source) valid
+    (native.native_valid lawful)
+
+/-- Unsatisfiability of the complete represented command sequence reflects
+through the same theorem to the lawful intrinsic source semantics. -/
+theorem commands_unsat_implies_source_unsat {signature : Signature}
+    (encoding : Encoding (Symbol signature))
+    {env : Datatype.Env signature}
+    (native : Datatype.EnvRepresentation encoding env)
+    (formula : Sentence signature) {commands : Array Command}
+    (representation : TheoryRepresentation encoding
+      (translatedTheory formula) commands)
     (unsat : Crush.SMT.CommandsUnsatisfiable commands) :
-    FO.FamilyTheoryUnsatisfiable source := by
-  intro target valid
+    Datatype.Env.Unsatisfiable env formula := by
+  intro source lawful sourceValid
   obtain ⟨smtModel, commandsValid⟩ :=
-    representation_sound encoding representation target valid
+    representation_sound encoding native representation source lawful
+      (model_extension source formula sourceValid)
   exact unsat smtModel commandsValid
 
 

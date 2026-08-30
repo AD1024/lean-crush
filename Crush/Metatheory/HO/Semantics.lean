@@ -11,6 +11,8 @@ values of their intrinsically recorded types.
 
 namespace Crush.Metatheory
 
+universe u
+
 namespace Ty
 
 /-- Set-theoretic interpretation of a source type. -/
@@ -91,6 +93,21 @@ def Term.denote {signature : Signature} (model : Model signature) :
 def Model.Satisfies {signature : Signature} (model : Model signature)
     (formula : Sentence signature) : Prop :=
   formula.denote model (Valuation.empty model.Base)
+
+/-- Satisfiability among the source models carrying an additional semantic
+contract.  The contract is proof-relevant so clients may retain canonical
+carriers, isomorphisms, or other data used by a model-lifting proof. -/
+def SatisfiableUnder {signature : Signature}
+    (Lawful : Model signature → Sort u) (formula : Sentence signature) : Prop :=
+  ∃ model : Model signature, ∃ _law : Lawful model,
+    model.Satisfies formula
+
+/-- Unsatisfiability among the source models carrying an additional semantic
+contract. -/
+def UnsatisfiableUnder {signature : Signature}
+    (Lawful : Model signature → Sort u) (formula : Sentence signature) : Prop :=
+  ∀ model : Model signature, ∀ _law : Lawful model,
+    ¬model.Satisfies formula
 
 /-- Satisfiability allows the model's carriers and interpretations to vary. -/
 def Satisfiable {signature : Signature} (formula : Sentence signature) : Prop :=

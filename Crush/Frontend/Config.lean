@@ -141,6 +141,13 @@ register_option crush.ho.mode : HOMode := {
   descr := "Higher-order elimination strategy: defunctionalize or native."
 }
 
+register_option crush.datatype.certify : Bool := {
+  defValue := false
+  descr := "Certify datatype discovery, typed ownership, and native declarations. Disabled \
+            by default so existing production datatype behavior and benchmarks remain \
+            unchanged while certified fragment coverage is expanded."
+}
+
 register_option crush.mono.fuel : Nat := {
   defValue := 512
   descr := "Maximum number of monomorphization instances generated before giving up."
@@ -264,6 +271,7 @@ structure Config where
   timeout        : Nat       := 10
   trust          : TrustMode := .trust
   hoMode         : HOMode    := .defunctionalize
+  certifyDatatype : Bool     := false
   monoFuel       : Nat       := 512
   monoRounds     : Nat       := 8
   monoCertify    : Bool      := false
@@ -294,6 +302,7 @@ def Config.ofOptions (opts : Options) : Config :=
     timeout        := crush.timeout.get opts
     trust          := crush.trust.get opts
     hoMode         := crush.ho.mode.get opts
+    certifyDatatype := crush.datatype.certify.get opts
     monoFuel       := crush.mono.fuel.get opts
     monoRounds     := crush.mono.rounds.get opts
     monoCertify    := crush.mono.certify.get opts

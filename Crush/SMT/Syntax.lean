@@ -26,7 +26,7 @@ namespace Crush.SMT
 inductive Ident where
   | symb    : String → Ident
   | indexed : String → Array (String ⊕ Nat) → Ident
-  deriving BEq, Inhabited, Repr
+  deriving BEq, DecidableEq, Inhabited, Repr
 
 /-- An SMT sort: a bound variable (only inside `define-sort`) or an applied sort
 constructor `(S s₀ … sₙ)`. Nullary constructors render as bare symbols. -/
@@ -34,6 +34,71 @@ inductive SSort where
   | bvar : Nat → SSort
   | app  : Ident → Array SSort → SSort
   deriving BEq, Inhabited, Repr
+
+namespace SSort
+
+mutual
+  private def size : SSort → Nat
+    | .bvar _ => 1
+    | .app _ arguments => listSize arguments.toList + 1
+
+  private def listSize : List SSort → Nat
+    | [] => 0
+    | sort :: sorts => size sort + listSize sorts + 1
+end
+
+/- Executable equality for the nested recursive sort syntax. Lean's standard
+deriver does not recurse through `Array`, so the list helper makes the structural
+decrease explicit. -/
+mutual
+  def decEq : (left right : SSort) → Decidable (left = right)
+    | .bvar left, .bvar right =>
+      if equal : left = right then
+        isTrue (by cases equal; rfl)
+      else
+        isFalse fun assumed => by
+          cases assumed
+          exact equal rfl
+    | .bvar _, .app _ _ | .app _ _, .bvar _ => isFalse nofun
+    | .app leftName leftArgs, .app rightName rightArgs =>
+      if namesEqual : leftName = rightName then
+        match listDecEq leftArgs.toList rightArgs.toList with
+        | isFalse different => isFalse fun equal => by
+            injection equal with _ argsEqual
+            exact different (congrArg Array.toList argsEqual)
+        | isTrue argsEqual => isTrue (by
+            cases namesEqual
+            have arraysEqual := Array.toList_inj.mp argsEqual
+            cases arraysEqual
+            rfl)
+      else
+        isFalse fun equal => by
+          injection equal with equalNames
+          exact namesEqual equalNames
+  termination_by left right => size left + size right
+  decreasing_by all_goals simp [size] <;> omega
+
+  def listDecEq : (left right : List SSort) → Decidable (left = right)
+    | [], [] => isTrue rfl
+    | [], _ :: _ | _ :: _, [] => isFalse nofun
+    | left :: lefts, right :: rights =>
+      match decEq left right with
+      | isFalse different => isFalse fun equal => by
+          injection equal with headEqual
+          exact different headEqual
+      | isTrue headEqual =>
+        match listDecEq lefts rights with
+        | isFalse different => isFalse fun equal => by
+            injection equal with _ tailEqual
+            exact different tailEqual
+        | isTrue tailEqual => isTrue (by cases headEqual; cases tailEqual; rfl)
+  termination_by left right => listSize left + listSize right
+  decreasing_by all_goals simp [listSize] <;> omega
+end
+
+end SSort
+
+instance : DecidableEq SSort := SSort.decEq
 
 /-- Literal constants. `TODO(reals/floats)` tracked in the implementation plan. -/
 inductive Literal where
@@ -73,13 +138,13 @@ structure CtorDecl where
   name     : String
   /-- `(selectorName, selectorSort)` pairs. -/
   selDecls : Array (String × SSort)
-  deriving Inhabited, Repr
+  deriving DecidableEq, Inhabited, Repr
 
 /-- A (possibly parametric) datatype body. -/
 structure DatatypeDecl where
   params : Array String := #[]
   ctors  : Array CtorDecl
-  deriving Inhabited, Repr
+  deriving DecidableEq, Inhabited, Repr
 
 /-- One function in an SMT-LIB `define-funs-rec` command. -/
 structure FunDef where

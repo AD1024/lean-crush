@@ -1,6 +1,7 @@
 import Lean
 import Crush.SMT.Syntax
 import Crush.Metatheory.VCG.Command
+import Crush.Metatheory.VCG.Datatype
 import Crush.Frontend.Config
 open Lean
 
@@ -24,6 +25,8 @@ Responsibilities:
 -/
 
 namespace Crush
+
+open Metatheory.VCG
 
 open SMT
 
@@ -67,6 +70,25 @@ structure StructuralAllocationTrace where
 
 instance : Inhabited StructuralAllocationTrace where
   default := { entries := [], namesNodup := by simp }
+
+/-- Every concrete symbol returned by the shared allocator, independent of its
+semantic key class. This is the global freshness witness needed when ordinary,
+datatype, closure, and derived identifiers share one SMT namespace. -/
+structure NameAllocationTrace where
+  names : List String
+  nodup : names.Nodup
+
+instance : Inhabited NameAllocationTrace where
+  default := { names := [], nodup := by simp }
+
+namespace NameAllocationTrace
+
+def push (trace : NameAllocationTrace) (name : String)
+    (fresh : name ∉ trace.names) : NameAllocationTrace where
+  names := name :: trace.names
+  nodup := by simp [fresh, trace.nodup]
+
+end NameAllocationTrace
 
 namespace StructuralAllocationTrace
 
@@ -153,16 +175,25 @@ structure RegistryCache where
   hasResult       : Option Bool := none
   deriving Inhabited
 
-/-- Auditable link from one retained defunctionalization command encoding to
-the structural symbols whose allocation it relies on. Links are created only by
-`emitStructuralCommand`, after checking every name against the
-proof-carrying allocation trace. -/
-structure DefunAllocationLink where
+/-- Auditable link from one retained command encoding to the globally allocated
+symbols it owns. Every allocator key class contributes to this one name trace,
+so ordinary structural commands and datatype guards use the same mechanism. -/
+structure CommandAllocationLink where
   encodingIndex : Nat
+  commandIndex : Nat
   symbols : Array String
-  allocation : StructuralAllocationTrace
+  allocation : NameAllocationTrace
   symbolsAllocated : ∀ symbol ∈ symbols.toList,
-    symbol ∈ allocation.entries.map Prod.snd
+    symbol ∈ allocation.names
+
+/-- Exact state position and global-allocation support for one certified native
+datatype command. -/
+structure DataAllocationLink where
+  commandIndex : Nat
+  certificateIndex : Nat
+  names : Array String
+  allocation : NameAllocationTrace
+  namesAllocated : ∀ name ∈ names.toList, name ∈ allocation.names
 
 /-- One successful dispatch through the restricted certified primitive registry. -/
 structure CertifiedHookUse where
@@ -174,7 +205,7 @@ structure CertifiedHookUse where
 attached by the proved VCG route. -/
 inductive RunStatus where
   | proved
-  | trusted (reasons : Array Metatheory.VCG.TrustReason)
+  | trusted (reasons : Array TrustReason)
 
 /-- Mutable translation state. -/
 structure TranslateState where
@@ -186,6 +217,8 @@ structure TranslateState where
   structuralToName : Std.HashMap StructuralKey String := {}
   /-- Auditable, proof-carrying allocation history for `structuralToName`. -/
   structuralAllocations : StructuralAllocationTrace := default
+  /-- Global proof-facing history of every allocated SMT symbol. -/
+  nameAllocations : NameAllocationTrace := default
   nameToAtom : Std.HashMap String String := {}
   /-- Emitted SMT symbol → the Lean term it stands for.
 
@@ -205,18 +238,32 @@ structure TranslateState where
   derivedSymbols : Std.HashMap DerivedSymbolKey String := {}
   /-- Emitted commands, in order. -/
   commands   : Array SMT.Command := #[]
-  /-- Syntax encodings retained for declarations and assertions emitted by the
-      stateful defunctionalization path.  These are not semantic certificates. -/
-  defunEncodings : Array Metatheory.VCG.CommandEncoding := #[]
-  /-- Checked structural-name dependencies of `defunEncodings`. -/
-  defunAllocationLinks : Array DefunAllocationLink := #[]
+  /-- Syntax encodings retained for proof-facing declarations, assertions, and
+      datatype guards. These are not yet semantic certificates. -/
+  commandEncodings : Array CommandEncoding := #[]
+  /-- Checked global-name dependencies of `commandEncodings`. -/
+  commandAllocationLinks : Array CommandAllocationLink := #[]
   /-- Every step that crossed the explicit trusted translation boundary. -/
-  trustReasons : Array Metatheory.VCG.TrustReason := #[]
+  trustReasons : Array TrustReason := #[]
   /-- Root expression of the legacy direct translator, recorded once even when
       recursive emission revisits many subterms. -/
   directSource : Option Expr := none
   /-- Type-erased identity-bearing semantic certificates for live source symbols. -/
   verifiedConstants : Array Dynamic := #[]
+  /-- Opt-in certificates for datatype discovery and typed signature ownership.
+      These certify datatype lowering inputs. -/
+  datatypeCertificates : Array CertifiedDataEnv := #[]
+  /-- Fact-local certified datatype environment consumed by native declaration
+      allocation. Restored after the fact has been emitted. -/
+  activeDataSignature : Option Metatheory.Reification.SomeDataSignature := none
+  /-- Native datatype commands whose exact typed block and command
+      well-formedness have been certified. -/
+  certifiedDataCommands : Array CertifiedDataCommand := #[]
+  /-- Command-array positions appended atomically with `certifiedDataCommands`. -/
+  certifiedDataCommandIndices : Array Nat := #[]
+  certifiedDataAllocationLinks : Array DataAllocationLink := #[]
+  /-- Globally duplicate-free names owned by all certified datatype commands. -/
+  certifiedDataNames : NameAllocationTrace := default
   /-- Auditable successful uses of proof-carrying primitive mappings. -/
   certifiedHookUses : Array CertifiedHookUse := #[]
   /-- Provenance table indexed by fact id. -/
@@ -253,6 +300,22 @@ def Proved (state : TranslateState) : Prop :=
     state.status = .proved ↔ state.Proved := by
   simp [status, Proved, Array.isEmpty_iff]
 
+/-- Retained datatype-guard encodings in their emission order. The allocation
+links select them from the shared command-encoding trace without duplicating
+mutable state. -/
+def dataGuards (state : TranslateState) : Array DataGuardEncoding :=
+  state.commandAllocationLinks.filterMap fun link =>
+    match state.commandEncodings[link.encodingIndex]? with
+    | some (CommandEncoding.dataGuard encoding) => some encoding
+    | _ => none
+
+/-- Production command positions aligned with `dataGuards`. -/
+def dataGuardIndices (state : TranslateState) : Array Nat :=
+  state.commandAllocationLinks.filterMap fun link =>
+    match state.commandEncodings[link.encodingIndex]? with
+    | some (CommandEncoding.dataGuard _) => some link.commandIndex
+    | _ => none
+
 end TranslateState
 
 /-- The translation monad. `MetaM` at the bottom gives us `whnf`, unification,
@@ -276,41 +339,42 @@ def run {α : Type} (cfg : Config) (x : TranslateM α) : MetaM (α × TranslateS
 def emitCommand (c : SMT.Command) : TranslateM Unit :=
   modify fun s => { s with commands := s.commands.push c }
 
-/-- Atomically emit the command stored in a defunctionalization encoding and
-retain that same syntax witness. This rules out command/encoding drift, but does
-not establish semantic preservation. -/
-def emitEncodedCommand
-    (encoding : Metatheory.VCG.CommandEncoding) : TranslateM Unit :=
-  modify fun s => { s with
-    commands := s.commands.push encoding.command
-    defunEncodings := s.defunEncodings.push encoding }
-
-/-- Emit an encoded command only when all of its structural symbol dependencies
-have already been allocated and recorded in the uniqueness trace. The command,
-encoding, and dependency link are appended atomically. -/
-def emitStructuralCommand
-    (encoding : Metatheory.VCG.CommandEncoding) : TranslateM Unit := do
-  let symbols := encoding.structuralSymbols
+/-- Emit an encoded command only when all symbols determined by its witness have
+already been recorded in the global uniqueness trace. The command, encoding,
+and dependency link are appended atomically. -/
+def emitAllocatedCommand
+    (encoding : CommandEncoding) : TranslateM Unit := do
+  let symbols := encoding.allocatedSymbols
   let state ← get
-  let allocatedNames := state.structuralAllocations.entries.map Prod.snd
+  let allocatedNames := state.nameAllocations.names
   if allocated : ∀ symbol ∈ symbols.toList, symbol ∈ allocatedNames then
-    let index := state.defunEncodings.size
+    let index := state.commandEncodings.size
+    let commandIndex := state.commands.size
     modify fun s => { s with
       commands := s.commands.push encoding.command
-      defunEncodings := s.defunEncodings.push encoding
-      defunAllocationLinks := s.defunAllocationLinks.push {
+      commandEncodings := s.commandEncodings.push encoding
+      commandAllocationLinks := s.commandAllocationLinks.push {
         encodingIndex := index
+        commandIndex
         symbols
-        allocation := state.structuralAllocations
+        allocation := state.nameAllocations
         symbolsAllocated := allocated } }
   else
     let missing := symbols.filter fun symbol => !allocatedNames.contains symbol
     throwError
-      "crush: internal encoded command refers to unallocated structural symbols: {missing}"
+      "crush: internal encoded command refers to unallocated symbols: {missing}"
 
-def markTrusted (reason : Metatheory.VCG.TrustReason) : TranslateM Unit :=
+def markTrusted (reason : TrustReason) : TranslateM Unit :=
   modify fun state => { state with
     trustReasons := state.trustReasons.push reason }
+
+def markDatatypeTrusted
+    (reason : Metatheory.Reification.DatatypeReject) : TranslateM Unit := do
+  let rendered := reprStr reason
+  unless (← get).trustReasons.any fun
+      | .datatype existing => reprStr existing == rendered
+      | _ => false do
+    markTrusted (.datatype reason)
 
 /-- Classify the legacy direct Lean-to-SMT route as trusted exactly once. The
 proved route instead enters through `Metatheory.VCG.emit`. -/
@@ -325,6 +389,69 @@ def recordVerifiedConstant (certificate : Dynamic) : TranslateM Nat := do
   modify fun s => { s with verifiedConstants := s.verifiedConstants.push certificate }
   return index
 
+def recordDatatypeCertificate
+    (certificate : CertifiedDataEnv) : TranslateM Nat := do
+  let index := (← get).datatypeCertificates.size
+  modify fun state => {
+    state with datatypeCertificates := state.datatypeCertificates.push certificate }
+  return index
+
+/-- Re-index every fact-local datatype trace against the completed production
+command array. Certificates are initially recorded while their fact is emitted;
+this final pass removes the intermediate-prefix boundary, so every retained
+certificate refers to the exact final `TranslateState.commands`. -/
+def finalizeDatatypeCertificates : TranslateM Unit := do
+  let state ← get
+  let mut certificates : Array CertifiedDataEnv := #[]
+  for certificate in state.datatypeCertificates do
+    let some certificate := certificate.withCommands? state.commands
+        state.certifiedDataCommands state.certifiedDataCommandIndices
+        state.dataGuards state.dataGuardIndices
+      | throwError "crush: final command array lost a certified datatype block"
+    certificates := certificates.push certificate
+  modify fun current => { current with datatypeCertificates := certificates }
+
+def withDataSignature {α : Type}
+    (signature : Metatheory.Reification.SomeDataSignature)
+    (body : TranslateM α) : TranslateM α := do
+  let previous := (← get).activeDataSignature
+  modify fun state => { state with activeDataSignature := some signature }
+  try body finally
+    modify fun state => { state with activeDataSignature := previous }
+
+/-- Emit and retain one certified native datatype command atomically, preventing
+the production command and its certificate from drifting apart. -/
+def emitCertifiedDataCommand
+    (certificate : CertifiedDataCommand) : TranslateM Nat := do
+  let state ← get
+  let commandIndex := state.commands.size
+  let certificateIndex := state.certifiedDataCommands.size
+  let names := certificate.names
+  if allocated : ∀ name ∈ names.toList, name ∈ state.nameAllocations.names then
+    if namesNodup : (names.toList ++ state.certifiedDataNames.names).Nodup then
+      modify fun current => {
+        current with
+          commands := current.commands.push certificate.command
+          certifiedDataCommands := current.certifiedDataCommands.push certificate
+          certifiedDataCommandIndices :=
+            current.certifiedDataCommandIndices.push commandIndex
+          certifiedDataAllocationLinks :=
+            current.certifiedDataAllocationLinks.push {
+              commandIndex
+              certificateIndex
+              names
+              allocation := state.nameAllocations
+              namesAllocated := allocated }
+          certifiedDataNames := {
+            names := names.toList ++ state.certifiedDataNames.names
+            nodup := namesNodup } }
+      return commandIndex
+    else
+      throwError "crush: certified datatype commands share an owned symbol"
+  else
+    let missing := names.filter fun name => !state.nameAllocations.names.contains name
+    throwError "crush: certified datatype command uses unallocated names: {missing}"
+
 def recordCertifiedHookUse (declaration : Name) (targetSymbol : String) :
     TranslateM Unit :=
   modify fun s => { s with certifiedHookUses := s.certifiedHookUses.push {
@@ -337,13 +464,32 @@ private def sanitizeSymbol (s : String) : String :=
   let s := String.ofList (s.toList.map (fun c => if ok c then c else '_'))
   if s.isEmpty || s.front.isDigit then "cr_" ++ s else s
 
+/-- Names with fixed meaning in the proved raw semantics. The opt-in datatype
+certificate reserves them before allocation so a user declaration cannot make
+an intrinsic datatype sort equal to `Bool`/`Int`/`String`, or make a native
+constructor/selector parse as a logical connective. -/
+private def proofReservedName (name : String) : Bool :=
+  name == "Bool" || name == "Int" || name == "String" || name == "=" ||
+    name == "not" || name == "=>" || name == "and" || name == "or"
+
 /-- Turn an arbitrary hint into a legal, collision-free SMT symbol. -/
 private def reserveSymbol (hint : String) : TranslateM String := do
-  let base := sanitizeSymbol hint
+  let sanitized := sanitizeSymbol hint
+  let base :=
+    if (← get).cfg.certifyDatatype && proofReservedName sanitized then
+      "cr_" ++ sanitized
+    else sanitized
   let used := (← get).usedNames
   if !used.contains base then
-    modify fun s => { s with usedNames := s.usedNames.insert base 0 }
-    return base
+    let trace := (← get).nameAllocations
+    if fresh : base ∉ trace.names then
+      modify fun state => {
+        state with
+          usedNames := state.usedNames.insert base 0
+          nameAllocations := trace.push base fresh }
+      return base
+    else
+      throwError "crush: internal allocator freshness drift for `{base}`"
   else
     let rec findUnused : Nat → Nat → String × Nat
       | 0, k => (s!"{base}_{k}", k + 1)
@@ -354,9 +500,15 @@ private def reserveSymbol (hint : String) : TranslateM String := do
         else
           (candidate, k + 1)
     let (name, next) := findUnused (used.size + 1) (used.getD base 0)
-    modify fun s => { s with usedNames :=
-      (s.usedNames.insert base next).insert name 0 }
-    return name
+    let trace := (← get).nameAllocations
+    if fresh : name ∉ trace.names then
+      modify fun state => {
+        state with
+          usedNames := (state.usedNames.insert base next).insert name 0
+          nameAllocations := trace.push name fresh }
+      return name
+    else
+      throwError "crush: internal allocator freshness drift for `{name}`"
 
 /-- Allocate a fresh internal symbol not tied to any Lean atom. -/
 def freshSymbol (hint : String := "x") : TranslateM String := do

@@ -13,6 +13,8 @@ semantic representation witness.
 namespace Crush.Metatheory.VCG
 
 open Defunctionalization.Flattened
+open SMT.Datatype
+open scoped Crush.Metatheory Crush.SMT
 
 /-- Semantic classification of a completed Lean-to-SMT translation. -/
 inductive TranslationStatus {signature : Signature}
@@ -46,11 +48,12 @@ theorem unsat_source {signature : Signature}
     {encoding : SMT.Encoding (Symbol signature)}
     (status : TranslationStatus encoding) {source : Sentence signature}
     (proved : status.Proves source)
+    {env : Datatype.Env signature} (native : EnvRepresentation encoding env)
     (unsat : Crush.SMT.CommandsUnsatisfiable status.commands) :
-    Unsatisfiable source := by
+    Datatype.Env.Unsatisfiable env source := by
   rcases proved with ⟨commands, representation, rfl⟩
-  exact target_unsat_implies_source_unsat source
-    (SMT.commands_unsat_implies_theory_unsat encoding representation unsat)
+  exact SMT.commands_unsat_implies_source_unsat encoding native source
+    representation unsat
 
 end TranslationStatus
 

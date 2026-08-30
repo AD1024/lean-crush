@@ -299,6 +299,105 @@ theorem prod_congr (x y : Int) (h : x = y) : (x, 0) = (y, 0) := by crush
 theorem option_inj (x y : Int) (h : Option.some x = Option.some y) :
     x = y := by crush
 
+-- Opting into certified datatype acceptance preserves the same production
+-- encoding for a block inside the currently certified fragment.
+set_option crush.datatype.certify true in
+theorem option_inj_certified_acceptance (x y : Int)
+    (h : Option.some x = Option.some y) : x = y := by
+  crush
+
+inductive CertifiedReading where
+  | missing
+  | measured (value : Int)
+
+set_option crush.datatype.certify true in
+theorem measured_threshold (x y : Int)
+    (same : CertifiedReading.measured x = CertifiedReading.measured y)
+    (threshold : 10 ≤ x) : 10 ≤ y := by
+  crush
+
+set_option crush.datatype.certify true in
+theorem measured_not_missing (x : Int) :
+    CertifiedReading.measured x ≠ CertifiedReading.missing := by
+  crush
+
+/-! Certified definition unfolding composes with certified datatype acceptance.
+The definitions are deliberately small: each theorem isolates one datatype
+shape while still requiring native constructor semantics after delta reduction. -/
+
+inductive CertifiedColor where
+  | red
+  | blue
+
+structure CertifiedPoint where
+  x : Int
+  y : Int
+
+inductive CertifiedTree (α : Type) where
+  | leaf : α → CertifiedTree α
+  | node : CertifiedTree α → CertifiedTree α → CertifiedTree α
+
+mutual
+  inductive CertifiedMutTree where
+    | leaf
+    | node : CertifiedMutTrees → CertifiedMutTree
+  inductive CertifiedMutTrees where
+    | nil
+    | cons : CertifiedMutTree → CertifiedMutTrees → CertifiedMutTrees
+end
+
+@[crush_certified_def]
+def certifiedRed : CertifiedColor := .red
+
+@[crush_certified_def]
+def certifiedPoint (x y : Int) : CertifiedPoint := ⟨x, y⟩
+
+@[crush_certified_def]
+def certifiedSomeInt (x : Int) : Option Int := some x
+
+@[crush_certified_def]
+def certifiedSomeBool (x : Bool) : Option Bool := some x
+
+@[crush_certified_def]
+def certifiedLeaf (x : Int) : CertifiedTree Int := .leaf x
+
+@[crush_certified_def]
+def certifiedNode (xs : CertifiedMutTrees) : CertifiedMutTree := .node xs
+
+@[crush_certified_def]
+def certifiedWrap (reading : CertifiedReading) : Option CertifiedReading :=
+  some reading
+
+set_option crush.datatype.certify true in
+theorem certified_def_enum : certifiedRed ≠ CertifiedColor.blue := by
+  crush
+
+set_option crush.datatype.certify true in
+theorem certified_def_record (a b c d : Int)
+    (equal : certifiedPoint a b = certifiedPoint c d) : a = c ∧ b = d := by
+  crush
+
+set_option crush.datatype.certify true in
+theorem certified_def_two_instances (a b : Int) (p q : Bool)
+    (ints : certifiedSomeInt a = certifiedSomeInt b)
+    (bools : certifiedSomeBool p = certifiedSomeBool q) : a = b ∧ p = q := by
+  crush
+
+set_option crush.datatype.certify true in
+theorem certified_def_recursive (a b : Int)
+    (equal : certifiedLeaf a = certifiedLeaf b) : a = b := by
+  crush
+
+set_option crush.datatype.certify true in
+theorem certified_def_mutual (xs ys : CertifiedMutTrees)
+    (equal : certifiedNode xs = certifiedNode ys) : xs = ys := by
+  crush
+
+set_option crush.datatype.certify true in
+theorem certified_def_data_arrow (left right : CertifiedReading)
+    (equal : certifiedWrap left = certifiedWrap right) : left = right := by
+  crush
+
 -- Constructors are distinct: `none ≠ some x`.
 theorem option_distinct (x : Int) : (Option.some x) ≠ Option.none := by crush
 

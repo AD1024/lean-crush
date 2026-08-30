@@ -27,6 +27,11 @@ inductive SignatureBridge : Signature → Type where
   | cons {signature : Signature}
       (expression : Expr) (type : TypeBridge)
       (tail : SignatureBridge signature) : SignatureBridge (type.ty :: signature)
+  /-- A typed source constant owned by a structural component rather than by
+  ordinary expression lookup. Datatype reification selects these slots through
+  its exact constructor/selector/tester references. -/
+  | hidden {signature : Signature} (type : Ty)
+      (tail : SignatureBridge signature) : SignatureBridge (type :: signature)
 
 /-- An existentially typed constant lookup result. -/
 inductive FoundConst (signature : Signature) where
@@ -46,10 +51,22 @@ def find? : {signature : Signature} → SignatureBridge signature → Expr →
       else
         (tail.find? expression).map fun
           | .pack foundType ref => .pack foundType (.there ref)
+  | _ :: _, .hidden _ tail, expression =>
+      (tail.find? expression).map fun
+        | .pack foundType ref => .pack foundType (.there ref)
 
 def expressions : {signature : Signature} → SignatureBridge signature → List Expr
   | [], .nil => []
   | _ :: _, .cons expression _ tail => expression :: tail.expressions
+  | _ :: _, .hidden _ tail => tail.expressions
+
+/-- Reserve a typed structural prefix while preserving ordinary expression
+lookup in the tail. -/
+def prepend (head : Signature) {signature : Signature}
+    (bridge : SignatureBridge signature) : SignatureBridge (head ++ signature) :=
+  match head with
+  | [] => bridge
+  | type :: head => .hidden type (bridge.prepend head)
 
 end SignatureBridge
 
@@ -91,6 +108,15 @@ def ofVar : FoundVar context → PackedTerm signature context
 
 def ofConst : FoundConst signature → PackedTerm signature context
   | .pack type ref => .pack type (.const ref)
+
+/-- Package a structurally owned constant after checking that its live Lean type
+bridge computes the declaration type carried by the intrinsic reference. -/
+def ofTypedConst? (type : TypeBridge) {expected : Ty}
+    (ref : Const signature expected) : Option (PackedTerm signature context) :=
+  if equal : type.ty = expected then
+    some (.pack type (.const (equal.symm ▸ ref)))
+  else
+    none
 
 /-- Canonical bridge for the proposition/formula type. -/
 def propositionType : TypeBridge := .bool (.sort .zero)
