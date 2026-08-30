@@ -1,20 +1,22 @@
-import Crush.Metatheory.VCG.Soundness
+import Crush.Metatheory.VCG.Datatype
+import Crush.Metatheory.VCG.Generate
 import Crush.SMT.TermEq
 
 /-!
-# Live production agreement
+# Relating final production commands to the intrinsic theory
 
-This module is the refinement boundary for a completed direct production run.
-The unrestricted `emitTerm` implementation is not proved correct merely by
-entering this module. Instead, `TheoryAgreement` can be constructed only when
-the final command snapshot, after erasing semantically transparent top-level
-assertion attributes, is exactly the guarded intrinsic encoding of one exact
-ordered common-environment reification witness.
+After the production translator has processed every selected fact,
+`TranslateState.commands` contains its final SMT command array. This module
+checks that, after removing only the proved-semantically-irrelevant top-level
+assertion names, those commands impose exactly the same model requirements as
+the guarded intrinsic encoding of the complete reified higher-order theory.
 
-`SingleFactAgreement` is the compatibility specialization for the exact fact
-retained by `CertifiedDataEnv`. Production still has to construct the shared
-encoding/guard representations and retain common reification for the complete
-fact array before either executable check can succeed end to end.
+`ProductionTheoryAgreement` states this whole-theory correspondence, and
+`build?` returns its proof only when both command sets contain exactly the same
+commands. `ProductionFactAgreement` is the specialization to one retained fact.
+The theorem applies to the extensible production translator only when the
+shared encoding, datatype representations, guard interpretation, complete
+reification, and this final command-set comparison have all been constructed.
 -/
 
 namespace Crush.Metatheory.VCG
@@ -22,9 +24,9 @@ namespace Crush.Metatheory.VCG
 open Defunctionalization.Flattened Reification
 
 /-- Erase a top-level assertion annotation. Production adds `:named` at this
-position for unsat-core provenance; the attribute does not change the formula's
-raw semantics. Nested annotations are part of the represented term and remain
-untouched. -/
+position so an unsat core can identify the source fact; the attribute does not
+change the formula's untyped semantics. Nested annotations are part of the
+represented term and remain untouched. -/
 def stripAssertionAnnotation : Crush.SMT.Command → Crush.SMT.Command
   | .assert (.annot body _) => .assert body
   | command => command
@@ -49,8 +51,8 @@ def stripAssertionAnnotation : Crush.SMT.Command → Crush.SMT.Command
       defFunsRec | declDatatypes | checkSat | getModel | getProof |
       getUnsatCore | echo | exit => rfl
 
-/-- Stripping production provenance from every assertion preserves the class
-of satisfying raw models. -/
+/-- Removing top-level assertion names preserves the class of satisfying SMT
+models. -/
 theorem satisfiesCommands_stripAssertionAnnotations
     (model : Crush.SMT.Model) (commands : Array Crush.SMT.Command) :
     model.SatisfiesCommands (commands.map stripAssertionAnnotation) ↔
@@ -84,7 +86,7 @@ theorem commandsUnsatisfiable_stripAssertionAnnotations
     exact unsat model
       ((satisfiesCommands_stripAssertionAnnotations model commands).mp valid)
 
-/-- The logic-selection command is administrative in the raw model semantics. -/
+/-- The logic-selection command imposes no requirement on an SMT model. -/
 theorem satisfiesCommands_setLogic (model : Crush.SMT.Model) (logic : String)
     (commands : Array Crush.SMT.Command) :
     model.SatisfiesCommands (#[.setLogic logic] ++ commands) ↔
@@ -108,8 +110,9 @@ theorem commandsUnsatisfiable_setLogic (logic : String)
   · intro unsat model valid
     exact unsat model ((satisfiesCommands_setLogic model logic commands).mp valid)
 
-/-- Executable equality of semantic command sets. This follows the raw command
-semantics exactly: order and duplicate occurrences do not add obligations. -/
+/-- Decide whether two arrays impose the same model requirements. The command
+semantics depends on membership, so order and duplicate occurrences do not
+change the result. -/
 def sameCommandSet? (left right : Array Crush.SMT.Command) : Bool :=
   (left.toList.all fun command => decide (command ∈ right.toList)) &&
     (right.toList.all fun command => decide (command ∈ left.toList))
@@ -122,37 +125,37 @@ def sameCommandSet? (left right : Array Crush.SMT.Command) : Bool :=
 
 /-! ## Whole-theory production agreement -/
 
-/-- Whole-array refinement evidence for an exact ordered list of reified facts
-sharing one production datatype environment and ordinary signature. -/
-structure TheoryAgreement (certificate : CertifiedDataEnv)
+/-- Proof that the final production commands encode every fact reified under
+one shared datatype environment and ordinary signature. -/
+structure ProductionTheoryAgreement (production : ProductionFact)
     (guarding : SMT.Guarding
-      (Symbol (certificate.env.signature ++ certificate.tail)))
-    (represented : certificate.Representation guarding.encoding)
-    (guarded : certificate.GuardRepresentation guarding represented)
+      (Symbol (production.datatypes.signature ++ production.ordinarySignature)))
+    (represented : production.Representation guarding.encoding)
+    (guarded : production.GuardRepresentation guarding represented)
     {expressions : List Lean.Expr}
-    (reified : ReifiedSentencesFor certificate.env certificate.bridge
+    (reified : ReifiedSentencesFor production.datatypes production.constants
       expressions) where
   representation : SMT.GuardedTheoryRepresentation guarding
-    certificate.guardCommands (translatedTheories reified.sources)
-    (certificate.emitted.map stripAssertionAnnotation)
+    production.guardCommands (translatedTheories reified.sources)
+    (production.allCommands.map stripAssertionAnnotation)
 
-namespace TheoryAgreement
+namespace ProductionTheoryAgreement
 
-/-- Check the completed production array against the guarded encoding of an
-exact common-environment reification witness. -/
-def build? {certificate : CertifiedDataEnv}
+/-- Compare the final production array with the guarded encoding of all facts
+reified under the same environment. -/
+def build? {production : ProductionFact}
     {guarding : SMT.Guarding
-      (Symbol (certificate.env.signature ++ certificate.tail))}
-    {represented : certificate.Representation guarding.encoding}
-    {guarded : certificate.GuardRepresentation guarding represented}
+      (Symbol (production.datatypes.signature ++ production.ordinarySignature))}
+    {represented : production.Representation guarding.encoding}
+    {guarded : production.GuardRepresentation guarding represented}
     {expressions : List Lean.Expr}
-    (reified : ReifiedSentencesFor certificate.env certificate.bridge
+    (reified : ReifiedSentencesFor production.datatypes production.constants
       expressions) :
     Option (PLift
-      (TheoryAgreement certificate guarding represented guarded reified)) := by
-  let expected := guardedTheoryCommands guarding certificate.guardCommands
+      (ProductionTheoryAgreement production guarding represented guarded reified)) := by
+  let expected := guardedTheoryCommands guarding production.guardCommands
     reified.sources
-  let actual := certificate.emitted.map stripAssertionAnnotation
+  let actual := production.allCommands.map stripAssertionAnnotation
   if same : sameCommandSet? actual expected = true then
     exact some ⟨{
       representation := ⟨SMT.translatedDeclarations reified.sources,
@@ -160,96 +163,95 @@ def build? {certificate : CertifiedDataEnv}
   else
     exact none
 
-/-- Unsatisfiability of the exact live production snapshot reflects to every
-fact in the retained intrinsic source theory. -/
-theorem unsat_source {certificate : CertifiedDataEnv}
+/-- Unsatisfiability of the final production commands reflects to the complete
+retained intrinsic source theory. -/
+theorem unsat_source {production : ProductionFact}
     {guarding : SMT.Guarding
-      (Symbol (certificate.env.signature ++ certificate.tail))}
-    {represented : certificate.Representation guarding.encoding}
-    {guarded : certificate.GuardRepresentation guarding represented}
+      (Symbol (production.datatypes.signature ++ production.ordinarySignature))}
+    {represented : production.Representation guarding.encoding}
+    {guarded : production.GuardRepresentation guarding represented}
     {expressions : List Lean.Expr}
-    {reified : ReifiedSentencesFor certificate.env certificate.bridge
+    {reified : ReifiedSentencesFor production.datatypes production.constants
       expressions}
-    (agreement : TheoryAgreement certificate guarding represented guarded reified)
-    (interpretation : certificate.GuardInterpretation guarding represented guarded)
-    (unsat : Crush.SMT.CommandsUnsatisfiable certificate.emitted) :
-    Datatype.Env.TheoryUnsatisfiable certificate.data.toModelEnv
+    (agreement : ProductionTheoryAgreement production guarding represented guarded reified)
+    (interpretation : production.GuardInterpretation guarding represented guarded)
+    (unsat : Crush.SMT.CommandsUnsatisfiable production.allCommands) :
+    Datatype.Env.TheoryUnsatisfiable production.datatypeBridge.toModelEnv
       reified.sources := by
   apply represented.theory_unsat guarded interpretation reified.sources
     agreement.representation
   exact (commandsUnsatisfiable_stripAssertionAnnotations
-    certificate.emitted).mpr unsat
+    production.allCommands).mpr unsat
 
 /-- Whole-theory reflection from the script returned by `buildScript`,
 including its leading logic-selection command. -/
-theorem unsat_source_script {certificate : CertifiedDataEnv}
+theorem unsat_source_script {production : ProductionFact}
     {guarding : SMT.Guarding
-      (Symbol (certificate.env.signature ++ certificate.tail))}
-    {represented : certificate.Representation guarding.encoding}
-    {guarded : certificate.GuardRepresentation guarding represented}
+      (Symbol (production.datatypes.signature ++ production.ordinarySignature))}
+    {represented : production.Representation guarding.encoding}
+    {guarded : production.GuardRepresentation guarding represented}
     {expressions : List Lean.Expr}
-    {reified : ReifiedSentencesFor certificate.env certificate.bridge
+    {reified : ReifiedSentencesFor production.datatypes production.constants
       expressions}
-    (agreement : TheoryAgreement certificate guarding represented guarded reified)
-    (interpretation : certificate.GuardInterpretation guarding represented guarded)
+    (agreement : ProductionTheoryAgreement production guarding represented guarded reified)
+    (interpretation : production.GuardInterpretation guarding represented guarded)
     (logic : String)
     (unsat : Crush.SMT.CommandsUnsatisfiable
-      (#[.setLogic logic] ++ certificate.emitted)) :
-    Datatype.Env.TheoryUnsatisfiable certificate.data.toModelEnv
+      (#[.setLogic logic] ++ production.allCommands)) :
+    Datatype.Env.TheoryUnsatisfiable production.datatypeBridge.toModelEnv
       reified.sources :=
   agreement.unsat_source interpretation
-    ((commandsUnsatisfiable_setLogic logic certificate.emitted).mp unsat)
+    ((commandsUnsatisfiable_setLogic logic production.allCommands).mp unsat)
 
-end TheoryAgreement
+end ProductionTheoryAgreement
 
-/-- Whole-array refinement evidence for one live production certificate and its
-exact retained intrinsic sentence. Native declarations, recursive guard
-definitions, all ordinary declarations, and every assertion must occur in the
-guarded encoder's semantic command set. Production order and duplicate
-elimination follow the raw model semantics; the only erased syntax is the root
-provenance annotation proved semantically transparent above. -/
-structure SingleFactAgreement (certificate : CertifiedDataEnv)
+/-- The single-fact specialization of `ProductionTheoryAgreement`. Native
+datatype declarations, recursive guard definitions, ordinary declarations,
+and assertions must all occur in the guarded encoder's command set. Command
+order and duplicate elimination do not affect the membership-based semantics;
+the only removed syntax is the top-level assertion name handled above. -/
+structure ProductionFactAgreement (production : ProductionFact)
     (guarding : SMT.Guarding
-      (Symbol (certificate.env.signature ++ certificate.tail)))
-    (represented : certificate.Representation guarding.encoding)
-    (guarded : certificate.GuardRepresentation guarding represented)
-    (reified : ReifiedSentenceFor certificate.source certificate.env
-      certificate.bridge) where
-  retained : certificate.reified = some reified
-  theory : TheoryAgreement certificate guarding represented guarded
+      (Symbol (production.datatypes.signature ++ production.ordinarySignature)))
+    (represented : production.Representation guarding.encoding)
+    (guarded : production.GuardRepresentation guarding represented)
+    (reified : ReifiedSentenceFor production.expression production.datatypes
+      production.constants) where
+  retained : production.sentence = some reified
+  theory : ProductionTheoryAgreement production guarding represented guarded
     (.cons reified .nil)
 
-namespace SingleFactAgreement
+namespace ProductionFactAgreement
 
-/-- The exact retained sentence together with checked whole-array production
-agreement. This packages the existential result of `build?` as data while the
-agreement itself remains proof-irrelevant. -/
-structure Checked (certificate : CertifiedDataEnv)
+/-- The retained intrinsic sentence together with the checked final-command
+comparison. -/
+structure Checked (production : ProductionFact)
     (guarding : SMT.Guarding
-      (Symbol (certificate.env.signature ++ certificate.tail)))
-    (represented : certificate.Representation guarding.encoding)
-    (guarded : certificate.GuardRepresentation guarding represented) where
-  reified : ReifiedSentenceFor certificate.source certificate.env
-    certificate.bridge
-  agreement : SingleFactAgreement certificate guarding represented guarded
+      (Symbol (production.datatypes.signature ++ production.ordinarySignature)))
+    (represented : production.Representation guarding.encoding)
+    (guarded : production.GuardRepresentation guarding represented) where
+  reified : ReifiedSentenceFor production.expression production.datatypes
+    production.constants
+  agreement : ProductionFactAgreement production guarding represented guarded
     reified
 
-/-- Check the completed production array against the guarded intrinsic command
-set and return proof-carrying agreement only on exact mutual inclusion. The
-reified fact is obtained from the environment-indexed certificate itself, so a
-caller cannot substitute a different intrinsic sentence. -/
-def build? {certificate : CertifiedDataEnv}
+/-- Compare the final production array with the guarded intrinsic commands and
+return the retained fact plus a proof of mutual inclusion. The type of
+`ProductionFact.sentence` ties the sentence to this fact's expression,
+datatype environment, and constants, so a caller cannot substitute another
+sentence. -/
+def build? {production : ProductionFact}
     {guarding : SMT.Guarding
-      (Symbol (certificate.env.signature ++ certificate.tail))}
-    {represented : certificate.Representation guarding.encoding}
-    {guarded : certificate.GuardRepresentation guarding represented} :
-    Option (Checked certificate guarding represented guarded) := by
-  cases retained : certificate.reified with
+      (Symbol (production.datatypes.signature ++ production.ordinarySignature))}
+    {represented : production.Representation guarding.encoding}
+    {guarded : production.GuardRepresentation guarding represented} :
+    Option (Checked production guarding represented guarded) := by
+  cases retained : production.sentence with
   | none => exact none
   | some reified =>
-      let witness : ReifiedSentencesFor certificate.env certificate.bridge
-          [certificate.source] := .cons reified .nil
-      match TheoryAgreement.build? (guarding := guarding)
+      let witness : ReifiedSentencesFor production.datatypes production.constants
+          [production.expression] := .cons reified .nil
+      match ProductionTheoryAgreement.build? (guarding := guarding)
           (represented := represented) (guarded := guarded) witness
       with
       | none => exact none
@@ -258,21 +260,21 @@ def build? {certificate : CertifiedDataEnv}
             reified
             agreement := { retained, theory := checked.down }}
 
-/-- Unsatisfiability of the exact live production snapshot reflects to the
-retained intrinsic sentence, provided the production encoding has one uniform
-guard interpretation for all datatype-lawful source models. -/
-theorem unsat_source {certificate : CertifiedDataEnv}
+/-- Unsatisfiability of the final production commands reflects to the retained
+intrinsic sentence, provided the same guard interpretation works for every
+source model satisfying the datatype laws. -/
+theorem unsat_source {production : ProductionFact}
     {guarding : SMT.Guarding
-      (Symbol (certificate.env.signature ++ certificate.tail))}
-    {represented : certificate.Representation guarding.encoding}
-    {guarded : certificate.GuardRepresentation guarding represented}
-    {reified : ReifiedSentenceFor certificate.source certificate.env
-      certificate.bridge}
-    (agreement : SingleFactAgreement certificate guarding represented guarded
+      (Symbol (production.datatypes.signature ++ production.ordinarySignature))}
+    {represented : production.Representation guarding.encoding}
+    {guarded : production.GuardRepresentation guarding represented}
+    {reified : ReifiedSentenceFor production.expression production.datatypes
+      production.constants}
+    (agreement : ProductionFactAgreement production guarding represented guarded
       reified)
-    (interpretation : certificate.GuardInterpretation guarding represented guarded)
-    (unsat : Crush.SMT.CommandsUnsatisfiable certificate.emitted) :
-    Datatype.Env.Unsatisfiable certificate.data.toModelEnv reified.source := by
+    (interpretation : production.GuardInterpretation guarding represented guarded)
+    (unsat : Crush.SMT.CommandsUnsatisfiable production.allCommands) :
+    Datatype.Env.Unsatisfiable production.datatypeBridge.toModelEnv reified.source := by
   intro source lawful sourceValid
   apply agreement.theory.unsat_source interpretation unsat source lawful
   intro formula membership
@@ -282,23 +284,23 @@ theorem unsat_source {certificate : CertifiedDataEnv}
 
 /-- Reflection from the exact script returned by `buildScript`, including its
 leading logic-selection command. -/
-theorem unsat_source_script {certificate : CertifiedDataEnv}
+theorem unsat_source_script {production : ProductionFact}
     {guarding : SMT.Guarding
-      (Symbol (certificate.env.signature ++ certificate.tail))}
-    {represented : certificate.Representation guarding.encoding}
-    {guarded : certificate.GuardRepresentation guarding represented}
-    {reified : ReifiedSentenceFor certificate.source certificate.env
-      certificate.bridge}
-    (agreement : SingleFactAgreement certificate guarding represented guarded
+      (Symbol (production.datatypes.signature ++ production.ordinarySignature))}
+    {represented : production.Representation guarding.encoding}
+    {guarded : production.GuardRepresentation guarding represented}
+    {reified : ReifiedSentenceFor production.expression production.datatypes
+      production.constants}
+    (agreement : ProductionFactAgreement production guarding represented guarded
       reified)
-    (interpretation : certificate.GuardInterpretation guarding represented guarded)
+    (interpretation : production.GuardInterpretation guarding represented guarded)
     (logic : String)
     (unsat : Crush.SMT.CommandsUnsatisfiable
-      (#[.setLogic logic] ++ certificate.emitted)) :
-    Datatype.Env.Unsatisfiable certificate.data.toModelEnv reified.source :=
+      (#[.setLogic logic] ++ production.allCommands)) :
+    Datatype.Env.Unsatisfiable production.datatypeBridge.toModelEnv reified.source :=
   agreement.unsat_source interpretation
-    ((commandsUnsatisfiable_setLogic logic certificate.emitted).mp unsat)
+    ((commandsUnsatisfiable_setLogic logic production.allCommands).mp unsat)
 
-end SingleFactAgreement
+end ProductionFactAgreement
 
 end Crush.Metatheory.VCG

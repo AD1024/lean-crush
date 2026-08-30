@@ -4,7 +4,7 @@ import Crush.Metatheory.HO.Core
 /-!
 # Surface syntax for the metatheory core
 
-`(core| ...)` elaborates a small higher-order formula directly to an intrinsically typed
+`(ho| ...)` elaborates a small higher-order formula directly to an intrinsically typed
 `Crush.Metatheory.Term`. Bound identifiers are resolved to typed de Bruijn references.
 Two antiquotation forms connect object syntax to Lean declarations:
 
@@ -113,8 +113,8 @@ private partial def expandTerm (binders : List Name) : Syntax → MacroM (TSynta
       `(term| Term.existsE (domain := $domain) $body)
   | stx => Macro.throwErrorAt stx "unsupported metatheory term syntax"
 
-/-- Quotation for intrinsically typed metatheory terms and formulas. -/
-elab "(core|" body:metatheoryTerm ")" : term => do
+/-- Quotation for intrinsically typed higher-order terms and formulas. -/
+elab "(ho|" body:metatheoryTerm ")" : term => do
   let expanded ← liftMacroM <| expandTerm [] body
   Lean.Elab.Term.elabTerm expanded none
 

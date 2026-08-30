@@ -104,14 +104,14 @@ def toFamilyArgs : {start result : Ty} →
 
 /-- Rename every translated argument into another erased source context. -/
 def rename {sourceContext targetContext' : Context}
-    (rho : FO.FamilyRenaming (targetContext sourceContext)
+    (r : FO.FamilyRenaming (targetContext sourceContext)
       (targetContext targetContext')) :
     {start result : Ty} →
       TargetArguments signature sourceContext start result →
         TargetArguments signature targetContext' start result
   | _, _, .nil ty => .nil ty
   | _, _, .cons argument rest =>
-      .cons (argument.rename rho) (rest.rename rho)
+      .cons (argument.rename r) (rest.rename r)
 
 /-- Move translated arguments beneath one fresh source binder. -/
 def weaken {start result : Ty}
@@ -212,7 +212,7 @@ structure ArgumentsResult (signature : Signature) (context : Context)
     (types : List Ty) where
   terms : FO.FamilyArgs (Symbol signature) (targetContext context)
     (types.map FO.FOSort.ofTy)
-  generated : GeneratedObligations signature := {}
+  generated : GeneratedOutput signature := {}
 
 namespace AppliedArguments
 
@@ -237,7 +237,7 @@ def translate
             translatedPrevious.terms.append
               (.cons translatedArgument.term .nil)
         generated := translatedPrevious.generated.append
-          translatedArgument.obligations }
+          translatedArgument.generated }
 
 end AppliedArguments
 

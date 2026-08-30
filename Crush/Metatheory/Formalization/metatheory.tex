@@ -20,6 +20,7 @@
 \newtheorem{proposition}[definition]{Proposition}
 \theoremstyle{remark}
 \newtheorem{remark}[definition]{Remark}
+\newtheorem{example}[definition]{Example}
 
 \newcommand{\leanfile}[1]{\footnote{Lean formalization: \texttt{Crush/Metatheory/#1}.}}
 \newcommand{\leanfiles}[1]{\footnote{Lean formalization: \texttt{Crush/Metatheory/#1}.}}
@@ -59,8 +60,13 @@
 \newcommand{\args}{\mathsf{args}}
 \newcommand{\res}{\mathsf{res}}
 \newcommand{\FV}{\mathsf{FV}}
+\newcommand{\Tree}{\mathsf{Tree}}
+\newcommand{\Num}{\mathsf{Num}}
+\newcommand{\TreeTy}{\mathsf{T}}
+\newcommand{\TreeFun}{\mathsf{F}}
+\newcommand{\squarefun}{\mathsf{square}}
 
-\title{The Metatheory of Crush's Certified Lowering Pipeline}
+\title{The Metatheory of Crush's Lowering Pipeline}
 \author{lean-crush}
 \date{August 2026}
 
@@ -71,9 +77,10 @@
 Crush translates a supported finite collection of Lean propositions into SMT
 commands. This document explains the current mathematical framework for that
 translation: intrinsically typed higher-order syntax, datatype-aware source
-models, total flattened defunctionalization, raw SMT command semantics, native
-datatype declarations, guarded carrier encodings, and exact agreement with a
-completed production command snapshot. It is written in dependency order:
+models, total flattened defunctionalization, untyped SMT command semantics,
+native datatype declarations, representation of source values by an existing
+target type plus a predicate, and exact agreement with the final production
+command array. It is written in dependency order:
 each object and notation is introduced before the first theorem that uses it.
 The final theorem justifies the reified higher-order theory and the exact
 semantic command set produced by the modeled lowering pipeline; it does not
@@ -97,7 +104,7 @@ The formalization studies this pipeline:
 \longrightarrow
 \boxed{\text{combined flattened FO theory}}
 \longrightarrow
-\boxed{\text{semantic raw command set}}
+\boxed{\text{untyped SMT command array}}
 $}
 \end{center}
 The first arrow is a partial recognizer: every accepted fact is reified under
@@ -107,14 +114,15 @@ commands and recursive well-formedness definitions are modeled components of
 the final command set. The principal semantic conclusion is:
 
 \begin{quote}
-If the completed represented command set is semantically unsatisfiable, then
+If the represented final command array is semantically unsatisfiable, then
 the reified higher-order source theory is unsatisfiable in every source model
 satisfying the retained datatype laws.
 \end{quote}
 
 The proof is by countermodel construction. Starting from one lawful model of
 the complete higher-order theory, Lean constructs one model of all flattened
-sentences and generated obligations, then constructs one relational SMT model
+sentences, closure equations, and extensionality formulas, then constructs one
+SMT model
 satisfying native declarations, derived recursive guards, ordinary
 declarations, and assertions. Contraposition yields the desired reflection of
 unsatisfiability.
@@ -131,13 +139,18 @@ The argument is organized into seven stages:
         sorts are opaque, then give total flattened defunctionalization.
   \item Interpret every translated sentence in one canonical model and prove
         simultaneous validity of the aggregate target theory.
-  \item Give raw semantics to the admitted SMT command fragment and prove one
-        exact command-set representation theorem.
-  \item Lift guarded and datatype carriers, validate native datatype and
-        recursive guard commands, and combine all components in one raw model.
-  \item Retain structural Lean reification, exact stateful VCG execution, and
-        proof-producing agreement with a completed production snapshot.
+  \item Give semantics to the admitted untyped SMT command fragment and prove
+        that the generated command array has exactly the intended models.
+  \item Represent source values inside target types using predicates, validate
+        native datatype and recursive guard commands, and combine all
+        components in one SMT model.
+  \item Retain structural Lean reification and compare the final production
+        command array with the verified intrinsic command generator.
 \end{enumerate}
+
+A running example begins in Example~\ref{ex:running-source} after the source
+syntax has been defined. Each later section revisits the same sentence using
+only the objects introduced by that point in the document.
 
 \subsection{Metavariables and notation}
 
@@ -150,24 +163,26 @@ that gives it meaning.
  \varphi,\psi & \text{Boolean formulas; a closed formula is a sentence},\\
  \Phi & \text{a finite higher-order source theory},\\
  \beta & \text{an opaque source base-sort name},\\
- \alpha,\gamma,\sigma,\tau,\upsilon & \text{source types},\\
+ \sigma,\tau,\upsilon & \text{source types},\\
  \kappa & \text{a first-order sort},\\
  \Gamma,\Delta & \text{typing contexts},\\
  \Sigma & \text{a typed signature},\\
- T & \text{a typed first-order theory},\\
+ T & \text{a finite first-order target theory},\\
  M,N & \text{semantic models},\\
- \rho & \text{a source valuation or typed renaming},\\
+ r & \text{a typed renaming},\\
+ \rho & \text{a source valuation},\\
  \nu & \text{a target valuation},\\
+ \eta & \text{an untyped SMT evaluation environment},\\
  v,w & \text{individual semantic values},\\
  \mathcal E & \text{a concrete FO-to-SMT encoding choice},\\
  \mathcal G & \text{a guard-aware SMT encoding choice},\\
- C & \text{an ordered array of raw SMT commands}.
+ C & \text{an ordered array of untyped SMT commands}.
 \end{array}
 \]
-Subscripts $s$, $t$, and $q$ mean source, typed target, and raw SMT model,
+Subscripts $s$, $t$, and $q$ mean source, typed target, and untyped SMT model,
 respectively. Proof-facing Lean declarations use the corresponding Greek
-binders; executable allocation and state code keeps descriptive names when
-several objects have the same mathematical role.
+binders for valuations and Roman $r$ for renamings; executable allocation and
+state code uses descriptive names when several objects have the same role.
 
 We reserve $\Phi\vdash\varphi$ strictly for syntactic entailment in an
 explicitly specified deductive system. The present formalization defines no
@@ -245,6 +260,46 @@ The omitted rules are the standard typed Boolean rules. A formula is a term of
 type $\Bool$; a sentence is a formula in the empty context.
 \leanfile{HO/Core.lean}
 \end{definition}
+
+\subsection{Running example: captured functions over trees}
+\label{sec:running-source}
+
+\begin{example}[The source formula used throughout]
+\label{ex:running-source}
+Fix an opaque base-sort identity $\beta_{\Tree}$ and abbreviate
+\[
+ \TreeTy=\Base(\beta_{\Tree}),
+ \qquad
+ \TreeFun=\TreeTy\to\TreeTy.
+\]
+For a local variable $f:\TreeFun$, define the following metanotation for a
+source term:
+\[
+ \squarefun(f)=\lambda x{:}\TreeTy.\,f\,(f\,x).
+\]
+This is not a new constant in $\Sigma$: it abbreviates a lambda that captures
+the surrounding variable $f$. Our running sentence is
+\[
+ \varphi_{\mathsf{sq}}=
+ \forall f{:}\TreeFun.\;\forall g{:}\TreeFun.\;
+ \left(
+   \bigl(\forall x{:}\TreeTy.\;f\,x=g\,x\bigr)
+   \mathbin{\to}
+   \squarefun(f)=\squarefun(g)
+ \right).
+ \tag{RE}
+\]
+It deliberately contains the three cases that make defunctionalization
+interesting: higher-order quantification over $f$ and $g$, complete
+applications such as $f\,(f\,x)$, and equality between function values. In
+ordinary source semantics it is valid by function extensionality. Later
+sections show exactly which first-order sorts, application symbols, closure
+symbols, equations, extensionality formulas, and SMT commands it generates.
+\end{example}
+
+At this point $\TreeTy$ is merely an opaque base type.
+Section~\ref{sec:datatypes} gives $\beta_{\Tree}$ the meaning of a custom
+datatype; the HO term grammar itself does not change.
 
 Quantifiers may range over arrow types. Thus the modeled language is genuinely
 higher-order even though its arrows are nondependent.
@@ -339,6 +394,7 @@ The Lean definitions are \texttt{Unsatisfiable},
 \end{definition}
 
 \section{Datatype-aware source semantics}
+\label{sec:datatypes}
 \sectioncontents{Intrinsic mutual blocks; their embedding as HO base sorts and constants; finite free values; lawful model environments.}
 
 Native datatype lowering strengthens the class of source models without
@@ -443,8 +499,70 @@ selector, or tester is not a new HO term form: it is an intrinsically typed
 constant application. An unowned $\Base(\beta)$ remains completely opaque;
 ownership by a datatype environment and the lawfulness condition below are
 what give a selected base sort free-datatype meaning.
+
+The datatype value type is therefore a base type, while constructor constants
+usually have function types because they accept fields and return that base
+type. This does not prevent an ordinary HO function from accepting or returning
+a datatype value. The supported datatype reifier does reject function-valued
+\emph{fields}: the modeled native SMT datatype representation has only external
+base fields and recursive datatype fields, and the free-algebra proof is stated
+for exactly those field sorts. Thus the datatype theorems assume, after all
+datatype parameters have been instantiated, that every stored field is either
+an external nonfunction base value or a direct recursive datatype value.
 \leanfiles{Datatype/Syntax.lean, Datatype/Model.lean, and Datatype/Flattened.lean}
 \end{definition}
+
+\begin{example}[The running tree datatype]
+Give $\beta_{\Tree}$ from Example~\ref{ex:running-source} one datatype
+declaration and fix a second, external base sort $\beta_{\Num}$. In familiar
+notation the block is
+\[
+ \Tree ::= \mathsf{leaf}(\mathsf{value}:\Num)
+       \mid \mathsf{node}(\mathsf{left}:\Tree,
+                          \mathsf{right}:\Tree),
+ \qquad
+ \Num=\Base(\beta_{\Num}).
+\]
+Formally, the result type of both constructors is $\TreeTy$, the leaf field has
+field sort $\mathsf{base}(\beta_{\Num})$, and the two node fields have field
+sort $\mathsf{data}(d_{\Tree})$. Ownership selects ordinary HO constants with
+types
+\[
+ \mathsf{leaf}:\Num\to\TreeTy,
+ \qquad
+ \mathsf{node}:\TreeTy\to\TreeTy\to\TreeTy,
+\]
+together with the corresponding selectors and Boolean testers. The variables
+$f,g:\TreeFun$ in (RE) are ordinary HO functions over datatype values; they
+are permitted even though a function-valued \emph{field} in the declaration
+above would be outside the modeled datatype fragment.
+\end{example}
+
+\begin{example}[A tree that stores functions]
+Consider a parameterized Lean datatype with the familiar shape
+\[
+ \Tree(\alpha) ::= \mathsf{leaf}(\mathsf{value}:\alpha)
+      \mid \mathsf{node}(\mathsf{left}:\Tree(\alpha),
+                         \mathsf{right}:\Tree(\alpha)).
+\]
+Let $A=\Base(\beta_A)$. In the ground instance $\Tree(A\to A)$, the leaf
+constructor has type
+\[
+ (A\to A)\to\Tree(A\to A).
+\]
+The problem is not that this constructor has an arrow type---every constructor
+that accepts a field does. The problem is that the value stored in its leaf is
+itself a function. Such an instance cannot supply a custom-datatype block in
+the present formalization, because its field is neither an external base value
+nor a recursive datatype value.
+
+The HO language may still treat the whole type $\Tree(A\to A)$ as an opaque
+base type. It can then quantify over values of that type and form ordinary HO
+functions that accept or return them. That opaque interpretation provides no
+free-datatype laws for \textsf{leaf} and \textsf{node}: in particular, it does
+not provide constructor injectivity, disjointness, exhaustiveness, selector
+equations, or structural recursion.
+\end{example}
 
 \begin{definition}[Lawful datatype model]
 Let $S:\mathsf{Symbols}(\Sigma,B)$. A witness
@@ -543,6 +661,31 @@ ordinary, fully applied family symbols.
 \leanfile{Datatype/Flattened.lean}
 \end{proposition}
 
+\begin{example}[The running datatype after erasure]
+The two source base types remain base sorts:
+\[
+ \erase{\TreeTy}=\Base(\beta_{\Tree}),
+ \qquad
+ \erase{\Num}=\Base(\beta_{\Num}),
+\]
+while the type of a tree transformer becomes the opaque sort
+\[
+ \erase{\TreeFun}=\Fn(\TreeTy,\TreeTy).
+\]
+For readability, continue to write $\TreeTy$ for the erased tree base sort and
+$\TreeFun$ for this function-value sort. The datatype-owned constructors have
+the first-order declarations
+\[
+ \mathsf{leaf}:(\Num;\TreeTy),
+ \qquad
+ \mathsf{node}:(\TreeTy,\TreeTy;\TreeTy).
+\]
+Nothing in the arbitrary FO model yet says that the carrier of $\TreeFun$
+contains actual functions. Defunctionalization supplies operations on that
+opaque carrier, and the soundness proof later chooses a canonical FO model in
+which its values really are source functions.
+\end{example}
+
 \begin{definition}[Typed family arguments and symbol application]
 Terms and heterogeneous argument vectors are defined mutually. For a context
 $\Gamma$, the argument-vector family follows the declaration telescope:
@@ -594,13 +737,14 @@ $\Xi=[d_0,\ldots,d_m]$, and a symbol occurrence carries a typed position
 showing that some $d_j$ is its declaration. That form is useful after allocation,
 but inconvenient during recursive translation. A recursive branch may discover
 a new closure or application symbol; combining two branches then concatenates
-their declaration traces. If terms already stored numeric signature positions,
+their declaration lists. If terms already stored numeric signature positions,
 those positions would have to be weakened and reindexed after every such
 concatenation.
 
 With a family, the translator instead constructs a structural identity
-$p:S(d)$ immediately. Recursive results concatenate an occurrence trace of
-existential packages $(d,p)$, while already constructed terms remain unchanged.
+$p:S(d)$ immediately. Recursive results concatenate an ordered list of
+existential packages $(d,p)$, including repeated uses, while already
+constructed terms remain unchanged.
 For flattened defunctionalization, $S$ is an indexed inductive family whose
 constructors represent source constants, application symbols, and closures.
 Each constructor's result index is its exact declaration; the flattened symbol
@@ -615,14 +759,14 @@ $\Xi$ that select declaration $d$. A typed resolver has one component
  r_d:S(d)\longrightarrow\mathsf{Symbol}(\Xi,d)
  \qquad\text{for every }d\in\mathsf{Decl}.
 \]
-The proved raw-SMT route can also encode family terms directly. Its encoding
+The proved untyped SMT route can also encode family terms directly. Its encoding
 record similarly supplies one naming component
 \[
  \mathsf{name}_d:S(d)\longrightarrow\mathsf{String}
  \qquad\text{for every }d\in\mathsf{Decl},
 \]
 with injectivity both between declarations and between two inhabitants of the
-same fiber, plus freshness from logical built-ins. For each traced pair $(d,p)$,
+same fiber, plus freshness from logical built-ins. For each listed pair $(d,p)$,
 the command encoder emits the argument and result sorts from $d$ and the concrete
 identifier $\mathsf{name}(p)$. Thus delaying allocation loses neither typing nor
 symbol identity.
@@ -747,7 +891,7 @@ where:
 \begin{itemize}[leftmargin=*]
  \item $t_e$ is a target term in context $\erase{\Gamma}^{\star}$ and sort
        $\erase{\tau}$;
- \item $D_e$ is the ordered trace of required symbol declarations;
+ \item $D_e$ is the ordered list of required symbol declarations;
  \item $E_e$ is the list of closure equations;
  \item $X_e$ is the list of extensionality formulas;
 \end{itemize}
@@ -761,8 +905,8 @@ and the combined target theory of a finite source theory are
    \mathop{\mathsf{concat}}_{\varphi\in\Phi}\Theory(\varphi).
 \end{aligned}
 \]
-Lists are kept separate in Lean to retain provenance, then concatenated in this
-fixed order for semantic statements. The aggregate operation is Lean's
+Lean keeps the lists separate so each formula's role remains explicit, then
+concatenates them in this fixed order for semantic statements. The aggregate operation is Lean's
 \texttt{translatedTheories}; every sentence is translated against the same
 intrinsic signature.
 \leanfiles{Defunctionalization/TranslationResult.lean and Defunctionalization/Flattened/Theory.lean}
@@ -805,8 +949,8 @@ $\bar y$, and eta-opened body $b$. Its defining equation has the shape
 where $\app_\alpha$ abbreviates the application symbol selected by the full
 arrow type $\alpha$.
 The left side uses one flattened application, not a chain of unary applications.
-The right side carries all obligations recursively generated while translating
-$b$.
+The right side carries all declarations and formulas recursively generated
+while translating $b$.
 \end{definition}
 
 The three mutually recursive modes---ordinary term translation, application
@@ -815,8 +959,111 @@ built from constructor count and a mode tag. Lean therefore accepts them as
 total definitions, with no \texttt{partial} escape hatch.
 \leanfile{Defunctionalization/Flattened/Translate.lean}
 
+\subsection{Running example: the complete flattened result}
+\label{sec:running-flattened}
+
+\begin{example}[Step-by-step defunctionalization of (RE)]
+For the running arrow type,
+\[
+ \args(\TreeFun)=[\TreeTy],
+ \qquad
+ \res(\TreeFun)=\TreeTy,
+ \qquad
+ \erase{\TreeFun}=\Fn(\TreeTy,\TreeTy).
+\]
+Continue to abbreviate the last sort by $\TreeFun$. Flattening introduces the
+fully applied symbol
+\[
+ \app_{\TreeTy,\TreeTy}:\TreeFun\times\TreeTy\longrightarrow\TreeTy.
+\tag{A}
+\]
+Thus neither $f\,x$ nor $f\,(f\,x)$ remains a first-order application node:
+\[
+ f\,x\quad\mapsto\quad\app(f,x),
+ \qquad
+ f\,(f\,x)\quad\mapsto\quad\app(f,\app(f,x)),
+\]
+where this example suppresses the type subscripts on $\app$.
+
+The two lambda occurrences in (RE) produce distinct closure descriptors
+$\chi_L$ and $\chi_R$. The left occurrence captures exactly $f$ and the right
+occurrence captures exactly $g$, so their declarations are
+\[
+ \clos_{\chi_L}:\TreeFun\longrightarrow\TreeFun,
+ \qquad
+ \clos_{\chi_R}:\TreeFun\longrightarrow\TreeFun.
+\tag{C}
+\]
+The translated main sentence contains no lambda and no under-applied symbol:
+\[
+ t_{\mathsf{sq}}=
+ \forall f{:}\TreeFun.\;\forall g{:}\TreeFun.\;
+ \left(
+  \bigl(\forall x{:}\TreeTy.\;\app(f,x)=\app(g,x)\bigr)
+  \to
+  \clos_{\chi_L}(f)=\clos_{\chi_R}(g)
+ \right).
+\tag{T}
+\]
+The meaning of the closure values is supplied separately by the generated
+equations
+\[
+\begin{aligned}
+ E_L&=\forall f{:}\TreeFun.\;\forall x{:}\TreeTy.\;
+   \app(\clos_{\chi_L}(f),x)=\app(f,\app(f,x)),\\
+ E_R&=\forall g{:}\TreeFun.\;\forall x{:}\TreeTy.\;
+   \app(\clos_{\chi_R}(g),x)=\app(g,\app(g,x)).
+\end{aligned}
+\tag{E}
+\]
+Finally, because (T) compares values of sort $\TreeFun$, the generated
+extensionality list contains
+\[
+ X_{\TreeFun}=\forall p,q{:}\TreeFun.\;
+ \left(
+   \bigl(\forall x{:}\TreeTy.\;\app(p,x)=\app(q,x)\bigr)
+   \to p=q
+ \right).
+\tag{X}
+\]
+Up to repeated declaration occurrences, the complete result is therefore
+\[
+ \flattr{\varphi_{\mathsf{sq}}}
+ =\bigl(t_{\mathsf{sq}},
+        D_{\mathsf{sq}},
+        [E_L,E_R],
+        [X_{\TreeFun}]\bigr),
+\]
+where the distinct identities mentioned by $D_{\mathsf{sq}}$ are the
+application symbol (A) and the two closure symbols (C). The target theory for
+this one sentence is
+\[
+ \Theory(\varphi_{\mathsf{sq}})
+   =[E_L,E_R,X_{\TreeFun},t_{\mathsf{sq}}].
+\tag{R}
+\]
+\end{example}
+
+The recursive translator reaches (R) in four conceptually separate steps:
+\begin{enumerate}[leftmargin=*]
+ \item \texttt{translateSpineWith} sees $f$ as the head of $f\,x$, translates
+       the argument $x$, and finishes the spine only because its result is the
+       ground sort $\TreeTy$.
+ \item Repeating that operation for the outer application produces
+       $\app(f,\app(f,x))$; no unary application chain is retained.
+ \item \texttt{translateLambdaBodyWith} opens the binder $x$, translates that
+       ground body, and closes $E_L$ or $E_R$ over both the exact capture and
+       the opened binder.
+ \item Ordinary \texttt{translateWith} replaces each residual function-valued
+       lambda by its closure symbol, combines all recursive output, and adds
+       $X_{\TreeFun}$ at the function-equality node.
+\end{enumerate}
+This separation explains why the translated term, closure equations, and
+extensionality formula are different fields of \texttt{TranslationResult}:
+all are needed, but they are produced for different reasons.
+
 \section{The canonical model and flattened correctness}
-\sectioncontents{Why the model is chosen; term preservation; generated validity; unsatisfiability reflection.}
+\sectioncontents{Why the model is chosen; term preservation; generated-formula validity; unsatisfiability reflection.}
 
 \subsection{Modeling function values}
 
@@ -846,6 +1093,26 @@ countermodel construction used only in the soundness proof.
 \leanfiles{Defunctionalization/ModelExtension.lean and Defunctionalization/Flattened/Symbol.lean}
 \end{definition}
 
+\begin{example}[Why every generated formula in (R) is true]
+Let $V_{\Tree}$ be the source carrier chosen for $\TreeTy$. The canonical
+target carrier for $\TreeFun$ is the actual function space
+$V_{\Tree}\to V_{\Tree}$. It interprets
+\[
+\begin{aligned}
+ \app(h,x)&=h(x),\\
+ \clos_{\chi_L}(f)&=\lambda x.\,f(f(x)),\\
+ \clos_{\chi_R}(g)&=\lambda x.\,g(g(x)).
+\end{aligned}
+\]
+Consequently $E_L$ and $E_R$ reduce to ordinary beta equations, and
+$X_{\TreeFun}$ is ordinary function extensionality. Under this interpretation,
+the first-order sentence $t_{\mathsf{sq}}$ has exactly the denotation of the
+higher-order sentence $\varphi_{\mathsf{sq}}$. This is the concrete instance
+of the two general theorems below: term preservation handles
+$t_{\mathsf{sq}}$, while generated-formula validity handles
+$E_L,E_R,$ and $X_{\TreeFun}$.
+\end{example}
+
 A source valuation $\rho$ induces a canonical target valuation
 $\widehat\rho$ by applying $\mathsf{toCanonical}$ pointwise.
 
@@ -866,7 +1133,7 @@ Quantifiers use the fact that extending a canonical target valuation corresponds
 to extending the source valuation.
 \end{proof}
 
-\begin{theorem}[Validity of generated obligations]
+\begin{theorem}[Validity of generated formulas]
 For every $e$, the same canonical model satisfies the entire auxiliary
 theory:\leanfile{Defunctionalization/Flattened/Theory.lean}
 \[
@@ -890,7 +1157,7 @@ $M_s$:\leanfile{Defunctionalization/Flattened/Theory.lean}
 \]
 \end{theorem}
 \begin{proof}
-Generated-obligation validity proves the prefix $\Gen(\varphi)$. Flattened term
+Generated-formula validity proves the prefix $\Gen(\varphi)$. Flattened term
 preservation at the empty valuation proves the final assertion $t_\varphi$.
 \end{proof}
 
@@ -953,11 +1220,13 @@ same canonical denotation. Thus the unary proof is an independent semantic
 reference, not the endpoint of the current VCG
 theorem.\leanfiles{Defunctionalization/Fundamental.lean, Defunctionalization/ModelExtension.lean, and Defunctionalization/Flattened/Currying.lean}
 
-\section{Raw SMT semantics}
+\section{Untyped (``raw'') SMT semantics}
 \sectioncontents{Relational term evaluation; admitted commands; native datatype laws; semantic command-set equality.}
 
-The production SMT syntax is intentionally not intrinsically typed. The proof
-does not claim that every raw term is well sorted; instead it gives an
+The production SMT syntax is intentionally not intrinsically typed. From this
+point onward, \emph{raw} means this untyped syntax, in contrast to the intrinsic
+HO and FO syntax above. The proof does not claim that every raw term is well
+sorted; instead it gives an
 inductive evaluation relation to exactly the fragment used by the modeled
 lowering pipeline.
 
@@ -1049,7 +1318,7 @@ solver process or its reported verdict.
 \end{definition}
 
 \section{Exact FO-to-SMT representation}
-\sectioncontents{One shared encoding; semantic command-set representation; native datatype certificates; model lifting.}
+\sectioncontents{One shared encoding; semantic command-set representation; native datatype representation proofs; model lifting.}
 
 \begin{definition}[Encoding choice]
 For a typed symbol family $S$, an encoding $\mathcal E$ chooses:
@@ -1075,7 +1344,7 @@ homomorphically.
 \end{definition}
 
 \begin{definition}[Pure theory encoder]
-For an ordered declaration occurrence trace $D$ and typed theory $T$, define
+For an ordered declaration list $D$ and typed theory $T$, define
 \[
  \mathsf{theory}(\mathcal E,D,T)=
  C_{\mathsf{native}}\mathbin{+!+}
@@ -1098,7 +1367,7 @@ Only after defining the pure encoder and command-set equality do we introduce
 This is \texttt{TheoryRepresentation}. It is intentionally weaker than array
 equality and exactly as strong as the raw command semantics: production may
 interleave independent declarations and assertions or suppress duplicates, but
-it may neither omit nor add a semantic obligation.
+it may neither omit nor add a semantically relevant command.
 \leanfile{SMT/Representation.lean}
 \end{definition}
 
@@ -1118,6 +1387,35 @@ singleton counterpart.
 \leanfile{SMT/Representation.lean}
 \end{theorem}
 
+\begin{example}[Concrete names for the flattened running example]
+One injective encoding may choose
+\[
+\begin{array}{c@{\quad\mapsto\quad}l}
+ \TreeTy & \texttt{Tree},\\
+ \TreeFun & \texttt{Fn\_Tree\_Tree},\\
+ \app_{\TreeTy,\TreeTy} & \texttt{app\_Tree},\\
+ \clos_{\chi_L} & \texttt{clos\_left},\\
+ \clos_{\chi_R} & \texttt{clos\_right}.
+\end{array}
+\]
+The function-side declaration segment then contains commands of the following
+shape:
+\begin{verbatim}
+(declare-sort Fn_Tree_Tree 0)
+(declare-fun app_Tree
+  (Fn_Tree_Tree Tree) Tree)
+(declare-fun clos_left
+  (Fn_Tree_Tree) Fn_Tree_Tree)
+(declare-fun clos_right
+  (Fn_Tree_Tree) Fn_Tree_Tree)
+\end{verbatim}
+The encoded assertions are the untyped images of
+$E_L,E_R,X_{\TreeFun},t_{\mathsf{sq}}$ from (R). This example separates two
+questions that are easy to conflate: the flattened pass determines the typed
+symbols and formulas, while $\mathcal E$ only chooses concrete, globally fresh
+SMT names for them.
+\end{example}
+
 \subsection{Native datatype representation}
 
 \begin{definition}[One represented native block]
@@ -1132,7 +1430,7 @@ $\mathsf{Representation}(B,S,\mathcal E,A)$ proves:
  \item all encoded sorts and identifiers equal the names in $A$, including
        indexed tester identifiers.
 \end{itemize}
-An environment representation lists such certificates in dependency order and
+An environment representation lists such proofs in dependency order and
 proves that their command array is exactly $C_{\mathsf{native}}$.
 \leanfiles{SMT/DatatypeWF.lean and SMT/DatatypeRepresentation.lean}
 \end{definition}
@@ -1165,9 +1463,26 @@ indexed tester identifier recorded by $A$. The native
 \texttt{declare-datatypes} command declares those identifiers together, so the
 same object is not also emitted as an ordinary uninterpreted sort or function.
 All other HO and FO syntax remains generic: datatype-specific meaning enters
-only through ownership, lawfulness, and the native representation certificate.
+only through ownership, lawfulness, and the native representation proof.
 \leanfiles{Reification/Datatype.lean, Datatype/Flattened.lean, SMT/Datatype.lean, and SMT/DatatypeRepresentation.lean}
 \end{definition}
+
+\begin{example}[The native tree declaration]
+For the later guarded specialization in which source $\Num$ values are
+represented by SMT integers, the allocated native command may be printed as
+follows (irrelevant presentation details omitted):
+\begin{verbatim}
+(declare-datatypes ((Tree 0))
+  (((leaf (leaf_value Int))
+    (node (left Tree) (right Tree)))))
+\end{verbatim}
+The command simultaneously introduces the sort, constructors, selectors, and
+implicit testers such as \texttt{(\_ is leaf)}. Its native datatype laws say
+that every raw \texttt{Tree} value is a finite constructor tree. They do
+\emph{not} yet say that the integer stored by \texttt{leaf} represents a source
+$\Num$ value. That additional condition is exactly the guard introduced in
+Section~\ref{sec:guarded-representations}.
+\end{example}
 
 \begin{theorem}[Native command validity]
 If $M_s$ is lawful for the represented datatype environment $\mathcal D$, then
@@ -1192,8 +1507,8 @@ Given $\mathcal E$ and a typed target model $M_t$, the induced raw universe
 tags each value by its intrinsic FO sort. Sort membership checks that tag. The
 graph for an encoded symbol decodes typed arguments, applies $M_t$'s curried
 interpretation, and retags the result. An optional \texttt{ExtraGraph} adds
-certified derived identifiers only when they are disjoint from all identifiers
-owned by $\mathcal E$.
+derived identifiers together with a proof that they are disjoint from all
+identifiers owned by $\mathcal E$.
 \leanfiles{SMT/Model.lean and SMT/ModelExtension.lean}
 \end{definition}
 
@@ -1233,18 +1548,21 @@ complete representation soundness with aggregate flattened model extension.
 \leanfile{SMT/Soundness.lean}
 \end{corollary}
 
-\section{Guarded carriers and guarded SMT encoding}
-\sectioncontents{Carrier equivalences; related FO models; recursive datatype guards; one guarded raw-model theorem.}
+\section{Representing source values inside SMT types}
+\label{sec:guarded-representations}
+\sectioncontents{Subset representations; related FO models; recursive datatype guards; one guard-aware SMT-model theorem.}
 
-Some source carriers occupy a proper subset of the corresponding production
-SMT carrier. The primary external example is $\mathbb N$ represented in
-$\mathbb Z$ by the predicate $0\le z$. Datatype values recursively inherit
-guards from their external fields.
+Production can represent a source type using an existing SMT type together
+with a predicate that selects exactly the values belonging to the source type.
+For example, it represents $\mathbb N$ using $\mathbb Z$ and the predicate
+$0\le z$. We call the selecting predicate a \emph{guard}. A custom datatype
+uses the SMT datatype emitted for it, and its guard recursively requires each
+field to satisfy the guard of that field's source type.
 
-\subsection{Guarded carrier equivalence}
+\subsection{Subset representations}
 
-\begin{definition}[Guarded relation]
-A guarded relation $R:S\rightsquigarrow T$ contains
+\begin{definition}[Guarded-subset representation]
+A guarded-subset representation $R:S\rightsquigarrow T$ contains
 \[
  \mathsf{encode}:S\to T,\qquad
  \mathsf{guard}:T\to\mathsf{Prop},\qquad
@@ -1257,7 +1575,7 @@ together with nonemptiness of $S$ and the laws
  \mathsf{guard}(t)\Rightarrow
    \mathsf{encode}(\mathsf{decode}(t))=t.
 \]
-Thus $S$ is equivalent to the guarded subtype of $T$. Encoding is injective;
+Thus $S$ is equivalent to the subtype of $T$ selected by the guard. Encoding is injective;
 source equality is preserved and reflected; and source quantifiers correspond
 to the following guarded target quantifiers.\leanfile{Guarded/Encoding.lean}
 \[
@@ -1267,8 +1585,31 @@ to the following guarded target quantifiers.\leanfile{Guarded/Encoding.lean}
 \]
 \end{definition}
 
+\begin{example}[The external $\Num$ field represented by integers]
+Specialize the source carrier of $\Num$ to $\mathbb N$ and the target carrier
+to $\mathbb Z$. The representation is
+\[
+ \mathsf{encode}(n)=\mathsf{ofNat}(n),
+ \qquad
+ \mathsf{guard}(z)\equiv 0\le z,
+ \qquad
+ \mathsf{decode}(z,p)=\mathsf{toNat}(z).
+\]
+The proof $p:0\le z$ is what makes encoding after decoding recover the original
+integer. For example, a source quantifier
+\[
+ \forall n{:}\Num.\;P(n)
+\]
+is represented by
+\[
+ \forall z{:}\mathsf{Int}.\;0\le z\to P'(z),
+\]
+whereas an existential uses $0\le z\land P'(z)$. Negative integers remain in
+the SMT carrier but are excluded from the represented source values.
+\end{example}
+
 \begin{definition}[FO carrier and model relation]
-A carrier relation $R$ assigns a guarded relation to every nonlogical FO
+A carrier relation $R$ assigns a guarded-subset representation to every nonlogical FO
 carrier; Boolean propositions use the identity relation. For source and target
 family models $M_0,M_1$, a model relation
 $M_0\sim_R M_1$ requires every typed symbol interpretation to map encoded
@@ -1291,10 +1632,10 @@ denotation must remain visually distinct.
 \end{definition}
 
 \begin{theorem}[FO guarded preservation]
-If $M_0\sim_R M_1$, then for every typed term $e$ and source valuation $\nu$,
+If $M_0\sim_R M_1$, then for every typed term $e$ and source valuation $\rho$,
 \[
- \mathsf{guardDenote}(e,M_1,R,\mathsf{lift}_R(\nu))
- =R_{\kappa}.\mathsf{encode}(\den{e}{M_0}{\nu}),
+ \mathsf{guardDenote}(e,M_1,R,\mathsf{lift}_R(\rho))
+ =R_{\kappa}.\mathsf{encode}(\den{e}{M_0}{\rho}),
 \]
 where $\kappa$ is the result sort of $e$. The theorem handles variables,
 symbols, all logical forms, equality, and both quantifiers uniformly.
@@ -1328,6 +1669,38 @@ per-symbol model relation.
 \leanfiles{Datatype/Guarded.lean, Datatype/Carrier.lean, Datatype/FamilyModel.lean, and Datatype/Flattened.lean}
 \end{theorem}
 
+\begin{example}[The recursive guard for the running tree]
+Lifting the $\mathbb N\rightsquigarrow\mathbb Z$ representation through the
+tree block gives
+\[
+\begin{aligned}
+ \WF_{\Tree}(\mathsf{leaf}(z))
+   &\Longleftrightarrow 0\le z,\\
+ \WF_{\Tree}(\mathsf{node}(l,r))
+   &\Longleftrightarrow
+     \WF_{\Tree}(l)\land\WF_{\Tree}(r).
+\end{aligned}
+\tag{G}
+\]
+The production-shaped predicate expresses the same condition without pattern
+matching:
+\[
+\begin{aligned}
+ \mathsf{wf}_{\Tree}(t)\Longleftrightarrow{}&
+ \bigl(\mathsf{isLeaf}(t)\to 0\le\mathsf{leafValue}(t)\bigr)\\
+ &{}\land
+ \bigl(\mathsf{isNode}(t)\to
+   \mathsf{wf}_{\Tree}(\mathsf{left}(t))\land
+   \mathsf{wf}_{\Tree}(\mathsf{right}(t))\bigr).
+\end{aligned}
+\tag{PG}
+\]
+Native constructor exhaustiveness and tester disjointness make (G) and (PG)
+equivalent. This is the concrete content of
+\texttt{Val.wf\_iff\_selWF}; it is why a native SMT datatype carrier can be
+larger than the source datatype carrier while still representing it exactly.
+\end{example}
+
 \subsection{Guard-aware raw syntax}
 
 \begin{definition}[Guarding policy and guarded encoder]
@@ -1344,9 +1717,24 @@ $\smtenc{\mathcal E}{e}$.
 \leanfile{SMT/Guarded.lean}
 \end{definition}
 
+\begin{example}[Guarding the flattened running formula]
+Under the running representation, a tree binder in (T), (E), or (X) is encoded
+with $\mathsf{wf}_{\Tree}$ as its restriction. For example, the pointwise
+premise inside $t_{\mathsf{sq}}$ becomes schematically
+\[
+ \forall x{:}\texttt{Tree}.\;
+   \mathsf{wf}_{\Tree}(x)\to
+   \texttt{app\_Tree}(f,x)=\texttt{app\_Tree}(g,x).
+\]
+The chosen relation treats the function-value sort $\TreeFun$ as total, so its
+binders need no nontrivial guard. All uses of \texttt{app\_Tree},
+\texttt{clos\_left}, and \texttt{clos\_right} still come from the same ordinary
+encoding $\mathcal E$; guarding changes quantifier domains, not symbol identity.
+\end{example}
+
 \begin{definition}[Guarded theory representation]
-Let $C_{\mathsf{derived}}$ be an exact certified command segment, such as the
-mutual \texttt{wf\_T} definitions. Define the following guarded command
+Let $C_{\mathsf{derived}}$ be a specified command segment whose validity is
+proved separately, such as the mutual \texttt{wf\_T} definitions. Define the following guarded command
 sequence and representation.\leanfile{SMT/Guarded.lean}
 \[
  \mathsf{gtheory}(\mathcal G,C_{\mathsf{derived}},D,T)
@@ -1379,19 +1767,19 @@ arbitrary already-evaluated raw term, which is needed for datatype selectors.
 \begin{theorem}[Guarded raw term preservation]
 If $M_0\sim_R M_1$ and the guarding policy has the semantic guard contract,
 then the raw term $\guardenc{\mathcal G}{e}$ evaluates to the tagged
-encoding of $\den{e}{M_0}{\nu}$. This is \texttt{guardTerm\_rel\_eval}; it
+encoding of $\den{e}{M_0}{\rho}$. This is \texttt{guardTerm\_rel\_eval}; it
 composes FO guarded preservation with the raw evaluator.
 \leanfile{SMT/GuardedSoundness.lean}
 \end{theorem}
 
 \subsection{Native blocks and recursive guards in one model}
 
-The datatype target is built by a dependency fold. At each step, the current
-block receives its enlarged free-algebra carrier and native interpretations.
-An \texttt{Ordered} witness proves every earlier native command is disjoint
-from every later block, not only from its immediate successor. The carry
-theorems transport constructor, selector, tester, exhaustive, and rank laws
-through the entire suffix.
+The target model is built one datatype block at a time in dependency order. At
+each step, the current block receives its free-algebra type and native
+interpretations. An \texttt{Ordered} proof states that every earlier native
+command is disjoint from every later block, not only from its immediate
+successor. The following lemmas preserve constructor, selector, tester,
+exhaustiveness, and rank laws as each later block is added.
 
 Each represented block has one exact \texttt{define-funs-rec} guard command.
 Its retained names and binder determine the same shared \texttt{wfBody} syntax
@@ -1400,6 +1788,22 @@ clauses, then \texttt{wfDefs\_valid} proves the simultaneous command graph.
 The exact guard command array is indexed by the same represented block list as
 the native prefix.
 \leanfiles{SMT/Datatype.lean, SMT/DatatypeGuard.lean, SMT/DatatypeGuarded.lean, and SMT/DatatypeCarry.lean}
+
+For the running tree, the one-function recursive block has the following
+schematic SMT-LIB shape:
+\begin{verbatim}
+(define-funs-rec
+  ((wf_Tree ((t Tree)) Bool))
+  ((and
+     (=> ((_ is leaf) t)
+         (>= (leaf_value t) 0))
+     (=> ((_ is node) t)
+         (and (wf_Tree (left t))
+              (wf_Tree (right t)))))))
+\end{verbatim}
+This is a concrete command, not an axiom schema: \texttt{wfDefs\_valid} proves
+that its simultaneous function graph denotes (PG) in the same raw model as the
+native \texttt{Tree} declaration.
 
 \begin{theorem}[Complete guarded model lifting]
 Assume
@@ -1426,7 +1830,7 @@ lawfulness in the quantified model class.
 \end{remark}
 
 \section{Lean reification and intrinsic VCG}
-\sectioncontents{Partial structural reification; common-environment theories; pure and stateful aggregate lowering.}
+\sectioncontents{Partial structural reification; common-environment theories; verified finite-theory command generation.}
 
 \subsection{The supported Lean boundary}
 
@@ -1471,9 +1875,32 @@ the complete structural plan is known.
 \leanfile{Reification/Datatype.lean}
 \end{definition}
 
+\begin{example}[A Lean expression corresponding to (RE)]
+The front end may encounter a normalized proposition with this source shape:
+\begin{verbatim}
+inductive Tree where
+  | leaf : Nat -> Tree
+  | node : Tree -> Tree -> Tree
+
+def runningFact : Prop :=
+  forall f g : Tree -> Tree,
+    (forall x : Tree, f x = g x) ->
+    (fun x => f (f x)) = (fun x => g (g x))
+\end{verbatim}
+Successful reification retains the ground datatype block for \texttt{Tree},
+the external representation information for \texttt{Nat}, and the intrinsic
+sentence $\varphi_{\mathsf{sq}}$. It does not retain the printed binder names:
+typed de Bruijn references record the same binding structure. If any node falls
+outside the supported fragment, reification returns no witness rather than
+silently approximating the expression.
+\end{example}
+
 \subsection{Pure aggregate VCG}
 
 \begin{definition}[Pure VCG commands]
+Here VCG abbreviates \emph{verification-condition generator}: it is the pure
+function that turns the reified finite theory into the command array whose
+unsatisfiability is checked.
 For encoding $\mathcal E$ and finite intrinsic source theory $\Phi$, the pure
 VCG function computes
 \[
@@ -1487,77 +1914,85 @@ and retains
 \]
 For guarding policy $\mathcal G$ and exact derived segment
 $C_{\mathsf{derived}}$, \texttt{guardedTheoryCommands} constructs the
-corresponding $\Rep_g$ witness. Sentence-level functions are singleton
-conveniences.
+corresponding $\Rep_g$ witness.
 \leanfile{VCG/Generate.lean}
 \end{definition}
 
-\begin{definition}[Stateful aggregate VCG]
-The aggregate runner begins with fresh translation bookkeeping and installs the
-pure aggregate command array in the state's command field. Its representation
-witness retains both exact command equality and the semantic theory
-representation. The guarded aggregate runner does the same for the guarded
-array and certified derived segment. Freshness prevents either route from
-inheriting commands or trust markers from a previous direct run. Lean names
-these runners \texttt{runTheory} and \texttt{runGuardedTheory}, and names the
-witness \texttt{TheoryStateRepresents}.
-\leanfile{VCG/Stateful.lean}
-\end{definition}
+\begin{example}[The verified command groups for the running fact]
+For the singleton theory $[\varphi_{\mathsf{sq}}]$, guarded generation combines
+the components already displayed:
+\[
+\begin{array}{c@{\quad}l}
+ C_{\mathsf{native}} & \text{the native \texttt{Tree} declaration},\\
+ C_{\mathsf{derived}} & \text{the recursive \texttt{wf\_Tree} definition},\\
+ C_{\mathsf{ordinary}} & \text{the function sort and (A), (C) declarations},\\
+ C_{\mathsf{gassert}} & \text{guarded encodings of $E_L,E_R,X_{\TreeFun},t_{\mathsf{sq}}$}.
+\end{array}
+\]
+The VCG representation theorem does not merely say that this array was
+produced: it proves command-set equivalence with the guarded encoder's output.
+The guarded model-lifting theorem then constructs one SMT model in which the
+encoded formulas from (R), the native declaration, and the recursive guard
+definition are all satisfied together.
+\end{example}
 
-\begin{theorem}[Aggregate intrinsic VCG soundness]
-Let $C$ be the command array in a fresh aggregate VCG state, let $\mathcal D$
-be represented by the same encoding, and assume
-$\unsat_{\mathsf{SMT}}(C)$. Then
+\begin{theorem}[Finite-theory command-generation soundness]
+Let $C=\mathsf{theoryCommands}(\mathcal E,\Phi)$, let $\mathcal D$ be
+represented by the same encoding, and assume $\unsat_{\mathsf{SMT}}(C)$. Then
 \[
  \unsat_{\mathsf{HO}}^{\mathcal D}(\Phi).
 \]
-This is \texttt{TheoryStateRepresents.unsat\_source};
-\texttt{runTheory\_unsat\_implies\_source\_unsat} is its executable
-specialization. The guarded finite-theory theorem uses one uniform
-\texttt{GuardInterpretation} and reaches the same source-model class.
-\leanfile{VCG/Soundness.lean}
+This is \texttt{theoryCommands\_unsat\_implies\_source\_unsat}. The guarded
+representation above is composed with native datatype and guard validity by
+the production-facing theorem in the next section.
+\leanfile{VCG/Generate.lean}
 \end{theorem}
 
-\section{Production certificates and whole-theory agreement}
-\sectioncontents{Exact final-state traces; static representation evidence; proof-producing command-set comparison; production reflection.}
+\section{Comparing the final production commands with the intrinsic theory}
+\sectioncontents{Command locations; representation proofs; checked final-array comparison; reflection.}
 
-The intrinsic VCG constructs a fresh canonical array. The live production
-translator instead interleaves declarations and assertions, removes duplicate
-occurrences, attaches provenance annotations to assertions, and allows
-extension handlers. The production layer therefore uses semantic command-set
-agreement, not an unattainable array equality.
+The intrinsic VCG constructs a canonical command array. The production
+translator may interleave declarations and assertions, omit duplicate
+occurrences, attach names to top-level assertions, and invoke extension
+handlers. Array equality would reject harmless reordering and duplicate
+removal, so the comparison instead proves that the two arrays contain the same
+commands under the membership-based semantics defined above.
 
-\subsection{Exact final-state component traces}
+\subsection{Locating datatype commands in the final array}
 
-\begin{definition}[Certified production datatype environment]
-A \texttt{CertifiedDataEnv} retains:
+\begin{definition}[Production fact]
+A \texttt{ProductionFact} retains:
 \begin{itemize}[leftmargin=*]
- \item the exact source expression, datatype environment, ordinary signature
-       bridge, and optional reified sentence indexed by that environment;
- \item the complete final production command snapshot $C_{\mathsf{prod}}$;
- \item a typed native-command trace; and
- \item a typed recursive-guard trace.
+ \item the source expression, its datatype environment, its ordinary signature
+       and constants, and the intrinsic sentence when the expression is in the
+       supported fragment;
+ \item the complete final production command array $C_{\mathsf{prod}}$;
+ \item the positions of its native datatype commands in that array; and
+ \item the positions of its recursive guard definitions in that array.
 \end{itemize}
-Each trace entry records an index in the final snapshot and proves that the
-command at that index is the exact command belonging to the intrinsically
-indexed block. Traces are rebuilt after all facts are emitted; no intermediate
-prefix is presented as final evidence.
+Each recorded position comes with a Lean proof that the command at that position
+belongs to the corresponding intrinsically typed datatype block. These
+positions are recomputed after all facts are translated, so every
+\texttt{ProductionFact} refers to the same final command array rather than an
+intermediate prefix.
 \leanfile{VCG/Datatype.lean}
 \end{definition}
 
 \begin{definition}[Production representation evidence]
-For a certificate $P$:
+For a production fact $P$:
 \begin{itemize}[leftmargin=*]
- \item $P.\mathsf{Representation}(\mathcal E)$ links every typed native trace
-       entry to one shared encoding and proves that its exact native prefix is
-       the certified command list;
+ \item $P.\mathsf{Representation}(\mathcal E)$ links every located native
+       command to one shared encoding and proves that the encoding's native
+       prefix is exactly the retained command list;
  \item $P.\mathsf{GuardRepresentation}(\mathcal G)$ links the recursive guard
-       trace to fresh, injective identifiers independently of any model; and
+       definitions to fresh, injective SMT identifiers independently of any
+       model; and
  \item $P.\mathsf{GuardInterpretation}(\mathcal G)$ realizes that static guard
        representation for every datatype-lawful source model.
 \end{itemize}
-These are premises of the production refinement boundary. They are not a
-second term encoder or a second datatype soundness theorem.
+These records connect production commands to the already-proved intrinsic
+encoding. They do not define a second term encoder or a second datatype
+soundness theorem.
 \leanfile{VCG/Datatype.lean}
 \end{definition}
 
@@ -1575,31 +2010,45 @@ No other command is erased. The Lean normalizer is
 
 \begin{definition}[Whole-theory agreement]
 Let $W$ be an exact \texttt{ReifiedSentencesFor} witness with intrinsic theory
-$\Phi_W$. A \texttt{TheoryAgreement} is the proposition
+$\Phi_W$. A \texttt{ProductionTheoryAgreement} is the proposition
 \[
  \Rep_g(\mathcal G,C_{\mathsf{guard}},\Theorys{\Phi_W},
    \mathsf{strip}(C_{\mathsf{prod}})).
 \]
-The executable \texttt{TheoryAgreement.build?} computes the expected guarded
-aggregate commands and checks mutual command inclusion. It returns
-proof-carrying agreement only when the Boolean comparison is proved equivalent
-to $\SameCmd$. Thus reordering and duplicate suppression are accepted, while a
-missing or extra semantic obligation is rejected.
+The executable \texttt{ProductionTheoryAgreement.build?} computes the expected
+guarded commands and checks inclusion in both directions. On success it returns
+both the comparison result and its Lean proof. Thus reordering and duplicate
+removal are accepted, while a missing or extra semantically relevant command is
+rejected.
 \leanfile{VCG/Production.lean}
 \end{definition}
 
+\begin{example}[What final-array agreement checks]
+Suppose production emits the running commands in a different legal order,
+reuses one declaration instead of repeating its occurrence, and attaches the
+name \texttt{crush\_fact\_0} to the root of the encoded
+$t_{\mathsf{sq}}$ assertion.
+After removing that one root annotation, the comparison accepts the array if
+it contains the native \texttt{Tree} declaration, \texttt{wf\_Tree}, every
+ordinary declaration, and the encoded formulas
+$E_L,E_R,X_{\TreeFun},t_{\mathsf{sq}}$. It rejects, for example, an array that
+omits $E_L$ or adds an unrelated assertion. This illustrates why the final
+theorem is about exact semantic command-set agreement rather than byte-for-byte
+script equality.
+\end{example}
+
 \begin{theorem}[Production whole-theory reflection]
-Let $P$ be a production certificate with native representation, static guard
+Let $P$ be a production fact with native representation, static guard
 representation, uniform guard interpretation, and whole-theory agreement for
-$W$. If the exact completed snapshot is semantically unsatisfiable, then
+$W$. If the final production command array is semantically unsatisfiable, then
 \[
  \unsat_{\mathsf{SMT}}(C_{\mathsf{prod}})
  \quad\Longrightarrow\quad
  \unsat_{\mathsf{HO}}^{\mathcal D}(\Phi_W).
 \]
-The theorem \texttt{TheoryAgreement.unsat\_source\_script} also admits the
+The theorem \texttt{ProductionTheoryAgreement.unsat\_source\_script} also admits the
 leading logic-selection command returned by \texttt{buildScript}.
-\texttt{SingleFactAgreement} is defined only as the singleton specialization
+\texttt{ProductionFactAgreement} is the single-fact specialization
 of this aggregate path.
 \leanfile{VCG/Production.lean}
 \end{theorem}
@@ -1609,12 +2058,12 @@ of this aggregate path.
 \texttt{TranslateState.status} is \texttt{proved} exactly when its trust-reason
 array is empty; otherwise it retains the nonempty reasons in a \texttt{trusted}
 constructor. This operational classification is not itself a semantic
-representation witness. The legacy extensible \texttt{emitTerm} route is
-marked direct-trusted at its root, and unrestricted handlers, uncertified
-constants or closures, and native-HO emission retain additional reasons.
-Certified local components become a whole-run theorem only through the exact
+representation witness. The production translator's extensible \texttt{emitTerm} route is
+marked trusted at its root, and unrestricted handlers, constants or closures
+without semantic proofs, and native-HO emission retain additional reasons.
+Individually proved components become a whole-run theorem only through the exact
 aggregate agreement described above.
-\leanpaths{Crush/Metatheory/VCG/Trust.lean, Crush/Translation/Monad.lean, Crush/Metatheory/VCG/Stateful.lean, and Crush/Metatheory/VCG/Production.lean}
+\leanpaths{Crush/Metatheory/VCG/Trust.lean, Crush/Translation/Monad.lean, and Crush/Metatheory/VCG/Production.lean}
 
 \section{Proof architecture and exact scope}
 \sectioncontents{The composed aggregate theorem; modeled production behavior; explicit external boundaries.}
@@ -1642,12 +2091,12 @@ not denotational.
   \node[boundary] (lean) {supported Lean\\fact array};
   \node[stage,right=of lean] (ho) {common-signature HO\\theory $\Phi$};
   \node[stage,right=of ho] (fo) {combined FO theory\\$\Theorys{\Phi}$};
-  \node[stage,right=of fo] (spec) {canonical guarded\\command set};
-  \node[boundary,right=of spec] (prod) {completed production\\snapshot $C$};
+  \node[stage,right=of fo] (spec) {verified guarded\\command array};
+  \node[boundary,right=of spec] (prod) {final production\\command array $C$};
 
   \node[proof,below=15mm of fo,xshift=-21mm] (model1) {lawful source-model extension\\
     $M_s\satt\Phi\Rightarrow\widehat M_s\satt\Theorys{\Phi}$};
-  \node[proof,below=15mm of spec,xshift=21mm] (model2) {one raw-model construction\\
+  \node[proof,below=15mm of spec,xshift=21mm] (model2) {one untyped-model construction\\
     native $+$ derived $+$ ordinary $+$ assertions};
   \node[final,below=17mm of model1,xshift=41mm] (final) {whole-theory reflection\\
     $\unsat_{\mathsf{SMT}}(C)\Rightarrow
@@ -1668,8 +2117,8 @@ not denotational.
 }
 \caption{The current aggregate proof architecture. Datatype lawfulness and a
 uniform guard interpretation parameterize the model construction. Command-set
-agreement models production reordering and duplicate suppression exactly at the
-membership-based raw semantics.}
+agreement models production reordering and duplicate suppression exactly in the
+membership-based untyped command semantics.}
 \label{fig:proof-architecture}
 \end{figure}
 
@@ -1679,26 +2128,26 @@ membership-based raw semantics.}
  \item HO and FO syntax is intrinsically typed, and flattened
        defunctionalization is total on the complete modeled core.
  \item Every source fact contributes its translated body, closure equations,
-       extensionality obligations, and declaration occurrences to one combined
+       extensionality formulas, and declaration occurrences to one combined
        target theory over one signature.
  \item One canonical target model simultaneously satisfies that whole target
        theory whenever one source model satisfies the whole source theory.
  \item Productive monomorphic datatype blocks have finite free-algebra source
-       semantics and exact native raw-command semantics.
- \item Guarded carrier relations preserve typed terms, equality, and both
-       quantifiers; recursive datatype guards denote exactly the structural
-       image of the source carrier.
- \item One induced raw model validates native datatype commands, simultaneous
+       semantics and exact native command semantics in the untyped SMT model.
+ \item Guarded-subset representations preserve typed terms, equality, and both
+       quantifiers; recursive datatype guards select exactly the values that
+       represent well-formed source datatype values.
+ \item One induced untyped SMT model validates native datatype commands, simultaneous
        guard definitions, ordinary declarations, and every guarded assertion.
  \item Exact representation is semantic command-set equivalence. It therefore
        admits production interleaving and duplicate elimination without
        weakening or strengthening the model obligations.
  \item Common-environment reification retains the exact ordered Lean fact array,
-       and fresh aggregate VCG retains an exact representation theorem.
- \item Production traces reconnect native and recursive-guard commands to the
-       completed final snapshot. \texttt{TheoryAgreement.build?} checks the
-       remaining whole-array command set and returns proof-producing evidence.
- \item Semantic unsatisfiability of the agreed completed snapshot reflects to
+       and the pure finite-theory VCG proves the meaning of its command array.
+ \item Command locations reconnect native datatype and recursive guard commands
+       to the final production array. \texttt{ProductionTheoryAgreement.build?}
+       checks the rest of that array and returns a proof of agreement.
+ \item Semantic unsatisfiability of the agreed final command array reflects to
        unsatisfiability of the entire intrinsic source theory in every
        datatype-lawful source model.
 \end{enumerate}
@@ -1709,21 +2158,29 @@ membership-based raw semantics.}
  \item No denotational semantics is postulated for arbitrary \texttt{Lean.Expr};
        the final proposition concerns the reified intrinsic theory.
  \item Semantic command unsatisfiability is a premise. Correctness of an
-       external solver's reported \texttt{unsat} answer requires certificate
-       replay or another independently checked argument.
- \item The live extensible translator does not automatically construct the
+       external solver's reported \texttt{unsat} answer requires replaying a
+       checked solver proof or another independently checked argument.
+ \item The extensible production translator does not automatically construct the
        shared encoding, native representation, static guard representation,
        uniform guard interpretation, or common aggregate reification witness.
        Production reflection applies once those proof objects and exact
        agreement are present.
  \item \texttt{TranslateState.status} is operational metadata; it cannot replace
-       a \texttt{TheoryRepresentation} or \texttt{TheoryAgreement} witness.
- \item The live allocator is finite, while the intrinsic \texttt{SMT.Encoding}
+       a \texttt{TheoryRepresentation} or \texttt{ProductionTheoryAgreement} witness.
+ \item The production allocator is finite, while the intrinsic \texttt{SMT.Encoding}
        interface supplies total injections over the modeled symbol family. The
        current theorem takes that total encoding as an explicit representation
        premise rather than claiming it is extracted from every allocator state.
+ \item A ground production type such as \texttt{Tree (A -> A)} is not accepted
+       as a native datatype. The legacy acceptance check rejects the arrow-valued
+       field, and certified reification reports \texttt{functionField}. Production
+       may continue by declaring the whole tree type as an opaque sort and its
+       operations as ordinary uninterpreted symbols; a projected function value
+       may still use the ordinary higher-order encoding. This fallback supplies
+       none of the free-datatype laws and does not produce the represented native
+       datatype block required by the production-agreement theorem.
  \item Unsupported dependent syntax, indexed or nonproductive inductives,
-       dependent or function-valued datatype fields, unsafe indirect recursion,
+       dependent datatype fields, unsafe indirect recursion,
        unrestricted translation handlers, nonrecursive raw definitions, and
        native-HO commands remain outside the modeled theorem.
 \end{itemize}
@@ -1746,7 +2203,7 @@ The principal declarations, in proof order, are:
        flattened application preserve repeated source application.
  \item \path{Flattened.translate_denote}: the translated term component has
        the source denotation in the canonical model.
- \item \path{Flattened.generated_valid}: all generated closure equations and
+ \item \path{Flattened.generatedFormulas_valid}: all generated closure equations and
        extensionality formulas are valid in that same model.
  \item \path{Flattened.model_extension_theory}: one source model satisfying a
        finite theory extends to the combined flattened target theory.
@@ -1762,33 +2219,30 @@ The principal declarations, in proof order, are:
  \item \path{Datatype.Val.wf_iff_selWF}: the structural datatype image equals
        the tester/selector predicate emitted by production.
  \item \path{SMT.Datatype.wfDefs_valid}: exact mutual \texttt{wf\_T}
-       definitions satisfy the raw simultaneous graph semantics.
- \item \path{SMT.guardTerm_rel_eval}: guard-aware raw evaluation agrees with
+       definitions satisfy the untyped simultaneous graph semantics.
+ \item \path{SMT.guardTerm_rel_eval}: guard-aware untyped evaluation agrees with
        denotation in any symbol-related target model.
  \item \path{SMT.guarded_lift}: native commands, derived definitions, ordinary
-       declarations, and guarded assertions hold in one raw model.
+       declarations, and guarded assertions hold in one untyped SMT model.
  \item \path{SMT.representation_sound}: the unguarded complete representation
        has the corresponding one-model lifting theorem.
  \item \path{SMT.commands_unsat_implies_source_theory_unsat}: semantic
-       raw-command unsatisfiability reflects to the lawful intrinsic HO theory.
+       untyped-command unsatisfiability reflects to the lawful intrinsic HO theory.
  \item \path{Reification.reifyTheory?}: an exact Lean fact array reifies under
        one datatype environment and signature bridge without reordering.
  \item \path{VCG.theoryCommands_represents} and
        \path{VCG.guardedTheoryCommands_represents}: pure aggregate generation
        retains ordinary and guarded representation evidence.
- \item \path{VCG.runTheory_represents} and
-       \path{VCG.runGuardedTheory_represents}: fresh stateful runs retain those
-       exact aggregate representations.
- \item \path{VCG.TheoryStateRepresents.unsat_source} and
-       \path{VCG.runGuardedTheory_unsat_implies_source_unsat}: the intrinsic
-       stateful compositions reflect to source-theory unsatisfiability.
- \item \path{VCG.CertifiedDataEnv.Representation.theory_unsat}: one production
+ \item \path{VCG.theoryCommands_unsat_implies_source_unsat}: unsatisfiability
+       of the pure finite-theory command array reflects to source-theory
+       unsatisfiability.
+ \item \path{VCG.ProductionFact.Representation.theory_unsat}: one production
        datatype and guard package reflects any exactly represented finite
        source theory.
- \item \path{VCG.TheoryAgreement.unsat_source} and
-       \path{VCG.TheoryAgreement.unsat_source_script}: the complete production
-       snapshot, with optional leading logic command, reflects through checked
-       whole-theory agreement.
+ \item \path{VCG.ProductionTheoryAgreement.unsat_source} and
+       \path{VCG.ProductionTheoryAgreement.unsat_source_script}: the final
+       production command array, with an optional leading logic command,
+       reflects through checked whole-theory agreement.
 \end{enumerate}
 \end{sloppypar}
 

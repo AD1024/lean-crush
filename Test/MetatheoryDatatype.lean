@@ -12,7 +12,6 @@ import Crush.Metatheory.SMT.DatatypeGuard
 import Crush.Metatheory.SMT.DatatypeRepresentation
 import Crush.Metatheory.SMT.Soundness
 import Crush.Metatheory.SMT.Semantics
-import Crush.Metatheory.VCG.Soundness
 import Crush.Metatheory.VCG.Production
 import Crush.Frontend.Tactic
 
@@ -235,8 +234,8 @@ the same construction used for recursive and mutual datatypes. -/
 
 private abbrev NatBase : BaseSort → Type := fun _ => Nat
 
-private def natBase : Guarded.BaseRel NatBase IntBase :=
-  fun _ => Guarded.natInt.rel
+private def natBase : Guarded.BaseRepresentations NatBase IntBase :=
+  fun _ => Guarded.natInt.representation
 
 private abbrev NoSymbols : FO.SymbolFamily := fun _ => Empty
 
@@ -275,7 +274,7 @@ example (value : Val optionBlock NatBase optionData) :
 
 example : ¬guardedOption.guard (some (-1)) := by
   simp [guardedOption, lift, some, Val.WF, Args.WF, natBase,
-    Guarded.Encoding.rel, Guarded.natInt]
+    Guarded.natInt]
 
 example : guardedOption.encode (someNat 7) = some 7 := rfl
 
@@ -342,7 +341,7 @@ example : guardedTree.encode (leafNat 3) = leaf 3 := rfl
 
 example : ¬guardedTree.guard (node (leaf 1) (leaf (-1))) := by
   simp [guardedTree, lift, node, leaf, Val.WF, Args.WF, natBase,
-    Guarded.Encoding.rel, Guarded.natInt]
+    Guarded.natInt]
 
 /-- The same selector characterization is block-generic and therefore covers
 recursive guarded fields rather than only the `Option` case. -/
@@ -546,83 +545,20 @@ example {env : Datatype.Env σ} (represented : EnvRepresentation fo env)
     ∃ model : Crush.SMT.Model, model.SatisfiesCommands commands :=
   represented.soundFrom ordered encoded source lawful prior extra valid
 
-/-- The composed VCG theorem is indexed by the same certified datatype bridge
-that owns the reified source constants; an unrelated datatype environment cannot
-be supplied at this boundary. -/
-example (cfg : Crush.Config) (data : Reification.DataBridge σ)
-    (native : EnvRepresentation fo data.toModelEnv) (formula : Sentence σ)
-    (unsat : Crush.SMT.CommandsUnsatisfiable
-      (run cfg fo formula).commands) :
-    Datatype.Env.Unsatisfiable data.toModelEnv formula :=
-  run_unsat_implies_source_unsat cfg fo formula data native unsat
-
-/-- The same pure run retains exact native command positions, not only a
-whole-array representation proposition. -/
-example (cfg : Crush.Config) {env : Datatype.Env σ}
-    (native : EnvRepresentation fo env) (formula : Sentence σ)
-    (position : Nat) :
-    let trace := run_dataTrace cfg fo formula native
-    trace.indices[position]?.bind
-        (fun index => (run cfg fo formula).commands[index]?) =
-      trace.commands[position]? := by
-  exact (run_dataTrace cfg fo formula native).commands_at position
-
-/-- Guarded generation is also an exact proved state, with its derived-command
-segment represented explicitly. -/
-example (cfg : Crush.Config) (guarding : SMT.Guarding (Symbol σ))
-    (derived : Array Crush.SMT.Command) (formula : Sentence σ) :
-    SMT.GuardedTheoryRepresentation guarding derived (translatedTheory formula)
-      (runGuarded cfg guarding derived formula).commands :=
-  runGuarded_represents cfg guarding derived formula
-
-/-- A production datatype certificate enters the existing shared soundness API
+/-- A production fact enters the existing shared soundness API
 through one representation boundary; no datatype-only solver theorem is added. -/
-example (certificate : CertifiedDataEnv)
+example (production : ProductionFact)
     (encoding : SMT.Encoding
-      (Symbol (certificate.env.signature ++ certificate.tail)))
-    (trace : certificate.trace.Representation encoding)
-    (native : encoding.nativeCommands = certificate.nativeCommands) :
-    EnvRepresentation encoding certificate.data.toModelEnv :=
-  ({ trace, native_eq := native } :
-    certificate.Representation encoding).env
-
-/-- Raw unsatisfiability of the exact guarded VCG run reflects to the intrinsic
-sentence under the combined datatype/interpreted-carrier contract. -/
-example (certificate : CertifiedDataEnv) (cfg : Crush.Config)
-    (guarding : SMT.Guarding
-      (Symbol (certificate.env.signature ++ certificate.tail)))
-    (represented : certificate.Representation guarding.encoding)
-    (guarded : certificate.GuardRepresentation guarding represented)
-    (formula : Sentence
-      (certificate.env.signature ++ certificate.tail))
-    (unsat : Crush.SMT.CommandsUnsatisfiable
-      (runGuarded cfg guarding certificate.guardCommands formula).commands) :
-    UnsatisfiableUnder
-      (fun source =>
-        Σ lawful : Datatype.Env.Lawful source certificate.data.toModelEnv,
-          certificate.GuardModel guarding represented guarded source lawful)
-      formula :=
-  runGuarded_unsat_under cfg represented guarded formula unsat
-
-/-- A uniform interpretation removes target-model construction evidence from
-the model class quantified by guarded reflection. -/
-example (certificate : CertifiedDataEnv) (cfg : Crush.Config)
-    (guarding : SMT.Guarding
-      (Symbol (certificate.env.signature ++ certificate.tail)))
-    (represented : certificate.Representation guarding.encoding)
-    (guarded : certificate.GuardRepresentation guarding represented)
-    (interpretation : certificate.GuardInterpretation guarding represented guarded)
-    (formula : Sentence
-      (certificate.env.signature ++ certificate.tail))
-    (unsat : Crush.SMT.CommandsUnsatisfiable
-      (runGuarded cfg guarding certificate.guardCommands formula).commands) :
-    Datatype.Env.Unsatisfiable certificate.data.toModelEnv formula :=
-  runGuarded_unsat_implies_source_unsat cfg represented guarded interpretation
-    formula unsat
+      (Symbol (production.datatypes.signature ++ production.ordinarySignature)))
+    (locations : production.nativeLocations.Representation encoding)
+    (native : encoding.nativeCommands = production.nativeCommands) :
+    EnvRepresentation encoding production.datatypeBridge.toModelEnv :=
+  ({ native := locations, native_eq := native } :
+    production.Representation encoding).datatypeRepresentation
 
 /-- Production agreement follows semantic command-set equality: declaration
-and assertion interleaving plus duplicate elimination do not change the raw
-model obligations. -/
+and assertion interleaving plus duplicate elimination do not change which
+untyped SMT models satisfy the commands. -/
 private def commandA : Crush.SMT.Command := .declSort "A" 0
 private def commandB : Crush.SMT.Command := .assert (smt| true)
 
@@ -632,59 +568,59 @@ example : sameCommandSet? #[commandA, commandB]
 example : sameCommandSet? #[commandA] #[commandA, commandB] = false := by
   native_decide
 
-/-- The live singleton theorem is indexed by the exact retained fact and final
-command snapshot; `:named` root annotations are erased only through their proved
-semantic transparency theorem. -/
-example (certificate : CertifiedDataEnv)
+/-- The single-fact theorem is indexed by the retained source fact and final
+command array. Root-level `:named` annotations are removed only through the
+semantic transparency theorem above. -/
+example (production : ProductionFact)
     (guarding : SMT.Guarding
-      (Symbol (certificate.env.signature ++ certificate.tail)))
-    (represented : certificate.Representation guarding.encoding)
-    (guarded : certificate.GuardRepresentation guarding represented) :
-    Option (SingleFactAgreement.Checked certificate guarding represented guarded) :=
-  SingleFactAgreement.build?
+      (Symbol (production.datatypes.signature ++ production.ordinarySignature)))
+    (represented : production.Representation guarding.encoding)
+    (guarded : production.GuardRepresentation guarding represented) :
+    Option (ProductionFactAgreement.Checked production guarding represented guarded) :=
+  ProductionFactAgreement.build?
 
-example (certificate : CertifiedDataEnv)
+example (production : ProductionFact)
     (guarding : SMT.Guarding
-      (Symbol (certificate.env.signature ++ certificate.tail)))
-    (represented : certificate.Representation guarding.encoding)
-    (guarded : certificate.GuardRepresentation guarding represented)
+      (Symbol (production.datatypes.signature ++ production.ordinarySignature)))
+    (represented : production.Representation guarding.encoding)
+    (guarded : production.GuardRepresentation guarding represented)
     {expressions : List Lean.Expr}
-    (reified : Reification.ReifiedSentencesFor certificate.env
-      certificate.bridge expressions) :
+    (reified : Reification.ReifiedSentencesFor production.datatypes
+      production.constants expressions) :
     Option (PLift
-      (TheoryAgreement certificate guarding represented guarded reified)) :=
-  TheoryAgreement.build? reified
+      (ProductionTheoryAgreement production guarding represented guarded reified)) :=
+  ProductionTheoryAgreement.build? reified
 
-example (certificate : CertifiedDataEnv)
+example (production : ProductionFact)
     (guarding : SMT.Guarding
-      (Symbol (certificate.env.signature ++ certificate.tail)))
-    (represented : certificate.Representation guarding.encoding)
-    (guarded : certificate.GuardRepresentation guarding represented)
-    (reified : Reification.ReifiedSentenceFor certificate.source certificate.env
-      certificate.bridge)
-    (agreement : SingleFactAgreement certificate guarding represented guarded
+      (Symbol (production.datatypes.signature ++ production.ordinarySignature)))
+    (represented : production.Representation guarding.encoding)
+    (guarded : production.GuardRepresentation guarding represented)
+    (reified : Reification.ReifiedSentenceFor production.expression production.datatypes
+      production.constants)
+    (agreement : ProductionFactAgreement production guarding represented guarded
       reified)
-    (interpretation : certificate.GuardInterpretation guarding represented guarded)
-    (unsat : Crush.SMT.CommandsUnsatisfiable certificate.emitted) :
-    Datatype.Env.Unsatisfiable certificate.data.toModelEnv reified.source :=
+    (interpretation : production.GuardInterpretation guarding represented guarded)
+    (unsat : Crush.SMT.CommandsUnsatisfiable production.allCommands) :
+    Datatype.Env.Unsatisfiable production.datatypeBridge.toModelEnv reified.source :=
   agreement.unsat_source interpretation unsat
 
 /-- The leading `set-logic` command returned by `buildScript` is accounted for
 by semantic equivalence rather than silently dropped. -/
-example (certificate : CertifiedDataEnv)
+example (production : ProductionFact)
     (guarding : SMT.Guarding
-      (Symbol (certificate.env.signature ++ certificate.tail)))
-    (represented : certificate.Representation guarding.encoding)
-    (guarded : certificate.GuardRepresentation guarding represented)
-    (reified : Reification.ReifiedSentenceFor certificate.source certificate.env
-      certificate.bridge)
-    (agreement : SingleFactAgreement certificate guarding represented guarded
+      (Symbol (production.datatypes.signature ++ production.ordinarySignature)))
+    (represented : production.Representation guarding.encoding)
+    (guarded : production.GuardRepresentation guarding represented)
+    (reified : Reification.ReifiedSentenceFor production.expression production.datatypes
+      production.constants)
+    (agreement : ProductionFactAgreement production guarding represented guarded
       reified)
-    (interpretation : certificate.GuardInterpretation guarding represented guarded)
+    (interpretation : production.GuardInterpretation guarding represented guarded)
     (logic : String)
     (unsat : Crush.SMT.CommandsUnsatisfiable
-      (#[.setLogic logic] ++ certificate.emitted)) :
-    Datatype.Env.Unsatisfiable certificate.data.toModelEnv reified.source :=
+      (#[.setLogic logic] ++ production.allCommands)) :
+    Datatype.Env.Unsatisfiable production.datatypeBridge.toModelEnv reified.source :=
   agreement.unsat_source_script interpretation logic unsat
 
 end Crush.Metatheory.SMT.Datatype.Tests
@@ -951,54 +887,54 @@ run_meta do
             proof := none
             descr := "certified point" }
           let (_, legacy) ← Crush.buildScript {} #[fact]
-          unless legacy.datatypeCertificates.isEmpty do
+          unless legacy.productionFacts.isEmpty do
             throwError "default production unexpectedly enabled datatype certification"
           let (_, certifiedState) ← Crush.buildScript
             { certifyDatatype := true } #[fact]
           unless legacy.commands.map Crush.SMT.commandToString ==
               certifiedState.commands.map Crush.SMT.commandToString do
             throwError "certified point changed the established production script"
-          unless certifiedState.datatypeCertificates.size == 1 do
-            throwError "opt-in production did not retain one datatype certificate"
-          unless certifiedState.certifiedDataCommands.size == 1 do
+          unless certifiedState.productionFacts.size == 1 do
+            throwError "opt-in production did not retain one production fact"
+          unless certifiedState.nativeDatatypeCommands.size == 1 do
             throwError "opt-in production did not retain one certified native command"
-          unless certifiedState.certifiedDataAllocationLinks.size == 1 do
+          unless certifiedState.nativeDatatypeAllocationLinks.size == 1 do
             throwError "certified native command lost its global allocation link"
-          let some native := certifiedState.certifiedDataCommands[0]?
+          let some native := certifiedState.nativeDatatypeCommands[0]?
             | throwError "certified native datatype command disappeared"
-          let some commandIndex := certifiedState.certifiedDataCommandIndices[0]?
+          let some commandIndex := certifiedState.nativeDatatypeCommandIndices[0]?
             | throwError "certified native datatype command lost its state index"
           let some emitted := certifiedState.commands[commandIndex]?
             | throwError "certified native datatype command index is out of bounds"
           unless Crush.SMT.commandToString emitted ==
               Crush.SMT.commandToString native.command do
             throwError "certified native datatype command drifted after emission"
-          let some live := certifiedState.datatypeCertificates[0]?
-            | throwError "opt-in datatype certificate disappeared"
-          unless live.source == sentence do
-            throwError "stored datatype certificate refers to another fact"
-          if live.reified.isNone then
-            throwError "stored datatype certificate lost the intrinsic sentence"
-          unless live.emitted.map Crush.SMT.commandToString ==
+          let some production := certifiedState.productionFacts[0]?
+            | throwError "retained production fact disappeared"
+          unless production.expression == sentence do
+            throwError "retained production fact refers to another expression"
+          if production.sentence.isNone then
+            throwError "retained production fact lost the intrinsic sentence"
+          unless production.allCommands.map Crush.SMT.commandToString ==
               certifiedState.commands.map Crush.SMT.commandToString do
-            throwError "stored datatype certificate did not retain the final command array"
-          unless live.commandIndices.size == live.env.blocks.size do
-            throwError "stored datatype environment is not completely linked"
-          unless live.nativeCommands.size == live.env.blocks.size do
-            throwError "stored datatype environment lost dependency-ordered commands"
-          let some linkedIndex := live.commandIndices[0]?
-            | throwError "stored datatype trace lost its first command index"
-          let some linkedCommand := live.emitted[linkedIndex]?
-            | throwError "stored datatype trace points outside its command snapshot"
-          let some retainedCommand := live.nativeCommands[0]?
-            | throwError "stored datatype trace lost its first native command"
+            throwError "retained production fact lost the final command array"
+          unless production.commandIndices.size == production.datatypes.blocks.size do
+            throwError "retained datatype environment is not completely linked"
+          unless production.nativeCommands.size == production.datatypes.blocks.size do
+            throwError "retained datatype environment lost dependency-ordered commands"
+          let some linkedIndex := production.commandIndices[0]?
+            | throwError "retained native command lost its command index"
+          let some linkedCommand := production.allCommands[linkedIndex]?
+            | throwError "retained native command index is outside the final command array"
+          let some retainedCommand := production.nativeCommands[0]?
+            | throwError "retained native command disappeared"
           unless Crush.SMT.commandToString linkedCommand ==
               Crush.SMT.commandToString retainedCommand do
-            throwError "stored datatype trace is not linked to the emitted command"
+            throwError "retained native command does not match the final command array"
           let (_, repeated) ← Crush.buildScript
             { certifyDatatype := true } #[fact, fact]
-          unless repeated.certifiedDataCommands.size == 1 &&
-              repeated.datatypeCertificates.size == 2 do
+          unless repeated.nativeDatatypeCommands.size == 1 &&
+              repeated.productionFacts.size == 2 do
             throwError "repeated facts duplicated a native block or lost a fact link"
 
   let checkProduction (label : String) (type : Expr) (nativeCount guardCount : Nat) :
@@ -1016,41 +952,41 @@ run_meta do
       unless legacy.commands.map Crush.SMT.commandToString ==
           state.commands.map Crush.SMT.commandToString do
         throwError "{label}: certified and legacy production commands differ"
-      unless state.certifiedDataCommands.size == nativeCount do
+      unless state.nativeDatatypeCommands.size == nativeCount do
         throwError "{label}: expected {nativeCount} certified native blocks, got \
-          {state.certifiedDataCommands.size}"
-      unless state.datatypeCertificates.size == 1 do
-        throwError "{label}: expected one finalized fact-local datatype certificate"
-      let some certificate := state.datatypeCertificates[0]?
-        | throwError "{label}: finalized datatype certificate disappeared"
-      if certificate.reified.isNone then
-        throwError "{label}: finalized certificate lost its intrinsic sentence"
-      unless certificate.emitted.size == state.commands.size do
-        throwError "{label}: datatype certificate retained an intermediate command prefix"
-      unless certificate.nativeCommands.size == nativeCount do
-        throwError "{label}: finalized native trace has the wrong size"
-      unless certificate.guardCommands.size == guardCount do
-        throwError "{label}: finalized guard trace has the wrong size"
+          {state.nativeDatatypeCommands.size}"
+      unless state.productionFacts.size == 1 do
+        throwError "{label}: expected one finalized fact-local datatype production"
+      let some production := state.productionFacts[0]?
+        | throwError "{label}: finalized datatype production disappeared"
+      if production.sentence.isNone then
+        throwError "{label}: finalized production lost its intrinsic sentence"
+      unless production.allCommands.size == state.commands.size do
+        throwError "{label}: datatype production retained an intermediate command prefix"
+      unless production.nativeCommands.size == nativeCount do
+        throwError "{label}: finalized native command list has the wrong size"
+      unless production.guardCommands.size == guardCount do
+        throwError "{label}: finalized guard command list has the wrong size"
       for position in [:nativeCount] do
-        let some index := certificate.commandIndices[position]?
-          | throwError "{label}: native trace lost its production index"
-        let some retained := certificate.nativeCommands[position]?
-          | throwError "{label}: native trace lost its retained command"
+        let some index := production.commandIndices[position]?
+          | throwError "{label}: native command lost its final-array index"
+        let some retained := production.nativeCommands[position]?
+          | throwError "{label}: retained native command disappeared"
         let some emitted := state.commands[index]?
-          | throwError "{label}: native trace index is outside the final state"
+          | throwError "{label}: native command index is outside the final array"
         unless Crush.SMT.commandToString emitted ==
             Crush.SMT.commandToString retained do
-          throwError "{label}: native trace does not select the exact final-state command"
+          throwError "{label}: native command does not match the final array"
       for position in [:guardCount] do
-        let some index := certificate.guardCommandIndices[position]?
-          | throwError "{label}: guard trace lost its production index"
-        let some retained := certificate.guardCommands[position]?
-          | throwError "{label}: guard trace lost its retained command"
+        let some index := production.guardCommandIndices[position]?
+          | throwError "{label}: guard command lost its final-array index"
+        let some retained := production.guardCommands[position]?
+          | throwError "{label}: retained guard command disappeared"
         let some emitted := state.commands[index]?
-          | throwError "{label}: guard trace index is outside the final state"
+          | throwError "{label}: guard command index is outside the final array"
         unless Crush.SMT.commandToString emitted ==
             Crush.SMT.commandToString retained do
-          throwError "{label}: guard trace does not select the exact final-state command"
+          throwError "{label}: guard command does not match the final array"
       let guards := state.commandEncodings.filter fun
         | .dataGuard _ => true
         | _ => false
@@ -1067,7 +1003,7 @@ run_meta do
         unless Crush.SMT.commandToString emitted ==
             Crush.SMT.commandToString encoding.command do
           throwError "{label}: retained command encoding drifted from production state"
-      unless state.certifiedDataCommandIndices.toList.Pairwise (· < ·) do
+      unless state.nativeDatatypeCommandIndices.toList.Pairwise (· < ·) do
         throwError "{label}: dependency-ordered datatype command indices were reordered"
   checkProduction "Option Int" optionInt 1 1
   checkProduction "recursive tree" (mkApp (mkConst ``ReifiedTree) int) 1 1
@@ -1086,8 +1022,8 @@ run_meta do
       proof := none
       descr := "datatype name colliding with Bool" }
     let (_, state) ← Crush.buildScript { certifyDatatype := true } #[fact]
-    let some native := state.certifiedDataCommands[0]?
-      | throwError "reserved datatype-name test lost its native certificate"
+    let some native := state.nativeDatatypeCommands[0]?
+      | throwError "reserved datatype-name test lost its native command"
     let first : Fin native.block.arity := ⟨0, native.wf.blockWF.nonempty⟩
     unless native.blockEncoding.name (.sort first) != "Bool" do
       throwError "certified datatype allocator reused the built-in Bool sort"

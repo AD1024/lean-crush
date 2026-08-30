@@ -29,8 +29,6 @@ import Crush.Metatheory.SMT.Soundness
 import Crush.Metatheory.SMT.Guarded
 import Crush.Metatheory.SMT.GuardedSoundness
 import Crush.Metatheory.VCG.Generate
-import Crush.Metatheory.VCG.Stateful
-import Crush.Metatheory.VCG.Soundness
 
 open scoped Crush.Metatheory
 open scoped Crush.SMT
@@ -86,24 +84,24 @@ def booleanFormula : Sentence exampleSignature :=
 /-! ## Surface syntax -/
 
 def syntaxIdentity : ClosedTerm exampleSignature (.arrow entity entity) :=
-  (core| λ x : Entity. x)
+  (ho| λ x : Entity. x)
 
 def syntaxApplicationEquality : Sentence exampleSignature :=
-  (core| #f #a = #f #a)
+  (ho| #f #a = #f #a)
 
 def syntaxQuantifiedFormula : Sentence exampleSignature :=
-  (core| ∀ x : Entity, #p x → ∃ y : Entity, #f y = x)
+  (ho| ∀ x : Entity, #p x → ∃ y : Entity, #f y = x)
 
 def syntaxHigherOrderQuantifier : Sentence exampleSignature :=
-  (core| ∀ g : Entity → Entity, g #a = g #a)
+  (ho| ∀ g : Entity → Entity, g #a = g #a)
 
 def syntaxBooleanFormula : Sentence exampleSignature :=
-  (core| (⊤ ∧ ¬⊥) ↔ (#p #a ∨ ¬(#p #a)))
+  (ho| (⊤ ∧ ¬⊥) ↔ (#p #a ∨ ¬(#p #a)))
 
 /-- Type and term antiquotation compose with the intrinsically typed elaborator. -/
 def syntaxAntiquotation (body : Term exampleSignature [entity] entity) :
     ClosedTerm exampleSignature (.arrow entity entity) :=
-  (core| λ x : (~entity). ~body)
+  (ho| λ x : (~entity). ~body)
 
 /-! ## Higher-order semantics -/
 
@@ -492,7 +490,7 @@ hold simultaneously in its canonical model. -/
 example (model : Model partialSignature) :
     Flattened.canonicalModel model ⊨ᵀ
       𝓕⟦partialApplication⟧.theory :=
-  Flattened.generated_valid model partialApplication
+  Flattened.generatedFormulas_valid model partialApplication
 
 example (model : Model partialSignature) (formula : Sentence partialSignature)
     (sourceValid : model ⊨ formula) :
@@ -803,25 +801,6 @@ example : ∃ smtModel : Crush.SMT.Model,
   exact Crush.SMT.Model.satisfiesCommands_empty _
 
 end Crush.Metatheory.SMT.Tests
-
-namespace Crush.Metatheory.VCG.Tests
-
-open Defunctionalization.Flattened
-
-/-- Total stateful VCG returns exactly the state covered by the representation
-theorem, independently of the selected collision-free concrete encoding. -/
-example {signature : Signature} (cfg : Config)
-    (encoding : SMT.Encoding (Symbol signature)) (source : Sentence signature) :
-    StateRepresents encoding source (run cfg encoding source) := by
-  exact run_represents cfg encoding source
-
-/-- The total VCG state never carries a legacy trust marker. -/
-example {signature : Signature} (cfg : Config)
-    (encoding : SMT.Encoding (Symbol signature)) (source : Sentence signature) :
-    (run cfg encoding source).status = .proved := by
-  grind [run, TranslateState.status]
-
-end Crush.Metatheory.VCG.Tests
 
 namespace Crush.Metatheory.HookTests
 

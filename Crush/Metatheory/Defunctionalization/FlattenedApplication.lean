@@ -12,7 +12,8 @@ symbol family a total typed semantics.
 This module discharges the local semantic obligation for complete application
 spines.  It does not yet define the total flattened term translation, compose
 the recursively generated theory, assign semantics to concrete SMT commands, or
-refine a stateful translator run.  Those obligations are separate from this
+compare the verified translation with the production translator's output. Those
+results are separate from this
 application lemma and from Lean `Expr` reification and handler dispatch.
 -/
 

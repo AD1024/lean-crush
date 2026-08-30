@@ -17,117 +17,117 @@ variable {start result domain codomain : Ty}
 private theorem pull_lift_extend
     {symbols : FO.SymbolFamily} {source target : FO.Context}
     {binder : FO.FOSort} (M : FO.FamilyModel symbols)
-    (rho : FO.FamilyRenaming source target)
+    (r : FO.FamilyRenaming source target)
     (ν : FO.FamilyValuation M target)
     (value : binder.Denote M.carriers) :
     (fun {sort} (ref : FO.Var (binder :: source) sort) =>
-      FO.Valuation.extend ν value (FO.FamilyRenaming.lift rho ref)) =
+      FO.Valuation.extend ν value (FO.FamilyRenaming.lift r ref)) =
     (fun {sort} (ref : FO.Var (binder :: source) sort) =>
-      FO.Valuation.extend (fun {_} sourceRef => ν (rho sourceRef)) value ref) := by
+      FO.Valuation.extend (fun {_} sourceRef => ν (r sourceRef)) value ref) := by
   apply @funext FO.FOSort
     (fun sort => FO.Var (binder :: source) sort → sort.Denote M.carriers)
   intro sort
   funext ref
   cases ref <;> rfl
 
-private def RenameTerm {symbols : FO.SymbolFamily}
+private def RenamedTermDenotes {symbols : FO.SymbolFamily}
     (M : FO.FamilyModel symbols) {source : FO.Context} {sort : FO.FOSort}
     (term : FO.FamilyTerm symbols source sort) : Prop :=
-  ∀ {target : FO.Context} (rho : FO.FamilyRenaming source target)
+  ∀ {target : FO.Context} (r : FO.FamilyRenaming source target)
     (ν : FO.FamilyValuation M target),
-    ⟦term.rename rho⟧[M, ν] =
-      ⟦term⟧[M, fun {_} ref => ν (rho ref)]
+    ⟦term.rename r⟧[M, ν] =
+      ⟦term⟧[M, fun {_} ref => ν (r ref)]
 
-private def RenameArgs {symbols : FO.SymbolFamily}
+private def RenamedArgumentsDenote {symbols : FO.SymbolFamily}
     (M : FO.FamilyModel symbols) {source : FO.Context}
     {sorts : List FO.FOSort}
     (arguments : FO.FamilyArgs symbols source sorts) : Prop :=
   ∀ {target : FO.Context} {result : FO.FOSort}
-    (rho : FO.FamilyRenaming source target)
+    (r : FO.FamilyRenaming source target)
     (ν : FO.FamilyValuation M target)
     (function : FO.SymbolDenote M.carriers sorts result),
-    (arguments.rename rho).apply M ν function =
-      arguments.apply M (fun {_} ref => ν (rho ref)) function
+    (arguments.rename r).apply M ν function =
+      arguments.apply M (fun {_} ref => ν (r ref)) function
 
-private theorem rename_core {symbols : FO.SymbolFamily}
+private theorem renamed_denotes {symbols : FO.SymbolFamily}
     (M : FO.FamilyModel symbols) {source : FO.Context} {sort : FO.FOSort}
-    (term : FO.FamilyTerm symbols source sort) : RenameTerm M term := by
+    (term : FO.FamilyTerm symbols source sort) : RenamedTermDenotes M term := by
   exact FO.FamilyTerm.rec
-    (motive_1 := fun _ _ term => RenameTerm M term)
-    (motive_2 := fun _ _ arguments => RenameArgs M arguments)
+    (motive_1 := fun _ _ term => RenamedTermDenotes M term)
+    (motive_2 := fun _ _ arguments => RenamedArgumentsDenote M arguments)
     (var := fun ref => by
-      unfold RenameTerm
-      intro target rho ν
+      unfold RenamedTermDenotes
+      intro target r ν
       simp only [FO.FamilyTerm.rename, FO.FamilyTerm.denote.eq_1])
     (symbol := fun symbol arguments argumentsIH => by
-      unfold RenameTerm
-      intro target rho ν
+      unfold RenamedTermDenotes
+      intro target r ν
       simpa only [FO.FamilyTerm.rename, FO.FamilyTerm.denote.eq_2] using
-        argumentsIH rho ν (M.symbol symbol))
+        argumentsIH r ν (M.symbol symbol))
     (boolLit := fun value => by
-      unfold RenameTerm
-      intro target rho ν
+      unfold RenamedTermDenotes
+      intro target r ν
       cases value <;>
         simp only [FO.FamilyTerm.rename, FO.FamilyTerm.denote.eq_3,
           FO.FamilyTerm.denote.eq_4])
     (not := fun body bodyIH => by
-      unfold RenameTerm
-      intro target rho ν
+      unfold RenamedTermDenotes
+      intro target r ν
       simp only [FO.FamilyTerm.rename, FO.FamilyTerm.denote.eq_5]
-      rw [bodyIH rho ν])
+      rw [bodyIH r ν])
     (and := fun left right leftIH rightIH => by
-      unfold RenameTerm
-      intro target rho ν
+      unfold RenamedTermDenotes
+      intro target r ν
       simp only [FO.FamilyTerm.rename, FO.FamilyTerm.denote.eq_6]
-      rw [leftIH rho ν, rightIH rho ν])
+      rw [leftIH r ν, rightIH r ν])
     (or := fun left right leftIH rightIH => by
-      unfold RenameTerm
-      intro target rho ν
+      unfold RenamedTermDenotes
+      intro target r ν
       simp only [FO.FamilyTerm.rename, FO.FamilyTerm.denote.eq_7]
-      rw [leftIH rho ν, rightIH rho ν])
+      rw [leftIH r ν, rightIH r ν])
     (imp := fun left right leftIH rightIH => by
-      unfold RenameTerm
-      intro target rho ν
+      unfold RenamedTermDenotes
+      intro target r ν
       simp only [FO.FamilyTerm.rename, FO.FamilyTerm.denote.eq_8]
-      rw [leftIH rho ν, rightIH rho ν])
+      rw [leftIH r ν, rightIH r ν])
     (iff := fun left right leftIH rightIH => by
-      unfold RenameTerm
-      intro target rho ν
+      unfold RenamedTermDenotes
+      intro target r ν
       simp only [FO.FamilyTerm.rename, FO.FamilyTerm.denote.eq_9]
-      rw [leftIH rho ν, rightIH rho ν])
+      rw [leftIH r ν, rightIH r ν])
     (eq := fun left right leftIH rightIH => by
-      unfold RenameTerm
-      intro target rho ν
+      unfold RenamedTermDenotes
+      intro target r ν
       simp only [FO.FamilyTerm.rename, FO.FamilyTerm.denote.eq_10]
-      rw [leftIH rho ν, rightIH rho ν])
+      rw [leftIH r ν, rightIH r ν])
     (forallE := fun body bodyIH => by
-      unfold RenameTerm
-      intro target rho ν
+      unfold RenamedTermDenotes
+      intro target r ν
       simp only [FO.FamilyTerm.rename, FO.FamilyTerm.denote.eq_11]
       apply propext
       apply forall_congr'
       intro value
       rw [bodyIH]
-      rw [pull_lift_extend M rho ν value])
+      rw [pull_lift_extend M r ν value])
     (existsE := fun body bodyIH => by
-      unfold RenameTerm
-      intro target rho ν
+      unfold RenamedTermDenotes
+      intro target r ν
       simp only [FO.FamilyTerm.rename, FO.FamilyTerm.denote.eq_12]
       apply propext
       apply exists_congr
       intro value
       rw [bodyIH]
-      rw [pull_lift_extend M rho ν value])
+      rw [pull_lift_extend M r ν value])
     (nil := fun {_} => by
-      unfold RenameArgs
-      intro target result rho ν function
+      unfold RenamedArgumentsDenote
+      intro target result r ν function
       simp only [FO.FamilyArgs.rename, FO.FamilyArgs.apply.eq_1])
     (cons := fun argument rest argumentIH restIH => by
-      unfold RenameArgs
-      intro target result rho ν function
+      unfold RenamedArgumentsDenote
+      intro target result r ν function
       simp only [FO.FamilyArgs.rename, FO.FamilyArgs.apply.eq_2]
-      rw [argumentIH rho ν]
-      exact restIH rho ν _)
+      rw [argumentIH r ν]
+      exact restIH r ν _)
     term
 
 /-- FO family renaming commutes with denotation under the pulled-back
@@ -135,12 +135,12 @@ valuation. -/
 theorem FO.FamilyTerm.denote_rename
     {symbols : FO.SymbolFamily} (M : FO.FamilyModel symbols)
     {source target : FO.Context} {sort : FO.FOSort}
-    (rho : FO.FamilyRenaming source target)
+    (r : FO.FamilyRenaming source target)
     (term : FO.FamilyTerm symbols source sort)
     (ν : FO.FamilyValuation M target) :
-    ⟦term.rename rho⟧[M, ν] =
-      ⟦term⟧[M, fun {_} ref => ν (rho ref)] :=
-  rename_core M term rho ν
+    ⟦term.rename r⟧[M, ν] =
+      ⟦term⟧[M, fun {_} ref => ν (r ref)] :=
+  renamed_denotes M term r ν
 
 @[simp] theorem FO.FamilyTerm.denote_weaken
     {symbols : FO.SymbolFamily} (M : FO.FamilyModel symbols)
@@ -165,12 +165,12 @@ theorem FO.FamilyTerm.denote_rename
 
 theorem TargetArguments.applyUnary_rename
     (M : Model signature) {source target : Context}
-    (rho : FO.FamilyRenaming (targetContext source) (targetContext target))
+    (r : FO.FamilyRenaming (targetContext source) (targetContext target))
     (ν : TargetValuation M target)
     (arguments : TargetArguments signature source start result)
     (head : start.Denote M.Base) :
-    (arguments.rename rho).applyUnary M ν head =
-      arguments.applyUnary M (fun {_} ref => ν (rho ref)) head := by
+    (arguments.rename r).applyUnary M ν head =
+      arguments.applyUnary M (fun {_} ref => ν (r ref)) head := by
   induction arguments with
   | nil => rfl
   | cons argument rest restIH =>
@@ -400,37 +400,40 @@ theorem saturate_valid (M : Model signature)
 
 /-- Componentwise validity of generated formulas; declarations carry no
 semantic obligation. -/
-structure GenValid (M : Model signature)
-    (generated : GeneratedObligations signature) : Prop where
+structure GeneratedOutputValid (M : Model signature)
+    (generated : GeneratedOutput signature) : Prop where
   equations : canonicalModel M ⊨ᵀ generated.equations
   extensionality : canonicalModel M ⊨ᵀ generated.extensionality
 
-namespace GenValid
+namespace GeneratedOutputValid
 
 variable {M : Model signature}
 
 theorem empty (M : Model signature) :
-    GenValid M (GeneratedObligations.empty (signature := signature)) := by
+    GeneratedOutputValid M (GeneratedOutput.empty (signature := signature)) := by
   constructor <;> intro formula membership <;> contradiction
 
-theorem append {left right : GeneratedObligations signature}
-    (leftValid : GenValid M left) (rightValid : GenValid M right) :
-    GenValid M (left.append right) := by
+theorem append {left right : GeneratedOutput signature}
+    (leftValid : GeneratedOutputValid M left)
+    (rightValid : GeneratedOutputValid M right) :
+    GeneratedOutputValid M (left.append right) := by
   constructor
   · exact (FO.FamilyModel.satisfiesTheory_append _ _ _).2
       ⟨leftValid.equations, rightValid.equations⟩
   · exact (FO.FamilyModel.satisfiesTheory_append _ _ _).2
       ⟨leftValid.extensionality, rightValid.extensionality⟩
 
-theorem declare {generated : GeneratedObligations signature}
-    (valid : GenValid M generated) (declaration : DeclaredSymbol signature) :
-    GenValid M (generated.declare declaration) := by
+theorem declare {generated : GeneratedOutput signature}
+    (valid : GeneratedOutputValid M generated)
+    (declaration : DeclaredSymbol signature) :
+    GeneratedOutputValid M (generated.declare declaration) := by
   exact ⟨valid.equations, valid.extensionality⟩
 
-theorem addEquation {generated : GeneratedObligations signature}
-    (valid : GenValid M generated) (formula : TargetSentence signature)
+theorem addEquation {generated : GeneratedOutput signature}
+    (valid : GeneratedOutputValid M generated)
+    (formula : TargetSentence signature)
     (formulaValid : canonicalModel M ⊨ formula) :
-    GenValid M { generated with equations := generated.equations ++ [formula] } := by
+    GeneratedOutputValid M { generated with equations := generated.equations ++ [formula] } := by
   constructor
   · apply (FO.FamilyModel.satisfiesTheory_append _ _ _).2
     exact ⟨valid.equations, by
@@ -441,10 +444,11 @@ theorem addEquation {generated : GeneratedObligations signature}
       exact formulaValid⟩
   · exact valid.extensionality
 
-theorem addExt {generated : GeneratedObligations signature}
-    (valid : GenValid M generated) (formula : TargetSentence signature)
+theorem addExt {generated : GeneratedOutput signature}
+    (valid : GeneratedOutputValid M generated)
+    (formula : TargetSentence signature)
     (formulaValid : canonicalModel M ⊨ formula) :
-    GenValid M
+    GeneratedOutputValid M
       { generated with extensionality := generated.extensionality ++ [formula] } := by
   constructor
   · exact valid.equations
@@ -456,26 +460,26 @@ theorem addExt {generated : GeneratedObligations signature}
       subst candidate
       exact formulaValid⟩
 
-theorem theory {generated : GeneratedObligations signature}
-    (valid : GenValid M generated) :
+theorem theory {generated : GeneratedOutput signature}
+    (valid : GeneratedOutputValid M generated) :
     canonicalModel M ⊨ᵀ generated.theory := by
-  unfold GeneratedObligations.theory
+  unfold GeneratedOutput.theory
   exact (FO.FamilyModel.satisfiesTheory_append _ _ _).2
     ⟨valid.equations, valid.extensionality⟩
 
-end GenValid
+end GeneratedOutputValid
 
-abbrev ResultValid (M : Model signature)
+abbrev TranslationResultValid (M : Model signature)
     (translated : TranslationResult signature context result) : Prop :=
-  GenValid M translated.obligations
+  GeneratedOutputValid M translated.generated
 
-abbrev SpineValid (M : Model signature)
+abbrev SpineResultValid (M : Model signature)
     (spine : SpineResult signature context result) : Prop :=
-  GenValid M spine.generated
+  GeneratedOutputValid M spine.generated
 
-structure EqValid (M : Model signature)
+structure EquationResultValid (M : Model signature)
     (equation : EquationResult signature) : Prop where
-  generated : GenValid M equation.generated
+  generated : GeneratedOutputValid M equation.generated
   equation : canonicalModel M ⊨ equation.equation
 
 variable {M : Model signature}
@@ -483,70 +487,71 @@ variable {M : Model signature}
 theorem TranslationResult.ofGenerated_valid
     (M : Model signature)
     (term : TargetTerm signature context result)
-    (generated : GeneratedObligations signature)
-    (valid : GenValid M generated) :
-    ResultValid M (TranslationResult.ofGenerated term generated) := by
+    (generated : GeneratedOutput signature)
+    (valid : GeneratedOutputValid M generated) :
+    TranslationResultValid M (TranslationResult.ofGenerated term generated) := by
   exact valid
 
 theorem TranslationResult.replace_valid
     (translated : TranslationResult signature context start)
     (term : TargetTerm signature context result)
-    (valid : ResultValid M translated) :
-    ResultValid M (translated.replaceTerm term) := by
+    (valid : TranslationResultValid M translated) :
+    TranslationResultValid M (translated.replaceTerm term) := by
   exact valid
 
 theorem TranslationResult.combine_valid
     (left : TranslationResult signature context start)
     (right : TranslationResult signature context result)
     (term : TargetTerm signature context domain)
-    (leftValid : ResultValid M left) (rightValid : ResultValid M right) :
-    ResultValid M (left.combine right term) := by
-  exact GenValid.append leftValid rightValid
+    (leftValid : TranslationResultValid M left) (rightValid : TranslationResultValid M right) :
+    TranslationResultValid M (left.combine right term) := by
+  exact GeneratedOutputValid.append leftValid rightValid
 
 theorem TranslationResult.addExt_valid
     (translated : TranslationResult signature context result)
     (formula : TargetSentence signature)
-    (valid : ResultValid M translated)
+    (valid : TranslationResultValid M translated)
     (formulaValid : canonicalModel M ⊨ formula) :
-    ResultValid M
-      (translated.appendGenerated (extensionality := [formula])) := by
-  simpa only [ResultValid, TranslationResult.appendGenerated,
-    TranslationResult.obligations, List.append_nil] using
-    GenValid.addExt valid formula formulaValid
+    TranslationResultValid M
+      (translated.appendOutput (extensionality := [formula])) := by
+  simpa only [TranslationResultValid, TranslationResult.appendOutput,
+    TranslationResult.generated, List.append_nil] using
+    GeneratedOutputValid.addExt valid formula formulaValid
 
 theorem SpineResult.weaken_valid
     (spine : SpineResult signature context result)
-    (valid : SpineValid M spine) :
-    SpineValid M (spine.weaken (binder := domain)) := valid
+    (valid : SpineResultValid M spine) :
+    SpineResultValid M (spine.weaken (binder := domain)) := valid
 
 theorem SpineResult.snoc_valid
     (spine : SpineResult signature context (.arrow domain codomain))
     (argument : TargetTerm signature context domain)
-    (generated : GeneratedObligations signature)
-    (spineValid : SpineValid M spine) (generatedValid : GenValid M generated) :
-    SpineValid M (spine.snoc argument generated) := by
-  exact GenValid.append spineValid generatedValid
+    (generated : GeneratedOutput signature)
+    (spineValid : SpineResultValid M spine)
+    (generatedValid : GeneratedOutputValid M generated) :
+    SpineResultValid M (spine.snoc argument generated) := by
+  exact GeneratedOutputValid.append spineValid generatedValid
 
 theorem SpineResult.finish_valid
     (spine : SpineResult signature context result)
-    (ground : GroundResult result) (valid : SpineValid M spine) :
-    ResultValid M (spine.finish ground) := by
+    (ground : GroundResult result) (valid : SpineResultValid M spine) :
+    TranslationResultValid M (spine.finish ground) := by
   rcases spine with ⟨headDomain, headCodomain, head, arguments, generated⟩
   cases head with
   | value term =>
-      exact GenValid.declare valid _
+      exact GeneratedOutputValid.declare valid _
   | sourceConstant constant =>
-      exact GenValid.declare valid _
+      exact GeneratedOutputValid.declare valid _
 
-theorem saturate_generated (M : Model signature)
+theorem saturate_output_valid (M : Model signature)
     {closureDomain closureCodomain current : Ty}
     (closureHead : TargetTerm signature context
       (.arrow closureDomain closureCodomain))
     (closureArgs : TargetArguments signature context
       (.arrow closureDomain closureCodomain) current)
     (right : SpineResult signature context current)
-    (valid : SpineValid M right) :
-    GenValid M (saturateEquation closureHead closureArgs right).generated := by
+    (valid : SpineResultValid M right) :
+    GeneratedOutputValid M (saturateEquation closureHead closureArgs right).generated := by
   induction current generalizing context with
   | bool =>
       simpa only [saturateEquation] using
@@ -559,22 +564,22 @@ theorem saturate_generated (M : Model signature)
       apply codomainIH
       apply SpineResult.snoc_valid
       · exact SpineResult.weaken_valid right valid
-      · exact GenValid.empty M
+      · exact GeneratedOutputValid.empty M
 
-theorem saturate_eqValid (M : Model signature)
+theorem saturateEquation_valid (M : Model signature)
     {closureDomain closureCodomain current : Ty}
     (closureHead : TargetTerm signature context
       (.arrow closureDomain closureCodomain))
     (closureArgs : TargetArguments signature context
       (.arrow closureDomain closureCodomain) current)
     (right : SpineResult signature context current)
-    (valid : SpineValid M right)
+    (valid : SpineResultValid M right)
     (correct : ∀ ν : TargetValuation M context,
       closureArgs.applyUnary M ν
           (fromCanonical M _ ⟦closureHead⟧[canonicalModel M, ν]) =
         right.denote M ν) :
-    EqValid M (saturateEquation closureHead closureArgs right) :=
-  ⟨saturate_generated M closureHead closureArgs right valid,
+    EquationResultValid M (saturateEquation closureHead closureArgs right) :=
+  ⟨saturate_output_valid M closureHead closureArgs right valid,
     saturate_valid M closureHead closureArgs right correct⟩
 
 theorem finishClosure_valid
@@ -584,34 +589,34 @@ theorem finishClosure_valid
     (codomainEq : closure.codomain = codomain)
     (closureTerm : TargetTerm signature context (.arrow domain codomain))
     (equation : EquationResult signature)
-    (valid : EqValid M equation) :
-    ResultValid M (finishClosure closure contextEq domainEq codomainEq
+    (valid : EquationResultValid M equation) :
+    TranslationResultValid M (finishClosure closure contextEq domainEq codomainEq
       closureTerm equation) := by
   subst contextEq
   subst domainEq
   subst codomainEq
   let declarations :=
-    (GeneratedObligations.empty (signature := signature))
+    (GeneratedOutput.empty (signature := signature))
       |>.declare (.of (Symbol.application
         { domain := closure.domain, codomain := closure.codomain }))
       |>.declare (.of (Symbol.closure closure))
   let generated := declarations.append equation.generated
-  have declarationsValid : GenValid M declarations :=
-    (GenValid.empty M).declare _ |>.declare _
-  have generatedValid : GenValid M generated :=
+  have declarationsValid : GeneratedOutputValid M declarations :=
+    (GeneratedOutputValid.empty M).declare _ |>.declare _
+  have generatedValid : GeneratedOutputValid M generated :=
     declarationsValid.append valid.generated
   exact generatedValid.addEquation equation.equation valid.equation
 
-noncomputable def SpineGen (M : Model signature)
+noncomputable def SpineTranslationValid (M : Model signature)
     {Γ : Context} {ty : Ty} (term : Term signature Γ ty) : Prop :=
   match ty with
   | .bool | .base _ => True
-  | .arrow _ _ => ∀ {Δ : Context} (ρ : Renaming Γ Δ),
-      SpineValid M (translateSpineWith ρ term)
+  | .arrow _ _ => ∀ {Δ : Context} (r : Renaming Γ Δ),
+      SpineResultValid M (translateSpineWith r term)
 
-noncomputable def BodyCorrect (M : Model signature)
+noncomputable def LambdaBodyDenotation (M : Model signature)
     {Γ Δ : Context} {current closureDomain closureCodomain : Ty}
-    (ρ : Renaming Γ Δ) (term : Term signature Γ current)
+    (r : Renaming Γ Δ) (term : Term signature Γ current)
     (closureHead : TargetTerm signature Δ
       (.arrow closureDomain closureCodomain))
     (closureArgs : TargetArguments signature Δ
@@ -619,37 +624,37 @@ noncomputable def BodyCorrect (M : Model signature)
   ∀ ν : TargetValuation M Δ,
     closureArgs.applyUnary M ν
         (fromCanonical M _ ⟦closureHead⟧[canonicalModel M, ν]) =
-      ⟦term.rename ρ⟧[M, sourceValuation M ν]
+      ⟦term.rename r⟧[M, sourceValuation M ν]
 
-noncomputable def LambdaGen (M : Model signature)
+noncomputable def LambdaTranslationValid (M : Model signature)
     {Γ : Context} {current : Ty} (term : Term signature Γ current) : Prop :=
-  ∀ {Δ : Context} (ρ : Renaming Γ Δ)
+  ∀ {Δ : Context} (r : Renaming Γ Δ)
     {closureDomain closureCodomain : Ty}
     (closureHead : TargetTerm signature Δ
       (.arrow closureDomain closureCodomain))
     (closureArgs : TargetArguments signature Δ
       (.arrow closureDomain closureCodomain) current),
-    BodyCorrect M ρ term closureHead closureArgs →
-      EqValid M (translateLambdaBodyWith ρ term closureHead closureArgs)
+    LambdaBodyDenotation M r term closureHead closureArgs →
+      EquationResultValid M (translateLambdaBodyWith r term closureHead closureArgs)
 
-structure TermGenValid (M : Model signature)
+structure TranslationValid (M : Model signature)
     {Γ : Context} {ty : Ty} (term : Term signature Γ ty) : Prop where
-  result : ∀ {Δ : Context} (ρ : Renaming Γ Δ),
-    ResultValid M (translateWith ρ term)
-  spine : SpineGen M term
-  lambda : LambdaGen M term
+  result : ∀ {Δ : Context} (r : Renaming Γ Δ),
+    TranslationResultValid M (translateWith r term)
+  spine : SpineTranslationValid M term
+  lambda : LambdaTranslationValid M term
 
-theorem groundEq_valid (M : Model signature)
+theorem groundEquation_valid (M : Model signature)
     {Γ Δ : Context} {result closureDomain closureCodomain : Ty}
-    (ground : GroundResult result) (ρ : Renaming Γ Δ)
+    (ground : GroundResult result) (r : Renaming Γ Δ)
     (term : Term signature Γ result)
     (closureHead : TargetTerm signature Δ
       (.arrow closureDomain closureCodomain))
     (closureArgs : TargetArguments signature Δ
       (.arrow closureDomain closureCodomain) result)
-    (translatedValid : ResultValid M (translateWith ρ term))
-    (correct : BodyCorrect M ρ term closureHead closureArgs) :
-    EqValid M (translateLambdaBodyWith ρ term closureHead closureArgs) := by
+    (translatedValid : TranslationResultValid M (translateWith r term))
+    (correct : LambdaBodyDenotation M r term closureHead closureArgs) :
+    EquationResultValid M (translateLambdaBodyWith r term closureHead closureArgs) := by
   cases ground with
   | bool =>
       constructor
@@ -672,17 +677,17 @@ theorem groundEq_valid (M : Model signature)
 
 theorem openLambda_valid (M : Model signature)
     {Γ Δ : Context} {domain codomain closureDomain closureCodomain : Ty}
-    (ρ : Renaming Γ Δ) (body : Term signature (domain :: Γ) codomain)
+    (r : Renaming Γ Δ) (body : Term signature (domain :: Γ) codomain)
     (closureHead : TargetTerm signature Δ
       (.arrow closureDomain closureCodomain))
     (closureArgs : TargetArguments signature Δ
       (.arrow closureDomain closureCodomain) (.arrow domain codomain))
-    (bodyValid : LambdaGen M body)
-    (correct : BodyCorrect M ρ (.lam body) closureHead closureArgs) :
-    EqValid M
-      (translateLambdaBodyWith ρ (.lam body) closureHead closureArgs) := by
+    (bodyValid : LambdaTranslationValid M body)
+    (correct : LambdaBodyDenotation M r (.lam body) closureHead closureArgs) :
+    EquationResultValid M
+      (translateLambdaBodyWith r (.lam body) closureHead closureArgs) := by
   simp only [translateLambdaBodyWith]
-  apply bodyValid (Renaming.lift ρ)
+  apply bodyValid (Renaming.lift r)
   intro ν
   let tail : TargetValuation M Δ :=
     fun {_} ref => ν (.there ref)
@@ -707,9 +712,9 @@ theorem openLambda_valid (M : Model signature)
   exact leftStep.trans applied
 
 /-- One structural induction validates output from all three translator modes. -/
-private theorem generated_core (M : Model signature) :
+private theorem translation_valid (M : Model signature) :
     {Γ : Context} → {ty : Ty} → (term : Term signature Γ ty) →
-      TermGenValid M term := by
+      TranslationValid M term := by
   intro Γ ty term
   induction term with
   | var ref =>
@@ -717,315 +722,315 @@ private theorem generated_core (M : Model signature) :
       cases actualTy with
       | bool =>
           refine ⟨?_, True.intro, ?_⟩
-          · intro Δ ρ
+          · intro Δ r
             simp only [translateWith]
-            exact GenValid.empty M
-          · intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
-            exact groundEq_valid M .bool ρ (.var ref) closureHead closureArgs
-              (by simp only [translateWith]; exact GenValid.empty M) correct
+            exact GeneratedOutputValid.empty M
+          · intro Δ r closureDomain closureCodomain closureHead closureArgs correct
+            exact groundEquation_valid M .bool r (.var ref) closureHead closureArgs
+              (by simp only [translateWith]; exact GeneratedOutputValid.empty M) correct
       | base sort =>
           refine ⟨?_, True.intro, ?_⟩
-          · intro Δ ρ
+          · intro Δ r
             simp only [translateWith]
-            exact GenValid.empty M
-          · intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
-            exact groundEq_valid M (.base sort) ρ (.var ref) closureHead closureArgs
-              (by simp only [translateWith]; exact GenValid.empty M) correct
+            exact GeneratedOutputValid.empty M
+          · intro Δ r closureDomain closureCodomain closureHead closureArgs correct
+            exact groundEquation_valid M (.base sort) r (.var ref) closureHead closureArgs
+              (by simp only [translateWith]; exact GeneratedOutputValid.empty M) correct
       | arrow domain codomain =>
-          have spineValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-              SpineValid M (translateSpineWith ρ (.var ref)) := by
-            intro Δ ρ
+          have spineValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+              SpineResultValid M (translateSpineWith r (.var ref)) := by
+            intro Δ r
             simp only [translateSpineWith]
-            exact GenValid.empty M
+            exact GeneratedOutputValid.empty M
           refine ⟨?_, spineValid, ?_⟩
-          · intro Δ ρ
+          · intro Δ r
             simp only [translateWith]
             apply finishClosure_valid
-            apply saturate_eqValid
-            · exact spineValid ρ
+            apply saturateEquation_valid
+            · exact spineValid r
             · intro ν
-              have closureEq := etaClosure_denote M (.var (ρ ref)) ν
+              have closureEq := etaClosure_denote M (.var (r ref)) ν
               have mapped := congrArg
                 (fromCanonical M (.arrow domain codomain)) closureEq
               rw [fromCanonical_toCanonical] at mapped
               exact mapped.trans
-                (translateSpineWith_denote M ρ (.var ref) ν).symm
-          · intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
+                (translateSpineWith_denote M r (.var ref) ν).symm
+          · intro Δ r closureDomain closureCodomain closureHead closureArgs correct
             simp only [translateLambdaBodyWith]
-            apply saturate_eqValid
-            · exact spineValid ρ
+            apply saturateEquation_valid
+            · exact spineValid r
             · intro ν
               exact (correct ν).trans
-                (translateSpineWith_denote M ρ (.var ref) ν).symm
+                (translateSpineWith_denote M r (.var ref) ν).symm
   | const constant =>
       rename_i actualContext actualTy
       cases actualTy with
       | bool =>
-          have resultValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-              ResultValid M (translateWith ρ (.const constant)) := by
-            intro Δ ρ
+          have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+              TranslationResultValid M (translateWith r (.const constant)) := by
+            intro Δ r
             simp only [translateWith]
-            exact (GenValid.empty M).declare _
+            exact (GeneratedOutputValid.empty M).declare _
           refine ⟨resultValid, True.intro, ?_⟩
-          intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
-          exact groundEq_valid M .bool ρ (.const constant) closureHead closureArgs
-            (resultValid ρ) correct
+          intro Δ r closureDomain closureCodomain closureHead closureArgs correct
+          exact groundEquation_valid M .bool r (.const constant) closureHead closureArgs
+            (resultValid r) correct
       | base sort =>
-          have resultValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-              ResultValid M (translateWith ρ (.const constant)) := by
-            intro Δ ρ
+          have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+              TranslationResultValid M (translateWith r (.const constant)) := by
+            intro Δ r
             simp only [translateWith]
-            exact (GenValid.empty M).declare _
+            exact (GeneratedOutputValid.empty M).declare _
           refine ⟨resultValid, True.intro, ?_⟩
-          intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
-          exact groundEq_valid M (.base sort) ρ (.const constant)
-            closureHead closureArgs (resultValid ρ) correct
+          intro Δ r closureDomain closureCodomain closureHead closureArgs correct
+          exact groundEquation_valid M (.base sort) r (.const constant)
+            closureHead closureArgs (resultValid r) correct
       | arrow domain codomain =>
-          have spineValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-              SpineValid M (translateSpineWith ρ (.const constant)) := by
-            intro Δ ρ
+          have spineValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+              SpineResultValid M (translateSpineWith r (.const constant)) := by
+            intro Δ r
             simp only [translateSpineWith]
-            exact GenValid.empty M
+            exact GeneratedOutputValid.empty M
           refine ⟨?_, spineValid, ?_⟩
-          · intro Δ ρ
+          · intro Δ r
             simp only [translateWith]
             apply finishClosure_valid
-            apply saturate_eqValid
-            · exact spineValid ρ
+            apply saturateEquation_valid
+            · exact spineValid r
             · intro ν
               have closureEq := etaClosure_denote M (.const constant) ν
               have mapped := congrArg
                 (fromCanonical M (.arrow domain codomain)) closureEq
               rw [fromCanonical_toCanonical] at mapped
               exact mapped.trans
-                (translateSpineWith_denote M ρ (.const constant) ν).symm
-          · intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
+                (translateSpineWith_denote M r (.const constant) ν).symm
+          · intro Δ r closureDomain closureCodomain closureHead closureArgs correct
             simp only [translateLambdaBodyWith]
-            apply saturate_eqValid
-            · exact spineValid ρ
+            apply saturateEquation_valid
+            · exact spineValid r
             · intro ν
               exact (correct ν).trans
-                (translateSpineWith_denote M ρ (.const constant) ν).symm
+                (translateSpineWith_denote M r (.const constant) ν).symm
   | boolLit value =>
       rename_i actualContext
-      have resultValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-          ResultValid M (translateWith ρ (.boolLit value)) := by
-        intro Δ ρ
+      have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+          TranslationResultValid M (translateWith r (.boolLit value)) := by
+        intro Δ r
         simp only [translateWith]
-        exact GenValid.empty M
+        exact GeneratedOutputValid.empty M
       refine ⟨resultValid, True.intro, ?_⟩
-      intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
-      exact groundEq_valid M .bool ρ (.boolLit value) closureHead closureArgs
-        (resultValid ρ) correct
+      intro Δ r closureDomain closureCodomain closureHead closureArgs correct
+      exact groundEquation_valid M .bool r (.boolLit value) closureHead closureArgs
+        (resultValid r) correct
   | not body bodyIH =>
       rename_i actualContext
-      have resultValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-          ResultValid M (translateWith ρ (.not body)) := by
-        intro Δ ρ
+      have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+          TranslationResultValid M (translateWith r (.not body)) := by
+        intro Δ r
         simp only [translateWith]
-        exact TranslationResult.replace_valid _ _ (bodyIH.result ρ)
+        exact TranslationResult.replace_valid _ _ (bodyIH.result r)
       refine ⟨resultValid, True.intro, ?_⟩
-      intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
-      exact groundEq_valid M .bool ρ (.not body) closureHead closureArgs
-        (resultValid ρ) correct
+      intro Δ r closureDomain closureCodomain closureHead closureArgs correct
+      exact groundEquation_valid M .bool r (.not body) closureHead closureArgs
+        (resultValid r) correct
   | and left right leftIH rightIH =>
       rename_i actualContext
-      have resultValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-          ResultValid M (translateWith ρ (.and left right)) := by
-        intro Δ ρ
+      have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+          TranslationResultValid M (translateWith r (.and left right)) := by
+        intro Δ r
         simp only [translateWith]
         exact TranslationResult.combine_valid _ _ _
-          (leftIH.result ρ) (rightIH.result ρ)
+          (leftIH.result r) (rightIH.result r)
       refine ⟨resultValid, True.intro, ?_⟩
-      intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
-      exact groundEq_valid M .bool ρ (.and left right) closureHead closureArgs
-        (resultValid ρ) correct
+      intro Δ r closureDomain closureCodomain closureHead closureArgs correct
+      exact groundEquation_valid M .bool r (.and left right) closureHead closureArgs
+        (resultValid r) correct
   | or left right leftIH rightIH =>
       rename_i actualContext
-      have resultValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-          ResultValid M (translateWith ρ (.or left right)) := by
-        intro Δ ρ
+      have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+          TranslationResultValid M (translateWith r (.or left right)) := by
+        intro Δ r
         simp only [translateWith]
         exact TranslationResult.combine_valid _ _ _
-          (leftIH.result ρ) (rightIH.result ρ)
+          (leftIH.result r) (rightIH.result r)
       refine ⟨resultValid, True.intro, ?_⟩
-      intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
-      exact groundEq_valid M .bool ρ (.or left right) closureHead closureArgs
-        (resultValid ρ) correct
+      intro Δ r closureDomain closureCodomain closureHead closureArgs correct
+      exact groundEquation_valid M .bool r (.or left right) closureHead closureArgs
+        (resultValid r) correct
   | imp left right leftIH rightIH =>
       rename_i actualContext
-      have resultValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-          ResultValid M (translateWith ρ (.imp left right)) := by
-        intro Δ ρ
+      have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+          TranslationResultValid M (translateWith r (.imp left right)) := by
+        intro Δ r
         simp only [translateWith]
         exact TranslationResult.combine_valid _ _ _
-          (leftIH.result ρ) (rightIH.result ρ)
+          (leftIH.result r) (rightIH.result r)
       refine ⟨resultValid, True.intro, ?_⟩
-      intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
-      exact groundEq_valid M .bool ρ (.imp left right) closureHead closureArgs
-        (resultValid ρ) correct
+      intro Δ r closureDomain closureCodomain closureHead closureArgs correct
+      exact groundEquation_valid M .bool r (.imp left right) closureHead closureArgs
+        (resultValid r) correct
   | iff left right leftIH rightIH =>
       rename_i actualContext
-      have resultValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-          ResultValid M (translateWith ρ (.iff left right)) := by
-        intro Δ ρ
+      have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+          TranslationResultValid M (translateWith r (.iff left right)) := by
+        intro Δ r
         simp only [translateWith]
         exact TranslationResult.combine_valid _ _ _
-          (leftIH.result ρ) (rightIH.result ρ)
+          (leftIH.result r) (rightIH.result r)
       refine ⟨resultValid, True.intro, ?_⟩
-      intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
-      exact groundEq_valid M .bool ρ (.iff left right) closureHead closureArgs
-        (resultValid ρ) correct
+      intro Δ r closureDomain closureCodomain closureHead closureArgs correct
+      exact groundEquation_valid M .bool r (.iff left right) closureHead closureArgs
+        (resultValid r) correct
   | eq left right leftIH rightIH =>
       rename_i actualContext operandType
-      have resultValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-          ResultValid M (translateWith ρ (.eq left right)) := by
-        intro Δ ρ
+      have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+          TranslationResultValid M (translateWith r (.eq left right)) := by
+        intro Δ r
         cases operandType with
         | bool | base =>
             simp only [translateWith]
             exact TranslationResult.combine_valid _ _ _
-              (leftIH.result ρ) (rightIH.result ρ)
+              (leftIH.result r) (rightIH.result r)
         | arrow domain codomain =>
             simp only [translateWith]
             apply TranslationResult.addExt_valid
             · exact TranslationResult.combine_valid _ _ _
-                (leftIH.result ρ) (rightIH.result ρ)
+                (leftIH.result r) (rightIH.result r)
             · exact extensionality_valid M domain codomain
       refine ⟨resultValid, True.intro, ?_⟩
-      intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
-      exact groundEq_valid M .bool ρ (.eq left right) closureHead closureArgs
-        (resultValid ρ) correct
+      intro Δ r closureDomain closureCodomain closureHead closureArgs correct
+      exact groundEquation_valid M .bool r (.eq left right) closureHead closureArgs
+        (resultValid r) correct
   | lam body bodyIH =>
       rename_i actualContext domain codomain
-      have resultValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-          ResultValid M (translateWith ρ (.lam body)) := by
-        intro Δ ρ
+      have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+          TranslationResultValid M (translateWith r (.lam body)) := by
+        intro Δ r
         let closure : Closure signature :=
           Closure.ofBody
-            (LambdaBody.etaBody (.lam (body.rename (Renaming.lift ρ))))
+            (LambdaBody.etaBody (.lam (body.rename (Renaming.lift r))))
         let closureTerm : TargetTerm signature Δ (.arrow domain codomain) :=
           .symbol (Symbol.closure closure) (captureArgs closure.captureRefs)
         simp only [translateWith]
         apply finishClosure_valid
-        have closureCorrect : BodyCorrect M ρ (.lam body) closureTerm
+        have closureCorrect : LambdaBodyDenotation M r (.lam body) closureTerm
             (.nil (.arrow domain codomain)) := by
           intro ν
           simp only [TargetArguments.applyUnary]
           change ⟦closureTerm⟧[canonicalModel M, ν] =
-            ⟦Term.lam (body.rename (Renaming.lift ρ))⟧[
+            ⟦Term.lam (body.rename (Renaming.lift r))⟧[
               M, sourceValuation M ν]
           have closureEq := etaClosure_denote M
-            (.lam (body.rename (Renaming.lift ρ))) ν
+            (.lam (body.rename (Renaming.lift r))) ν
           simpa only [closureTerm, closure, toCanonical, FO.arrowSort,
             FO.FOSort.ofTy] using closureEq
-        have equationValid := openLambda_valid M ρ body closureTerm
+        have equationValid := openLambda_valid M r body closureTerm
           (.nil (.arrow domain codomain)) bodyIH.lambda closureCorrect
         simpa only [closureTerm, closure, translateLambdaBodyWith] using
           equationValid
       refine ⟨resultValid, ?_, ?_⟩
-      · intro Δ ρ
-        simpa only [translateSpineWith, translateWith, SpineValid, ResultValid]
-          using resultValid ρ
-      · intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
-        exact openLambda_valid M ρ body closureHead closureArgs
+      · intro Δ r
+        simpa only [translateSpineWith, translateWith, SpineResultValid, TranslationResultValid]
+          using resultValid r
+      · intro Δ r closureDomain closureCodomain closureHead closureArgs correct
+        exact openLambda_valid M r body closureHead closureArgs
           bodyIH.lambda correct
   | app fn argument fnIH argumentIH =>
       rename_i actualContext appDomain appCodomain
       cases appCodomain with
       | bool =>
-          have resultValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-              ResultValid M (translateWith ρ (.app fn argument)) := by
-            intro Δ ρ
+          have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+              TranslationResultValid M (translateWith r (.app fn argument)) := by
+            intro Δ r
             simp only [translateWith]
             apply SpineResult.finish_valid
             apply SpineResult.snoc_valid
-            · exact fnIH.spine ρ
-            · exact argumentIH.result ρ
+            · exact fnIH.spine r
+            · exact argumentIH.result r
           refine ⟨resultValid, True.intro, ?_⟩
-          intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
-          exact groundEq_valid M .bool ρ (.app fn argument)
-            closureHead closureArgs (resultValid ρ) correct
+          intro Δ r closureDomain closureCodomain closureHead closureArgs correct
+          exact groundEquation_valid M .bool r (.app fn argument)
+            closureHead closureArgs (resultValid r) correct
       | base sort =>
-          have resultValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-              ResultValid M (translateWith ρ (.app fn argument)) := by
-            intro Δ ρ
+          have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+              TranslationResultValid M (translateWith r (.app fn argument)) := by
+            intro Δ r
             simp only [translateWith]
             apply SpineResult.finish_valid
             apply SpineResult.snoc_valid
-            · exact fnIH.spine ρ
-            · exact argumentIH.result ρ
+            · exact fnIH.spine r
+            · exact argumentIH.result r
           refine ⟨resultValid, True.intro, ?_⟩
-          intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
-          exact groundEq_valid M (.base sort) ρ (.app fn argument)
-            closureHead closureArgs (resultValid ρ) correct
+          intro Δ r closureDomain closureCodomain closureHead closureArgs correct
+          exact groundEquation_valid M (.base sort) r (.app fn argument)
+            closureHead closureArgs (resultValid r) correct
       | arrow residualDomain residualCodomain =>
-          have spineValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-              SpineValid M (translateSpineWith ρ (.app fn argument)) := by
-            intro Δ ρ
+          have spineValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+              SpineResultValid M (translateSpineWith r (.app fn argument)) := by
+            intro Δ r
             simp only [translateSpineWith]
             apply SpineResult.snoc_valid
-            · exact fnIH.spine ρ
-            · exact argumentIH.result ρ
+            · exact fnIH.spine r
+            · exact argumentIH.result r
           refine ⟨?_, spineValid, ?_⟩
-          · intro Δ ρ
+          · intro Δ r
             simp only [translateWith]
             apply finishClosure_valid
-            apply saturate_eqValid
-            · exact spineValid ρ
+            apply saturateEquation_valid
+            · exact spineValid r
             · intro ν
               have closureEq := etaClosure_denote M
-                (.app (fn.rename ρ) (argument.rename ρ)) ν
+                (.app (fn.rename r) (argument.rename r)) ν
               have mapped := congrArg
                 (fromCanonical M (.arrow residualDomain residualCodomain))
                 closureEq
               rw [fromCanonical_toCanonical] at mapped
               exact mapped.trans
-                (translateSpineWith_denote M ρ (.app fn argument) ν).symm
-          · intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
+                (translateSpineWith_denote M r (.app fn argument) ν).symm
+          · intro Δ r closureDomain closureCodomain closureHead closureArgs correct
             simp only [translateLambdaBodyWith]
-            apply saturate_eqValid
-            · exact spineValid ρ
+            apply saturateEquation_valid
+            · exact spineValid r
             · intro ν
               exact (correct ν).trans
-                (translateSpineWith_denote M ρ (.app fn argument) ν).symm
+                (translateSpineWith_denote M r (.app fn argument) ν).symm
   | forallE body bodyIH =>
       rename_i actualContext domain
-      have resultValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-          ResultValid M (translateWith ρ (.forallE body)) := by
-        intro Δ ρ
+      have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+          TranslationResultValid M (translateWith r (.forallE body)) := by
+        intro Δ r
         simp only [translateWith]
-        exact bodyIH.result (Renaming.lift ρ)
+        exact bodyIH.result (Renaming.lift r)
       refine ⟨resultValid, True.intro, ?_⟩
-      intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
-      exact groundEq_valid M .bool ρ (.forallE body) closureHead closureArgs
-        (resultValid ρ) correct
+      intro Δ r closureDomain closureCodomain closureHead closureArgs correct
+      exact groundEquation_valid M .bool r (.forallE body) closureHead closureArgs
+        (resultValid r) correct
   | existsE body bodyIH =>
       rename_i actualContext domain
-      have resultValid : ∀ {Δ : Context} (ρ : Renaming actualContext Δ),
-          ResultValid M (translateWith ρ (.existsE body)) := by
-        intro Δ ρ
+      have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
+          TranslationResultValid M (translateWith r (.existsE body)) := by
+        intro Δ r
         simp only [translateWith]
-        exact bodyIH.result (Renaming.lift ρ)
+        exact bodyIH.result (Renaming.lift r)
       refine ⟨resultValid, True.intro, ?_⟩
-      intro Δ ρ closureDomain closureCodomain closureHead closureArgs correct
-      exact groundEq_valid M .bool ρ (.existsE body) closureHead closureArgs
-        (resultValid ρ) correct
+      intro Δ r closureDomain closureCodomain closureHead closureArgs correct
+      exact groundEquation_valid M .bool r (.existsE body) closureHead closureArgs
+        (resultValid r) correct
 
 /-- Generated output remains valid under every source-context renaming. -/
-theorem translateWith_generated_valid (M : Model signature)
-    {Γ Δ : Context} {ty : Ty} (ρ : Renaming Γ Δ)
+theorem translateWith_generatedFormulas_valid (M : Model signature)
+    {Γ Δ : Context} {ty : Ty} (r : Renaming Γ Δ)
     (term : Term signature Γ ty) :
-    ResultValid M (translateWith ρ term) :=
-  (generated_core M term).result ρ
+    TranslationResultValid M (translateWith r term) :=
+  (translation_valid M term).result r
 
 /-- The complete auxiliary theory produced by flattened translation is valid
 in the same canonical model as the translated term. -/
-theorem generated_valid (M : Model signature)
+theorem generatedFormulas_valid (M : Model signature)
     (term : Term signature context result) :
     canonicalModel M ⊨ᵀ 𝓕⟦term⟧.theory := by
-  apply GenValid.theory
-  exact translateWith_generated_valid M Renaming.id term
+  apply GeneratedOutputValid.theory
+  exact translateWith_generatedFormulas_valid M Renaming.id term
 
 /-- Term component of a translated closed formula, exposed as an FO sentence. -/
 def translatedSentence (formula : Sentence signature) :
@@ -1038,7 +1043,7 @@ def translatedTheory (formula : Sentence signature) :
   𝓕⟦formula⟧.theory ++ [translatedSentence formula]
 
 /-- Complete target theory for a finite source theory. Each source sentence
-contributes its own generated equations, extensionality obligations, and
+contributes its own generated equations, extensionality formulas, and
 translated sentence to one shared target signature. -/
 def translatedTheories (theory : Theory signature) :
     TargetTheory signature :=
@@ -1051,7 +1056,7 @@ theorem model_extension (M : Model signature) (formula : Sentence signature)
     canonicalModel M ⊨ᵀ translatedTheory formula := by
   rw [translatedTheory, FO.FamilyModel.satisfiesTheory_append]
   constructor
-  · exact generated_valid M formula
+  · exact generatedFormulas_valid M formula
   · intro targetFormula membership
     simp only [List.mem_singleton] at membership
     subst targetFormula

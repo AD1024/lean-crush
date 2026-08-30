@@ -553,8 +553,8 @@ theorem assertions_valid_with (encoding : Encoding symbols)
     rw [modelWith_bool, ← model_bool]
     exact extended
 
-/-- Every ordinary declaration in the represented trace is valid in the
-extended model. -/
+/-- Every ordinary declaration in the represented list is valid in the extended
+model. -/
 theorem declarations_valid_with (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
     (declarations : List (Declaration symbols)) :

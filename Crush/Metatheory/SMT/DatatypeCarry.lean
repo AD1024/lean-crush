@@ -1077,9 +1077,9 @@ theorem relation_guard (step : Step source) (sort : FO.FOSort)
   | bool => rfl
   | fn domain codomain => rfl
   | base base =>
-      change (BaseLift.rel step.wf step.productive step.prior.relation.base
+      change (BaseLift.subsetRepresentation step.wf step.productive step.prior.relation.base
         step.law.carrier base).guard value ↔ _
-      rw [BaseLift.rel_external step.wf step.productive
+      rw [BaseLift.subsetRepresentation_external step.wf step.productive
         step.prior.relation.base step.law.carrier base external]
       rfl
 
@@ -1293,8 +1293,8 @@ inductive Ordered {fo : SMT.Encoding (Symbol signature)} :
       After head tail → Ordered tail → Ordered (.cons head tail)
 
 /-- One exact recursive guard command for a represented datatype block. The
-names and binder are retained intrinsically, so semantic validation cannot
-drift from the raw command. -/
+names and binder are retained in this structure, so semantic validation uses
+the same untyped command that the translator emits. -/
 structure GuardCommand
     {entry : Entry signature} {data : BlockEncoding entry.arity}
     {guarding : SMT.Guarding (Symbol signature)}
@@ -1307,45 +1307,45 @@ structure GuardCommand
     (wfDefs (native := entry.symbols.native) guarding data name binder)
 
 /-- Recursive guard commands aligned with the same dependency-ordered native
-representation. -/
-inductive GuardTrace (guarding : SMT.Guarding (Symbol signature)) :
+datatype representation. -/
+inductive GuardCommands (guarding : SMT.Guarding (Symbol signature)) :
     {env : List (Entry signature)} →
       Represented guarding.encoding env → Type 1 where
-  | nil : GuardTrace guarding .nil
+  | nil : GuardCommands guarding .nil
   | cons {entry : Entry signature} {rest : List (Entry signature)}
       {data : BlockEncoding entry.arity}
       {head : Representation entry.block entry.symbols guarding.encoding data}
       {tail : Represented guarding.encoding rest}
       (command : GuardCommand head)
-      (rest : GuardTrace guarding tail) :
-      GuardTrace guarding (.cons head tail)
+      (rest : GuardCommands guarding tail) :
+      GuardCommands guarding (.cons head tail)
 
-namespace GuardTrace
+namespace GuardCommands
 
 /-- Exact recursive guard commands in dependency order. -/
 def commands {guarding : SMT.Guarding (Symbol signature)} :
     {env : List (Entry signature)} →
       {represented : Represented guarding.encoding env} →
-      GuardTrace guarding represented → Array Crush.SMT.Command
+      GuardCommands guarding represented → Array Crush.SMT.Command
   | [], .nil, .nil => #[]
   | _ :: _, .cons _ _, .cons command rest =>
       #[command.command] ++ rest.commands
 
 /-- An identifier allocation uses the exact names retained by every recursive
-guard command. This is static syntax/provenance evidence and does not depend on
-a target model or semantic predicate. -/
+guard command. This statement compares syntax only; it does not depend on a
+target model or on the meaning later assigned to the guard predicates. -/
 def Matches
     {guarding : SMT.Guarding (Symbol signature)}
     (ident : FO.FOSort → Option Crush.SMT.Ident) :
     {env : List (Entry signature)} →
       {represented : Represented guarding.encoding env} →
-      GuardTrace guarding represented → Prop
+      GuardCommands guarding represented → Prop
   | [], .nil, .nil => True
   | _ :: _, .cons _ _, .cons command rest =>
       (∀ child, ident (.base child.decl.sort) =
         some (.symb (command.name child))) ∧ rest.Matches ident
 
-end GuardTrace
+end GuardCommands
 
 namespace GuardCommand
 
@@ -1474,10 +1474,10 @@ theorem After.guardLaw
                   | bool => rfl
                   | fn domain codomain => rfl
                   | base base =>
-                      change (BaseLift.rel step.wf step.productive
+                      change (BaseLift.subsetRepresentation step.wf step.productive
                         step.prior.relation.base step.law.carrier base).guard
                           value ↔ _
-                      rw [BaseLift.rel_external step.wf step.productive
+                      rw [BaseLift.subsetRepresentation_external step.wf step.productive
                         step.prior.relation.base step.law.carrier base external]
                       rfl)
                 (by simpa [step] using law)
@@ -1565,7 +1565,7 @@ theorem Ordered.guards_valid
     {env : List (Entry signature)}
     {represented : Represented guarding.encoding env}
     (ordered : Ordered represented)
-    (trace : GuardTrace guarding represented)
+    (definitions : GuardCommands guarding represented)
     (sourceModel : Model signature)
     (lawful : Lawful sourceModel env)
     (prior : Lifted (canonicalModel sourceModel))
@@ -1585,18 +1585,18 @@ theorem Ordered.guards_valid
       (guards.over base)
       (fun sort => ((liftFrom sourceModel env lawful represented.blocksWF
         prior).relation sort).guard))
-    (linked : trace.Matches guards.ident) :
+    (linked : definitions.Matches guards.ident) :
     (SMT.modelWith guarding.encoding
       (liftFrom sourceModel env lawful represented.blocksWF prior).target
-      (guards.over base)).SatisfiesCommands trace.commands := by
+      (guards.over base)).SatisfiesCommands definitions.commands := by
   induction ordered generalizing prior with
   | nil =>
-      cases trace
+      cases definitions
       cases lawful
       exact Crush.SMT.Model.satisfiesCommands_empty _
   | @cons entry rest data head tail after ordered ih =>
-      cases trace with
-      | cons command restTrace =>
+      cases definitions with
+      | cons command restDefinitions =>
           cases lawful with
           | cons headLaw tailLaw =>
               let next := prior.extend headLaw.flattened head.wf.blockWF
@@ -1623,12 +1623,12 @@ theorem Ordered.guards_valid
                 · intro child value output
                   exact guards.applies_iff_over base fresh
                     (headLinked child) value output
-              have tailValid := ih restTrace tailLaw next guards base
+              have tailValid := ih restDefinitions tailLaw next guards base
                 baseUnique fresh semantics tailLinked
               change (SMT.modelWith guarding.encoding
                 (liftFrom sourceModel rest tailLaw tail.blocksWF next).target
                 (guards.over base)).SatisfiesCommands
-                  (#[command.command] ++ restTrace.commands)
+                  (#[command.command] ++ restDefinitions.commands)
               rw [Crush.SMT.Model.satisfiesCommands_append]
               exact ⟨by
                 simpa using Crush.SMT.Model.satisfiesCommands_push

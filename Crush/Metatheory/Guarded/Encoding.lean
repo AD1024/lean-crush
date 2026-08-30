@@ -1,15 +1,17 @@
 /-!
-# Guarded subtype encodings
+# Representing a source type inside a target type
 
-Some Lean types occupy only a guarded subset of their SMT carrier.  Production's
-primary example is `Nat`, represented by `Int` together with `0 ≤ x`.  Universal
-binders use implication, existential binders use conjunction, and every generated
-result is constrained to satisfy the guard.
+Production sometimes represents a source type with an existing SMT type plus a
+predicate selecting the values that belong to the source type.  For example,
+`Nat` is represented by `Int` together with `0 ≤ x`.  We call the selecting
+predicate a *guard* and the complete encode/guard/decode package a guarded-subset
+representation.
 
-`Encoding` states the exact semantic contract: the source carrier is equivalent
-to the subtype of guarded target values.  The theorems below validate the three
-production uses of `wfCondition`: binder guards, result guards, and guarded
-function extensionality.
+`SubsetRepresentation Source Target` states that `Source` is equivalent to the
+subtype of `Target` values satisfying the guard. `Encoding` packages such a
+representation when its source and target types are not known to the caller.
+The remaining definitions validate the three production uses of `wfCondition`:
+binder guards, result guards, and guarded function extensionality.
 -/
 
 namespace Crush.Metatheory.Guarded
@@ -18,107 +20,144 @@ universe u v
 
 set_option linter.checkUnivs false
 
-/-- An equivalence between a source carrier and the well-formed subset of a
-larger target carrier. -/
+/-- Evidence that `Source` is represented by exactly those `Target` values that
+satisfy `guard`. -/
+structure SubsetRepresentation (Source : Type u) (Target : Type v) where
+  sourceNonempty : Nonempty Source
+  encode : Source → Target
+  guard : Target → Prop
+  encode_guard : ∀ value, guard (encode value)
+  decode : (value : Target) → guard value → Source
+  decode_encode : ∀ value, decode (encode value) (encode_guard value) = value
+  encode_decode : ∀ value (wellFormed : guard value),
+    encode (decode value wellFormed) = value
+
+/-- A guarded-subset representation with its source and target types packaged
+existentially. This is the form stored by a production sort hook. -/
 structure Encoding where
   Source : Type u
   Target : Type v
-  sourceNonempty : Nonempty Source
-  encode : Source → Target
-  guard : Target → Prop
-  encode_guard : ∀ value, guard (encode value)
-  decode : (value : Target) → guard value → Source
-  decode_encode : ∀ value, decode (encode value) (encode_guard value) = value
-  encode_decode : ∀ value (wellFormed : guard value),
-    encode (decode value wellFormed) = value
+  representation : SubsetRepresentation Source Target
 
-/-- The indexed form of a guarded encoding, used when source and target carrier
-families are already known. -/
-structure Rel (Source : Type u) (Target : Type v) where
-  sourceNonempty : Nonempty Source
-  encode : Source → Target
-  guard : Target → Prop
-  encode_guard : ∀ value, guard (encode value)
-  decode : (value : Target) → guard value → Source
-  decode_encode : ∀ value, decode (encode value) (encode_guard value) = value
-  encode_decode : ∀ value (wellFormed : guard value),
-    encode (decode value wellFormed) = value
+namespace Encoding
+
+theorem sourceNonempty (encoding : Encoding) : Nonempty encoding.Source :=
+  encoding.representation.sourceNonempty
+
+@[reducible] def encode (encoding : Encoding) : encoding.Source → encoding.Target :=
+  encoding.representation.encode
+
+@[reducible] def guard (encoding : Encoding) : encoding.Target → Prop :=
+  encoding.representation.guard
+
+theorem encode_guard (encoding : Encoding) (value : encoding.Source) :
+    encoding.guard (encoding.encode value) :=
+  encoding.representation.encode_guard value
+
+@[reducible] def decode (encoding : Encoding) (value : encoding.Target)
+    (valid : encoding.guard value) : encoding.Source :=
+  encoding.representation.decode value valid
+
+theorem decode_encode (encoding : Encoding) (value : encoding.Source) :
+    encoding.decode (encoding.encode value) (encoding.encode_guard value) = value :=
+  encoding.representation.decode_encode value
+
+theorem encode_decode (encoding : Encoding) (value : encoding.Target)
+    (valid : encoding.guard value) :
+    encoding.encode (encoding.decode value valid) = value :=
+  encoding.representation.encode_decode value valid
+
+end Encoding
 
 /-- The target carrier is inhabited because it contains every encoded source
 value. -/
-theorem Rel.targetNonempty {Source : Type u} {Target : Type v}
-    (rel : Rel Source Target) : Nonempty Target :=
-  let ⟨value⟩ := rel.sourceNonempty
-  ⟨rel.encode value⟩
+theorem SubsetRepresentation.targetNonempty {Source : Type u} {Target : Type v}
+    (representation : SubsetRepresentation Source Target) : Nonempty Target :=
+  let ⟨value⟩ := representation.sourceNonempty
+  ⟨representation.encode value⟩
 
 /-- Totalize an indexed relation's decoder outside its guarded image. -/
-noncomputable def Rel.decodeDefault {Source : Type u} {Target : Type v}
-    (rel : Rel Source Target) (value : Target) : Source := by
+noncomputable def SubsetRepresentation.decodeDefault
+    {Source : Type u} {Target : Type v}
+    (representation : SubsetRepresentation Source Target) (value : Target) : Source := by
   classical
-  exact if wellFormed : rel.guard value then rel.decode value wellFormed
-    else Classical.choice rel.sourceNonempty
+  exact if valid : representation.guard value then representation.decode value valid
+    else Classical.choice representation.sourceNonempty
 
-@[simp] theorem Rel.decodeDefault_encode {Source : Type u} {Target : Type v}
-    (rel : Rel Source Target) (value : Source) :
-    rel.decodeDefault (rel.encode value) = value := by
-  rw [Rel.decodeDefault]
-  simp only [dif_pos (rel.encode_guard value), rel.decode_encode]
+@[simp] theorem SubsetRepresentation.decodeDefault_encode
+    {Source : Type u} {Target : Type v}
+    (representation : SubsetRepresentation Source Target) (value : Source) :
+    representation.decodeDefault (representation.encode value) = value := by
+  rw [SubsetRepresentation.decodeDefault]
+  simp only [dif_pos (representation.encode_guard value),
+    representation.decode_encode]
 
-theorem Rel.encode_injective {Source : Type u} {Target : Type v}
-    (rel : Rel Source Target) : Function.Injective rel.encode := by
+theorem SubsetRepresentation.encode_injective
+    {Source : Type u} {Target : Type v}
+    (representation : SubsetRepresentation Source Target) :
+    Function.Injective representation.encode := by
   intro left right equal
   have subtypeEqual :
-      (⟨rel.encode left, rel.encode_guard left⟩ : Subtype rel.guard) =
-        ⟨rel.encode right, rel.encode_guard right⟩ := Subtype.ext equal
+      (⟨representation.encode left, representation.encode_guard left⟩ :
+        Subtype representation.guard) =
+        ⟨representation.encode right, representation.encode_guard right⟩ :=
+    Subtype.ext equal
   have decoded := congrArg
-    (fun value : Subtype rel.guard => rel.decode value.1 value.2) subtypeEqual
-  simpa only [rel.decode_encode] using decoded
+    (fun value : Subtype representation.guard =>
+      representation.decode value.1 value.2) subtypeEqual
+  simpa only [representation.decode_encode] using decoded
 
 /-- Equality is reflected and preserved by an indexed guarded relation. -/
-theorem Rel.encode_eq_iff {Source : Type u} {Target : Type v}
-    (rel : Rel Source Target) (left right : Source) :
-    rel.encode left = rel.encode right ↔ left = right :=
-  ⟨fun equal => rel.encode_injective equal, congrArg rel.encode⟩
+theorem SubsetRepresentation.encode_eq_iff
+    {Source : Type u} {Target : Type v}
+    (representation : SubsetRepresentation Source Target) (left right : Source) :
+    representation.encode left = representation.encode right ↔ left = right :=
+  ⟨fun equal => representation.encode_injective equal,
+    congrArg representation.encode⟩
 
 /-- Source universal quantification is target quantification restricted to the
 guarded image. -/
-theorem Rel.forall_iff {Source : Type u} {Target : Type v}
-    (rel : Rel Source Target) (sourceBody : Source → Prop)
+theorem SubsetRepresentation.forall_iff {Source : Type u} {Target : Type v}
+    (representation : SubsetRepresentation Source Target)
+    (sourceBody : Source → Prop)
     (targetBody : Target → Prop)
     (bodyRelated : ∀ value,
-      sourceBody value ↔ targetBody (rel.encode value)) :
+      sourceBody value ↔ targetBody (representation.encode value)) :
     (∀ value, sourceBody value) ↔
-      ∀ value, rel.guard value → targetBody value := by
+      ∀ value, representation.guard value → targetBody value := by
   constructor
   · intro sourceForall targetValue guarded
-    have related := bodyRelated (rel.decode targetValue guarded)
-    rw [rel.encode_decode targetValue guarded] at related
+    have related := bodyRelated (representation.decode targetValue guarded)
+    rw [representation.encode_decode targetValue guarded] at related
     exact related.mp (sourceForall _)
   · intro targetForall sourceValue
     exact (bodyRelated sourceValue).mpr
-      (targetForall (rel.encode sourceValue) (rel.encode_guard sourceValue))
+      (targetForall (representation.encode sourceValue)
+        (representation.encode_guard sourceValue))
 
 /-- Source existential quantification is target quantification restricted to
 the guarded image. -/
-theorem Rel.exists_iff {Source : Type u} {Target : Type v}
-    (rel : Rel Source Target) (sourceBody : Source → Prop)
+theorem SubsetRepresentation.exists_iff {Source : Type u} {Target : Type v}
+    (representation : SubsetRepresentation Source Target)
+    (sourceBody : Source → Prop)
     (targetBody : Target → Prop)
     (bodyRelated : ∀ value,
-      sourceBody value ↔ targetBody (rel.encode value)) :
+      sourceBody value ↔ targetBody (representation.encode value)) :
     (∃ value, sourceBody value) ↔
-      ∃ value, rel.guard value ∧ targetBody value := by
+      ∃ value, representation.guard value ∧ targetBody value := by
   constructor
   · rintro ⟨value, valid⟩
-    exact ⟨rel.encode value, rel.encode_guard value,
+    exact ⟨representation.encode value, representation.encode_guard value,
       (bodyRelated value).mp valid⟩
   · rintro ⟨value, guarded, valid⟩
-    refine ⟨rel.decode value guarded, ?_⟩
-    have related := bodyRelated (rel.decode value guarded)
-    rw [rel.encode_decode value guarded] at related
+    refine ⟨representation.decode value guarded, ?_⟩
+    have related := bodyRelated (representation.decode value guarded)
+    rw [representation.encode_decode value guarded] at related
     exact related.mpr valid
 
 /-- Identity relation used by carriers that need no enlargement. -/
-def Rel.refl (Carrier : Type u) [Nonempty Carrier] : Rel Carrier Carrier where
+def SubsetRepresentation.refl (Value : Type u) [Nonempty Value] :
+    SubsetRepresentation Value Value where
   sourceNonempty := inferInstance
   encode := id
   guard := fun _ => True
@@ -131,16 +170,6 @@ namespace Encoding
 
 variable (encoding : Encoding)
 
-/-- Expose a bundled encoding as an indexed relation. -/
-def rel (encoding : Encoding) : Rel encoding.Source encoding.Target where
-  sourceNonempty := encoding.sourceNonempty
-  encode := encoding.encode
-  guard := encoding.guard
-  encode_guard := encoding.encode_guard
-  decode := encoding.decode
-  decode_encode := encoding.decode_encode
-  encode_decode := encoding.encode_decode
-
 /-- Production's universal-binder shape: `wf x ⇒ body`. -/
 def guardedForall (body : encoding.Target → Prop) : Prop :=
   ∀ value, encoding.guard value → body value
@@ -150,16 +179,7 @@ def guardedExists (body : encoding.Target → Prop) : Prop :=
   ∃ value, encoding.guard value ∧ body value
 
 theorem encode_injective : Function.Injective encoding.encode := by
-  intro left right equality
-  have subtypeEquality :
-      (⟨encoding.encode left, encoding.encode_guard left⟩ :
-        Subtype encoding.guard) =
-      ⟨encoding.encode right, encoding.encode_guard right⟩ :=
-    Subtype.ext equality
-  have decoded := congrArg
-    (fun value : Subtype encoding.guard =>
-      encoding.decode value.1 value.2) subtypeEquality
-  simpa only [encoding.decode_encode] using decoded
+  exact encoding.representation.encode_injective
 
 /-- A source predicate and its target image agree on encoded values iff source
 universal quantification agrees with the production guarded universal. -/
@@ -168,16 +188,8 @@ theorem forall_iff_guardedForall
     (targetBody : encoding.Target → Prop)
     (bodyRelated : ∀ value,
       sourceBody value ↔ targetBody (encoding.encode value)) :
-    (∀ value, sourceBody value) ↔ encoding.guardedForall targetBody := by
-  constructor
-  · intro sourceForall targetValue wellFormed
-    have related := bodyRelated (encoding.decode targetValue wellFormed)
-    rw [encoding.encode_decode targetValue wellFormed] at related
-    exact related.mp (sourceForall _)
-  · intro targetForall sourceValue
-    exact (bodyRelated sourceValue).mpr
-      (targetForall (encoding.encode sourceValue)
-        (encoding.encode_guard sourceValue))
+    (∀ value, sourceBody value) ↔ encoding.guardedForall targetBody :=
+  encoding.representation.forall_iff sourceBody targetBody bodyRelated
 
 /-- Existential quantification uses the dual conjunction guard. -/
 theorem exists_iff_guardedExists
@@ -185,36 +197,22 @@ theorem exists_iff_guardedExists
     (targetBody : encoding.Target → Prop)
     (bodyRelated : ∀ value,
       sourceBody value ↔ targetBody (encoding.encode value)) :
-    (∃ value, sourceBody value) ↔ encoding.guardedExists targetBody := by
-  constructor
-  · rintro ⟨sourceValue, sourceProof⟩
-    exact ⟨encoding.encode sourceValue, encoding.encode_guard sourceValue,
-      (bodyRelated sourceValue).mp sourceProof⟩
-  · rintro ⟨targetValue, wellFormed, targetProof⟩
-    refine ⟨encoding.decode targetValue wellFormed, ?_⟩
-    have related := bodyRelated (encoding.decode targetValue wellFormed)
-    rw [encoding.encode_decode targetValue wellFormed] at related
-    exact related.mpr targetProof
+    (∃ value, sourceBody value) ↔ encoding.guardedExists targetBody :=
+  encoding.representation.exists_iff sourceBody targetBody bodyRelated
 
 /-- Equality is reflected and preserved by a guarded encoding. -/
 theorem encode_eq_iff (left right : encoding.Source) :
-    encoding.encode left = encoding.encode right ↔ left = right := by
-  constructor
-  · exact fun equality => (encode_injective encoding) equality
-  · exact congrArg encoding.encode
+    encoding.encode left = encoding.encode right ↔ left = right :=
+  encoding.representation.encode_eq_iff left right
 
 /-- Totalize decoding outside the source image.  Production axioms only expose
 the behavior at guarded arguments, so the arbitrary default is unobservable. -/
 noncomputable def decodeDefault (value : encoding.Target) : encoding.Source :=
-  by
-    classical
-    exact if wellFormed : encoding.guard value then encoding.decode value wellFormed
-      else Classical.choice encoding.sourceNonempty
+  encoding.representation.decodeDefault value
 
 @[simp] theorem decodeDefault_encode (value : encoding.Source) :
-    encoding.decodeDefault (encoding.encode value) = value := by
-  rw [decodeDefault]
-  simp only [dif_pos (encoding.encode_guard value), encoding.decode_encode]
+    encoding.decodeDefault (encoding.encode value) = value :=
+  encoding.representation.decodeDefault_encode value
 
 /-- Canonical total target interpretation of a source function. -/
 noncomputable def liftFunction (fn : encoding.Source → encoding.Source) :
@@ -263,19 +261,20 @@ end Encoding
 /-! ## The production `Nat ↪ Int` instance -/
 
 /-- `Nat` is represented as the nonnegative subset of `Int`, exactly matching
-`emitSort`, `wfCondition`, and `guardSort` in the live translator. -/
+`emitSort`, `wfCondition`, and `guardSort` in the production translator. -/
 def natInt : Encoding where
   Source := Nat
   Target := Int
-  sourceNonempty := inferInstance
-  encode := Int.ofNat
-  guard := fun value => 0 ≤ value
-  encode_guard := Int.zero_le_ofNat
-  decode := fun value _ => value.toNat
-  decode_encode := by intro value; simp
-  encode_decode := by
-    intro value wellFormed
-    exact Int.toNat_of_nonneg wellFormed
+  representation := {
+    sourceNonempty := inferInstance
+    encode := Int.ofNat
+    guard := fun value => 0 ≤ value
+    encode_guard := Int.zero_le_ofNat
+    decode := fun value _ => value.toNat
+    decode_encode := by intro value; simp
+    encode_decode := by
+      intro value wellFormed
+      exact Int.toNat_of_nonneg wellFormed }
 
 @[simp] theorem natInt_guard_encode (value : Nat) :
     natInt.guard (natInt.encode value) :=

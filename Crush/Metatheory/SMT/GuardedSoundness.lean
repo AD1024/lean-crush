@@ -1474,7 +1474,7 @@ theorem guardedAssertions_valid (guarding : Guarding symbols)
     have truthEq :
         formula.denote source (FO.Valuation.empty source.carriers) = True :=
       propext ⟨fun _ => trivial, fun _ => formulaValid⟩
-    simp only [FO.CarrierRel.get, Guarded.Rel.refl, id_eq] at evaluated
+    simp only [FO.CarrierRel.get, Guarded.SubsetRepresentation.refl, id_eq] at evaluated
     rw [truthEq] at evaluated
     change Crush.SMT.Eval (modelWith guarding.encoding target extra) []
       (guarding.term formula) (.typed .bool True)

@@ -358,9 +358,9 @@ theorem dataParts_eval_wf
           (.base data.decl.sort)).guard value ↔
         (BaseLift.asData wf data value).WF
           (fun sort => (priorRel.base sort).guard) := by
-    change (BaseLift.rel wf productive priorRel.base law.carrier
+    change (BaseLift.subsetRepresentation wf productive priorRel.base law.carrier
       data.decl.sort).guard value ↔ _
-    rw [BaseLift.rel_data]
+    rw [BaseLift.subsetRepresentation_datatype]
     rfl
   have equal : SMT.GuardPart.Holds
       (fun sort => (BaseLift.carrierRel wf productive priorRel law.carrier
@@ -574,9 +574,9 @@ theorem Representation.guardLaw_extend
           (.base data.decl.sort)).guard value ↔
         (BaseLift.asData wf data value).WF
           (fun sort => (priorRel.base sort).guard) := by
-    change (BaseLift.rel wf productive priorRel.base law.carrier
+    change (BaseLift.subsetRepresentation wf productive priorRel.base law.carrier
       data.decl.sort).guard value ↔ _
-    rw [BaseLift.rel_data]
+    rw [BaseLift.subsetRepresentation_datatype]
     rfl
   exact selectors.trans (structural.symm.trans nativeGuard.symm)
 

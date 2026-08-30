@@ -87,7 +87,7 @@ namespace SpineResult
     (ν : TargetValuation M context)
     (spine : SpineResult signature context (.arrow domain codomain))
     (argument : TargetTerm signature context domain)
-    (generated : GeneratedObligations signature) :
+    (generated : GeneratedOutput signature) :
     (spine.snoc argument generated).denote M ν =
       spine.denote M ν
         (fromCanonical M domain ⟦argument⟧[canonicalModel M, ν]) := by
@@ -136,19 +136,19 @@ noncomputable def SpineCorrect (M : Model signature) {Γ : Context} {ty : Ty}
   match ty with
   | .bool | .base _ => True
   | .arrow domain codomain =>
-      ∀ {Δ : Context} (ρ : Renaming Γ Δ)
+      ∀ {Δ : Context} (r : Renaming Γ Δ)
         (ν : TargetValuation M Δ),
-        (translateSpineWith ρ term).denote M ν =
-          ⟦term.rename ρ⟧[M, sourceValuation M ν]
+        (translateSpineWith r term).denote M ν =
+          ⟦term.rename r⟧[M, sourceValuation M ν]
 
 /-- One structural induction establishes ordinary and spine denotation
 correctness together. -/
 private theorem denote_core (M : Model signature) :
     {Γ : Context} → {ty : Ty} → (term : Term signature Γ ty) →
-    (∀ {Δ : Context} (ρ : Renaming Γ Δ)
+    (∀ {Δ : Context} (r : Renaming Γ Δ)
       (ν : TargetValuation M Δ),
-      ⟦(translateWith ρ term).term⟧[canonicalModel M, ν] =
-        toCanonical M ty ⟦term.rename ρ⟧[M, sourceValuation M ν]) ∧
+      ⟦(translateWith r term).term⟧[canonicalModel M, ν] =
+        toCanonical M ty ⟦term.rename r⟧[M, sourceValuation M ν]) ∧
       SpineCorrect M term := by
   intro Γ ty term
   induction term with
@@ -157,24 +157,24 @@ private theorem denote_core (M : Model signature) :
       cases actualTy with
       | bool =>
           constructor
-          · intro Δ ρ ν
+          · intro Δ r ν
             simp only [translateWith, TranslationResult.ofGenerated,
               FO.FamilyTerm.denote.eq_1, Term.rename, Term.denote,
               sourceValuation]
           · trivial
       | base sort =>
           constructor
-          · intro Δ ρ ν
+          · intro Δ r ν
             simp only [translateWith, TranslationResult.ofGenerated,
               FO.FamilyTerm.denote.eq_1, Term.rename, Term.denote,
               sourceValuation]
           · trivial
       | arrow domain codomain =>
           constructor
-          · intro Δ ρ ν
+          · intro Δ r ν
             simp only [translateWith, finishClosure_term, Term.rename]
-            exact etaClosure_denote M (.var (ρ ref)) ν
-          · intro Δ ρ ν
+            exact etaClosure_denote M (.var (r ref)) ν
+          · intro Δ r ν
             rw [translateSpineWith.eq_1]
             simp only [SpineResult.denote, TargetArguments.applyUnary,
               FunctionHead.denote, Term.rename, Term.denote, sourceValuation]
@@ -184,14 +184,14 @@ private theorem denote_core (M : Model signature) :
       cases actualTy with
       | bool =>
           constructor
-          · intro Δ ρ ν
+          · intro Δ r ν
             simpa only [translateWith, TranslationResult.ofGenerated,
               Term.rename, Term.denote, TargetArguments.applyUnary] using
               (TargetArguments.nil .bool).sourceApp_denote M ν constant .bool
           · trivial
       | base sort =>
           constructor
-          · intro Δ ρ ν
+          · intro Δ r ν
             simpa only [translateWith, TranslationResult.ofGenerated,
               Term.rename, Term.denote, TargetArguments.applyUnary] using
               (TargetArguments.nil (.base sort)).sourceApp_denote
@@ -199,16 +199,16 @@ private theorem denote_core (M : Model signature) :
           · trivial
       | arrow domain codomain =>
           constructor
-          · intro Δ ρ ν
+          · intro Δ r ν
             simp only [translateWith, finishClosure_term, Term.rename]
             exact etaClosure_denote M (.const constant) ν
-          · intro Δ ρ ν
+          · intro Δ r ν
             rw [translateSpineWith.eq_2]
             simp only [SpineResult.denote, TargetArguments.applyUnary,
               FunctionHead.denote, Term.rename, Term.denote]
   | boolLit value =>
       constructor
-      · intro Δ ρ ν
+      · intro Δ r ν
         cases value <;>
           simp only [translateWith, TranslationResult.ofGenerated,
             FO.FamilyTerm.denote.eq_3, FO.FamilyTerm.denote.eq_4,
@@ -216,62 +216,62 @@ private theorem denote_core (M : Model signature) :
       · trivial
   | not body bodyIH =>
       constructor
-      · intro Δ ρ ν
+      · intro Δ r ν
         simp only [translateWith, TranslationResult.replaceTerm,
           FO.FamilyTerm.denote.eq_5, Term.rename, Term.denote, toCanonical]
-        rw [bodyIH.1 ρ ν]
+        rw [bodyIH.1 r ν]
       · trivial
   | and left right leftIH rightIH =>
       constructor
-      · intro Δ ρ ν
+      · intro Δ r ν
         simp only [translateWith, TranslationResult.combine,
           FO.FamilyTerm.denote.eq_6, Term.rename, Term.denote, toCanonical]
-        rw [leftIH.1 ρ ν, rightIH.1 ρ ν]
+        rw [leftIH.1 r ν, rightIH.1 r ν]
       · trivial
   | or left right leftIH rightIH =>
       constructor
-      · intro Δ ρ ν
+      · intro Δ r ν
         simp only [translateWith, TranslationResult.combine,
           FO.FamilyTerm.denote.eq_7, Term.rename, Term.denote, toCanonical]
-        rw [leftIH.1 ρ ν, rightIH.1 ρ ν]
+        rw [leftIH.1 r ν, rightIH.1 r ν]
       · trivial
   | imp left right leftIH rightIH =>
       constructor
-      · intro Δ ρ ν
+      · intro Δ r ν
         simp only [translateWith, TranslationResult.combine,
           FO.FamilyTerm.denote.eq_8, Term.rename, Term.denote, toCanonical]
-        rw [leftIH.1 ρ ν, rightIH.1 ρ ν]
+        rw [leftIH.1 r ν, rightIH.1 r ν]
       · trivial
   | iff left right leftIH rightIH =>
       constructor
-      · intro Δ ρ ν
+      · intro Δ r ν
         simp only [translateWith, TranslationResult.combine,
           FO.FamilyTerm.denote.eq_9, Term.rename, Term.denote, toCanonical]
-        rw [leftIH.1 ρ ν, rightIH.1 ρ ν]
+        rw [leftIH.1 r ν, rightIH.1 r ν]
       · trivial
   | eq left right leftIH rightIH =>
       rename_i operandType
       constructor
-      · intro Δ ρ ν
+      · intro Δ r ν
         cases operandType <;>
           simp only [translateWith.eq_13, translateWith.eq_14,
             translateWith.eq_15, TranslationResult.combine,
-            TranslationResult.appendGenerated, FO.FamilyTerm.denote.eq_10,
+            TranslationResult.appendOutput, FO.FamilyTerm.denote.eq_10,
             Term.rename, Term.denote, toCanonical] <;>
-          rw [leftIH.1 ρ ν, rightIH.1 ρ ν]
+          rw [leftIH.1 r ν, rightIH.1 r ν]
       · trivial
   | lam body bodyIH =>
       rename_i actualContext domain codomain
       constructor
-      · intro Δ ρ ν
+      · intro Δ r ν
         simp only [translateWith, finishClosure_term, Term.rename]
-        exact etaClosure_denote M (.lam (body.rename (Renaming.lift ρ))) ν
-      · intro Δ ρ ν
+        exact etaClosure_denote M (.lam (body.rename (Renaming.lift r))) ν
+      · intro Δ r ν
         rw [translateSpineWith.eq_3]
         simp only [SpineResult.denote, TargetArguments.applyUnary,
           FunctionHead.denote, finishClosure_term, Term.rename]
         have closureCorrect := etaClosure_denote M
-          (.lam (body.rename (Renaming.lift ρ))) ν
+          (.lam (body.rename (Renaming.lift r))) ν
         have mapped := congrArg (fromCanonical M (.arrow domain codomain))
           closureCorrect
         exact mapped.trans (fromCanonical_toCanonical M _ _)
@@ -280,36 +280,36 @@ private theorem denote_core (M : Model signature) :
       cases appCodomain with
       | bool =>
           constructor
-          · intro Δ ρ ν
+          · intro Δ r ν
             rw [translateWith.eq_17, SpineResult.finish_denote,
-              SpineResult.denote_snoc, fnIH.2 ρ ν,
-              argumentIH.1 ρ ν, fromCanonical_toCanonical]
+              SpineResult.denote_snoc, fnIH.2 r ν,
+              argumentIH.1 r ν, fromCanonical_toCanonical]
             rfl
           · trivial
       | base sort =>
           constructor
-          · intro Δ ρ ν
+          · intro Δ r ν
             rw [translateWith.eq_18, SpineResult.finish_denote,
-              SpineResult.denote_snoc, fnIH.2 ρ ν,
-              argumentIH.1 ρ ν, fromCanonical_toCanonical]
+              SpineResult.denote_snoc, fnIH.2 r ν,
+              argumentIH.1 r ν, fromCanonical_toCanonical]
             rfl
           · trivial
       | arrow residualDomain residualCodomain =>
           constructor
-          · intro Δ ρ ν
+          · intro Δ r ν
             rw [translateWith.eq_19]
             simp only [finishClosure_term, Term.rename]
             exact etaClosure_denote M
-              (.app (fn.rename ρ) (argument.rename ρ)) ν
-          · intro Δ ρ ν
+              (.app (fn.rename r) (argument.rename r)) ν
+          · intro Δ r ν
             rw [translateSpineWith.eq_4, SpineResult.denote_snoc,
-              fnIH.2 ρ ν, argumentIH.1 ρ ν,
+              fnIH.2 r ν, argumentIH.1 r ν,
               fromCanonical_toCanonical]
             rfl
   | forallE body bodyIH =>
       rename_i domain
       constructor
-      · intro Δ ρ ν
+      · intro Δ r ν
         cases domain <;>
           simp only [translateWith.eq_20, TranslationResult.ofGenerated,
             FO.FamilyTerm.denote.eq_11, Term.rename, Term.denote,
@@ -317,7 +317,7 @@ private theorem denote_core (M : Model signature) :
           apply propext <;>
           apply forall_congr' <;>
           intro value <;>
-          have bodyCorrect := bodyIH.1 (Renaming.lift ρ)
+          have bodyCorrect := bodyIH.1 (Renaming.lift r)
             (targetExtend M ν value) <;>
           rw [sourceValuation_extend M ν value] at bodyCorrect <;>
           exact bodyCorrect.to_iff
@@ -325,7 +325,7 @@ private theorem denote_core (M : Model signature) :
   | existsE body bodyIH =>
       rename_i domain
       constructor
-      · intro Δ ρ ν
+      · intro Δ r ν
         cases domain <;>
           simp only [translateWith.eq_21, TranslationResult.ofGenerated,
             FO.FamilyTerm.denote.eq_12, Term.rename, Term.denote,
@@ -333,7 +333,7 @@ private theorem denote_core (M : Model signature) :
           apply propext <;>
           apply exists_congr <;>
           intro value <;>
-          have bodyCorrect := bodyIH.1 (Renaming.lift ρ)
+          have bodyCorrect := bodyIH.1 (Renaming.lift r)
             (targetExtend M ν value) <;>
           rw [sourceValuation_extend M ν value] at bodyCorrect <;>
           exact bodyCorrect.to_iff
@@ -343,21 +343,21 @@ private theorem denote_core (M : Model signature) :
 canonical flattened model. -/
 theorem translateWith_denote (M : Model signature)
     {Γ Δ : Context} {ty : Ty}
-    (ρ : Renaming Γ Δ) (term : Term signature Γ ty)
+    (r : Renaming Γ Δ) (term : Term signature Γ ty)
     (ν : TargetValuation M Δ) :
-    ⟦(translateWith ρ term).term⟧[canonicalModel M, ν] =
-      toCanonical M ty ⟦term.rename ρ⟧[M, sourceValuation M ν] :=
-  (denote_core M term).1 ρ ν
+    ⟦(translateWith r term).term⟧[canonicalModel M, ν] =
+      toCanonical M ty ⟦term.rename r⟧[M, sourceValuation M ν] :=
+  (denote_core M term).1 r ν
 
 /-- A translated spine denotes the renamed higher-order application prefix. -/
 theorem translateSpineWith_denote (M : Model signature)
     {Γ Δ : Context} {domain codomain : Ty}
-    (ρ : Renaming Γ Δ)
+    (r : Renaming Γ Δ)
     (term : Term signature Γ (.arrow domain codomain))
     (ν : TargetValuation M Δ) :
-    (translateSpineWith ρ term).denote M ν =
-      ⟦term.rename ρ⟧[M, sourceValuation M ν] :=
-  (denote_core M term).2 ρ ν
+    (translateSpineWith r term).denote M ν =
+      ⟦term.rename r⟧[M, sourceValuation M ν] :=
+  (denote_core M term).2 r ν
 
 /-- Canonical target valuation obtained by pointwise type erasure. -/
 noncomputable def targetVal (M : Model signature) :

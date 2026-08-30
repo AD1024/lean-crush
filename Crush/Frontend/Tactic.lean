@@ -116,15 +116,15 @@ def buildScript (cfg : Config) (facts : Array Fact) :
         let reified? ← Metatheory.Reification.reifySentenceFor?
           fact.prop env bridge
         let state ← get
-        let some certificate := CertifiedDataEnv.build? fact.prop env bridge reified?
-            state.commands state.certifiedDataCommands
-            state.certifiedDataCommandIndices state.dataGuards
+        let some productionFact := ProductionFact.build? fact.prop env bridge reified?
+            state.commands state.nativeDatatypeCommands
+            state.nativeDatatypeCommandIndices state.dataGuards
             state.dataGuardIndices
-          | throwError "crush: certified datatype environment lost an exact native block"
-        let _ ← TranslateM.recordDatatypeCertificate certificate
+          | throwError "crush: final command array lost a native datatype block"
+        let _ ← TranslateM.recordProductionFact productionFact
       let named := Term.annot body #[.named s!"{factNamePrefix}{id}"]
       TranslateM.emitCommand (.assert named)
-    TranslateM.finalizeDatatypeCertificates
+    TranslateM.finalizeProductionFacts
   -- Prepend set-logic. Declarations are emitted eagerly on first use (before the
   -- assertion that references them), so command order already satisfies SMT-LIB's
   -- declare-before-reference rule.

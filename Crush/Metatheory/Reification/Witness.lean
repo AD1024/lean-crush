@@ -129,8 +129,8 @@ def shapesMatch : ExprShape → TermShape → Bool
 
 /-- Erase only certified datatype type parameters before comparing the source
 and intrinsic constructor trees. Exact ownership remains in the intrinsically
-typed term and its `DataBridge`; a second, unused occurrence trace added no
-soundness evidence. -/
+typed term and its `DataBridge`; recording the same constructor occurrences a
+second time added no soundness evidence. -/
 partial def eraseData (env : DatatypeEnv) (expression : Expr) :
     MetaM Expr := do
   if let some app ← env.ctorApp? expression then

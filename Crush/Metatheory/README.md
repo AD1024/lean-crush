@@ -16,8 +16,8 @@ construction.
 | `⌊Γ⌋^⋆` | Pointwise first-order erasure of a context | [`Notation.lean`](Notation.lean) |
 | `𝒟⟦e⟧` | Classic unary defunctionalization | [`Notation.lean`](Notation.lean), [`Defunctionalization/Translate.lean`](Defunctionalization/Translate.lean) |
 | `𝓕⟦e⟧` | Total flattened translation result | [`Defunctionalization/Flattened/Translate.lean`](Defunctionalization/Flattened/Translate.lean) |
-| `𝒶⟦e⟧[E]` | Ordinary raw SMT encoding under `E` | [`SMT/Representation.lean`](SMT/Representation.lean) |
-| `𝒢⟦e⟧[G]` | Guard-aware raw SMT encoding under `G` | [`SMT/Guarded.lean`](SMT/Guarded.lean) |
+| `𝒶⟦e⟧[E]` | Ordinary untyped SMT encoding under `E` | [`SMT/Representation.lean`](SMT/Representation.lean) |
+| `𝒢⟦e⟧[G]` | Guard-aware untyped SMT encoding under `G` | [`SMT/Guarded.lean`](SMT/Guarded.lean) |
 | `vₛ ≈[R, τ] vₜ` | Logical relation between source and target values | [`Notation.lean`](Notation.lean), [`Defunctionalization/LogicalRelation.lean`](Defunctionalization/LogicalRelation.lean) |
 | `ρₛ ≈ᵥ[R] ρₜ` | Pointwise logical relation between valuations | [`Notation.lean`](Notation.lean) |
 | `FV(e)` | Duplicate-free free-variable positions of `e` | [`Notation.lean`](Notation.lean), [`Defunctionalization/Collect.lean`](Defunctionalization/Collect.lean) |
@@ -26,9 +26,10 @@ The symbol `⊢` is reserved for syntactic entailment in an explicitly specified
 proof calculus. Intrinsic typing and datatype references use the indexed types
 `Term`, `FamilyTerm`, `DataRef`, `CtorRef`, and `FieldRef` directly.
 
-Proof statements conventionally use `σ` for signatures, `Γ` and `Δ` for
+Proof statements conventionally use `Σ` for signatures, `Γ` and `Δ` for
 contexts, `τ` for types or sorts, `φ` for formulas, `T` for theories, `M` for
-models, `ρ` for source valuations or renamings, and `ν` for target valuations.
+models, `r` for typed renamings, `ρ` for source valuations, and `ν` for target
+valuations.
 Executable state and allocation code uses descriptive names when they convey
 more information.
 
@@ -40,7 +41,7 @@ arbitrary `Lean.Expr`, and correctness of an external solver remains a separate
 boundary.
 
 1. `Flattened.translate_denote` proves preservation of term denotation by the
-   total flattened translation; `generated_valid` proves every generated
+   total flattened translation; `generatedFormulas_valid` proves every generated
    closure equation and extensionality formula in the same canonical model.
    See [`Defunctionalization/Flattened/Denotation.lean`](Defunctionalization/Flattened/Denotation.lean)
    and [`Defunctionalization/Flattened/Theory.lean`](Defunctionalization/Flattened/Theory.lean).
@@ -51,8 +52,9 @@ boundary.
    to the complete source theory. See
    [`Defunctionalization/Flattened/Theory.lean`](Defunctionalization/Flattened/Theory.lean).
 
-3. `SMT.encode_theories` gives an exact semantic command-set representation of
-   the combined flattened theory. `SMT.representation_sound` constructs one raw
+3. `SMT.encode_theories` proves that the generated command array and the
+   combined flattened theory have exactly the same satisfying SMT models.
+   `SMT.representation_sound` constructs one untyped
    SMT model satisfying native datatype commands, ordinary declarations, and
    assertions; `commands_unsat_implies_source_theory_unsat` is the corresponding
    reflection theorem. See [`SMT/Representation.lean`](SMT/Representation.lean)
@@ -68,26 +70,26 @@ boundary.
 
 5. `FO.FamilyTerm.guardDenote_rel` preserves terms across a common carrier and
    symbol relation. `SMT.guardTerm_rel_eval` connects that semantics to the
-   guard-aware raw syntax, and `SMT.guarded_lift` validates native commands,
-   certified derived definitions, ordinary declarations, and guarded assertions
-   in one raw model. See [`FO/Guarded.lean`](FO/Guarded.lean) and
+   guard-aware untyped syntax, and `SMT.guarded_lift` validates native commands,
+   recursively defined guards, ordinary declarations, and guarded assertions
+   in one untyped SMT model. See [`FO/Guarded.lean`](FO/Guarded.lean) and
    [`SMT/GuardedSoundness.lean`](SMT/GuardedSoundness.lean).
 
-6. `VCG.runTheory_represents` and `runGuardedTheory_represents` prove that fresh
-   stateful VCG runs retain the exact aggregate representation.
-   `TheoryStateRepresents.unsat_source` and
-   `runGuardedTheory_unsat_implies_source_unsat` compose the lowering proof to
-   intrinsic source-theory unsatisfiability. See
-   [`VCG/Stateful.lean`](VCG/Stateful.lean) and
-   [`VCG/Soundness.lean`](VCG/Soundness.lean).
+6. `VCG.theoryCommands_represents` and
+   `guardedTheoryCommands_represents` prove that finite-theory command
+   generation has the expected unguarded and guarded meanings.
+   `theoryCommands_unsat_implies_source_unsat` composes the unguarded lowering
+   proof to intrinsic source-theory unsatisfiability. See
+   [`VCG/Generate.lean`](VCG/Generate.lean).
 
 7. `Reification.reifyTheory?` retains an exact ordered fact list reified under
    one datatype environment and ordinary signature bridge. Its witness is
    structural, not a denotational theorem for arbitrary Lean expressions. See
    [`Reification/Witness.lean`](Reification/Witness.lean).
 
-8. `VCG.TheoryAgreement.build?` checks mutual inclusion between a normalized
-   production snapshot and the intrinsic guarded command set. Its
-   `unsat_source` theorem reflects unsatisfiability of the complete live snapshot
-   to the retained intrinsic source theory; `SingleFactAgreement` is the
-   singleton specialization. See [`VCG/Production.lean`](VCG/Production.lean).
+8. `VCG.ProductionTheoryAgreement.build?` checks that the final production
+   command array and the intrinsic guarded command array contain the same
+   semantically relevant commands. Its `unsat_source` theorem reflects
+   unsatisfiability of the final production commands to the complete retained
+   intrinsic source theory; `ProductionFactAgreement` is the single-fact
+   specialization. See [`VCG/Production.lean`](VCG/Production.lean).

@@ -18,12 +18,12 @@ variable {signature : Signature} {source target : Context}
 variable {ty domain codomain : Ty}
 
 private theorem pullback_lift_extend
-    {base : BaseSort → Type} (rho : Renaming source target)
+    {base : BaseSort → Type} (r : Renaming source target)
     (valuation : Valuation base target) (value : domain.Denote base) :
     (fun {refTy} (ref : Var (domain :: source) refTy) =>
-      valuation.extend value (rho.lift ref)) =
+      valuation.extend value (r.lift ref)) =
     (fun {refTy} (ref : Var (domain :: source) refTy) =>
-      Valuation.extend (fun {_} sourceRef => valuation (rho sourceRef)) value ref) := by
+      Valuation.extend (fun {_} sourceRef => valuation (r sourceRef)) value ref) := by
   apply @funext Ty
     (fun refTy => Var (domain :: source) refTy → refTy.Denote base)
   intro refTy
@@ -34,10 +34,10 @@ private theorem pullback_lift_extend
 /-- Renaming commutes with source denotation when the valuation is pulled back
 along the same typed renaming. -/
 theorem Term.denote_rename (model : Model signature)
-    (rho : Renaming source target) (term : Term signature source ty)
+    (r : Renaming source target) (term : Term signature source ty)
     (valuation : Valuation model.Base target) :
-    ⟦term.rename rho⟧[model, valuation] =
-      ⟦term⟧[model, fun {_} ref => valuation (rho ref)] := by
+    ⟦term.rename r⟧[model, valuation] =
+      ⟦term⟧[model, fun {_} ref => valuation (r ref)] := by
   induction term generalizing target with
   | var => rfl
   | const => rfl
@@ -56,8 +56,8 @@ theorem Term.denote_rename (model : Model signature)
   | lam body ih =>
       simp only [Term.rename, Term.denote]
       funext value
-      rw [ih rho.lift (valuation.extend value)]
-      rw [pullback_lift_extend rho valuation value]
+      rw [ih r.lift (valuation.extend value)]
+      rw [pullback_lift_extend r valuation value]
   | app fn argument fnIH argumentIH =>
       simp only [Term.rename, Term.denote, fnIH, argumentIH]
   | forallE body ih =>
@@ -65,16 +65,16 @@ theorem Term.denote_rename (model : Model signature)
       apply propext
       apply forall_congr'
       intro value
-      have denotationEq := ih rho.lift (valuation.extend value)
-      rw [pullback_lift_extend rho valuation value] at denotationEq
+      have denotationEq := ih r.lift (valuation.extend value)
+      rw [pullback_lift_extend r valuation value] at denotationEq
       exact denotationEq.to_iff
   | existsE body ih =>
       simp only [Term.rename, Term.denote]
       apply propext
       apply exists_congr
       intro value
-      have denotationEq := ih rho.lift (valuation.extend value)
-      rw [pullback_lift_extend rho valuation value] at denotationEq
+      have denotationEq := ih r.lift (valuation.extend value)
+      rw [pullback_lift_extend r valuation value] at denotationEq
       exact denotationEq.to_iff
 
 @[simp] theorem Term.denote_weaken (model : Model signature)

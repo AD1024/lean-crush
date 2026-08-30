@@ -162,7 +162,7 @@ end Representation
 
 /-- Dependency-ordered datatype blocks represented by one shared encoding.
 The encoding itself owns the exact native command array, so this witness does
-not duplicate a second command trace. -/
+not duplicate that command list. -/
 inductive Represented {signature : Signature}
     (fo : SMT.Encoding (Symbol signature)) :
     Env signature → Type 1 where

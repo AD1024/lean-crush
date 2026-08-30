@@ -5,7 +5,7 @@ import Crush.SMT.Quote
 # Syntax witnesses for emitted defunctionalization commands
 
 These encodings retain an intrinsic type witness, its ordered SMT sort images,
-and the exact command emitted by the stateful translator.  They establish
+and the exact command emitted by the production translator. They establish
 syntactic correspondence only.  In particular, they do not assign semantics to
 arbitrary `SMT.SSort`, prove that an emitted term represents an intrinsic FO
 term, or show that the whole command sequence preserves satisfiability.  Those
@@ -17,7 +17,7 @@ namespace Crush.Metatheory.VCG
 
 open Crush.Metatheory.Reification
 
-/-- One intrinsic type paired with the concrete SMT sort selected by the stateful
+/-- One intrinsic type paired with the concrete SMT sort selected by the production
 translator. -/
 structure SortImage where
   bridge : TypeBridge
@@ -87,20 +87,20 @@ structure ClosureEquationEncoding where
     (if binders.isEmpty then guardedEquation else .forallE binders guardedEquation)
 
 /-- Exact production encoding of the mutually recursive well-formedness
-predicates associated with one certified datatype block. Semantic field-guard
+predicates associated with one reified datatype block. Semantic field-guard
 evidence is attached by the later representation layer. -/
-structure DataGuardEncoding where
+structure DatatypeGuardCommand where
   owner : DatatypeBlock
   definitions : Array SMT.FunDef
   command : SMT.Command
   command_eq : command = .defFunsRec definitions
 
-/-- Syntax witnesses retained by the stateful translation in emission order. -/
+/-- Syntax descriptions retained by production translation in emission order. -/
 inductive CommandEncoding where
   | app : AppDeclarationEncoding → CommandEncoding
   | closure : ClosureDeclarationEncoding → CommandEncoding
   | closureEquation : ClosureEquationEncoding → CommandEncoding
-  | dataGuard : DataGuardEncoding → CommandEncoding
+  | dataGuard : DatatypeGuardCommand → CommandEncoding
 
 namespace CommandEncoding
 
@@ -120,7 +120,7 @@ private def termHead? : SMT.Term → Option String
   | _ => none
 
 /-- Principal allocated symbols determined by the encoding itself. Keeping this
-projection here prevents a stateful call site from supplying unrelated names
+projection here prevents a production call site from supplying unrelated names
 while claiming command/allocation correspondence. -/
 def allocatedSymbols : CommandEncoding → Array String
   | .app encoding =>

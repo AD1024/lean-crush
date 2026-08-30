@@ -57,8 +57,8 @@ def Guarding.theoryBody {symbols : FO.SymbolFamily}
       (declaration guarding.encoding)).toArray ++
     guarding.assertions source
 
-/-- Complete guarded command array. `derived` contains exact certified
-definitions such as datatype `wf_T` predicates and is kept distinct from the
+/-- Complete guarded command array. `derived` contains checked definitions such
+as datatype `wf_T` predicates and is kept distinct from the
 native datatype prefix. -/
 def Guarding.theory {symbols : FO.SymbolFamily}
     (guarding : Guarding symbols) (derived : Array Command)
@@ -67,8 +67,8 @@ def Guarding.theory {symbols : FO.SymbolFamily}
   guarding.encoding.nativeCommands ++
     (derived ++ guarding.theoryBody declarations source)
 
-/-- Semantic command-set representation for a guarded theory and its certified
-derived command segment. Production may interleave declarations and assertions
+/-- Semantic command-set representation for a guarded theory and its separately
+checked derived-command segment. Production may interleave declarations and assertions
 or omit duplicate occurrences without changing this model-theoretic boundary. -/
 def GuardedTheoryRepresentation {symbols : FO.SymbolFamily}
     (guarding : Guarding symbols) (derived : Array Command)

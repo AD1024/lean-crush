@@ -20,10 +20,10 @@ abbrev Renaming (source target : Context) :=
 namespace Renaming
 
 /-- Lift a renaming under a binder. -/
-def lift (rho : Renaming source target) :
+def lift (r : Renaming source target) :
     Renaming (domain :: source) (domain :: target)
   | _, .here => .here
-  | _, .there ref => .there (rho ref)
+  | _, .there ref => .there (r ref)
 
 /-- Embed a context underneath one fresh head variable. -/
 def weaken : Renaming source (domain :: source) :=
@@ -36,21 +36,21 @@ end Renaming
 
 /-- Apply a typed renaming throughout a source term. -/
 def Term.rename {signature : Signature} {source target : Context}
-    (rho : Renaming source target) :
+    (r : Renaming source target) :
     {ty : Ty} → Term signature source ty → Term signature target ty
-  | _, .var ref => .var (rho ref)
+  | _, .var ref => .var (r ref)
   | _, .const ref => .const ref
   | _, .boolLit value => .boolLit value
-  | _, .not body => .not (body.rename rho)
-  | _, .and left right => .and (left.rename rho) (right.rename rho)
-  | _, .or left right => .or (left.rename rho) (right.rename rho)
-  | _, .imp left right => .imp (left.rename rho) (right.rename rho)
-  | _, .iff left right => .iff (left.rename rho) (right.rename rho)
-  | _, .eq left right => .eq (left.rename rho) (right.rename rho)
-  | _, .lam body => .lam (body.rename rho.lift)
-  | _, .app fn argument => .app (fn.rename rho) (argument.rename rho)
-  | _, .forallE body => .forallE (body.rename rho.lift)
-  | _, .existsE body => .existsE (body.rename rho.lift)
+  | _, .not body => .not (body.rename r)
+  | _, .and left right => .and (left.rename r) (right.rename r)
+  | _, .or left right => .or (left.rename r) (right.rename r)
+  | _, .imp left right => .imp (left.rename r) (right.rename r)
+  | _, .iff left right => .iff (left.rename r) (right.rename r)
+  | _, .eq left right => .eq (left.rename r) (right.rename r)
+  | _, .lam body => .lam (body.rename r.lift)
+  | _, .app fn argument => .app (fn.rename r) (argument.rename r)
+  | _, .forallE body => .forallE (body.rename r.lift)
+  | _, .existsE body => .existsE (body.rename r.lift)
 
 /-- Move a term underneath one fresh binder. -/
 def Term.weaken (term : Term signature source ty) :

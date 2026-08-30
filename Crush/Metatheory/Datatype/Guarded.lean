@@ -15,8 +15,8 @@ namespace Crush.Metatheory.Guarded
 universe u v
 
 /-- Guarded representations for every external base sort. -/
-abbrev BaseRel (Source : BaseSort → Type u) (Target : BaseSort → Type v) :=
-  ∀ sort, Rel (Source sort) (Target sort)
+abbrev BaseRepresentations (Source : BaseSort → Type u) (Target : BaseSort → Type v) :=
+  ∀ sort, SubsetRepresentation (Source sort) (Target sort)
 
 end Crush.Metatheory.Guarded
 
@@ -108,7 +108,7 @@ theorem sel_wf {arity : Nat} {block : Block arity}
 the matching constructor selected by the production guard. -/
 noncomputable def FieldDecl.fallback {arity : Nat} {block : Block arity}
     {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-    (base : BaseRel Source Target) (productive : Productive block)
+    (base : BaseRepresentations Source Target) (productive : Productive block)
     (field : FieldDecl arity) : field.Denote block Target := by
   classical
   cases field with
@@ -146,7 +146,7 @@ theorem Val.selWF_of_wf {arity : Nat} {block : Block arity}
 /-- Tester/selector guards recover the structural recursive predicate. -/
 theorem Val.wf_of_selWF {arity : Nat} {block : Block arity}
     {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-    (base : BaseRel Source Target) (productive : Productive block)
+    (base : BaseRepresentations Source Target) (productive : Productive block)
     {data : DataRef block} {value : Val block Target data}
     (guarded : value.SelWF (fun sort => (base sort).guard)) :
     value.WF (fun sort => (base sort).guard) := by
@@ -163,7 +163,7 @@ theorem Val.wf_of_selWF {arity : Nat} {block : Block arity}
 equivalent for every productive block. -/
 theorem Val.wf_iff_selWF {arity : Nat} {block : Block arity}
     {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-    (base : BaseRel Source Target) (productive : Productive block)
+    (base : BaseRepresentations Source Target) (productive : Productive block)
     {data : DataRef block} (value : Val block Target data) :
     value.WF (fun sort => (base sort).guard) ↔
       value.SelWF (fun sort => (base sort).guard) :=
@@ -173,14 +173,14 @@ mutual
   /-- Encode a source datatype without changing its constructor tree. -/
   def Val.encode {arity : Nat} {block : Block arity}
       {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-      (base : BaseRel Source Target) :
+      (base : BaseRepresentations Source Target) :
       {data : DataRef block} → Val block Source data → Val block Target data
     | _, .ctor ctor args => .ctor ctor (args.encode base)
 
   /-- Encode every external field in a constructor telescope. -/
   def Args.encode {arity : Nat} {block : Block arity}
       {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-      (base : BaseRel Source Target) :
+      (base : BaseRepresentations Source Target) :
       {fields : List (FieldDecl arity)} →
         Args block Source fields → Args block Target fields
     | _, .nil => .nil
@@ -192,7 +192,7 @@ end
 a tester. -/
 theorem Val.isCtor_encode_iff {arity : Nat} {block : Block arity}
     {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-    (base : BaseRel Source Target) {data : DataRef block}
+    (base : BaseRepresentations Source Target) {data : DataRef block}
     {ctor : CtorDecl arity} (ref : CtorRef block data ctor)
     (value : Val block Source data) :
     IsCtor ref (value.encode base) ↔ IsCtor ref value := by
@@ -219,7 +219,7 @@ mutual
   /-- Encoding always produces a structurally guarded datatype value. -/
   theorem Val.encode_wf {arity : Nat} {block : Block arity}
       {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-      (base : BaseRel Source Target) {data : DataRef block}
+      (base : BaseRepresentations Source Target) {data : DataRef block}
       (value : Val block Source data) :
       (value.encode base).WF (fun sort => (base sort).guard) := by
     cases value with
@@ -228,7 +228,7 @@ mutual
   /-- Encoded constructor arguments satisfy the recursive guard. -/
   theorem Args.encode_wf {arity : Nat} {block : Block arity}
       {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-      (base : BaseRel Source Target) {fields : List (FieldDecl arity)}
+      (base : BaseRepresentations Source Target) {fields : List (FieldDecl arity)}
       (args : Args block Source fields) :
       (args.encode base).WF (fun sort => (base sort).guard) := by
     cases args with
@@ -241,7 +241,7 @@ mutual
   /-- Decode one well-formed target datatype value. -/
   def Val.decode {arity : Nat} {block : Block arity}
       {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-      (base : BaseRel Source Target) :
+      (base : BaseRepresentations Source Target) :
       {data : DataRef block} → (value : Val block Target data) →
       value.WF (fun sort => (base sort).guard) → Val block Source data
     | _, .ctor ctor args, wellFormed =>
@@ -250,7 +250,7 @@ mutual
   /-- Decode one structurally well-formed constructor telescope. -/
   def Args.decode {arity : Nat} {block : Block arity}
       {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-      (base : BaseRel Source Target) :
+      (base : BaseRepresentations Source Target) :
       {fields : List (FieldDecl arity)} → (args : Args block Target fields) →
       args.WF (fun sort => (base sort).guard) → Args block Source fields
     | _, .nil, _ => .nil
@@ -266,7 +266,7 @@ end
 fields and structural datatype decoding at recursive fields. -/
 def FieldDecl.decode {arity : Nat} {block : Block arity}
     {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-    (base : BaseRel Source Target) (field : FieldDecl arity)
+    (base : BaseRepresentations Source Target) (field : FieldDecl arity)
     (value : field.Denote block Target)
     (wellFormed : field.WF (fun sort => (base sort).guard) value) :
     field.Denote block Source :=
@@ -277,7 +277,7 @@ def FieldDecl.decode {arity : Nat} {block : Block arity}
 /-- Decoding a constructor telescope commutes with typed field lookup. -/
 theorem Args.get_decode {arity : Nat} {block : Block arity}
     {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-    (base : BaseRel Source Target)
+    (base : BaseRepresentations Source Target)
     {fields : List (FieldDecl arity)} (args : Args block Target fields)
     {field : FieldDecl arity} (ref : Ref fields field)
     (wellFormed : args.WF (fun sort => (base sort).guard)) :
@@ -293,7 +293,7 @@ mutual
   /-- Decoding an encoded datatype value is the identity. -/
   theorem Val.decode_encode {arity : Nat} {block : Block arity}
       {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-      (base : BaseRel Source Target) {data : DataRef block}
+      (base : BaseRepresentations Source Target) {data : DataRef block}
       (value : Val block Source data) :
       (value.encode base).decode base (value.encode_wf base) = value := by
     cases value with
@@ -302,13 +302,13 @@ mutual
   /-- Decoding encoded constructor arguments is the identity. -/
   theorem Args.decode_encode {arity : Nat} {block : Block arity}
       {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-      (base : BaseRel Source Target) {fields : List (FieldDecl arity)}
+      (base : BaseRepresentations Source Target) {fields : List (FieldDecl arity)}
       (args : Args block Source fields) :
       (args.encode base).decode base (args.encode_wf base) = args := by
     cases args with
     | nil => rfl
     | base value rest =>
-        simp [Args.encode, Args.decode, Rel.decode_encode,
+        simp [Args.encode, Args.decode, SubsetRepresentation.decode_encode,
           rest.decode_encode base]
     | data value rest =>
         simp [Args.encode, Args.decode, value.decode_encode base,
@@ -319,7 +319,7 @@ mutual
   /-- Every guarded target datatype value is recovered exactly after decoding. -/
   theorem Val.encode_decode {arity : Nat} {block : Block arity}
       {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-      (base : BaseRel Source Target) {data : DataRef block}
+      (base : BaseRepresentations Source Target) {data : DataRef block}
       (value : Val block Target data)
       (wellFormed : value.WF (fun sort => (base sort).guard)) :
       (value.decode base wellFormed).encode base = value := by
@@ -330,14 +330,14 @@ mutual
   /-- Every guarded target telescope is recovered exactly after decoding. -/
   theorem Args.encode_decode {arity : Nat} {block : Block arity}
       {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-      (base : BaseRel Source Target) {fields : List (FieldDecl arity)}
+      (base : BaseRepresentations Source Target) {fields : List (FieldDecl arity)}
       (args : Args block Target fields)
       (wellFormed : args.WF (fun sort => (base sort).guard)) :
       (args.decode base wellFormed).encode base = args := by
     cases args with
     | nil => rfl
     | base value rest =>
-        simp [Args.decode, Args.encode, Rel.encode_decode,
+        simp [Args.decode, Args.encode, SubsetRepresentation.encode_decode,
           rest.encode_decode base wellFormed.2]
     | data value rest =>
         simp [Args.decode, Args.encode,
@@ -350,8 +350,8 @@ This is the generic semantic counterpart of production's recursive `wf_T`
 predicate, including mutually recursive blocks. -/
 def lift {arity : Nat} {block : Block arity}
     {Source : BaseSort → Type u} {Target : BaseSort → Type v}
-    (base : BaseRel Source Target) (productive : Productive block)
-    (data : DataRef block) : Rel (Val block Source data) (Val block Target data) where
+    (base : BaseRepresentations Source Target) (productive : Productive block)
+    (data : DataRef block) : SubsetRepresentation (Val block Source data) (Val block Target data) where
   sourceNonempty := val_nonempty productive (fun sort => (base sort).sourceNonempty) data
   encode := Val.encode base
   guard := Val.WF (fun sort => (base sort).guard)

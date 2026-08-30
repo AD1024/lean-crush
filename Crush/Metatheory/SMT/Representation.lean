@@ -232,7 +232,7 @@ def theory {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
   simp [ordinaryDecls, native]
 
 /-- A command array represents a typed theory when it carries exactly the
-semantic command set produced from an explicit ordered declaration trace.
+semantic commands produced from the explicit ordered list of declarations.
 Script validation remains responsible for declaration-before-use ordering;
 the model semantics deliberately ignores order and duplicate occurrences. -/
 def TheoryRepresentation {symbols : FO.SymbolFamily}
@@ -247,45 +247,16 @@ def ofDeclared {signature : Signature}
     (declared : DeclaredSymbol signature) : Declaration (Symbol signature) :=
   ⟨declared.declaration, declared.symbol⟩
 
-/-- Commands produced by the pure specification encoder for one closed
-flattened translation result. -/
-def translatedBody {signature : Signature}
-    (result : TranslationResult signature [] .bool) :
-    TargetSentence signature :=
-  result.term
-
-/-- Complete theory carried by a closed flattened translation result. -/
-def completeTheory {signature : Signature}
-    (result : TranslationResult signature [] .bool) :
-    TargetTheory signature :=
-  result.theory ++ [translatedBody result]
-
-/-- Commands produced by the pure specification encoder for one closed
-flattened translation result. -/
-def encode {signature : Signature} (encoding : Encoding (Symbol signature))
-    (result : TranslationResult signature [] .bool) : Array Command :=
-  theory encoding (result.declarations.map ofDeclared)
-    (completeTheory result)
-
 set_option quotPrecheck false
 
 /-- Syntax brackets for the pure FO-to-SMT term encoder. -/
 scoped notation:max "𝒶⟦" source "⟧[" encoding "]" => term encoding source
 
-/-- The pure translation encoder represents the complete generated theory and
-translated body by construction. -/
-theorem encode_translation {signature : Signature}
-    (encoding : Encoding (Symbol signature))
-    (result : TranslationResult signature [] .bool) :
-    TheoryRepresentation encoding (completeTheory result)
-      (encode encoding result) :=
-  ⟨result.declarations.map ofDeclared, Crush.SMT.SameCommandSet.refl _⟩
-
 /-! ## Finite source theories -/
 
-/-- Ordered occurrence trace of every flattened symbol declaration generated
-for a finite source theory. Repeated occurrences remain explicit, matching the
-single-sentence translator's declaration contract. -/
+/-- Ordered list of every flattened symbol declaration generated for a finite
+source theory. Repeated occurrences remain explicit, matching the
+single-sentence translator's result. -/
 def translatedDeclarations {signature : Signature}
     (source : Theory signature) : List (Declaration (Symbol signature)) :=
   source.flatMap fun formula => 𝓕⟦formula⟧.declarations.map ofDeclared

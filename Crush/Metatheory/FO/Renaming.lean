@@ -30,10 +30,10 @@ def comp (after : FamilyRenaming target third)
   fun {_} ref => after (before ref)
 
 /-- Lift a renaming beneath one binder of the same sort. -/
-def lift (rho : FamilyRenaming source target) :
+def lift (r : FamilyRenaming source target) :
     FamilyRenaming (domain :: source) (domain :: target)
   | _, .here => .here
-  | _, .there ref => .there (rho ref)
+  | _, .there ref => .there (r ref)
 
 /-- Embed a context beneath one fresh head variable. -/
 def weaken : FamilyRenaming source (domain :: source) :=
@@ -51,30 +51,30 @@ end FamilyRenaming
 mutual
   /-- Apply a typed context renaming throughout an abstract-symbol FO term. -/
   def FamilyTerm.rename {source target : Context}
-      (rho : FamilyRenaming source target) :
+      (r : FamilyRenaming source target) :
       {sort : FOSort} → FamilyTerm symbols source sort →
         FamilyTerm symbols target sort
-    | _, .var ref => .var (rho ref)
+    | _, .var ref => .var (r ref)
     | _, .symbol symbol arguments =>
-        .symbol symbol (arguments.rename rho)
+        .symbol symbol (arguments.rename r)
     | _, .boolLit value => .boolLit value
-    | _, .not body => .not (body.rename rho)
-    | _, .and left right => .and (left.rename rho) (right.rename rho)
-    | _, .or left right => .or (left.rename rho) (right.rename rho)
-    | _, .imp left right => .imp (left.rename rho) (right.rename rho)
-    | _, .iff left right => .iff (left.rename rho) (right.rename rho)
-    | _, .eq left right => .eq (left.rename rho) (right.rename rho)
-    | _, .forallE body => .forallE (body.rename (FamilyRenaming.lift rho))
-    | _, .existsE body => .existsE (body.rename (FamilyRenaming.lift rho))
+    | _, .not body => .not (body.rename r)
+    | _, .and left right => .and (left.rename r) (right.rename r)
+    | _, .or left right => .or (left.rename r) (right.rename r)
+    | _, .imp left right => .imp (left.rename r) (right.rename r)
+    | _, .iff left right => .iff (left.rename r) (right.rename r)
+    | _, .eq left right => .eq (left.rename r) (right.rename r)
+    | _, .forallE body => .forallE (body.rename (FamilyRenaming.lift r))
+    | _, .existsE body => .existsE (body.rename (FamilyRenaming.lift r))
 
   /-- Apply the same context renaming to every argument in a typed telescope. -/
   def FamilyArgs.rename {source target : Context}
-      (rho : FamilyRenaming source target) :
+      (r : FamilyRenaming source target) :
       {sorts : List FOSort} → FamilyArgs symbols source sorts →
         FamilyArgs symbols target sorts
     | [], .nil => .nil
     | _ :: _, .cons argument rest =>
-        .cons (argument.rename rho) (rest.rename rho)
+        .cons (argument.rename r) (rest.rename r)
 end
 
 /-- Move an FO family term beneath one fresh binder. -/
@@ -98,9 +98,9 @@ def FamilyArgs.append {left right : List FOSort}
   | .cons argument rest => .cons argument (rest.append second)
 
 @[simp] theorem FamilyTerm.rename_var
-    (rho : FamilyRenaming source target) (ref : Var source sort) :
-    (FamilyTerm.var (symbols := symbols) ref).rename rho =
-      .var (rho ref) := rfl
+    (r : FamilyRenaming source target) (ref : Var source sort) :
+    (FamilyTerm.var (symbols := symbols) ref).rename r =
+      .var (r ref) := rfl
 
 @[simp] theorem FamilyTerm.rename_weaken_var (ref : Var source sort) :
     (FamilyTerm.var (symbols := symbols) ref).weaken (domain := domain) =

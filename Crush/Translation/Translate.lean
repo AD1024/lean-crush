@@ -332,11 +332,11 @@ def blockEncoding {arity : Nat} (names : AllocatedDataNames arity) :
 
 end AllocatedDataNames
 
-/-- Check and retain exact agreement between one production native command and
-the canonical command computed from its typed reified block. -/
-def certifyDataCommand? (block : Metatheory.Reification.DatatypeBlock)
+/-- Build a typed native command only when it equals the canonical command
+computed from the reified datatype block. -/
+def buildNativeDatatypeCommand? (block : Metatheory.Reification.DatatypeBlock)
     (names : AllocatedDataNames block.arity) :
-    Option Metatheory.VCG.CertifiedDataCommand :=
+    Option Metatheory.VCG.NativeDatatypeCommand :=
   let encoding := names.blockEncoding
   let command := Metatheory.SMT.Datatype.command block.block encoding
   let sortNames := List.ofFn fun data : Fin block.arity =>
@@ -1269,9 +1269,9 @@ mutual
           ctors := ctorNames
           sels := selNames
           bases := baseSorts }
-        let some certificate := certifyDataCommand? block names
-          | throwError "crush: allocated native command for `{n}` failed datatype certification"
-        let _ ← TranslateM.emitCertifiedDataCommand certificate
+        let some native := buildNativeDatatypeCommand? block names
+          | throwError "crush: allocated native command for `{n}` disagrees with its datatype block"
+        let _ ← TranslateM.emitNativeDatatypeCommand native
       else
         throwError "crush: certified mutual block size drift for `{n}`"
     else

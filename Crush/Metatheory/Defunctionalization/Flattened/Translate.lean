@@ -59,7 +59,7 @@ structure SpineResult (signature : Signature) (context : Context) (result : Ty) 
   head : FunctionHead signature context headDomain headCodomain
   arguments : TargetArguments signature context
     (.arrow headDomain headCodomain) result
-  generated : GeneratedObligations signature := {}
+  generated : GeneratedOutput signature := {}
 
 namespace SpineResult
 
@@ -75,7 +75,7 @@ def weaken {context : Context} {result binder : Ty}
 def snoc {context : Context} {domain codomain : Ty}
     (spine : SpineResult signature context (.arrow domain codomain))
     (argument : TargetTerm signature context domain)
-    (generated : GeneratedObligations signature := {}) :
+    (generated : GeneratedOutput signature := {}) :
     SpineResult signature context codomain where
   headDomain := spine.headDomain
   headCodomain := spine.headCodomain
@@ -108,7 +108,7 @@ end SpineResult
 right-hand side. -/
 structure EquationResult (signature : Signature) where
   equation : TargetSentence signature
-  generated : GeneratedObligations signature := {}
+  generated : GeneratedOutput signature := {}
 
 /-- Saturate a residual translated function spine with fresh variables and make
 it the right-hand side of a closure equation. -/
@@ -127,14 +127,14 @@ def saturateEquation {context : Context}
           (.eq
             (closureArguments.completeApplication closureHead .bool)
             translatedRight.term)
-        generated := translatedRight.obligations }
+        generated := translatedRight.generated }
   | .base sort =>
       let translatedRight := right.finish (GroundResult.base sort)
       { equation := FO.FamilyFormula.closeForall
           (.eq
             (closureArguments.completeApplication closureHead (.base sort))
             translatedRight.term)
-        generated := translatedRight.obligations }
+        generated := translatedRight.generated }
   | .arrow domain codomain =>
       let weakenedHead : TargetTerm signature (domain :: context)
           (.arrow closureDomain closureCodomain) :=
@@ -210,7 +210,7 @@ def finishClosure {context : Context} {domain codomain : Ty}
   subst domain_eq
   subst codomain_eq
   let declarations :=
-    (GeneratedObligations.empty (signature := signature))
+    (GeneratedOutput.empty (signature := signature))
       |>.declare (.of (Symbol.application
         { domain := closure.domain, codomain := closure.codomain }))
       |>.declare (.of (Symbol.closure closure))
@@ -221,20 +221,20 @@ def finishClosure {context : Context} {domain codomain : Ty}
 mutual
   /-- Translate a source term through an arbitrary typed source-context renaming. -/
   def translateWith {source target : Context}
-      (ρ : Renaming source target) : {ty : Ty} →
+      (r : Renaming source target) : {ty : Ty} →
       Term signature source ty → TranslationResult signature target ty
     | ty, .var ref =>
         match ty with
-        | .bool => TranslationResult.ofGenerated (.var (targetVar (ρ ref)))
-        | .base _ => TranslationResult.ofGenerated (.var (targetVar (ρ ref)))
+        | .bool => TranslationResult.ofGenerated (.var (targetVar (r ref)))
+        | .base _ => TranslationResult.ofGenerated (.var (targetVar (r ref)))
         | .arrow domain codomain =>
             let renamed : Term signature target (.arrow domain codomain) :=
-              .var (ρ ref)
+              .var (r ref)
             let closure : Closure signature :=
               Closure.ofBody (LambdaBody.etaBody renamed)
             let closureTerm : TargetTerm signature target (.arrow domain codomain) :=
               .symbol (Symbol.closure closure) (captureArgs closure.captureRefs)
-            let right := translateSpineWith ρ (.var ref)
+            let right := translateSpineWith r (.var ref)
             finishClosure closure rfl rfl rfl closureTerm
               (saturateEquation closureTerm (.nil _) right)
 
@@ -243,12 +243,12 @@ mutual
         | .bool =>
             TranslationResult.ofGenerated
               ((TargetArguments.nil .bool).sourceApplication constant .bool)
-              ((GeneratedObligations.empty (signature := signature)).declare
+              ((GeneratedOutput.empty (signature := signature)).declare
                 (.of (Symbol.sourceConstant constant)))
         | .base sort =>
             TranslationResult.ofGenerated
               ((TargetArguments.nil (.base sort)).sourceApplication constant (.base sort))
-              ((GeneratedObligations.empty (signature := signature)).declare
+              ((GeneratedOutput.empty (signature := signature)).declare
                 (.of (Symbol.sourceConstant constant)))
         | .arrow domain codomain =>
             let renamed : Term signature target (.arrow domain codomain) :=
@@ -257,47 +257,47 @@ mutual
               Closure.ofBody (LambdaBody.etaBody renamed)
             let closureTerm : TargetTerm signature target (.arrow domain codomain) :=
               .symbol (Symbol.closure closure) (captureArgs closure.captureRefs)
-            let right := translateSpineWith ρ (.const constant)
+            let right := translateSpineWith r (.const constant)
             finishClosure closure rfl rfl rfl closureTerm
               (saturateEquation closureTerm (.nil _) right)
 
     | _, .boolLit value => TranslationResult.ofGenerated (.boolLit value)
     | _, .not body =>
-        let translated := translateWith ρ body
+        let translated := translateWith r body
         translated.replaceTerm (.not translated.term)
     | _, .and left right =>
-        let translatedLeft := translateWith ρ left
-        let translatedRight := translateWith ρ right
+        let translatedLeft := translateWith r left
+        let translatedRight := translateWith r right
         translatedLeft.combine translatedRight
           (.and translatedLeft.term translatedRight.term)
     | _, .or left right =>
-        let translatedLeft := translateWith ρ left
-        let translatedRight := translateWith ρ right
+        let translatedLeft := translateWith r left
+        let translatedRight := translateWith r right
         translatedLeft.combine translatedRight
           (.or translatedLeft.term translatedRight.term)
     | _, .imp left right =>
-        let translatedLeft := translateWith ρ left
-        let translatedRight := translateWith ρ right
+        let translatedLeft := translateWith r left
+        let translatedRight := translateWith r right
         translatedLeft.combine translatedRight
           (.imp translatedLeft.term translatedRight.term)
     | _, .iff left right =>
-        let translatedLeft := translateWith ρ left
-        let translatedRight := translateWith ρ right
+        let translatedLeft := translateWith r left
+        let translatedRight := translateWith r right
         translatedLeft.combine translatedRight
           (.iff translatedLeft.term translatedRight.term)
     | _, .eq (ty := operandType) left right =>
-        let translatedLeft := translateWith ρ left
-        let translatedRight := translateWith ρ right
+        let translatedLeft := translateWith r left
+        let translatedRight := translateWith r right
         let combined : TranslationResult signature target .bool :=
           translatedLeft.combine translatedRight
             (.eq translatedLeft.term translatedRight.term)
         match operandType with
         | .arrow domain codomain =>
-            combined.appendGenerated
+            combined.appendOutput
               (extensionality := [extensionalityFormula domain codomain])
         | .bool | .base _ => combined
     | _, .lam (domain := domain) (codomain := codomain) body =>
-        let renamedBody := body.rename (Renaming.lift ρ)
+        let renamedBody := body.rename (Renaming.lift r)
         let closure : Closure signature :=
           Closure.ofBody (LambdaBody.etaBody (.lam renamedBody))
         let closureTerm : TargetTerm signature target (.arrow domain codomain) :=
@@ -308,52 +308,52 @@ mutual
             (.arrow domain codomain) codomain :=
           .snoc ((TargetArguments.nil (.arrow domain codomain)).weaken
             (domain := domain)) (.var .here)
-        let equation := translateLambdaBodyWith (Renaming.lift ρ) body
+        let equation := translateLambdaBodyWith (Renaming.lift r) body
           weakenedHead openedArguments
         finishClosure closure rfl rfl rfl closureTerm equation
     | _, .app (domain := domain) (codomain := codomain) fn argument =>
         match codomain with
         | .bool =>
-            let spine := translateSpineWith ρ fn
-            let translatedArgument := translateWith ρ argument
-            (spine.snoc translatedArgument.term translatedArgument.obligations).finish .bool
+            let spine := translateSpineWith r fn
+            let translatedArgument := translateWith r argument
+            (spine.snoc translatedArgument.term translatedArgument.generated).finish .bool
         | .base sort =>
-            let spine := translateSpineWith ρ fn
-            let translatedArgument := translateWith ρ argument
-            (spine.snoc translatedArgument.term translatedArgument.obligations).finish
+            let spine := translateSpineWith r fn
+            let translatedArgument := translateWith r argument
+            (spine.snoc translatedArgument.term translatedArgument.generated).finish
               (.base sort)
         | .arrow residualDomain residualCodomain =>
             let renamed : Term signature target
                 (.arrow residualDomain residualCodomain) :=
-              .app (fn.rename ρ) (argument.rename ρ)
+              .app (fn.rename r) (argument.rename r)
             let closure : Closure signature :=
               Closure.ofBody (LambdaBody.etaBody renamed)
             let closureTerm : TargetTerm signature target
                 (.arrow residualDomain residualCodomain) :=
               .symbol (Symbol.closure closure) (captureArgs closure.captureRefs)
-            let right := translateSpineWith ρ (.app fn argument)
+            let right := translateSpineWith r (.app fn argument)
             finishClosure closure rfl rfl rfl closureTerm
               (saturateEquation closureTerm (.nil _) right)
     | _, .forallE (domain := domain) body =>
-        let translated := translateWith (Renaming.lift ρ) body
+        let translated := translateWith (Renaming.lift r) body
         TranslationResult.ofGenerated (.forallE translated.term)
-          translated.obligations
+          translated.generated
     | _, .existsE (domain := domain) body =>
-        let translated := translateWith (Renaming.lift ρ) body
+        let translated := translateWith (Renaming.lift r) body
         TranslationResult.ofGenerated (.existsE translated.term)
-          translated.obligations
+          translated.generated
   termination_by ty term => 4 * termSize term + 2
   decreasing_by all_goals simp_wf <;> simp [termSize] <;> omega
 
   /-- Collect and translate the entire application prefix of a function term. -/
   def translateSpineWith {source target : Context}
-      (ρ : Renaming source target) : {domain codomain : Ty} →
+      (r : Renaming source target) : {domain codomain : Ty} →
       Term signature source (.arrow domain codomain) →
         SpineResult signature target (.arrow domain codomain)
     | domain, codomain, .var ref =>
         { headDomain := domain
           headCodomain := codomain
-          head := .value (.var (targetVar (ρ ref)))
+          head := .value (.var (targetVar (r ref)))
           arguments := .nil _ }
     | domain, codomain, .const constant =>
         { headDomain := domain
@@ -361,7 +361,7 @@ mutual
           head := .sourceConstant constant
           arguments := .nil _ }
     | domain, codomain, .lam body =>
-        let renamedBody := body.rename (Renaming.lift ρ)
+        let renamedBody := body.rename (Renaming.lift r)
         let closure : Closure signature :=
           Closure.ofBody (LambdaBody.etaBody (.lam renamedBody))
         let closureTerm : TargetTerm signature target (.arrow domain codomain) :=
@@ -372,25 +372,25 @@ mutual
             (.arrow domain codomain) codomain :=
           .snoc ((TargetArguments.nil (.arrow domain codomain)).weaken
             (domain := domain)) (.var .here)
-        let equation := translateLambdaBodyWith (Renaming.lift ρ) body
+        let equation := translateLambdaBodyWith (Renaming.lift r) body
           weakenedHead openedArguments
         let translated := finishClosure closure rfl rfl rfl closureTerm equation
         { headDomain := domain
           headCodomain := codomain
           head := .value translated.term
           arguments := .nil _
-          generated := translated.obligations }
+          generated := translated.generated }
     | domain, codomain, .app fn argument =>
-        let spine := translateSpineWith ρ fn
-        let translatedArgument := translateWith ρ argument
-        spine.snoc translatedArgument.term translatedArgument.obligations
+        let spine := translateSpineWith r fn
+        let translatedArgument := translateWith r argument
+        spine.snoc translatedArgument.term translatedArgument.generated
   termination_by domain codomain term => 4 * termSize term + 1
   decreasing_by all_goals simp_wf <;> simp [termSize] <;> omega
 
   /-- Translate the terminal body of one flattened lambda closure, opening
   existing nested lambdas without allocating intermediate closures. -/
   def translateLambdaBodyWith {source target : Context}
-      (ρ : Renaming source target)
+      (r : Renaming source target)
       {closureDomain closureCodomain current : Ty}
       (term : Term signature source current)
       (closureHead : TargetTerm signature target
@@ -400,34 +400,34 @@ mutual
       EquationResult signature :=
     match current with
     | .bool =>
-        let translated := translateWith ρ term
+        let translated := translateWith r term
         { equation := FO.FamilyFormula.closeForall
             (.eq
               (closureArguments.completeApplication closureHead .bool)
               translated.term)
-          generated := translated.obligations }
+          generated := translated.generated }
     | .base sort =>
-        let translated := translateWith ρ term
+        let translated := translateWith r term
         { equation := FO.FamilyFormula.closeForall
             (.eq
               (closureArguments.completeApplication closureHead (.base sort))
               translated.term)
-          generated := translated.obligations }
+          generated := translated.generated }
     | .arrow domain codomain =>
         match term with
         | .lam body =>
-            translateLambdaBodyWith (Renaming.lift ρ) body
+            translateLambdaBodyWith (Renaming.lift r) body
               (closureHead.weaken (domain := FO.FOSort.ofTy domain))
               (.snoc (closureArguments.weaken (domain := domain)) (.var .here))
         | .var ref =>
             saturateEquation closureHead closureArguments
-              (translateSpineWith ρ (.var ref))
+              (translateSpineWith r (.var ref))
         | .const constant =>
             saturateEquation closureHead closureArguments
-              (translateSpineWith ρ (.const constant))
+              (translateSpineWith r (.const constant))
         | .app fn argument =>
             saturateEquation closureHead closureArguments
-              (translateSpineWith ρ (.app fn argument))
+              (translateSpineWith r (.app fn argument))
   termination_by 4 * termSize term + 3
   decreasing_by all_goals simp_wf <;> simp [termSize] <;> omega
 end

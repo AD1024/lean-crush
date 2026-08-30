@@ -5,7 +5,7 @@ import Crush.Metatheory.SMT.Semantics
 # Semantics of production-shaped datatype guards
 
 The syntax builder lives in `SMT.Datatype`; this module proves how those exact
-raw terms evaluate. The final production certificate supplies the
+untyped SMT terms evaluate. The final production comparison supplies the
 component-specific evidence that each selector guard evaluates to the typed
 `FieldDecl.WF` proposition.
 -/
@@ -14,7 +14,7 @@ namespace Crush.Metatheory.SMT.Datatype
 
 open scoped Crush.SMT
 
-/-- Raw terms evaluated pointwise to Boolean values in source order. Keeping
+/-- Untyped SMT terms evaluated pointwise to Boolean values in source order. Keeping
 both existing relational judgments avoids introducing a second evaluator. -/
 def BoolEvals (model : Crush.SMT.Model)
     (environment : List model.Value) (terms : Array Crush.SMT.Term)

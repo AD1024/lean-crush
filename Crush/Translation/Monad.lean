@@ -186,11 +186,11 @@ structure CommandAllocationLink where
   symbolsAllocated : ∀ symbol ∈ symbols.toList,
     symbol ∈ allocation.names
 
-/-- Exact state position and global-allocation support for one certified native
+/-- Exact state position and global-allocation support for one checked native
 datatype command. -/
-structure DataAllocationLink where
+structure NativeDatatypeAllocationLink where
   commandIndex : Nat
-  certificateIndex : Nat
+  nativeCommandIndex : Nat
   names : Array String
   allocation : NameAllocationTrace
   namesAllocated : ∀ name ∈ names.toList, name ∈ allocation.names
@@ -238,8 +238,8 @@ structure TranslateState where
   derivedSymbols : Std.HashMap DerivedSymbolKey String := {}
   /-- Emitted commands, in order. -/
   commands   : Array SMT.Command := #[]
-  /-- Syntax encodings retained for proof-facing declarations, assertions, and
-      datatype guards. These are not yet semantic certificates. -/
+  /-- Syntax encodings retained for declarations, assertions, and datatype
+      guards. Their semantic meaning is established separately. -/
   commandEncodings : Array CommandEncoding := #[]
   /-- Checked global-name dependencies of `commandEncodings`. -/
   commandAllocationLinks : Array CommandAllocationLink := #[]
@@ -250,20 +250,20 @@ structure TranslateState where
   directSource : Option Expr := none
   /-- Type-erased identity-bearing semantic certificates for live source symbols. -/
   verifiedConstants : Array Dynamic := #[]
-  /-- Opt-in certificates for datatype discovery and typed signature ownership.
-      These certify datatype lowering inputs. -/
-  datatypeCertificates : Array CertifiedDataEnv := #[]
-  /-- Fact-local certified datatype environment consumed by native declaration
-      allocation. Restored after the fact has been emitted. -/
+  /-- Source facts whose datatype environments and command locations were
+      retained for the proof-facing production comparison. -/
+  productionFacts : Array ProductionFact := #[]
+  /-- Fact-local datatype environment used while emitting native declarations.
+      Restored after the fact has been translated. -/
   activeDataSignature : Option Metatheory.Reification.SomeDataSignature := none
-  /-- Native datatype commands whose exact typed block and command
-      well-formedness have been certified. -/
-  certifiedDataCommands : Array CertifiedDataCommand := #[]
-  /-- Command-array positions appended atomically with `certifiedDataCommands`. -/
-  certifiedDataCommandIndices : Array Nat := #[]
-  certifiedDataAllocationLinks : Array DataAllocationLink := #[]
-  /-- Globally duplicate-free names owned by all certified datatype commands. -/
-  certifiedDataNames : NameAllocationTrace := default
+  /-- Native datatype commands paired with their exact typed block and command
+      well-formedness proof. -/
+  nativeDatatypeCommands : Array NativeDatatypeCommand := #[]
+  /-- Command-array positions appended atomically with `nativeDatatypeCommands`. -/
+  nativeDatatypeCommandIndices : Array Nat := #[]
+  nativeDatatypeAllocationLinks : Array NativeDatatypeAllocationLink := #[]
+  /-- Globally duplicate-free names owned by all retained datatype commands. -/
+  nativeDatatypeNames : NameAllocationTrace := default
   /-- Auditable successful uses of proof-carrying primitive mappings. -/
   certifiedHookUses : Array CertifiedHookUse := #[]
   /-- Provenance table indexed by fact id. -/
@@ -292,7 +292,7 @@ namespace TranslateState
 def status (state : TranslateState) : RunStatus :=
   if state.trustReasons.isEmpty then .proved else .trusted state.trustReasons
 
-/-- Proposition consumed by the later stateful refinement theorem. -/
+/-- The production translator used no operation marked as trusted. -/
 def Proved (state : TranslateState) : Prop :=
   state.trustReasons = #[]
 
@@ -303,7 +303,7 @@ def Proved (state : TranslateState) : Prop :=
 /-- Retained datatype-guard encodings in their emission order. The allocation
 links select them from the shared command-encoding trace without duplicating
 mutable state. -/
-def dataGuards (state : TranslateState) : Array DataGuardEncoding :=
+def dataGuards (state : TranslateState) : Array DatatypeGuardCommand :=
   state.commandAllocationLinks.filterMap fun link =>
     match state.commandEncodings[link.encodingIndex]? with
     | some (CommandEncoding.dataGuard encoding) => some encoding
@@ -376,8 +376,9 @@ def markDatatypeTrusted
       | _ => false do
     markTrusted (.datatype reason)
 
-/-- Classify the legacy direct Lean-to-SMT route as trusted exactly once. The
-proved route instead enters through `Metatheory.VCG.run`. -/
+/-- Classify the extensible direct Lean-to-SMT route as trusted exactly once.
+The metatheory proves the separately defined intrinsic command generator and
+applies to production only after `ProductionTheoryAgreement.build?` succeeds. -/
 def markDirect (source : Expr) : TranslateM Unit := do
   if (← get).directSource.isNone then
     modify fun state => { state with
@@ -389,27 +390,27 @@ def recordVerifiedConstant (certificate : Dynamic) : TranslateM Nat := do
   modify fun s => { s with verifiedConstants := s.verifiedConstants.push certificate }
   return index
 
-def recordDatatypeCertificate
-    (certificate : CertifiedDataEnv) : TranslateM Nat := do
-  let index := (← get).datatypeCertificates.size
+def recordProductionFact
+    (productionFact : ProductionFact) : TranslateM Nat := do
+  let index := (← get).productionFacts.size
   modify fun state => {
-    state with datatypeCertificates := state.datatypeCertificates.push certificate }
+    state with productionFacts := state.productionFacts.push productionFact }
   return index
 
-/-- Re-index every fact-local datatype trace against the completed production
-command array. Certificates are initially recorded while their fact is emitted;
-this final pass removes the intermediate-prefix boundary, so every retained
-certificate refers to the exact final `TranslateState.commands`. -/
-def finalizeDatatypeCertificates : TranslateM Unit := do
+/-- Recompute every fact's datatype-command locations after all facts have been
+translated. A fact is first recorded while its own assertion is being emitted;
+this final pass makes every retained `ProductionFact` refer to the complete
+final `TranslateState.commands` array. -/
+def finalizeProductionFacts : TranslateM Unit := do
   let state ← get
-  let mut certificates : Array CertifiedDataEnv := #[]
-  for certificate in state.datatypeCertificates do
-    let some certificate := certificate.withCommands? state.commands
-        state.certifiedDataCommands state.certifiedDataCommandIndices
+  let mut finalizedFacts : Array ProductionFact := #[]
+  for productionFact in state.productionFacts do
+    let some productionFact := productionFact.withCommands? state.commands
+        state.nativeDatatypeCommands state.nativeDatatypeCommandIndices
         state.dataGuards state.dataGuardIndices
-      | throwError "crush: final command array lost a certified datatype block"
-    certificates := certificates.push certificate
-  modify fun current => { current with datatypeCertificates := certificates }
+      | throwError "crush: final command array lost a native datatype block"
+    finalizedFacts := finalizedFacts.push productionFact
+  modify fun current => { current with productionFacts := finalizedFacts }
 
 def withDataSignature {α : Type}
     (signature : Metatheory.Reification.SomeDataSignature)
@@ -419,38 +420,38 @@ def withDataSignature {α : Type}
   try body finally
     modify fun state => { state with activeDataSignature := previous }
 
-/-- Emit and retain one certified native datatype command atomically, preventing
-the production command and its certificate from drifting apart. -/
-def emitCertifiedDataCommand
-    (certificate : CertifiedDataCommand) : TranslateM Nat := do
+/-- Emit a native datatype command and retain its typed description in the same
+state update, so they cannot disagree. -/
+def emitNativeDatatypeCommand
+    (native : NativeDatatypeCommand) : TranslateM Nat := do
   let state ← get
   let commandIndex := state.commands.size
-  let certificateIndex := state.certifiedDataCommands.size
-  let names := certificate.names
+  let nativeCommandIndex := state.nativeDatatypeCommands.size
+  let names := native.names
   if allocated : ∀ name ∈ names.toList, name ∈ state.nameAllocations.names then
-    if namesNodup : (names.toList ++ state.certifiedDataNames.names).Nodup then
+    if namesNodup : (names.toList ++ state.nativeDatatypeNames.names).Nodup then
       modify fun current => {
         current with
-          commands := current.commands.push certificate.command
-          certifiedDataCommands := current.certifiedDataCommands.push certificate
-          certifiedDataCommandIndices :=
-            current.certifiedDataCommandIndices.push commandIndex
-          certifiedDataAllocationLinks :=
-            current.certifiedDataAllocationLinks.push {
+          commands := current.commands.push native.command
+          nativeDatatypeCommands := current.nativeDatatypeCommands.push native
+          nativeDatatypeCommandIndices :=
+            current.nativeDatatypeCommandIndices.push commandIndex
+          nativeDatatypeAllocationLinks :=
+            current.nativeDatatypeAllocationLinks.push {
               commandIndex
-              certificateIndex
+              nativeCommandIndex
               names
               allocation := state.nameAllocations
               namesAllocated := allocated }
-          certifiedDataNames := {
-            names := names.toList ++ state.certifiedDataNames.names
+          nativeDatatypeNames := {
+            names := names.toList ++ state.nativeDatatypeNames.names
             nodup := namesNodup } }
       return commandIndex
     else
-      throwError "crush: certified datatype commands share an owned symbol"
+      throwError "crush: retained datatype commands share an owned symbol"
   else
     let missing := names.filter fun name => !state.nameAllocations.names.contains name
-    throwError "crush: certified datatype command uses unallocated names: {missing}"
+    throwError "crush: native datatype command uses unallocated names: {missing}"
 
 def recordCertifiedHookUse (declaration : Name) (targetSymbol : String) :
     TranslateM Unit :=
@@ -464,8 +465,8 @@ private def sanitizeSymbol (s : String) : String :=
   let s := String.ofList (s.toList.map (fun c => if ok c then c else '_'))
   if s.isEmpty || s.front.isDigit then "cr_" ++ s else s
 
-/-- Names with fixed meaning in the proved raw semantics. The opt-in datatype
-certificate reserves them before allocation so a user declaration cannot make
+/-- Names with fixed meaning in the proved untyped semantics. The opt-in
+datatype path reserves them before allocation so a user declaration cannot make
 an intrinsic datatype sort equal to `Bool`/`Int`/`String`, or make a native
 constructor/selector parse as a logical connective. -/
 private def proofReservedName (name : String) : Bool :=
