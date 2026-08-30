@@ -12,7 +12,7 @@ namespace Crush.Metatheory.Defunctionalization.Flattened
 
 /-- An existentially packaged flattened symbol together with its declaration.
 Unlike a bare `FO.SymbolDecl`, this retains the structural identity of a source
-constant, application symbol, closure occurrence, or certified primitive. -/
+constant, application symbol, or closure occurrence. -/
 structure DeclaredSymbol (signature : Signature) where
   declaration : FO.SymbolDecl
   symbol : Symbol signature declaration
@@ -37,9 +37,7 @@ heterogeneous collections of recursive results can accumulate them uniformly. -/
 structure GeneratedObligations (signature : Signature) where
   declarations : List (DeclaredSymbol signature) := []
   equations : TargetTheory signature := []
-  guards : TargetTheory signature := []
   extensionality : TargetTheory signature := []
-  primitiveConstraints : TargetTheory signature := []
 
 namespace GeneratedObligations
 
@@ -61,15 +59,12 @@ def append (left right : GeneratedObligations signature) :
     GeneratedObligations signature :=
   { declarations := left.declarations ++ right.declarations
     equations := left.equations ++ right.equations
-    guards := left.guards ++ right.guards
-    extensionality := left.extensionality ++ right.extensionality
-    primitiveConstraints := left.primitiveConstraints ++ right.primitiveConstraints }
+    extensionality := left.extensionality ++ right.extensionality }
 
 /-- Complete generated auxiliary theory in stable provenance order. -/
 def theory (generated : GeneratedObligations signature) :
     TargetTheory signature :=
-  generated.equations ++ generated.guards ++ generated.extensionality ++
-    generated.primitiveConstraints
+  generated.equations ++ generated.extensionality
 
 end GeneratedObligations
 
@@ -79,9 +74,7 @@ structure TranslationResult (signature : Signature) (context : Context) (ty : Ty
   term : TargetTerm signature context ty
   declarations : List (DeclaredSymbol signature) := []
   equations : TargetTheory signature := []
-  guards : TargetTheory signature := []
   extensionality : TargetTheory signature := []
-  primitiveConstraints : TargetTheory signature := []
 
 namespace TranslationResult
 
@@ -96,18 +89,14 @@ def ofGenerated
   { term
     declarations := generated.declarations
     equations := generated.equations
-    guards := generated.guards
-    extensionality := generated.extensionality
-    primitiveConstraints := generated.primitiveConstraints }
+    extensionality := generated.extensionality }
 
 /-- Forget the result term while retaining every generated obligation. -/
 def obligations (result : TranslationResult signature context ty) :
-    GeneratedObligations signature where
+  GeneratedObligations signature where
   declarations := result.declarations
   equations := result.equations
-  guards := result.guards
   extensionality := result.extensionality
-  primitiveConstraints := result.primitiveConstraints
 
 /-- Complete generated auxiliary theory in stable provenance order. -/
 def theory (result : TranslationResult signature context ty) :
@@ -117,8 +106,7 @@ def theory (result : TranslationResult signature context ty) :
 @[simp] theorem mem_theory (result : TranslationResult signature context ty)
     (formula : TargetSentence signature) :
     formula ∈ result.theory ↔
-      formula ∈ result.equations ∨ formula ∈ result.guards ∨
-      formula ∈ result.extensionality ∨ formula ∈ result.primitiveConstraints := by
+      formula ∈ result.equations ∨ formula ∈ result.extensionality := by
   simp [theory, obligations, GeneratedObligations.theory]
 
 /-- Replace only the translated term while retaining every generated
@@ -137,23 +125,19 @@ def combine (left : TranslationResult signature context leftTy)
   term
   declarations := left.declarations ++ right.declarations
   equations := left.equations ++ right.equations
-  guards := left.guards ++ right.guards
   extensionality := left.extensionality ++ right.extensionality
-  primitiveConstraints := left.primitiveConstraints ++ right.primitiveConstraints
 
 /-- Retain a recursive result while appending obligations generated at the
 current syntax node. -/
 def appendGenerated (result : TranslationResult signature context ty)
     (declarations : List (DeclaredSymbol signature) := [])
-    (equations guards extensionality primitiveConstraints :
+    (equations extensionality :
       TargetTheory signature := []) :
     TranslationResult signature context ty :=
   { result with
     declarations := result.declarations ++ declarations
     equations := result.equations ++ equations
-    guards := result.guards ++ guards
-    extensionality := result.extensionality ++ extensionality
-    primitiveConstraints := result.primitiveConstraints ++ primitiveConstraints }
+    extensionality := result.extensionality ++ extensionality }
 
 /-- Replace all generated output at once. -/
 def withObligations (result : TranslationResult signature context ty)
@@ -162,9 +146,7 @@ def withObligations (result : TranslationResult signature context ty)
   { result with
     declarations := generated.declarations
     equations := generated.equations
-    guards := generated.guards
-    extensionality := generated.extensionality
-    primitiveConstraints := generated.primitiveConstraints }
+    extensionality := generated.extensionality }
 
 end TranslationResult
 

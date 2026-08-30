@@ -306,12 +306,6 @@ private def flattenedAppSymbol :
     Flattened.Symbol [] (FO.appDecl entity entity) :=
   .application { domain := entity, codomain := entity }
 
-/-- Certified primitives remain distinct from ordinary source constants even
-when they have the same declaration shape. -/
-private def flattenedPrimitiveSymbol :
-    Flattened.Symbol partialSignature (sourceDecl (.arrow entity (.arrow entity entity))) :=
-  .certifiedPrimitive (.production binaryFn)
-
 /-- A result with no generated formulas has an empty combined theory. -/
 private def variableTranslation :
     Flattened.TranslationResult [] [entity] entity where
@@ -324,7 +318,7 @@ private def guardedTranslation :
     Flattened.TranslationResult [] [entity] .bool where
   term := .boolLit true
   equations := [.boolLit true]
-  guards := [.boolLit false]
+  extensionality := [.boolLit false]
 
 example : guardedTranslation.theory = [.boolLit true, .boolLit false] := rfl
 
@@ -357,13 +351,13 @@ private def repeatedArguments :
 example
     (translateTerm : {ty : Ty} → Term partialSignature [entity] ty →
       Flattened.TranslationResult partialSignature [entity] ty)
-    (guard : (translateTerm (.var .here :
-      Term partialSignature [entity] entity)).guards = [.boolLit true]) :
-    (repeatedArguments.translate translateTerm).generated.guards.length = 2 := by
+    (equation : (translateTerm (.var .here :
+      Term partialSignature [entity] entity)).equations = [.boolLit true]) :
+    (repeatedArguments.translate translateTerm).generated.equations.length = 2 := by
   simp only [repeatedArguments, Flattened.AppliedArguments.translate]
-  change ((translateTerm (.var .here)).guards ++
-    (translateTerm (.var .here)).guards).length = 2
-  rw [guard]
+  change ((translateTerm (.var .here)).equations ++
+    (translateTerm (.var .here)).equations).length = 2
+  rw [equation]
   rfl
 
 /-- The target-side telescope can emit an n-ary application only after its

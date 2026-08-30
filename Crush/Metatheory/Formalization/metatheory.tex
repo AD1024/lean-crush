@@ -379,9 +379,9 @@ With a family, the translator instead constructs a structural identity
 $p:S(d)$ immediately. Recursive results concatenate an occurrence trace of
 existential packages $(d,p)$, while already constructed terms remain unchanged.
 For flattened defunctionalization, $S$ is an indexed inductive family whose
-constructors represent source constants, application symbols, closures, and
-certified primitives. Each constructor's result index is its exact declaration;
-Section~4.2 spells out those four shapes.
+constructors represent source constants, application symbols, and closures.
+Each constructor's result index is its exact declaration; Section~4.2 spells
+out those three shapes.
 
 \paragraph{From abstract identities to concrete symbols.}
 The abstraction is removed only at a boundary where allocation information is
@@ -503,11 +503,11 @@ The target symbol family has four semantic roles:
        \erase{\gamma_1}\times\cdots\times\erase{\gamma_m}
        \longrightarrow\Fn(\tau,\sigma);
        \]
- \item a certified primitive symbol carrying a proof that its chosen semantic
-       value equals the canonical flattened interpretation of its source
-       constant.
 \end{enumerate}
 The roles remain distinct even when two declarations have the same shape.
+Certified production hooks use the separate semantic contracts in
+\path{Hooks.lean}; the total structural translator does not add a second symbol
+identity for them.
 \leanfile{Defunctionalization/Flattened/Symbol.lean}
 \end{definition}
 
@@ -517,7 +517,7 @@ The roles remain distinct even when two declarations have the same shape.
 For $\Sigma;\Gamma\vdash e:\tau$, the total translation result
 $\flattr{e}$ contains
 \[
- \flattr{e}=(t_e,D_e,E_e,G_e,X_e,P_e),
+ \flattr{e}=(t_e,D_e,E_e,X_e),
 \]
 where:
 \begin{itemize}[leftmargin=*]
@@ -525,13 +525,11 @@ where:
        $\erase{\tau}$;
  \item $D_e$ is the ordered trace of required symbol declarations;
  \item $E_e$ is the list of closure equations;
- \item $G_e$ is the list of representation guards;
  \item $X_e$ is the list of extensionality formulas;
- \item $P_e$ is the list of certified primitive constraints.
 \end{itemize}
 The generated auxiliary theory and the complete theory of a source sentence are
 \[
- \Gen(e)=E_e\mathbin{+\!+}G_e\mathbin{+\!+}X_e\mathbin{+\!+}P_e,
+ \Gen(e)=E_e\mathbin{+\!+}X_e,
  \qquad
  \Theory(\varphi)=\Gen(\varphi)\mathbin{+\!+}[t_\varphi].
 \]
@@ -611,8 +609,7 @@ remain uniform at all types. In $\widehat M_s$:
  \item flattened source symbols perform repeated source application;
  \item $\app_{\tau,\sigma}$ performs repeated source application;
  \item $\clos_\chi$ reconstructs the exact captured source environment and
-       denotes the source lambda;
- \item certified primitives use their proved canonical interpretation.
+       denotes the source lambda.
 \end{itemize}
 This does not claim that all target models contain actual functions. It is a
 countermodel construction used only in the soundness proof.
@@ -628,7 +625,7 @@ $\Sigma;\Gamma\vdash e:\tau$,
 \[
  \den{t_e}{\widehat M_s}{\widehat\rho}
  =\mathsf{toCanonical}_\tau\bigl(\den{e}{M_s}{\rho}\bigr),
- \qquad\text{where }\flattr{e}=(t_e,D_e,E_e,G_e,X_e,P_e).
+ \qquad\text{where }\flattr{e}=(t_e,D_e,E_e,X_e).
 \]
 \leanfile{Defunctionalization/Flattened/Denotation.lean}
 \end{theorem}
@@ -651,8 +648,7 @@ For every $e$, the same canonical model satisfies the entire auxiliary theory:
 A second simultaneous induction follows the three translator modes. Closure
 equations use term preservation and eta correctness; function extensionality is
 valid because the canonical function carriers are genuine source function
-spaces. Guards and primitive constraints are retained in the induction even
-when a particular structural term generates none.
+spaces.
 \end{proof}
 
 \begin{theorem}[Flattened model extension]
@@ -899,7 +895,7 @@ only when its chosen target meaning is proved equal to the canonical meaning of
 its source constant. Arbitrary metaprogram handlers remain trusted.
 \leanfile{Hooks.lean}
 
-Guarded encodings and certified primitives are modeled components, but the
+Guarded encodings and certified hook contracts are modeled components, but the
 current proved raw-command encoder treats flattened symbols as fresh user
 symbols. A full proved path for interpreted integer operations requires an
 extended encoding and model-lifting theorem for the corresponding SMT built-ins;
@@ -1045,8 +1041,8 @@ The principal declarations, in proof order, are:
        application symbol denotes repeated source application.
  \item \path{Flattened.translate_denote}: the translated term component has
        the source denotation in the canonical model.
- \item \path{Flattened.generated_valid}: all generated equations, guards,
-       extensionality formulas, and primitive constraints are valid.
+ \item \path{Flattened.generated_valid}: all generated equations and
+       extensionality formulas are valid.
  \item \path{Flattened.model_extension}: every satisfying source model
        extends to the complete flattened target theory.
  \item \path{Flattened.target_unsat_implies_source_unsat}: FO

@@ -4,9 +4,7 @@ import Crush.Metatheory.Defunctionalization.Flattened.Denotation
 # Validity of the generated flattened theory
 
 Every equation and extensionality axiom emitted by total flattened translation
-holds in the same canonical model used for term denotation.  Guards and
-primitive constraints are included in the final theorem as well; the current
-structural translator emits neither family.
+holds in the same canonical model used for term denotation.
 -/
 
 namespace Crush.Metatheory.Defunctionalization.Flattened
@@ -417,9 +415,7 @@ semantic obligation. -/
 structure GenValid (M : Model signature)
     (generated : GeneratedObligations signature) : Prop where
   equations : canonicalModel M ⊨ᵀ generated.equations
-  guards : canonicalModel M ⊨ᵀ generated.guards
   extensionality : canonicalModel M ⊨ᵀ generated.extensionality
-  primitives : canonicalModel M ⊨ᵀ generated.primitiveConstraints
 
 namespace GenValid
 
@@ -436,17 +432,12 @@ theorem append {left right : GeneratedObligations signature}
   · exact (FO.FamilyModel.satisfiesTheory_append _ _ _).2
       ⟨leftValid.equations, rightValid.equations⟩
   · exact (FO.FamilyModel.satisfiesTheory_append _ _ _).2
-      ⟨leftValid.guards, rightValid.guards⟩
-  · exact (FO.FamilyModel.satisfiesTheory_append _ _ _).2
       ⟨leftValid.extensionality, rightValid.extensionality⟩
-  · exact (FO.FamilyModel.satisfiesTheory_append _ _ _).2
-      ⟨leftValid.primitives, rightValid.primitives⟩
 
 theorem declare {generated : GeneratedObligations signature}
     (valid : GenValid M generated) (declaration : DeclaredSymbol signature) :
     GenValid M (generated.declare declaration) := by
-  exact ⟨valid.equations, valid.guards, valid.extensionality,
-    valid.primitives⟩
+  exact ⟨valid.equations, valid.extensionality⟩
 
 theorem addEquation {generated : GeneratedObligations signature}
     (valid : GenValid M generated) (formula : TargetSentence signature)
@@ -460,9 +451,7 @@ theorem addEquation {generated : GeneratedObligations signature}
         simpa only [List.mem_singleton] using membership
       subst candidate
       exact formulaValid⟩
-  · exact valid.guards
   · exact valid.extensionality
-  · exact valid.primitives
 
 theorem addExt {generated : GeneratedObligations signature}
     (valid : GenValid M generated) (formula : TargetSentence signature)
@@ -471,7 +460,6 @@ theorem addExt {generated : GeneratedObligations signature}
       { generated with extensionality := generated.extensionality ++ [formula] } := by
   constructor
   · exact valid.equations
-  · exact valid.guards
   · apply (FO.FamilyModel.satisfiesTheory_append _ _ _).2
     exact ⟨valid.extensionality, by
       intro candidate membership
@@ -479,17 +467,13 @@ theorem addExt {generated : GeneratedObligations signature}
         simpa only [List.mem_singleton] using membership
       subst candidate
       exact formulaValid⟩
-  · exact valid.primitives
 
 theorem theory {generated : GeneratedObligations signature}
     (valid : GenValid M generated) :
     canonicalModel M ⊨ᵀ generated.theory := by
   unfold GeneratedObligations.theory
-  rw [FO.FamilyModel.satisfiesTheory_append,
-    FO.FamilyModel.satisfiesTheory_append,
-    FO.FamilyModel.satisfiesTheory_append]
-  exact ⟨⟨⟨valid.equations, valid.guards⟩, valid.extensionality⟩,
-    valid.primitives⟩
+  exact (FO.FamilyModel.satisfiesTheory_append _ _ _).2
+    ⟨valid.equations, valid.extensionality⟩
 
 end GenValid
 

@@ -169,6 +169,11 @@ exhaustiveness, and rank properties separately.
 - The unused parallel `VCG.TranslationStatus` hierarchy was removed. The pure
   route now returns one `TranslateState`; `StateRepresents` carries semantic
   evidence, while `TranslateState.status` remains the operational trust marker.
+- The unused intrinsic `certifiedPrimitive` symbol and the never-populated
+  generated `guards`/`primitiveConstraints` channels were removed. Live hook
+  certificates remain in `Hooks.lean`; carrying semantic functions inside the
+  globally name-injective structural symbol family was both unnecessary and an
+  obstacle to constructing a concrete encoding.
 
 ## Naming and organization rules
 
