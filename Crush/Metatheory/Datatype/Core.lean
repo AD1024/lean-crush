@@ -419,17 +419,3 @@ def wellFormed {arity : Nat} (block : Block arity) : Bool :=
 end Block
 
 end Crush.Metatheory.Datatype
-
-namespace Crush.Metatheory
-
-/-- `B ⊢ᴰ` is the type of datatype positions in block `B`. -/
-scoped notation:arg block:arg " ⊢ᴰ" => Datatype.DataRef block
-
-/-- `B ⊢ᶜ[d] C` witnesses constructor `C` of datatype position `d` in `B`. -/
-scoped notation:50 block:51 " ⊢ᶜ[" data "] " ctor:51 =>
-  Datatype.CtorRef block data ctor
-
-/-- `C ⊢ᶠ F` witnesses field `F` of constructor `C`. -/
-scoped notation:50 ctor:51 " ⊢ᶠ " field:51 => Datatype.FieldRef ctor field
-
-end Crush.Metatheory

@@ -51,6 +51,11 @@
 \newcommand{\Val}{\mathsf{Val}}
 \newcommand{\WF}{\mathsf{WF}}
 \newcommand{\dsort}[2]{\beta_{#1,#2}}
+\newcommand{\DataRef}[1]{\mathsf{DataRef}(#1)}
+\newcommand{\CtorRef}[3]{\mathsf{CtorRef}(#1,#2,#3)}
+\newcommand{\FieldRef}[2]{\mathsf{FieldRef}(#1,#2)}
+\newcommand{\HOTerm}[4]{#3:\mathsf{Term}_{#1}(#2,#4)}
+\newcommand{\FOTerm}[4]{#3:\mathsf{FamilyTerm}_{#1}(#2,#4)}
 \newcommand{\args}{\mathsf{args}}
 \newcommand{\res}{\mathsf{res}}
 \newcommand{\FV}{\mathsf{FV}}
@@ -164,6 +169,12 @@ respectively. Proof-facing Lean declarations use the corresponding Greek
 binders; executable allocation and state code keeps descriptive names when
 several objects have the same mathematical role.
 
+We reserve $\Phi\vdash\varphi$ strictly for syntactic entailment in an
+explicitly specified deductive system. The present formalization defines no
+such proof calculus: intrinsic syntax is written as inhabitation of an indexed
+term family, and semantic claims use satisfaction. In particular, $\vdash$
+does not denote typing, context lookup, or membership in a datatype block.
+
 \section{The intrinsically typed higher-order source}
 \sectioncontents{Types, contexts, terms, and ordinary higher-order semantics.}
 
@@ -205,29 +216,30 @@ by $k$ from the signature. The subscripts are typed lookup witnesses, not
 variable or constant names.
 
 \begin{definition}[Source terms]
-The intrinsic judgment $\Sigma;\Gamma\vdash e:\tau$ has variables, constants,
+An intrinsic source term is written $\HOTerm{\Sigma}{\Gamma}{e}{\tau}$.
+This indexed family has variables, constants,
 Boolean literals and connectives, same-type equality, lambda, application, and
 universal and existential quantification:
 \begin{mathpar}
  \inferrule{i:\Gamma\ni\tau}
-   {\Sigma;\Gamma\vdash x_i:\tau}
+   {\HOTerm{\Sigma}{\Gamma}{x_i}{\tau}}
  \qquad
  \inferrule{k:\Sigma\ni\tau}
-   {\Sigma;\Gamma\vdash c_k:\tau}
+   {\HOTerm{\Sigma}{\Gamma}{c_k}{\tau}}
 
- \inferrule{\Sigma;\Gamma,\tau\vdash e:\sigma}
-   {\Sigma;\Gamma\vdash\lambda x{:}\tau.e:\tau\to\sigma}
+ \inferrule{\HOTerm{\Sigma}{\Gamma,\tau}{e}{\sigma}}
+   {\HOTerm{\Sigma}{\Gamma}{\lambda x{:}\tau.e}{\tau\to\sigma}}
  \qquad
- \inferrule{\Sigma;\Gamma\vdash f:\tau\to\sigma\\
-             \Sigma;\Gamma\vdash a:\tau}
-   {\Sigma;\Gamma\vdash f\,a:\sigma}
+ \inferrule{\HOTerm{\Sigma}{\Gamma}{f}{\tau\to\sigma}\\
+             \HOTerm{\Sigma}{\Gamma}{a}{\tau}}
+   {\HOTerm{\Sigma}{\Gamma}{f\,a}{\sigma}}
 
- \inferrule{\Sigma;\Gamma\vdash e_1:\tau\\
-             \Sigma;\Gamma\vdash e_2:\tau}
-   {\Sigma;\Gamma\vdash e_1=e_2:\Bool}
+ \inferrule{\HOTerm{\Sigma}{\Gamma}{e_1}{\tau}\\
+             \HOTerm{\Sigma}{\Gamma}{e_2}{\tau}}
+   {\HOTerm{\Sigma}{\Gamma}{e_1=e_2}{\Bool}}
  \qquad
- \inferrule{\Sigma;\Gamma,\tau\vdash\varphi:\Bool\\Q\in\{\forall,\exists\}}
-   {\Sigma;\Gamma\vdash Qx{:}\tau.\varphi:\Bool}.
+ \inferrule{\HOTerm{\Sigma}{\Gamma,\tau}{\varphi}{\Bool}\\Q\in\{\forall,\exists\}}
+   {\HOTerm{\Sigma}{\Gamma}{Qx{:}\tau.\varphi}{\Bool}}.
 \end{mathpar}
 The omitted rules are the standard typed Boolean rules. A formula is a term of
 type $\Bool$; a sentence is a formula in the empty context.
@@ -348,15 +360,14 @@ name and an ordered field list; a datatype declaration is a base-sort identity
 and an ordered constructor list. A block $B$ assigns one datatype declaration
 to every $d\in\mathsf{Fin}(n)$. Typed positions, rather than names, identify
 members. We write $\dsort{B}{d}$ for the base-sort identity stored in the
-declaration at position $d$. After this definition we also write
+declaration at position $d$. The corresponding intrinsic reference types are
 \[
- B\vdash_D d,\qquad B\vdash_C[d]K,\qquad K\vdash_F F
+ \DataRef{B},\qquad \CtorRef{B}{d}{K},\qquad \FieldRef{K}{F}.
 \]
-for a datatype position, a constructor position in $d$, and a field position
-in $K$, respectively. These correspond to Lean's scoped notations
-\texttt{B~$\vdash$\textsuperscript{D}},
-\texttt{B~$\vdash$\textsuperscript{C}[d]~K}, and
-\texttt{K~$\vdash$\textsuperscript{F}~F}.
+Their inhabitants select, respectively, a datatype position $d$ in $B$, a
+constructor $K$ of $d$, and a field $F$ of $K$. The notation deliberately
+mirrors the Lean type families \texttt{DataRef}, \texttt{CtorRef}, and
+\texttt{FieldRef}; none is an entailment relation.
 \leanfile{Datatype/Core.lean}
 \end{definition}
 
@@ -539,7 +550,7 @@ $\Gamma$, the argument-vector family follows the declaration telescope:
 \begin{aligned}
  \mathsf{Args}_S(\Gamma,[])&=\{()\},\\
  \mathsf{Args}_S(\Gamma,\kappa_1::\bar\kappa)
-   &=\{t\mid S;\Gamma\vdash t:\kappa_1\}
+   &=\{t\mid \FOTerm{S}{\Gamma}{t}{\kappa_1}\}
      \times\mathsf{Args}_S(\Gamma,\bar\kappa).
 \end{aligned}
 \]
@@ -547,7 +558,7 @@ The only general symbol-application rule is
 \begin{mathpar}
  \inferrule{p:S(d)\\
              \bar t:\mathsf{Args}_S(\Gamma,d.\mathsf{args})}
-   {S;\Gamma\vdash p(\bar t):d.\mathsf{result}}.
+   {\FOTerm{S}{\Gamma}{p(\bar t)}{d.\mathsf{result}}}.
 \end{mathpar}
 Consequently the result sort and the complete ordered list of argument sorts
 are determined by the index $d$. A missing, extra, or incorrectly sorted
@@ -556,12 +567,18 @@ applied; partial application is not a target-language operation.
 \end{definition}
 
 For example, let $d=(\kappa_1,\kappa_2;\kappa)$ and let $p,q:S(d)$ be distinct
-symbols. Given $S;\Gamma\vdash u:\kappa_1$ and
-$S;\Gamma\vdash v:\kappa_2$, both $p(u,v)$ and $q(u,v)$ have sort $\kappa$,
-but they remain different terms. Neither $p(u)$ nor $p(v,u)$ is constructible.
+symbols. Given
+\[
+ \FOTerm{S}{\Gamma}{u}{\kappa_1}
+ \qquad\text{and}\qquad
+ \FOTerm{S}{\Gamma}{v}{\kappa_2},
+\]
+both $p(u,v)$ and $q(u,v)$ have sort $\kappa$, but they remain different
+terms. Neither $p(u)$ nor $p(v,u)$ is constructible.
 
 \begin{definition}[Target terms]
-For a symbol family $S$, the intrinsic judgment $S;\Gamma\vdash t:\kappa$
+For a symbol family $S$, the indexed type
+$\FOTerm{S}{\Gamma}{t}{\kappa}$
 contains variables, the fully applied family symbols above, Boolean literals
 and connectives, same-sort equality, and first-order quantifiers. It contains
 neither lambda nor a distinguished higher-order application constructor. A
@@ -684,7 +701,7 @@ in $e$. Beneath a binder, position zero is removed and positive positions are
 shifted down. A closure descriptor
 \[
  \chi=(\Gamma,\tau,\sigma,e),
- \qquad \Sigma;\Gamma,\tau\vdash e:\sigma,
+ \qquad \HOTerm{\Sigma}{\Gamma,\tau}{e}{\sigma},
 \]
 stores the lambda's context, domain, codomain, body, and the typed references
 selected from $\FV(e)$. If their types are
@@ -721,7 +738,7 @@ identity for them.
 \subsection{What translation returns}
 
 \begin{definition}[Translation result]
-For $\Sigma;\Gamma\vdash e:\tau$, write $\flattr{e}$ for the total
+For $\HOTerm{\Sigma}{\Gamma}{e}{\tau}$, write $\flattr{e}$ for the total
 flattened translation result. It contains
 \[
  \flattr{e}=(t_e,D_e,E_e,X_e),
@@ -834,7 +851,7 @@ $\widehat\rho$ by applying $\mathsf{toCanonical}$ pointwise.
 
 \begin{theorem}[Flattened term preservation]
 For every source model $M_s$, valuation $\rho$, and typed source term
-$\Sigma;\Gamma\vdash e:\tau$:\leanfile{Defunctionalization/Flattened/Denotation.lean}
+$\HOTerm{\Sigma}{\Gamma}{e}{\tau}$:\leanfile{Defunctionalization/Flattened/Denotation.lean}
 \[
  \den{t_e}{\widehat M_s}{\widehat\rho}
  =\mathsf{toCanonical}_\tau\bigl(\den{e}{M_s}{\rho}\bigr),

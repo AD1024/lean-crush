@@ -117,7 +117,8 @@ theorem wrap_inSort (step : Step source)
       rw [equal]
       exact typed
   | raw rawSort =>
-      change rawSort = sort ∧ ∀ intrinsic, fo.sort intrinsic ≠ rawSort at typed ⊢
+      change rawSort = sort ∧ ∀ intrinsic, fo.sort intrinsic ≠ rawSort at typed
+      change rawSort = sort ∧ ∀ intrinsic, fo.sort intrinsic ≠ rawSort
       exact typed
 
 theorem inSort_of_wrap (step : Step source)
@@ -131,7 +132,8 @@ theorem inSort_of_wrap (step : Step source)
       rw [equal] at typed
       exact typed
   | raw rawSort =>
-      change rawSort = sort ∧ ∀ intrinsic, fo.sort intrinsic ≠ rawSort at typed ⊢
+      change rawSort = sort ∧ ∀ intrinsic, fo.sort intrinsic ≠ rawSort at typed
+      change rawSort = sort ∧ ∀ intrinsic, fo.sort intrinsic ≠ rawSort
       exact typed
 
 theorem unwrap_inSort (step : Step source)
@@ -145,7 +147,8 @@ theorem unwrap_inSort (step : Step source)
       rw [equal]
       exact typed
   | raw rawSort =>
-      change rawSort = sort ∧ ∀ intrinsic, fo.sort intrinsic ≠ rawSort at typed ⊢
+      change rawSort = sort ∧ ∀ intrinsic, fo.sort intrinsic ≠ rawSort at typed
+      change rawSort = sort ∧ ∀ intrinsic, fo.sort intrinsic ≠ rawSort
       exact typed
 
 theorem wrap_injective (step : Step source)
@@ -333,7 +336,8 @@ theorem apply_wrap_iff (step : Step source)
         (step.prior.target.symbol symbol) values)
   have carriedEval := step.applyValues_carry fo external.1
     external.2 (step.prior.target.symbol symbol) valuesTyped
-  dsimp only [target, Lifted.extend] at symbolEq carriedEval ⊢
+  dsimp only [target, Lifted.extend] at symbolEq carriedEval
+  dsimp only [target, Lifted.extend]
   constructor
   · rintro ⟨otherDecl, otherSymbol, identEq, outputEq⟩
     have declEq := fo.ident_decl_injective symbol otherSymbol identEq
@@ -395,7 +399,8 @@ theorem apply_unwrap (step : Step source)
   have valuesEq := step.values_wrap_unwrap fo external.1 valuesTyped
   have outputRoundtrip :=
     step.wrap_unwrap_of_inSort fo external.2 output outputTyped
-  dsimp only [target, Lifted.extend] at valuesEq outputRoundtrip outputEq ⊢
+  dsimp only [target, Lifted.extend] at valuesEq outputRoundtrip outputEq
+  dsimp only [target, Lifted.extend]
   have baseApply : (SMT.model fo step.target).apply
       (fo.ident symbol) values output :=
     ⟨decl, symbol, rfl, outputEq⟩
@@ -594,7 +599,8 @@ theorem ctor_holds_carry (step : Step source)
       (sorts := ctor.fields.map (FieldDecl.fo oldBlock)) fieldExternal (by
         simpa [List.map_map, Function.comp_def] using rightTyped)
     have mappedEq := congrArg (List.map step.wrap) oldArgsEq
-    dsimp only [target, Lifted.extend] at leftRound rightRound mappedEq ⊢
+    dsimp only [target, Lifted.extend] at leftRound rightRound mappedEq
+    dsimp only [target, Lifted.extend]
     exact leftRound.symm.trans (mappedEq.trans rightRound)
 
 /-- Selector totality and the matching-constructor equation survive a later
@@ -938,10 +944,12 @@ theorem exhaustive_carry (step : Step source)
     value encodedTyped
   have mapped' : Crush.SMT.CtorApplies (SMT.model fo step.target)
       rawCtor (arguments.map step.wrap) (step.wrap (step.unwrap value)) := by
-    dsimp only [target, Lifted.extend] at mapped ⊢
+    dsimp only [target, Lifted.extend] at mapped
+    dsimp only [target, Lifted.extend]
     exact ctorEq.symm ▸ mapped
   refine ⟨rawCtor, ctorMem, arguments.map step.wrap, ?_⟩
-  dsimp only [target, Lifted.extend] at valueRound mapped' ⊢
+  dsimp only [target, Lifted.extend] at valueRound mapped'
+  dsimp only [target, Lifted.extend]
   exact valueRound ▸ mapped'
 
 /-- The preceding structural rank, composed with unwrapping, still decreases
@@ -1051,7 +1059,8 @@ theorem symbol_unary_carry (step : Step source)
   have equal := step.law.extend_symbol_external step.wf step.productive
     step.prior.target step.prior.relation step.prior.models symbol
     carried.unowned carried.external
-  dsimp only [target, Lifted.extend] at equal ⊢
+  dsimp only [target, Lifted.extend] at equal
+  dsimp only [target, Lifted.extend]
   rw [equal]
   rfl
 
@@ -1745,7 +1754,8 @@ theorem Represented.commands_with_extra
   induction represented with
   | nil => exact Crush.SMT.Model.satisfiesCommands_empty _
   | @cons entry rest data head tail ih =>
-      rw [Represented.commands] at valid ⊢
+      rw [Represented.commands] at valid
+      rw [Represented.commands]
       have parts := (Crush.SMT.Model.satisfiesCommands_append _ _ _).mp valid
       have headValid : (SMT.model fo target).SatisfiesCommand
           (command entry.block data) :=

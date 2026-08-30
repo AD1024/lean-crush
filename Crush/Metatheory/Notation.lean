@@ -14,6 +14,10 @@ Mathematical binders follow one convention throughout theorem-facing notation:
 for formulas, `T` for theories, `M` for models, and `ρ` for valuations. Longer
 English names remain preferable in executable code where the role is operational
 rather than mathematical.
+
+The object-language symbol `⊢` is intentionally not declared here. It is reserved
+for syntactic entailment in a proof calculus; intrinsic terms and datatype references
+are represented by their indexed Lean types instead.
 -/
 
 namespace Crush.Metatheory.Defunctionalization

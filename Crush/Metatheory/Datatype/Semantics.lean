@@ -11,8 +11,6 @@ are consequences of the representation, not additional axioms.
 
 namespace Crush.Metatheory.Datatype
 
-open scoped Crush.Metatheory
-
 universe u v
 
 mutual
@@ -152,18 +150,18 @@ abbrev mk {arity : Nat} {block : Block arity}
 
 /-- Constructor application is injective in its argument telescope. -/
 theorem ctor_inj {arity : Nat} {block : Block arity}
-    {Base : BaseSort → Type u} {data : block ⊢ᴰ}
-    {ctor : CtorDecl arity} (ref : block ⊢ᶜ[data] ctor)
+    {Base : BaseSort → Type u} {data : DataRef block}
+    {ctor : CtorDecl arity} (ref : CtorRef block data ctor)
     {left right : Args block Base ctor.fields}
     (equal : mk ref left = mk ref right) : left = right := by
   grind
 
 /-- Distinct constructor positions build distinct datatype values. -/
 theorem ctor_ne {arity : Nat} {block : Block arity}
-    {Base : BaseSort → Type u} {data : block ⊢ᴰ}
+    {Base : BaseSort → Type u} {data : DataRef block}
     {leftCtor rightCtor : CtorDecl arity}
-    (leftRef : block ⊢ᶜ[data] leftCtor)
-    (rightRef : block ⊢ᶜ[data] rightCtor)
+    (leftRef : CtorRef block data leftCtor)
+    (rightRef : CtorRef block data rightCtor)
     (different : Ref.index leftRef ≠ Ref.index rightRef)
     (left : Args block Base leftCtor.fields)
     (right : Args block Base rightCtor.fields) :
@@ -172,9 +170,9 @@ theorem ctor_ne {arity : Nat} {block : Block arity}
 
 /-- Every canonical value was built by one constructor in its declaration. -/
 theorem ctor_cases {arity : Nat} {block : Block arity}
-    {Base : BaseSort → Type u} {data : block ⊢ᴰ}
+    {Base : BaseSort → Type u} {data : DataRef block}
     (value : Val block Base data) :
-    ∃ ctor, ∃ ref : block ⊢ᶜ[data] ctor,
+    ∃ ctor, ∃ ref : CtorRef block data ctor,
       ∃ args : Args block Base ctor.fields, value = mk ref args := by
   cases value with
   | ctor ref args => exact ⟨_, ref, args, rfl⟩
@@ -222,9 +220,9 @@ noncomputable def sel {arity : Nat} {block : Block arity}
 
 /-- A selector recovers its field on the matching constructor. -/
 @[simp] theorem sel_ctor {arity : Nat} {block : Block arity}
-    {Base : BaseSort → Type u} {data : block ⊢ᴰ}
-    {ctor : CtorDecl arity} (ctorRef : block ⊢ᶜ[data] ctor)
-    {field : FieldDecl arity} (fieldRef : ctor ⊢ᶠ field)
+    {Base : BaseSort → Type u} {data : DataRef block}
+    {ctor : CtorDecl arity} (ctorRef : CtorRef block data ctor)
+    {field : FieldDecl arity} (fieldRef : FieldRef ctor field)
     (fallback : field.Denote block Base) (args : Args block Base ctor.fields) :
     sel ctorRef fieldRef fallback (mk ctorRef args) = args.get fieldRef := by
   rw [sel, dif_pos (test_ctor ctorRef args)]

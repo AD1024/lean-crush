@@ -253,7 +253,8 @@ theorem results_all {guarding : Guarding symbols}
   | nil => rfl
   | cons input inputs ih =>
       classical
-      unfold results terms at ih ⊢
+      unfold results terms at ih
+      unfold results terms
       cases conditionEq : guarding.guard input.sort input.raw <;>
         simp [conditionEq, ih]
 

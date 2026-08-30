@@ -283,7 +283,8 @@ theorem extensionality_valid (M : Model signature) (domain codomain : Ty) :
   intro pointwise
   have equal := (pointwise_iff M left right
     (.nil functionTy) (.nil functionTy) ν).1 pointwise
-  dsimp only [functionTy] at equal ⊢
+  dsimp only [functionTy] at equal
+  dsimp only [functionTy]
   have mapped := congrArg (toCanonical M (.arrow domain codomain)) equal
   simpa only [TargetArguments.applyUnary, toCanonical_fromCanonical] using mapped
 

@@ -21,9 +21,10 @@ construction.
 | `vₛ ≈[R, τ] vₜ` | Logical relation between source and target values | [`Notation.lean`](Notation.lean), [`Defunctionalization/LogicalRelation.lean`](Defunctionalization/LogicalRelation.lean) |
 | `ρₛ ≈ᵥ[R] ρₜ` | Pointwise logical relation between valuations | [`Notation.lean`](Notation.lean) |
 | `FV(e)` | Duplicate-free free-variable positions of `e` | [`Notation.lean`](Notation.lean), [`Defunctionalization/Collect.lean`](Defunctionalization/Collect.lean) |
-| `B ⊢ᴰ` | Datatype positions in block `B` | [`Datatype/Core.lean`](Datatype/Core.lean) |
-| `B ⊢ᶜ[d] C` | References to constructor `C` of datatype `d` in `B` | [`Datatype/Core.lean`](Datatype/Core.lean) |
-| `C ⊢ᶠ F` | References to field `F` of constructor `C` | [`Datatype/Core.lean`](Datatype/Core.lean) |
+
+The symbol `⊢` is reserved for syntactic entailment in an explicitly specified
+proof calculus. Intrinsic typing and datatype references use the indexed types
+`Term`, `FamilyTerm`, `DataRef`, `CtorRef`, and `FieldRef` directly.
 
 Proof statements conventionally use `σ` for signatures, `Γ` and `Δ` for
 contexts, `τ` for types or sorts, `φ` for formulas, `T` for theories, `M` for
