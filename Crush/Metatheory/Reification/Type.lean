@@ -3,15 +3,16 @@ import Crush.Metatheory.HO.Core
 import Crush.Metatheory.FO.Core
 
 /-!
-# Executable type-refinement bridge
+# Executable type reification
 
-`TypeBridge` retains the original normalized Lean type while assigning it a type
-in the verified nondependent core.  Arrow flattening is then performed by a pure,
-total function whose result is proved to agree with `FO.flattenArrow`.
+`ReifiedType` retains the Lean type expression selected by the translator while
+assigning it a type in the verified nondependent core. Arrow flattening is then
+performed by a pure, total function whose result is proved to agree with
+`FO.flattenArrow`.
 
 Non-arrow Lean types are opaque bases, except `Prop`, which is the core Boolean
 formula sort.  A dependent function is therefore opaque rather than falsely
-represented as a nondependent arrow; this matches production's refusal to send
+represented as a nondependent arrow; this matches the Crush translator's refusal to send
 dependent arrows through `declareArrowSort`.
 -/
 
@@ -20,128 +21,128 @@ namespace Crush.Metatheory.Reification
 open Lean Meta
 
 /-- A normalized Lean type paired structurally with its verified core image. -/
-inductive TypeBridge where
+inductive ReifiedType where
   | bool (expr : Expr)
   | base (expr : Expr) (sort : BaseSort)
-  | arrow (expr : Expr) (domain codomain : TypeBridge)
+  | arrow (expr : Expr) (domain codomain : ReifiedType)
   deriving Repr
 
-namespace TypeBridge
+namespace ReifiedType
 
-def expr : TypeBridge → Expr
+def expr : ReifiedType → Expr
   | .bool expr | .base expr _ | .arrow expr _ _ => expr
 
-def ty : TypeBridge → Ty
+def ty : ReifiedType → Ty
   | .bool _ => .bool
   | .base _ sort => .base sort
   | .arrow _ domain codomain => .arrow domain.ty codomain.ty
 
 /-- Pure flattening of a reified nondependent arrow telescope. -/
-def flatten : TypeBridge → List TypeBridge × TypeBridge
-  | bridge@(.bool _) | bridge@(.base _ _) => ([], bridge)
+def flatten : ReifiedType → List ReifiedType × ReifiedType
+  | reified@(.bool _) | reified@(.base _ _) => ([], reified)
   | .arrow _ domain codomain =>
       let (arguments, result) := codomain.flatten
       (domain :: arguments, result)
 
-@[simp] theorem flatten_types (bridge : TypeBridge) :
-    bridge.flatten.1.map TypeBridge.ty = (FO.flattenArrow bridge.ty).1 := by
-  induction bridge with
+@[simp] theorem flatten_types (reified : ReifiedType) :
+    reified.flatten.1.map ReifiedType.ty = (FO.flattenArrow reified.ty).1 := by
+  induction reified with
   | bool | base => rfl
   | arrow expr domain codomain domainIH codomainIH =>
       simp only [flatten, ty, FO.flattenArrow, List.map_cons]
       rw [codomainIH]
 
-@[simp] theorem flatten_result (bridge : TypeBridge) :
-    bridge.flatten.2.ty = (FO.flattenArrow bridge.ty).2 := by
-  induction bridge with
+@[simp] theorem flatten_result (reified : ReifiedType) :
+    reified.flatten.2.ty = (FO.flattenArrow reified.ty).2 := by
+  induction reified with
   | bool | base => rfl
   | arrow expr domain codomain domainIH codomainIH =>
       simp only [flatten, ty, FO.flattenArrow]
       exact codomainIH
 
-end TypeBridge
+end ReifiedType
 
 /-- Evidence retained by the executable translator that a normalized Lean type
 is represented by a genuine nondependent arrow in the verified core. -/
-structure ArrowBridge where
+structure ReifiedArrowType where
   expr : Expr
-  domain : TypeBridge
-  codomain : TypeBridge
+  domain : ReifiedType
+  codomain : ReifiedType
   deriving Repr
 
-namespace ArrowBridge
+namespace ReifiedArrowType
 
-def typeBridge (bridge : ArrowBridge) : TypeBridge :=
-  .arrow bridge.expr bridge.domain bridge.codomain
+def reifiedType (reified : ReifiedArrowType) : ReifiedType :=
+  .arrow reified.expr reified.domain reified.codomain
 
-def ty (bridge : ArrowBridge) : Ty :=
-  .arrow bridge.domain.ty bridge.codomain.ty
+def ty (reified : ReifiedArrowType) : Ty :=
+  .arrow reified.domain.ty reified.codomain.ty
 
-/-- The same full application telescope consumed by production. -/
-def flatten (bridge : ArrowBridge) : List TypeBridge × TypeBridge :=
-  bridge.typeBridge.flatten
+/-- The same full application telescope consumed by the Crush translator. -/
+def flatten (reified : ReifiedArrowType) : List ReifiedType × ReifiedType :=
+  reified.reifiedType.flatten
 
-/-- The theorem-facing declaration represented by production's generated
+/-- The theorem-facing declaration represented by the Crush translator's generated
 `app` symbol for this arrow. -/
-def appDecl (bridge : ArrowBridge) : FO.SymbolDecl :=
-  FO.appDecl bridge.domain.ty bridge.codomain.ty
+def appDecl (reified : ReifiedArrowType) : FO.SymbolDecl :=
+  FO.appDecl reified.domain.ty reified.codomain.ty
 
-@[simp] theorem flatten_types (bridge : ArrowBridge) :
-    bridge.flatten.1.map TypeBridge.ty = (FO.flattenArrow bridge.ty).1 :=
-  TypeBridge.flatten_types bridge.typeBridge
+@[simp] theorem flatten_types (reified : ReifiedArrowType) :
+    reified.flatten.1.map ReifiedType.ty = (FO.flattenArrow reified.ty).1 :=
+  ReifiedType.flatten_types reified.reifiedType
 
-@[simp] theorem flatten_result (bridge : ArrowBridge) :
-    bridge.flatten.2.ty = (FO.flattenArrow bridge.ty).2 :=
-  TypeBridge.flatten_result bridge.typeBridge
+@[simp] theorem flatten_result (reified : ReifiedArrowType) :
+    reified.flatten.2.ty = (FO.flattenArrow reified.ty).2 :=
+  ReifiedType.flatten_result reified.reifiedType
 
-@[simp] theorem appDecl_args (bridge : ArrowBridge) :
-    bridge.appDecl.args =
-      FO.arrowSort bridge.domain.ty bridge.codomain.ty ::
-        bridge.flatten.1.map (FO.FOSort.ofTy ∘ TypeBridge.ty) := by
+@[simp] theorem appDecl_args (reified : ReifiedArrowType) :
+    reified.appDecl.args =
+      FO.arrowSort reified.domain.ty reified.codomain.ty ::
+        reified.flatten.1.map (FO.FOSort.ofTy ∘ ReifiedType.ty) := by
   rw [appDecl, FO.appDecl_args]
   have telescope :
-      bridge.domain.ty :: (FO.flattenArrow bridge.codomain.ty).1 =
-        bridge.flatten.1.map TypeBridge.ty := by
+      reified.domain.ty :: (FO.flattenArrow reified.codomain.ty).1 =
+        reified.flatten.1.map ReifiedType.ty := by
     simp [ty]
   rw [telescope]
   have mapped :
-      List.map FO.FOSort.ofTy (List.map TypeBridge.ty bridge.flatten.1) =
-        List.map (FO.FOSort.ofTy ∘ TypeBridge.ty) bridge.flatten.1 :=
+      List.map FO.FOSort.ofTy (List.map ReifiedType.ty reified.flatten.1) =
+        List.map (FO.FOSort.ofTy ∘ ReifiedType.ty) reified.flatten.1 :=
     List.map_map
   exact congrArg
-    (fun arguments => FO.arrowSort bridge.domain.ty bridge.codomain.ty :: arguments)
+    (fun arguments => FO.arrowSort reified.domain.ty reified.codomain.ty :: arguments)
     mapped
 
-@[simp] theorem appDecl_result (bridge : ArrowBridge) :
-    bridge.appDecl.result = FO.FOSort.ofTy bridge.flatten.2.ty := by
-  rw [appDecl, FO.appDecl_result, bridge.flatten_result]
+@[simp] theorem appDecl_result (reified : ReifiedArrowType) :
+    reified.appDecl.result = FO.FOSort.ofTy reified.flatten.2.ty := by
+  rw [appDecl, FO.appDecl_result, reified.flatten_result]
   rfl
 
-end ArrowBridge
+end ReifiedArrowType
 
-/-- Reify the fragment needed by production arrow-shape discovery.  Weak-head
+/-- Reify the fragment needed by translator arrow-shape discovery.  Weak-head
 normalization remains a metaprogramming boundary; after it returns, telescope
-flattening is the proved total `TypeBridge.flatten` function. -/
-partial def reifyType (type : Expr) (preserveExpr := false) : MetaM TypeBridge := do
+flattening is the proved total `ReifiedType.flatten` function. -/
+partial def reifyType (type : Expr) (preserveExpr := false) : MetaM ReifiedType := do
   let normalized ← whnf type
-  let liveExpr := if preserveExpr then type else normalized
+  let retainedExpr := if preserveExpr then type else normalized
   if normalized.isArrow then
     let .forallE _ domain codomain _ := normalized
       | throwError "crush: internal — `isArrow` without a forall expression"
-    -- Production preserves each binder domain expression as it appeared after
+    -- The Crush translator preserves each binder domain expression as it appeared after
     -- exposing the surrounding arrow, but weak-head normalizes the evolving
     -- codomain before deciding whether to continue flattening.
-    return .arrow liveExpr
+    return .arrow retainedExpr
       (← reifyType domain (preserveExpr := true))
       (← reifyType codomain)
   if normalized == .sort .zero then
-    return .bool liveExpr
+    return .bool retainedExpr
   let rendered := toString (← ppExpr normalized)
-  return .base liveExpr ⟨rendered⟩
+  return .base retainedExpr ⟨rendered⟩
 
 /-- Reify only a genuine outer nondependent arrow, as required by
 `arrowShape?`. -/
-partial def reifyArrow? (type : Expr) : MetaM (Option ArrowBridge) := do
+partial def reifyArrow? (type : Expr) : MetaM (Option ReifiedArrowType) := do
   let type ← whnf type
   unless type.isArrow do return none
   let .forallE _ domain codomain _ := type

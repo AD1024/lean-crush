@@ -176,7 +176,7 @@ structure RegistryCache where
   deriving Inhabited
 
 /-- Auditable link from one retained command encoding to the globally allocated
-symbols it owns. Every allocator key class contributes to this one name trace,
+symbols it references. Every allocator key class contributes to this one name trace,
 so ordinary structural commands and datatype guards use the same mechanism. -/
 structure CommandAllocationLink where
   encodingIndex : Nat
@@ -188,9 +188,9 @@ structure CommandAllocationLink where
 
 /-- Exact state position and global-allocation support for one checked native
 datatype command. -/
-structure NativeDatatypeAllocationLink where
+structure DatatypeDeclarationAllocation where
   commandIndex : Nat
-  nativeCommandIndex : Nat
+  declarationIndex : Nat
   names : Array String
   allocation : NameAllocationTrace
   namesAllocated : ∀ name ∈ names.toList, name ∈ allocation.names
@@ -248,22 +248,22 @@ structure TranslateState where
   /-- Root expression of the legacy direct translator, recorded once even when
       recursive emission revisits many subterms. -/
   directSource : Option Expr := none
-  /-- Type-erased identity-bearing semantic certificates for live source symbols. -/
+  /-- Type-erased identity-bearing semantic certificates for elaborated source symbols. -/
   verifiedConstants : Array Dynamic := #[]
   /-- Source facts whose datatype environments and command locations were
-      retained for the proof-facing production comparison. -/
-  productionFacts : Array ProductionFact := #[]
-  /-- Fact-local datatype environment used while emitting native declarations.
+      retained for the proof-facing translator comparison. -/
+  factTranslations : Array FactTranslationRecord := #[]
+  /-- Fact-local datatype environment used while emitting SMT datatype declarations.
       Restored after the fact has been translated. -/
   activeDataSignature : Option Metatheory.Reification.SomeDataSignature := none
-  /-- Native datatype commands paired with their exact typed block and command
+  /-- SMT datatype declarations paired with their exact typed block and command
       well-formedness proof. -/
-  nativeDatatypeCommands : Array NativeDatatypeCommand := #[]
-  /-- Command-array positions appended atomically with `nativeDatatypeCommands`. -/
-  nativeDatatypeCommandIndices : Array Nat := #[]
-  nativeDatatypeAllocationLinks : Array NativeDatatypeAllocationLink := #[]
-  /-- Globally duplicate-free names owned by all retained datatype commands. -/
-  nativeDatatypeNames : NameAllocationTrace := default
+  datatypeDeclarations : Array DatatypeDeclaration := #[]
+  /-- Command-array positions appended atomically with `datatypeDeclarations`. -/
+  datatypeDeclarationIndices : Array Nat := #[]
+  datatypeDeclarationAllocations : Array DatatypeDeclarationAllocation := #[]
+  /-- Globally duplicate-free names declared by all retained SMT datatype declarations. -/
+  datatypeDeclarationNames : NameAllocationTrace := default
   /-- Auditable successful uses of proof-carrying primitive mappings. -/
   certifiedHookUses : Array CertifiedHookUse := #[]
   /-- Provenance table indexed by fact id. -/
@@ -292,7 +292,7 @@ namespace TranslateState
 def status (state : TranslateState) : RunStatus :=
   if state.trustReasons.isEmpty then .proved else .trusted state.trustReasons
 
-/-- The production translator used no operation marked as trusted. -/
+/-- The Crush translator used no operation marked as trusted. -/
 def Proved (state : TranslateState) : Prop :=
   state.trustReasons = #[]
 
@@ -303,17 +303,17 @@ def Proved (state : TranslateState) : Prop :=
 /-- Retained datatype-guard encodings in their emission order. The allocation
 links select them from the shared command-encoding trace without duplicating
 mutable state. -/
-def dataGuards (state : TranslateState) : Array DatatypeGuardCommand :=
+def datatypeGuardDefinitions (state : TranslateState) : Array DatatypeGuardDefinition :=
   state.commandAllocationLinks.filterMap fun link =>
     match state.commandEncodings[link.encodingIndex]? with
-    | some (CommandEncoding.dataGuard encoding) => some encoding
+    | some (CommandEncoding.datatypeGuard encoding) => some encoding
     | _ => none
 
-/-- Production command positions aligned with `dataGuards`. -/
-def dataGuardIndices (state : TranslateState) : Array Nat :=
+/-- Emitted command positions aligned with `datatypeGuardDefinitions`. -/
+def datatypeGuardDefinitionIndices (state : TranslateState) : Array Nat :=
   state.commandAllocationLinks.filterMap fun link =>
     match state.commandEncodings[link.encodingIndex]? with
-    | some (CommandEncoding.dataGuard _) => some link.commandIndex
+    | some (CommandEncoding.datatypeGuard _) => some link.commandIndex
     | _ => none
 
 end TranslateState
@@ -377,8 +377,8 @@ def markDatatypeTrusted
     markTrusted (.datatype reason)
 
 /-- Classify the extensible direct Lean-to-SMT route as trusted exactly once.
-The metatheory proves the separately defined intrinsic command generator and
-applies to production only after `ProductionTheoryAgreement.build?` succeeds. -/
+The metatheory proves the separately defined proof-defined command generator and
+applies to the Crush translator only after `CommandEquivalence.build?` succeeds. -/
 def markDirect (source : Expr) : TranslateM Unit := do
   if (← get).directSource.isNone then
     modify fun state => { state with
@@ -390,27 +390,27 @@ def recordVerifiedConstant (certificate : Dynamic) : TranslateM Nat := do
   modify fun s => { s with verifiedConstants := s.verifiedConstants.push certificate }
   return index
 
-def recordProductionFact
-    (productionFact : ProductionFact) : TranslateM Nat := do
-  let index := (← get).productionFacts.size
+def recordFactTranslation
+    (factTranslation : FactTranslationRecord) : TranslateM Nat := do
+  let index := (← get).factTranslations.size
   modify fun state => {
-    state with productionFacts := state.productionFacts.push productionFact }
+    state with factTranslations := state.factTranslations.push factTranslation }
   return index
 
 /-- Recompute every fact's datatype-command locations after all facts have been
 translated. A fact is first recorded while its own assertion is being emitted;
-this final pass makes every retained `ProductionFact` refer to the complete
+this final pass makes every retained `FactTranslationRecord` refer to the complete
 final `TranslateState.commands` array. -/
-def finalizeProductionFacts : TranslateM Unit := do
+def finalizeFactTranslations : TranslateM Unit := do
   let state ← get
-  let mut finalizedFacts : Array ProductionFact := #[]
-  for productionFact in state.productionFacts do
-    let some productionFact := productionFact.withCommands? state.commands
-        state.nativeDatatypeCommands state.nativeDatatypeCommandIndices
-        state.dataGuards state.dataGuardIndices
-      | throwError "crush: final command array lost a native datatype block"
-    finalizedFacts := finalizedFacts.push productionFact
-  modify fun current => { current with productionFacts := finalizedFacts }
+  let mut finalizedFacts : Array FactTranslationRecord := #[]
+  for factTranslation in state.factTranslations do
+    let some factTranslation := factTranslation.withCommands? state.commands
+        state.datatypeDeclarations state.datatypeDeclarationIndices
+        state.datatypeGuardDefinitions state.datatypeGuardDefinitionIndices
+      | throwError "crush: emitted command sequence lost an SMT datatype declaration"
+    finalizedFacts := finalizedFacts.push factTranslation
+  modify fun current => { current with factTranslations := finalizedFacts }
 
 def withDataSignature {α : Type}
     (signature : Metatheory.Reification.SomeDataSignature)
@@ -420,38 +420,38 @@ def withDataSignature {α : Type}
   try body finally
     modify fun state => { state with activeDataSignature := previous }
 
-/-- Emit a native datatype command and retain its typed description in the same
+/-- Emit an SMT datatype declaration and retain its typed description in the same
 state update, so they cannot disagree. -/
-def emitNativeDatatypeCommand
-    (native : NativeDatatypeCommand) : TranslateM Nat := do
+def emitDatatypeDeclaration
+    (declaration : DatatypeDeclaration) : TranslateM Nat := do
   let state ← get
   let commandIndex := state.commands.size
-  let nativeCommandIndex := state.nativeDatatypeCommands.size
-  let names := native.names
+  let declarationIndex := state.datatypeDeclarations.size
+  let names := declaration.names
   if allocated : ∀ name ∈ names.toList, name ∈ state.nameAllocations.names then
-    if namesNodup : (names.toList ++ state.nativeDatatypeNames.names).Nodup then
+    if namesNodup : (names.toList ++ state.datatypeDeclarationNames.names).Nodup then
       modify fun current => {
         current with
-          commands := current.commands.push native.command
-          nativeDatatypeCommands := current.nativeDatatypeCommands.push native
-          nativeDatatypeCommandIndices :=
-            current.nativeDatatypeCommandIndices.push commandIndex
-          nativeDatatypeAllocationLinks :=
-            current.nativeDatatypeAllocationLinks.push {
+          commands := current.commands.push declaration.command
+          datatypeDeclarations := current.datatypeDeclarations.push declaration
+          datatypeDeclarationIndices :=
+            current.datatypeDeclarationIndices.push commandIndex
+          datatypeDeclarationAllocations :=
+            current.datatypeDeclarationAllocations.push {
               commandIndex
-              nativeCommandIndex
+              declarationIndex
               names
               allocation := state.nameAllocations
               namesAllocated := allocated }
-          nativeDatatypeNames := {
-            names := names.toList ++ state.nativeDatatypeNames.names
+          datatypeDeclarationNames := {
+            names := names.toList ++ state.datatypeDeclarationNames.names
             nodup := namesNodup } }
       return commandIndex
     else
-      throwError "crush: retained datatype commands share an owned symbol"
+      throwError "crush: retained SMT datatype declarations declare the same symbol"
   else
     let missing := names.filter fun name => !state.nameAllocations.names.contains name
-    throwError "crush: native datatype command uses unallocated names: {missing}"
+    throwError "crush: SMT datatype declaration uses unallocated names: {missing}"
 
 def recordCertifiedHookUse (declaration : Name) (targetSymbol : String) :
     TranslateM Unit :=
@@ -467,7 +467,7 @@ private def sanitizeSymbol (s : String) : String :=
 
 /-- Names with fixed meaning in the proved untyped semantics. The opt-in
 datatype path reserves them before allocation so a user declaration cannot make
-an intrinsic datatype sort equal to `Bool`/`Int`/`String`, or make a native
+a reified datatype sort equal to `Bool`/`Int`/`String`, or make an SMT datatype
 constructor/selector parse as a logical connective. -/
 private def proofReservedName (name : String) : Bool :=
   name == "Bool" || name == "Int" || name == "String" || name == "=" ||

@@ -5,7 +5,7 @@ import Crush.Metatheory.FO.Core
 # Typed HO and FO declarations for datatype symbols
 
 Datatype constructors, selectors, and testers remain ordinary applications in
-the intrinsic term languages. Their datatype ownership is retained separately,
+the intrinsically typed term languages. Their datatype-symbol positions are retained separately,
 while this module computes the exact type or first-order declaration associated
 with each typed datatype reference.
 -/
@@ -72,9 +72,9 @@ def CtorDecl.test {arity : Nat} (block : Block arity)
   { args := [.base data.decl.sort]
     result := .bool }
 
-/-! ## Canonical datatype-owned source signature -/
+/-! ## Canonical datatype source signature -/
 
-/-- Source-constant types owned by one constructor: constructor, selectors in
+/-- Source-constant types for one constructor: constructor, selectors in
 field order, then its tester. -/
 def CtorDecl.symbolTypes {arity : Nat} (block : Block arity)
     (data : DataRef block) (ctor : CtorDecl arity) : List Ty :=
@@ -83,12 +83,12 @@ def CtorDecl.symbolTypes {arity : Nat} (block : Block arity)
       .arrow (.base data.decl.sort) (field.ty block)) ++
     [.arrow (.base data.decl.sort) .bool]
 
-/-- Source-constant types owned by one datatype declaration. -/
+/-- Source-constant types for one datatype declaration. -/
 def DataDecl.symbolTypes {arity : Nat} (block : Block arity)
     (data : DataRef block) : List Ty :=
   data.decl.ctors.flatMap (CtorDecl.symbolTypes block data)
 
-/-- Canonical source signature owned by a complete mutual block. -/
+/-- Canonical source signature for a complete mutual block. -/
 def Block.symbolTypes {arity : Nat} (block : Block arity) : Signature :=
   (List.ofFn fun data : Fin arity => data).flatMap
     (DataDecl.symbolTypes block)
@@ -102,14 +102,14 @@ private def CtorRef.inSymbols {arity : Nat} {block : Block arity}
   dataRef.flatMap (DataDecl.symbolTypes block)
     (ctorRef.flatMap (CtorDecl.symbolTypes block data) inside)
 
-/-- Canonical source constant owned by one constructor. -/
+/-- Canonical source constant for one constructor. -/
 def Block.ctorConst {arity : Nat} {block : Block arity}
     {data : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block data ctor) :
     Const block.symbolTypes (ctor.ty block data) :=
   (ref.inSymbols .here).toConst
 
-/-- Canonical source constant owned by one selector. -/
+/-- Canonical source constant for one selector. -/
 def Block.selConst {arity : Nat} {block : Block arity}
     {data : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block data ctor) {field : FieldDecl arity}
@@ -121,7 +121,7 @@ def Block.selConst {arity : Nat} {block : Block arity}
       [Ty.arrow (Ty.base data.decl.sort) .bool]
   (ctorRef.inSymbols (.there selected)).toConst
 
-/-- Canonical source constant owned by one tester. -/
+/-- Canonical source constant for one tester. -/
 def Block.testConst {arity : Nat} {block : Block arity}
     {data : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block data ctor) :

@@ -5,7 +5,7 @@ import Crush.Metatheory.Guarded.Encoding
 # Guarded lifting of first-order models
 
 This module separates carrier enlargement from raw SMT syntax. A relation is
-supplied for every intrinsic FO sort; source symbol interpretations are then
+supplied for every typed FO sort; source symbol interpretations are then
 totalized canonically on target arguments and re-encoded at their result sort.
 -/
 
@@ -20,7 +20,7 @@ structure CarrierRel (source target : Carriers) where
   fn : ∀ domain codomain,
     SubsetRepresentation (source.Fn domain codomain) (target.Fn domain codomain)
 
-/-- Relation selected by one intrinsic FO sort. -/
+/-- Relation selected by one typed FO sort. -/
 def CarrierRel.get {source target : Carriers}
     (relation : CarrierRel source target) :
     (sort : FOSort) → SubsetRepresentation (sort.Denote source) (sort.Denote target)

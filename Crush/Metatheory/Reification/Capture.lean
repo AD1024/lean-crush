@@ -6,8 +6,8 @@ import Crush.Metatheory.Reification.Type
 # Executable closure-capture refinement
 
 This module specifies free-variable occurrence independently of the accumulator
-used by production and proves that the actual total collector returns exactly
-the occurring variables.  Production's eligibility filter is then characterized
+used by the Crush translator and proves that the actual total collector returns exactly
+the occurring variables.  The Crush translator's eligibility filter is then characterized
 as the conjunction of occurrence and SMT-local eligibility.
 
 Ordering is not abstracted away: `collectFVarsOrdered` remains the executable
@@ -22,7 +22,7 @@ open Lean
 open Crush.Metatheory.Defunctionalization
 
 /-- Lean derives `BEq FVarId` from its sole `Name` field but does not publish the
-corresponding lawfulness witness. The bridge needs that proposition-level fact. -/
+corresponding `LawfulBEq` instance. Reification needs that proposition-level fact. -/
 instance : LawfulBEq FVarId where
   eq_of_beq := by
     intro left right equality
@@ -55,7 +55,7 @@ def fvarOccurs (needle : FVarId) : Expr → Bool
   | .proj _ _ body => fvarOccurs needle body
   | _ => false
 
-/-- The production accumulator contains a variable exactly when it was already
+/-- The translator accumulator contains a variable exactly when it was already
 present or occurs in the traversed expression. -/
 theorem collectFVarsOrdered_go_mem (expression : Expr)
     (accumulator : Array FVarId) (needle : FVarId) :
@@ -95,14 +95,14 @@ theorem collectFVarsOrdered_go_mem (expression : Expr)
   | proj typeName index body bodyIH =>
       simp [collectFVarsOrdered.go, fvarOccurs, bodyIH]
 
-/-- Exact membership specification for the collector actually used by the live
+/-- Exact membership specification for the collector used by the Crush translator's
 defunctionalization pass. -/
 @[simp] theorem collectFVarsOrdered_mem (expression : Expr) (needle : FVarId) :
     needle ∈ collectFVarsOrdered expression ↔ fvarOccurs needle expression = true := by
   simpa [collectFVarsOrdered] using
     collectFVarsOrdered_go_mem expression #[] needle
 
-/-- The accumulator traversal preserves uniqueness. Consequently, production's
+/-- The accumulator traversal preserves uniqueness. Consequently, the Crush translator's
 capture order contains one parameter per free-variable identity. -/
 theorem collectFVarsOrdered_go_nodup (expression : Expr)
     (accumulator : Array FVarId) (unique : accumulator.toList.Nodup) :
@@ -152,30 +152,30 @@ actually used by `emitClosure`. -/
   simp only [selectClosureCaptures, Array.mem_filter]
   rw [collectFVarsOrdered_mem]
 
-/-! ## Exact bridge to intrinsic closure contexts -/
+/-! ## Exact reification of closure contexts -/
 
 /-- A position-preserving correspondence between an intrinsic de Bruijn context
-and the live free variables representing it. The intrinsic type at each position
-is definitionally derived from the retained live type bridge. -/
-inductive ContextBridge : Context → Type where
-  | nil : ContextBridge []
+and the elaborated free variables representing it. The typed source index at each position
+is definitionally derived from the retained reified type. -/
+inductive ReifiedContext : Context → Type where
+  | nil : ReifiedContext []
   | cons {context : Context}
-      (fvar : FVarId) (type : TypeBridge)
-      (tail : ContextBridge context) : ContextBridge (type.ty :: context)
+      (fvar : FVarId) (type : ReifiedType)
+      (tail : ReifiedContext context) : ReifiedContext (type.ty :: context)
 
-namespace ContextBridge
+namespace ReifiedContext
 
-def fvar : {context : Context} → ContextBridge context → PackedVar context → FVarId
+def fvar : {context : Context} → ReifiedContext context → PackedVar context → FVarId
   | _ :: _, .cons fvar _ _, .pack (.here) => fvar
   | _ :: _, .cons _ _ tail, .pack (.there ref) => tail.fvar (.pack ref)
 
-def type : {context : Context} → ContextBridge context → PackedVar context → TypeBridge
+def type : {context : Context} → ReifiedContext context → PackedVar context → ReifiedType
   | _ :: _, .cons _ type _, .pack (.here) => type
   | _ :: _, .cons _ _ tail, .pack (.there ref) => tail.type (.pack ref)
 
-theorem type_eq {context : Context} (bridge : ContextBridge context)
-    (item : PackedVar context) : (bridge.type item).ty = item.type := by
-  cases bridge with
+theorem type_eq {context : Context} (reified : ReifiedContext context)
+    (item : PackedVar context) : (reified.type item).ty = item.type := by
+  cases reified with
   | nil =>
       cases item with
       | pack ref => exact nomatch ref
@@ -186,31 +186,31 @@ theorem type_eq {context : Context} (bridge : ContextBridge context)
           | here => rfl
           | there ref => exact tail.type_eq (.pack ref)
 
-/-- Live variables in intrinsic context order. -/
-def fvars : {context : Context} → ContextBridge context → List FVarId
+/-- Elaborated free variables in reified context order. -/
+def fvars : {context : Context} → ReifiedContext context → List FVarId
   | [], .nil => []
   | _ :: _, .cons fvar _ tail => fvar :: tail.fvars
 
-/-- Live type bridges in the same intrinsic context order. -/
-def types : {context : Context} → ContextBridge context → List TypeBridge
+/-- Reified types in the same context order. -/
+def types : {context : Context} → ReifiedContext context → List ReifiedType
   | [], .nil => []
   | _ :: _, .cons _ type tail => type :: tail.types
 
-def Nodup {context : Context} (bridge : ContextBridge context) : Prop :=
-  bridge.fvars.Nodup
+def Nodup {context : Context} (reified : ReifiedContext context) : Prop :=
+  reified.fvars.Nodup
 
-end ContextBridge
+end ReifiedContext
 
 /-- The exact executable refinement obligation for one modeled closure.
 
-The right side is derived exclusively from the intrinsic collector's typed
-references. The left side is the actual production function used by
+The right side is derived exclusively from the typed collector's
+references. The left side is the actual translator function used by
 `emitClosure`. Thus a term reifier need only construct this certificate; it
 cannot silently choose a different capture set or order. -/
 structure ClosureCaptureCertificate {signature : Signature}
     (closure : Closure signature) where
   lambda : Expr
-  context : ContextBridge closure.context
+  context : ReifiedContext closure.context
   eligible : FVarId → Bool
   contextNodup : context.Nodup
   captures_eq :
@@ -219,26 +219,26 @@ structure ClosureCaptureCertificate {signature : Signature}
 
 namespace ClosureCaptureCertificate
 
-/-- Live type bridges in the exact capture order certified above. -/
-def captureTypeBridges {signature : Signature} {closure : Closure signature}
-    (certificate : ClosureCaptureCertificate closure) : List TypeBridge :=
+/-- Reified types in the exact capture order certified above. -/
+def captureReifiedTypes {signature : Signature} {closure : Closure signature}
+    (certificate : ClosureCaptureCertificate closure) : List ReifiedType :=
   closure.captureRefs.map certificate.context.type
 
-theorem captureTypeBridges_types {signature : Signature} {closure : Closure signature}
+theorem captureReifiedTypes_types {signature : Signature} {closure : Closure signature}
     (certificate : ClosureCaptureCertificate closure) :
-    certificate.captureTypeBridges.map TypeBridge.ty = closure.captureTypes := by
-  simp only [captureTypeBridges, Closure.captureTypes, List.map_map]
+    certificate.captureReifiedTypes.map ReifiedType.ty = closure.captureTypes := by
+  simp only [captureReifiedTypes, Closure.captureTypes, List.map_map]
   apply List.map_congr_left
   intro item membership
   exact certificate.context.type_eq item
 
-/-- Consequently, mapping the certified live capture types to FO sorts produces
+/-- Consequently, mapping the certified reified capture types to FO sorts produces
 the exact constructor telescope selected by the verified pass. -/
 theorem closureDecl_args {signature : Signature} {closure : Closure signature}
     (certificate : ClosureCaptureCertificate closure) :
     (FO.closureDecl closure.captureTypes closure.domain closure.codomain).args =
-      certificate.captureTypeBridges.map (FO.FOSort.ofTy ∘ TypeBridge.ty) := by
-  rw [FO.closureDecl_args, ← certificate.captureTypeBridges_types]
+      certificate.captureReifiedTypes.map (FO.FOSort.ofTy ∘ ReifiedType.ty) := by
+  rw [FO.closureDecl_args, ← certificate.captureReifiedTypes_types]
   exact List.map_map
 
 theorem capture_count {signature : Signature} {closure : Closure signature}

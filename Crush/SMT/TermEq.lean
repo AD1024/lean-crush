@@ -5,7 +5,7 @@ import Crush.SMT.Syntax
 
 `Term` and `Attr` recurse through arrays, so Lean's standard equality deriver
 cannot construct their instances directly.  The explicit list recursion below
-is used at proof-producing production boundaries that must compare retained raw
+is used at proof-carrying translator boundaries that must compare retained raw
 commands without trusting rendered strings or hashes.
 -/
 
@@ -256,7 +256,7 @@ instance : DecidableEq FunDef := fun left right => by
               exact ⟨nameEq, argsEq, resultEq, bodyEq⟩)
 
 /- Exact command equality becomes decidable once recursive terms, attributes,
-and function definitions have their explicit instances. Production agreement
+and function definitions have their explicit instances. Translator agreement
 uses this instance to turn a successful whole-array comparison into an equality
 proof rather than comparing rendered strings or hashes. A regular comment is
 intentional: Lean documentation comments cannot attach to `deriving instance`. -/

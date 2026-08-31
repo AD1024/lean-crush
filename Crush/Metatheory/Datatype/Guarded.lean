@@ -5,7 +5,7 @@ import Crush.Metatheory.Guarded.Encoding
 # Guarded datatype carriers
 
 Lift guarded representations of external base fields through any productive
-intrinsic datatype block. The target remains the same finite free algebra over
+reified datatype block. The target remains the same finite free algebra over
 larger field carriers; a recursive structural guard selects exactly the values
 that come from the source datatype.
 -/
@@ -105,7 +105,7 @@ theorem sel_wf {arity : Nat} {block : Block arity}
   exact args.get_wf base fieldRef wellFormed
 
 /-- Canonical fallback for a total selector. It is semantically irrelevant on
-the matching constructor selected by the production guard. -/
+the matching constructor selected by the emitted guard. -/
 noncomputable def FieldDecl.fallback {arity : Nat} {block : Block arity}
     {Source : BaseSort → Type u} {Target : BaseSort → Type v}
     (base : BaseRepresentations Source Target) (productive : Productive block)
@@ -119,7 +119,7 @@ noncomputable def FieldDecl.fallback {arity : Nat} {block : Block arity}
           exact Classical.choice (val_nonempty productive
             (fun sort => (base sort).targetNonempty) child)
 
-/-- Production-shaped datatype guard: whenever a constructor tester accepts,
+/-- Emitted datatype guard: whenever a constructor tester accepts,
 every selector belonging to that constructor returns a guarded field. -/
 def Val.SelWF {arity : Nat} {block : Block arity}
     {Target : BaseSort → Type v} (base : ∀ sort, Target sort → Prop)
@@ -159,7 +159,7 @@ theorem Val.wf_of_selWF {arity : Nat} {block : Block arity}
       simpa [fallback] using guarded _ ctorRef _ fieldRef fallback
         (test_ctor ctorRef args)
 
-/-- The recursive structural guard and production's tester/selector form are
+/-- The recursive structural guard and the Crush translator's tester/selector form are
 equivalent for every productive block. -/
 theorem Val.wf_iff_selWF {arity : Nat} {block : Block arity}
     {Source : BaseSort → Type u} {Target : BaseSort → Type v}
@@ -346,7 +346,7 @@ mutual
 end
 
 /-- Any productive free datatype lifts a pointwise guarded base representation.
-This is the generic semantic counterpart of production's recursive `wf_T`
+This is the generic semantic counterpart of the Crush translator's recursive `wf_T`
 predicate, including mutually recursive blocks. -/
 def lift {arity : Nat} {block : Block arity}
     {Source : BaseSort → Type u} {Target : BaseSort → Type v}

@@ -9,7 +9,7 @@ Constructors are classified by semantic role: source constants, flattened
 application, and exact-capture closures.
 
 `canonicalModel` gives every such symbol its intended interpretation in a model
-constructed from an HO source model. Interpreted production hooks use the
+constructed from an HO source model. Interpreted translation hooks use the
 separate semantic contracts in `Hooks.lean`; they are not extra identities in
 the total structural translator's symbol family.
 -/
@@ -73,21 +73,21 @@ captured environment. -/
 /-! ## Target-language shorthands -/
 
 /-- A flattened target term, indexed by its source signature, context, and type. -/
-abbrev TargetTerm (σ : Signature) (Γ : Context) (τ : Ty) :=
-  FO.FamilyTerm (Symbol σ) (targetContext Γ) (FO.FOSort.ofTy τ)
+abbrev TargetTerm (signature : Signature) (Γ : Context) (τ : Ty) :=
+  FO.FamilyTerm (Symbol signature) (targetContext Γ) (FO.FOSort.ofTy τ)
 
 /-- A Boolean flattened target term in an erased source context. -/
-abbrev TargetFormula (σ : Signature) (Γ : Context) :=
-  FO.FamilyFormula (Symbol σ) (targetContext Γ)
+abbrev TargetFormula (signature : Signature) (Γ : Context) :=
+  FO.FamilyFormula (Symbol signature) (targetContext Γ)
 
 /-- A closed flattened target formula. -/
-abbrev TargetSentence (σ : Signature) := FO.FamilySentence (Symbol σ)
+abbrev TargetSentence (signature : Signature) := FO.FamilySentence (Symbol signature)
 
 /-- A flattened target theory. -/
-abbrev TargetTheory (σ : Signature) := FO.FamilyTheory (Symbol σ)
+abbrev TargetTheory (signature : Signature) := FO.FamilyTheory (Symbol signature)
 
 /-- A valuation for the canonical flattened model over an erased source context. -/
-abbrev TargetValuation {σ : Signature} (M : Model σ) (Γ : Context) :=
+abbrev TargetValuation {signature : Signature} (M : Model signature) (Γ : Context) :=
   FO.FamilyValuation (canonicalModel M) (targetContext Γ)
 
 @[simp] theorem canonicalModel_sourceConstant (source : Model signature)

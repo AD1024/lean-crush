@@ -3,10 +3,10 @@ import Crush.SMT.Syntax
 import Crush.SMT.Quote
 
 /-!
-# Native SMT representation of intrinsic datatype blocks
+# SMT representation of reified datatype blocks
 
 This module is the pure syntactic half of datatype representation. It emits one
-monomorphic `declare-datatypes` command for an intrinsic mutual block and retains
+monomorphic `declare-datatypes` command for a typed mutual block and retains
 one injective namespace for its sorts, constructors, and selectors. Relational
 command semantics and model lifting are proved separately.
 -/
@@ -15,7 +15,7 @@ namespace Crush.Metatheory.SMT.Datatype
 
 open Crush.Metatheory.Datatype
 
-/-- Namespace key for every identifier owned by one datatype block. Natural
+/-- Namespace key for every identifier declared by one datatype block. Natural
 positions retain exact source declaration order. -/
 inductive NameKey (arity : Nat) where
   | sort : Fin arity → NameKey arity
@@ -23,7 +23,7 @@ inductive NameKey (arity : Nat) where
   | sel : Fin arity → Nat → Nat → NameKey arity
   deriving BEq, DecidableEq, Repr
 
-/-- Concrete names for datatype-owned entities and concrete sorts for external
+/-- Concrete names for datatype entities and concrete sorts for external
 constructor fields. -/
 structure BlockEncoding (arity : Nat) where
   name : NameKey arity → String
@@ -36,7 +36,7 @@ out-of-range natural-number keys. -/
 def BlockEncoding.WF {arity : Nat} (encoding : BlockEncoding arity) : Prop :=
   Function.Injective fun data : Fin arity => encoding.name (.sort data)
 
-/-- Nullary raw SMT sort owned by one datatype declaration. -/
+/-- Nullary raw SMT sort declared by one datatype declaration. -/
 def dataSort {arity : Nat} (encoding : BlockEncoding arity)
     (data : Fin arity) : Crush.SMT.SSort :=
   .app (.symb (encoding.name (.sort data))) #[]
@@ -71,14 +71,14 @@ def entries {arity : Nat} (block : Block arity)
     (encoding.name (.sort data), 0,
       dataDecl (block := block) encoding data)).toArray
 
-/-- One native command representing the complete intrinsic block. -/
+/-- One native command representing the complete reified block. -/
 def command {arity : Nat} (block : Block arity)
     (encoding : BlockEncoding arity) : Crush.SMT.Command :=
   .declDatatypes (entries block encoding)
 
 /-! ## Guarded datatype predicate syntax -/
 
-/-- Conjoin a dynamic list using the same compact shape as production: zero
+/-- Conjoin a dynamic list using the same compact shape as the Crush translator: zero
 arguments become `true` and a singleton is not wrapped in `and`. -/
 def andAll (terms : Array Crush.SMT.Term) : Crush.SMT.Term :=
   match terms.toList with
@@ -86,7 +86,7 @@ def andAll (terms : Array Crush.SMT.Term) : Crush.SMT.Term :=
   | [term] => term
   | _ => Crush.SMT.Term.symbApp "and" terms
 
-/-- One production selector clause. Constructors without guarded fields
+/-- One emitted selector clause. Constructors without guarded fields
 contribute no implication to the surrounding conjunction. -/
 def wfClause? (ctor : String) (fields : Array Crush.SMT.Term)
     (value : Crush.SMT.Term) : Option Crush.SMT.Term :=
@@ -96,7 +96,7 @@ def wfClause? (ctor : String) (fields : Array Crush.SMT.Term)
     let body := andAll fields
     some (smt| (=> $tester $body))
 
-/-- Exact production-shaped body of one datatype well-formedness definition.
+/-- Exact emitted body of one datatype well-formedness definition.
 Each input pairs a constructor symbol with the already encoded guards on its
 matching selectors. -/
 def wfBody (parts : Array (String × Array Crush.SMT.Term))

@@ -63,27 +63,26 @@ namespace Crush
 
 open SMT
 
-/-- A curried arrow type flattened into argument types and a final result type.
-`Int → Int → Bool` becomes `(#[Int, Int], Bool)`. -/
-structure ArrowShape where
-  /-- Structural evidence connecting this live shape to `FO.appDecl`. -/
-  verified : Metatheory.Reification.ArrowBridge
+/-- The verified curried arrow type used by the translator. Flattening
+`Int → Int → Bool` produces argument types `#[Int, Int]` and result type `Bool`.
+This abbreviation reuses the reification witness directly. -/
+abbrev ArrowShape := Metatheory.Reification.ReifiedArrowType
 
 namespace ArrowShape
 
-/-- Live argument types are projections of the verified telescope, so an
+/-- Translated argument types are projections of the verified telescope, so an
 `ArrowShape` cannot carry an SMT-facing telescope inconsistent with its core
 declaration. -/
 def args (shape : ArrowShape) : Array Expr :=
-  shape.verified.flatten.1.toArray.map Metatheory.Reification.TypeBridge.expr
+  shape.flatten.1.toArray.map Metatheory.Reification.ReifiedType.expr
 
-/-- Live result type is likewise a projection of the verified telescope. -/
+/-- Translated result type is likewise a projection of the verified telescope. -/
 def res (shape : ArrowShape) : Expr :=
-  shape.verified.flatten.2.expr
+  shape.flatten.2.expr
 
-/-- Exact proof-facing declaration represented by the live shape. -/
+/-- Exact proof-facing declaration represented by the reified arrow shape. -/
 def coreDecl (shape : ArrowShape) : Metatheory.FO.SymbolDecl :=
-  shape.verified.appDecl
+  shape.appDecl
 
 end ArrowShape
 
@@ -91,8 +90,7 @@ end ArrowShape
 first-order types normally). Dependent arrows are refused: their SMT image would
 need dependent sorts. -/
 def arrowShape? (ty : Expr) : MetaM (Option ArrowShape) := do
-  let some bridge ← Metatheory.Reification.reifyArrow? ty | return none
-  return some { verified := bridge }
+  Metatheory.Reification.reifyArrow? ty
 
 /-- Whether `ty` is a function type we must encode (an arrow into a non-`Prop`).
 Arrows into `Prop` are predicates and are handled by the first-order path when
@@ -100,26 +98,26 @@ fully applied; only *unapplied* or *argument-position* functions need encoding. 
 def isFunctionType (ty : Expr) : MetaM Bool := do
   return (← whnf ty).isArrow
 
-/-! ## Pure production command shapes
+/-! ## Pure emitted command shapes
 
-Keeping these constructors outside the recursive translator lets the bridge
+Keeping these constructors outside the recursive translator lets the reifiedArrow
 relate emitted syntax to typed declarations/equations without reasoning about
 `TranslateM` state effects. -/
 
-def productionAppDeclaration (appName : String) (functionSort : SMT.SSort)
+def appDeclaration (appName : String) (functionSort : SMT.SSort)
     (argumentSorts : Array SMT.SSort) (resultSort : SMT.SSort) : SMT.Command :=
   .declFun appName (#[functionSort] ++ argumentSorts) resultSort
 
-def productionClosureDeclaration (closureName : String)
+def closureDeclaration (closureName : String)
     (captureSorts : Array SMT.SSort) (functionSort : SMT.SSort) : SMT.Command :=
   .declFun closureName captureSorts functionSort
 
-def productionClosureEquation (appName : String) (closure : SMT.Term)
+def closureEquation (appName : String) (closure : SMT.Term)
     (parameters : Array SMT.Term) (body : SMT.Term) : SMT.Term :=
   SMT.Term.symbApp "=" #[
     SMT.Term.app (.symb appName) (#[closure] ++ parameters), body]
 
-def productionClosureAssertion (binders : Array (String × SMT.SSort))
+def closureEquationCommand (binders : Array (String × SMT.SSort))
     (equation : SMT.Term) : SMT.Command :=
   .assert (if binders.isEmpty then equation else .forallE binders equation)
 

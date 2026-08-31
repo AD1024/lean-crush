@@ -3,7 +3,7 @@ import Crush.SMT.Syntax
 /-!
 # Semantics of the verified SMT fragment
 
-The production SMT syntax is intentionally untyped.  Its semantics is therefore
+The emitted SMT syntax is intentionally untyped. Its semantics is therefore
 relational: a model supplies one universe of values, sort membership, literal
 interpretations, and a graph for user symbols.  The evaluation relation gives
 the built-in Boolean connectives, equality, quantifiers, and simultaneous lets
@@ -12,7 +12,7 @@ their standard meaning.
 Only the command forms needed by the proved representation path are classified
 as supported. Native datatypes have their free-algebra semantics, and
 `define-funs-rec` has a simultaneous typed graph-equation semantics for the
-production datatype guards. Nonrecursive definitions and lambdas remain outside
+emitted datatype guards. Nonrecursive definitions and lambdas remain outside
 the command fragment instead of receiving a vacuous semantics.
 -/
 
@@ -399,12 +399,12 @@ def datatypeCtors
   datatypes.toList.flatMap fun (name, _, datatype) =>
     datatype.ctors.toList.map fun ctor => (datatypeSort name, ctor)
 
-/-- Sorts owned by one mutual datatype command. -/
+/-- Sorts declared by one mutual datatype command. -/
 def datatypeSorts
     (datatypes : Array (String × Nat × DatatypeDecl)) : List SSort :=
   datatypes.toList.map fun (name, _, _) => datatypeSort name
 
-/-- Function identifiers owned by one datatype command. -/
+/-- Function identifiers declared by one datatype command. -/
 def datatypeSymbols
     (datatypes : Array (String × Nat × DatatypeDecl)) : List Ident :=
   (datatypeCtors datatypes).flatMap fun (_, ctor) =>

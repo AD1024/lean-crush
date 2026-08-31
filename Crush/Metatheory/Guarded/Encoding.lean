@@ -1,7 +1,7 @@
 /-!
 # Representing a source type inside a target type
 
-Production sometimes represents a source type with an existing SMT type plus a
+The Crush translator sometimes represents a source type with an existing SMT type plus a
 predicate selecting the values that belong to the source type.  For example,
 `Nat` is represented by `Int` together with `0 ≤ x`.  We call the selecting
 predicate a *guard* and the complete encode/guard/decode package a guarded-subset
@@ -10,7 +10,7 @@ representation.
 `SubsetRepresentation Source Target` states that `Source` is equivalent to the
 subtype of `Target` values satisfying the guard. `Encoding` packages such a
 representation when its source and target types are not known to the caller.
-The remaining definitions validate the three production uses of `wfCondition`:
+The remaining definitions validate the three translator uses of `wfCondition`:
 binder guards, result guards, and guarded function extensionality.
 -/
 
@@ -33,7 +33,7 @@ structure SubsetRepresentation (Source : Type u) (Target : Type v) where
     encode (decode value wellFormed) = value
 
 /-- A guarded-subset representation with its source and target types packaged
-existentially. This is the form stored by a production sort hook. -/
+existentially. This is the form stored by a translation sort hook. -/
 structure Encoding where
   Source : Type u
   Target : Type v
@@ -170,11 +170,11 @@ namespace Encoding
 
 variable (encoding : Encoding)
 
-/-- Production's universal-binder shape: `wf x ⇒ body`. -/
+/-- The Crush translator's universal-binder shape: `wf x ⇒ body`. -/
 def guardedForall (body : encoding.Target → Prop) : Prop :=
   ∀ value, encoding.guard value → body value
 
-/-- Production's existential-binder shape: `wf x ∧ body`. -/
+/-- The Crush translator's existential-binder shape: `wf x ∧ body`. -/
 def guardedExists (body : encoding.Target → Prop) : Prop :=
   ∃ value, encoding.guard value ∧ body value
 
@@ -182,7 +182,7 @@ theorem encode_injective : Function.Injective encoding.encode := by
   exact encoding.representation.encode_injective
 
 /-- A source predicate and its target image agree on encoded values iff source
-universal quantification agrees with the production guarded universal. -/
+universal quantification agrees with the emitted guarded universal. -/
 theorem forall_iff_guardedForall
     (sourceBody : encoding.Source → Prop)
     (targetBody : encoding.Target → Prop)
@@ -205,7 +205,7 @@ theorem encode_eq_iff (left right : encoding.Source) :
     encoding.encode left = encoding.encode right ↔ left = right :=
   encoding.representation.encode_eq_iff left right
 
-/-- Totalize decoding outside the source image.  Production axioms only expose
+/-- Totalize decoding outside the source image.  Emitted axioms only expose
 the behavior at guarded arguments, so the arbitrary default is unobservable. -/
 noncomputable def decodeDefault (value : encoding.Target) : encoding.Source :=
   encoding.representation.decodeDefault value
@@ -243,7 +243,7 @@ theorem liftFunction_result_guard
     encoding.guard (encoding.liftFunction fn argument) := by
   exact encoding.encode_guard _
 
-/-- Production's extensionality premise needs equality only at guarded
+/-- The Crush translator's extensionality premise needs equality only at guarded
 arguments.  Such guarded pointwise agreement reflects source function equality. -/
 theorem function_eq_of_guarded_lift_eq
     (left right : encoding.Source → encoding.Source)
@@ -258,10 +258,10 @@ theorem function_eq_of_guarded_lift_eq
 
 end Encoding
 
-/-! ## The production `Nat ↪ Int` instance -/
+/-! ## The translator's `Nat ↪ Int` instance -/
 
 /-- `Nat` is represented as the nonnegative subset of `Int`, exactly matching
-`emitSort`, `wfCondition`, and `guardSort` in the production translator. -/
+`emitSort`, `wfCondition`, and `guardSort` in the Crush translator. -/
 def natInt : Encoding where
   Source := Nat
   Target := Int
@@ -299,7 +299,7 @@ theorem nat_exists_iff_int_guarded
       ∃ value : Int, 0 ≤ value ∧ targetBody value :=
   natInt.exists_iff_guardedExists sourceBody targetBody bodyRelated
 
-/-- Production's result-WF assertion for a `Nat → Nat` application is valid in
+/-- The Crush translator's result-WF assertion for a `Nat → Nat` application is valid in
 the canonical guarded model. -/
 theorem nat_liftFunction_result_nonnegative (fn : Nat → Nat) (argument : Int) :
     (0 : Int) ≤ (natInt.liftFunction fn argument : Int) :=

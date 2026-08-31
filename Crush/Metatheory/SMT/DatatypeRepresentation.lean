@@ -6,9 +6,9 @@ import Crush.Metatheory.SMT.Representation
 /-!
 # Datatypes in the shared SMT representation
 
-A datatype is an ordinary intrinsic base sort with ordinary typed FO symbols.
+A datatype is an ordinary typed base sort with ordinary typed FO symbols.
 This certificate records only what is special at the SMT declaration boundary:
-the sort and symbols are supplied by one native `declare-datatypes` command,
+the sort and symbols are supplied by one `declare-datatypes` command,
 and testers use SMT-LIB's indexed identifier. Term encoding and raw-model
 lifting remain the generic definitions in `SMT.Representation` and
 `SMT.Soundness`.
@@ -19,17 +19,17 @@ namespace Crush.Metatheory.SMT.Datatype
 open Crush.Metatheory.Datatype
 open Crush.Metatheory.Defunctionalization.Flattened
 
-/-- One intrinsic datatype block represented inside the shared FO-to-SMT
-encoding. No parallel term encoder or ownership record is needed. -/
+/-- One reified datatype block represented inside the shared FO-to-SMT
+encoding. No parallel term encoder or block-membership record is needed. -/
 structure Representation {signature : Signature} {arity : Nat}
     (block : Block arity) (symbols : Symbols signature block)
     (fo : SMT.Encoding (Symbol signature))
     (data : BlockEncoding arity) where
   wf : CommandWF block data
-  /-- One flattened symbol cannot simultaneously play two native datatype
-  roles. Reification establishes this from distinct source-constant ownership;
-  retaining it here makes native model selection deterministic. -/
-  exclusive : symbols.native.Exclusive
+  /-- One flattened symbol cannot simultaneously play two datatype
+  roles. Reification establishes this from distinct source-constant positions;
+  retaining it here makes datatype-model selection deterministic. -/
+  rolesUnique : symbols.datatypeSymbols.RolesUnique
   sort_native : ∀ child : DataRef block,
     fo.nativeSort (.base child.decl.sort) = true
   sort_eq : ∀ child : DataRef block,
@@ -75,37 +75,37 @@ variable {data : BlockEncoding arity}
   cases equal
   rfl
 
-/-- Constructor ownership at the flattened declaration has the same encoded
+/-- A constructor's flattened declaration has the same encoded
 identifier as the underlying source constant. -/
-theorem native_ctor_ident
+theorem flattenedCtor_ident
     (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block child ctor) :
-    fo.ident (symbols.native.ctor ref) =
+    fo.ident (symbols.datatypeSymbols.ctor ref) =
       .symb (data.name (.ctor child ref.index)) := by
   let equal : Defunctionalization.sourceDecl (ctor.ty block child) =
       ctor.fo block child := by
     simpa [CtorDecl.fo, CtorDecl.ty] using
       sourceDecl_ctor (block := block) ctor.fields child.decl.sort
-  have casted : symbols.native.ctor ref =
+  have casted : symbols.datatypeSymbols.ctor ref =
       castSymbol equal (.sourceConstant (symbols.ctor ref)) := by
-    simp only [Symbols.native]
+    simp only [Symbols.datatypeSymbols]
   calc
-    fo.ident (symbols.native.ctor ref) =
+    fo.ident (symbols.datatypeSymbols.ctor ref) =
         fo.ident (castSymbol equal (.sourceConstant (symbols.ctor ref))) :=
       congrArg fo.ident casted
     _ = fo.ident (.sourceConstant (symbols.ctor ref)) :=
       SMT.Encoding.ident_cast fo equal _
     _ = _ := represented.ctor_ident ref
 
-/-- Selector ownership uses the same encoded identifier as its source
+/-- A selector uses the same encoded identifier as its source
 constant. -/
-theorem native_sel_ident
+theorem flattenedSelector_ident
     (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) {field : FieldDecl arity}
     (fieldRef : FieldRef ctor field) :
-    fo.ident (symbols.native.sel ctorRef fieldRef) =
+    fo.ident (symbols.datatypeSymbols.sel ctorRef fieldRef) =
       .symb (data.name (.sel child ctorRef.index fieldRef.index)) := by
   cases field with
   | mk name sort => cases sort <;>
@@ -161,7 +161,7 @@ theorem native_sel_ident
 end Representation
 
 /-- Dependency-ordered datatype blocks represented by one shared encoding.
-The encoding itself owns the exact native command array, so this witness does
+The encoding itself contains the exact SMT datatype command sequence, so this witness does
 not duplicate that command list. -/
 inductive Represented {signature : Signature}
     (fo : SMT.Encoding (Symbol signature)) :
@@ -174,7 +174,7 @@ inductive Represented {signature : Signature}
 
 namespace Represented
 
-/-- Every represented native block supplies the structural well-formedness
+/-- Every represented SMT datatype block supplies the structural well-formedness
 needed by guarded dependency composition. -/
 def blocksWF {signature : Signature}
     {fo : SMT.Encoding (Symbol signature)} :
@@ -182,7 +182,7 @@ def blocksWF {signature : Signature}
   | [], .nil => .nil
   | _ :: _, .cons head tail => .cons head.wf.blockWF tail.blocksWF
 
-/-- Exact dependency-ordered native command sequence described by an
+/-- Exact dependency-ordered SMT datatype command sequence described by an
 environment representation. -/
 def commands {signature : Signature}
     {fo : SMT.Encoding (Symbol signature)} :
@@ -193,20 +193,20 @@ def commands {signature : Signature}
 
 end Represented
 
-/-- Exact representation of every datatype block owned by a shared encoding.
-The command equation is the single source of truth for native command order;
+/-- Exact representation of every datatype block under a shared encoding.
+The command equation is the single source of truth for SMT datatype command order;
 individual block certificates do not retain redundant membership proofs. -/
 structure EnvRepresentation {signature : Signature}
     (fo : SMT.Encoding (Symbol signature))
     (env : Env signature) where
   blocks : Represented fo env
-  native_eq : fo.nativeCommands = blocks.commands
+  datatypeCommands_eq : fo.nativeCommands = blocks.commands
 
 /-- The empty datatype environment is the ordinary encoding case. -/
 def EnvRepresentation.nil {signature : Signature}
-    (fo : SMT.Encoding (Symbol signature)) (native_eq : fo.nativeCommands = #[]) :
+    (fo : SMT.Encoding (Symbol signature)) (datatypeCommands_eq : fo.nativeCommands = #[]) :
     EnvRepresentation fo [] :=
-  ⟨.nil, native_eq⟩
+  ⟨.nil, datatypeCommands_eq⟩
 
 /-- Assemble the guarded flattened target carried by all represented blocks.
 The ordinary canonical model remains the fixed source of the resulting single
@@ -214,18 +214,18 @@ model relation. -/
 noncomputable def EnvRepresentation.lifted {signature : Signature}
     {fo : SMT.Encoding (Symbol signature)} {env : Env signature}
     (represented : EnvRepresentation fo env) (source : Model signature)
-    (lawful : Env.Lawful source env) :
+    (freeDataModel : Env.IsFreeDatatypeModel source env) :
     Lifted (canonicalModel source) :=
-  Env.lift source env lawful represented.blocks.blocksWF
+  Env.lift source env freeDataModel represented.blocks.blocksWF
 
 /-- Assemble represented datatype blocks over a caller-supplied interpreted or
 otherwise guarded base model. -/
 noncomputable def EnvRepresentation.liftedFrom {signature : Signature}
     {fo : SMT.Encoding (Symbol signature)} {env : Env signature}
     (represented : EnvRepresentation fo env) (source : Model signature)
-    (lawful : Env.Lawful source env)
+    (freeDataModel : Env.IsFreeDatatypeModel source env)
     (prior : Lifted (canonicalModel source)) :
     Lifted (canonicalModel source) :=
-  Env.liftFrom source env lawful represented.blocks.blocksWF prior
+  Env.liftFrom source env freeDataModel represented.blocks.blocksWF prior
 
 end Crush.Metatheory.SMT.Datatype

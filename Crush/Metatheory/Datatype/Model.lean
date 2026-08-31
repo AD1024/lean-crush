@@ -5,9 +5,9 @@ import Crush.Metatheory.HO.Semantics
 /-!
 # Datatype-aware source models
 
-The intrinsic HO term language continues to use ordinary typed constants. A
+The intrinsically typed higher-order term language continues to use ordinary constants. A
 `Symbols` record classifies selected constants as datatype constructors,
-selectors, and testers. A `Lawful` witness then states their canonical meaning.
+selectors, and testers. A `IsFreeDatatypeModel` witness then states their canonical meaning.
 This keeps all existing term recursion unchanged while strengthening the class
 of source models used for datatype-aware satisfiability.
 -/
@@ -67,7 +67,7 @@ def FieldDecl.fromVal {arity : Nat} {block : Block arity}
       | base => rfl
       | data child => exact (carrier child).right_inv value
 
-/-- Curry a constructor argument telescope into its intrinsic source type. -/
+/-- Curry a constructor argument telescope into its reified source type. -/
 def Args.curry {arity : Nat} {block : Block arity}
     {Base : BaseSort → Type}
     (carrier : ∀ data : DataRef block,
@@ -94,7 +94,7 @@ def CtorDecl.denote {arity : Nat} {block : Block arity}
   Args.curry carrier ctor.fields (.base data.decl.sort) fun args =>
     (carrier data).«from» (.ctor ref args)
 
-/-- Existing HO constants owned by one datatype block. -/
+/-- Higher-order constants for one datatype block. -/
 structure Symbols (signature : Signature) {arity : Nat} (block : Block arity) where
   ctor : {data : DataRef block} → {decl : CtorDecl arity} →
     CtorRef block data decl → Const signature (decl.ty block data)
@@ -106,7 +106,7 @@ structure Symbols (signature : Signature) {arity : Nat} (block : Block arity) wh
     CtorRef block data ctor →
       Const signature (.arrow (.base data.decl.sort) .bool)
 
-/-- Every mutual block has one canonical ownership map into its compact source
+/-- Every mutual block has one canonical symbol map into its compact source
 signature. Terms continue to use ordinary constants. -/
 def Block.symbols {arity : Nat} (block : Block arity) :
     Symbols block.symbolTypes block where
@@ -116,7 +116,7 @@ def Block.symbols {arity : Nat} (block : Block arity) :
 
 namespace Symbols
 
-/-- Keep one ownership map while extending the signature on the right. -/
+/-- Keep one symbol map while extending the signature on the right. -/
 def inLeft {signature : Signature} {arity : Nat} {block : Block arity}
     (symbols : Symbols signature block) (tail : Signature) :
     Symbols (signature ++ tail) block where
@@ -125,7 +125,7 @@ def inLeft {signature : Signature} {arity : Nat} {block : Block arity}
     (symbols.sel ctorRef fieldRef).inLeft tail
   test := fun ref => (symbols.test ref).inLeft tail
 
-/-- Keep one ownership map while extending the signature on the left. -/
+/-- Keep one symbol map while extending the signature on the left. -/
 def inRight {signature : Signature} {arity : Nat} {block : Block arity}
     (symbols : Symbols signature block) (head : Signature) :
     Symbols (head ++ signature) block where
@@ -137,9 +137,9 @@ def inRight {signature : Signature} {arity : Nat} {block : Block arity}
 end Symbols
 
 /-- A source model interprets the selected base sorts as canonical finite
-datatype values and gives every owned symbol its native meaning. Selectors are
+datatype values and gives every datatype symbol its free-datatype meaning. Selectors are
 constrained only on their own constructor. -/
-structure Lawful {signature : Signature} {arity : Nat} {block : Block arity}
+structure IsFreeDatatypeModel {signature : Signature} {arity : Nat} {block : Block arity}
     (symbols : Symbols signature block) (model : Model signature) where
   carrier : ∀ data : DataRef block,
     Iso (model.Base data.decl.sort) (Val block model.Base data)
@@ -157,12 +157,13 @@ structure Lawful {signature : Signature} {arity : Nat} {block : Block arity}
     (ref : CtorRef block data ctor) (value : model.Base data.decl.sort),
     model.const (symbols.test ref) value ↔ IsCtor ref ((carrier data).to value)
 
-/-- A lawful datatype carrier is necessarily productive: the source model
+/-- A datatype carrier satisfying the free-datatype model condition is necessarily
+productive: the source model
 supplies an inhabitant and the carrier isomorphism turns it into a finite
 constructor tree. -/
-theorem Lawful.productive {signature : Signature} {arity : Nat}
+theorem IsFreeDatatypeModel.productive {signature : Signature} {arity : Nat}
     {block : Block arity} {symbols : Symbols signature block}
-    {model : Model signature} (law : Lawful symbols model) :
+    {model : Model signature} (law : IsFreeDatatypeModel symbols model) :
     Productive block := by
   intro data
   let ⟨value⟩ := model.baseNonempty data.decl.sort
@@ -170,7 +171,7 @@ theorem Lawful.productive {signature : Signature} {arity : Nat}
 
 /-! ## Multiple monomorphic datatype blocks -/
 
-/-- One datatype block and the HO constants it owns in a shared signature. -/
+/-- One datatype block and its higher-order constants in a shared signature. -/
 structure Entry (signature : Signature) where
   arity : Nat
   block : Block arity
@@ -208,25 +209,25 @@ def inRight {signature : Signature} (env : Env signature)
   unfold inRight
   simp
 
-/-- A shared source model is lawful for every datatype block in the environment. -/
-inductive Lawful {signature : Signature} (model : Model signature) :
+/-- A shared source model satisfies the free-datatype condition for every block. -/
+inductive IsFreeDatatypeModel {signature : Signature} (model : Model signature) :
     Env signature → Type where
-  | nil : Lawful model []
+  | nil : IsFreeDatatypeModel model []
   | cons {entry : Entry signature} {rest : Env signature} :
-      Datatype.Lawful entry.symbols model → Lawful model rest →
-        Lawful model (entry :: rest)
+      Datatype.IsFreeDatatypeModel entry.symbols model → IsFreeDatatypeModel model rest →
+        IsFreeDatatypeModel model (entry :: rest)
 
-/-- Semantic unsatisfiability in every model lawful for the complete datatype
+/-- Semantic unsatisfiability in every model satisfying the complete datatype
 environment. -/
 abbrev Unsatisfiable {signature : Signature} (env : Env signature)
     (formula : Sentence signature) : Prop :=
-  UnsatisfiableUnder (fun model => Lawful model env) formula
+  UnsatisfiableUnder (fun model => IsFreeDatatypeModel model env) formula
 
-/-- Semantic unsatisfiability of a complete source theory in every model lawful
+/-- Semantic unsatisfiability of a complete source theory in every model satisfying
 for the datatype environment. -/
 abbrev TheoryUnsatisfiable {signature : Signature} (env : Env signature)
     (theory : Theory signature) : Prop :=
-  ∀ model : Model signature, ∀ _lawful : Lawful model env,
+  ∀ model : Model signature, ∀ _freeDataModel : IsFreeDatatypeModel model env,
     ¬model.SatisfiesTheory theory
 
 end Env
@@ -239,7 +240,7 @@ theorem Env.unsatisfiable_nil_iff {signature : Signature}
   constructor
   · intro unsat model valid
     exact unsat model .nil valid
-  · intro unsat model lawful valid
+  · intro unsat model freeDataModel valid
     exact unsat model valid
 
 end Crush.Metatheory.Datatype

@@ -19,7 +19,7 @@ variable {symbols : FO.SymbolFamily}
 
 /-- Semantic contract for the guard syntax emitted at one bound variable.
 Omitting syntax is allowed only when every target value is guarded. -/
-structure Guarding.Semantics (guarding : Guarding symbols)
+structure GuardedEncoding.Semantics (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop) where
@@ -33,7 +33,7 @@ structure Guarding.Semantics (guarding : Guarding symbols)
 
 /-- Compositional guard semantics for an arbitrary already-evaluated raw term.
 This is the form needed by datatype guards applied to selector terms. -/
-structure Guarding.TermSemantics (guarding : Guarding symbols)
+structure GuardedEncoding.TermSemantics (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop) where
@@ -49,7 +49,7 @@ structure Guarding.TermSemantics (guarding : Guarding symbols)
 /-- Pointwise-equivalent semantic predicates satisfy the same guard syntax
 contract. This is the composition boundary between individual guard components
 and the complete source-to-target carrier relation. -/
-theorem Guarding.TermSemantics.congr {guarding : Guarding symbols}
+theorem GuardedEncoding.TermSemantics.congr {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
     {extra : ExtraGraph guarding.encoding target}
     {left right : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
@@ -69,7 +69,7 @@ theorem Guarding.TermSemantics.congr {guarding : Guarding symbols}
 
 /-- Bound-variable guard semantics is the immediate specialization of the
 compositional contract. -/
-theorem Guarding.TermSemantics.toSemantics {guarding : Guarding symbols}
+theorem GuardedEncoding.TermSemantics.toSemantics {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
     {extra : ExtraGraph guarding.encoding target}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
@@ -85,24 +85,24 @@ theorem Guarding.TermSemantics.toSemantics {guarding : Guarding symbols}
 
 /-- The ordinary encoder satisfies the guarded contract with the trivial
 predicate, so it remains the zero-cost specialization of the same semantics. -/
-theorem Guarding.none_semantics (encoding : Encoding symbols)
+theorem GuardedEncoding.none_semantics (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target) :
-    (Guarding.none encoding).Semantics target extra (fun _ _ => True) where
+    (GuardedEncoding.none encoding).Semantics target extra (fun _ _ => True) where
   omitted := by intros; trivial
   encoded := by
     intro sort value environment condition impossible
-    simp [Guarding.none] at impossible
+    simp [GuardedEncoding.none] at impossible
 
-theorem Guarding.none_termSemantics (encoding : Encoding symbols)
+theorem GuardedEncoding.none_termSemantics (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target) :
-    (Guarding.none encoding).TermSemantics target extra (fun _ _ => True) where
+    (GuardedEncoding.none encoding).TermSemantics target extra (fun _ _ => True) where
   omitted := by intros; trivial
   encoded := by
     intro sort raw value environment condition evaluated impossible
-    simp [Guarding.none] at impossible
+    simp [GuardedEncoding.none] at impossible
 
 /-- One typed raw term to which a compositional guard may be applied. -/
-structure GuardInput (guarding : Guarding symbols)
+structure GuardInput (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target)
     (environment : List (Value target)) where
@@ -115,7 +115,7 @@ structure GuardInput (guarding : Guarding symbols)
 namespace GuardInput
 
 /-- Apply one encoded unary family symbol to an already evaluated argument. -/
-def ofUnary {guarding : Guarding symbols}
+def ofUnary {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
     {extra : ExtraGraph guarding.encoding target}
     {environment : List (Value target)} {domain result : FO.FOSort}
@@ -153,7 +153,7 @@ noncomputable def truth (proposition : Prop) : Bool :=
   by_cases valid : proposition <;> simp [truth, valid]
 
 /-- Retain exactly the guard conditions emitted for a typed input list. -/
-def terms {guarding : Guarding symbols} {target : FO.FamilyModel symbols}
+def terms {guarding : GuardedEncoding symbols} {target : FO.FamilyModel symbols}
     {extra : ExtraGraph guarding.encoding target}
     {environment : List (Value target)}
     (inputs : List (GuardInput guarding target extra environment)) :
@@ -162,7 +162,7 @@ def terms {guarding : Guarding symbols} {target : FO.FamilyModel symbols}
     guarding.guard input.sort input.raw).toArray
 
 /-- Boolean denotations aligned with `terms`. -/
-noncomputable def results {guarding : Guarding symbols}
+noncomputable def results {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
     {extra : ExtraGraph guarding.encoding target}
     {environment : List (Value target)}
@@ -172,7 +172,7 @@ noncomputable def results {guarding : Guarding symbols}
     (guarding.guard input.sort input.raw).map fun _ =>
       truth (guard input.sort input.value)
 
-private theorem typed_decide {guarding : Guarding symbols}
+private theorem typed_decide {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
     {extra : ExtraGraph guarding.encoding target} (proposition : Prop) :
     (Value.typed .bool proposition : Value target) =
@@ -184,7 +184,7 @@ private theorem typed_decide {guarding : Guarding symbols}
 
 /-- Pointwise compositional guard semantics produces the exact Boolean list
 used by `wfBody`. -/
-theorem evals {guarding : Guarding symbols}
+theorem evals {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
     {extra : ExtraGraph guarding.encoding target}
     {environment : List (Value target)}
@@ -215,7 +215,7 @@ theorem evals {guarding : Guarding symbols}
 
 /-- Filtering omitted guards does not weaken the semantic conjunction because
 the compositional contract requires every omitted guard to be total. -/
-theorem results_all {guarding : Guarding symbols}
+theorem results_all {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
     {extra : ExtraGraph guarding.encoding target}
     {environment : List (Value target)}
@@ -242,7 +242,7 @@ theorem results_all {guarding : Guarding symbols}
           simp only [List.all_cons, Bool.and_eq_true, ih]
           simp
 
-@[simp] theorem results_length {guarding : Guarding symbols}
+@[simp] theorem results_length {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
     {extra : ExtraGraph guarding.encoding target}
     {environment : List (Value target)}
@@ -262,7 +262,7 @@ end GuardInput
 
 /-- Assemble one exact `wfBody` clause from a tester proposition and the
 compositional guards on its selector inputs. -/
-theorem Datatype.ClauseRuns.ofInputs {guarding : Guarding symbols}
+theorem Datatype.ClauseRuns.ofInputs {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
     {extra : ExtraGraph guarding.encoding target}
     {environment : List (Value target)}
@@ -285,7 +285,7 @@ theorem Datatype.ClauseRuns.ofInputs {guarding : Guarding symbols}
   exact testerEval
 
 /-- One constructor clause assembled from its tester and typed selector inputs. -/
-structure GuardPart (guarding : Guarding symbols)
+structure GuardPart (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target)
     (environment : List (Value target)) (valueTerm : Crush.SMT.Term) where
@@ -299,7 +299,7 @@ structure GuardPart (guarding : Guarding symbols)
 namespace GuardPart
 
 /-- Semantic tester-implies-field contract represented by a clause list. -/
-def Holds {guarding : Guarding symbols} {target : FO.FamilyModel symbols}
+def Holds {guarding : GuardedEncoding symbols} {target : FO.FamilyModel symbols}
     {extra : ExtraGraph guarding.encoding target}
     {environment : List (Value target)} {valueTerm : Crush.SMT.Term}
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
@@ -307,7 +307,7 @@ def Holds {guarding : Guarding symbols} {target : FO.FamilyModel symbols}
   ∀ clause ∈ clauses, clause.tester →
     ∀ input ∈ clause.fields, guard input.sort input.value
 
-def parts {guarding : Guarding symbols} {target : FO.FamilyModel symbols}
+def parts {guarding : GuardedEncoding symbols} {target : FO.FamilyModel symbols}
     {extra : ExtraGraph guarding.encoding target}
     {environment : List (Value target)} {valueTerm : Crush.SMT.Term}
     (clauses : List (GuardPart guarding target extra environment valueTerm)) :
@@ -315,7 +315,7 @@ def parts {guarding : Guarding symbols} {target : FO.FamilyModel symbols}
   (clauses.map fun clause =>
     (clause.name, GuardInput.terms clause.fields)).toArray
 
-noncomputable def results {guarding : Guarding symbols}
+noncomputable def results {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
     {extra : ExtraGraph guarding.encoding target}
     {environment : List (Value target)} {valueTerm : Crush.SMT.Term}
@@ -329,8 +329,8 @@ noncomputable def results {guarding : Guarding symbols}
       (GuardInput.results guard clause.fields).all id)
 
 /-- Constructor clauses produce the `PartsRun` expected by the exact body
-evaluator, with the same empty-field filtering as production. -/
-theorem runs {guarding : Guarding symbols}
+evaluator, with the same empty-field filtering as the Crush translator. -/
+theorem runs {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
     {extra : ExtraGraph guarding.encoding target}
     {environment : List (Value target)} {valueTerm : Crush.SMT.Term}
@@ -359,7 +359,7 @@ theorem runs {guarding : Guarding symbols}
 /-- The retained Boolean outcomes are true exactly when every constructor
 tester implies all semantic field guards. Clauses omitted because every field
 guard is total are recovered through `TermSemantics.omitted`. -/
-theorem results_all {guarding : Guarding symbols}
+theorem results_all {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
     {extra : ExtraGraph guarding.encoding target}
     {environment : List (Value target)} {valueTerm : Crush.SMT.Term}
@@ -428,9 +428,9 @@ theorem results_all {guarding : Guarding symbols}
             · intro current member
               exact all current (by simp [member])
 
-/-- The exact production-shaped `wfBody` evaluates to the semantic
+/-- The exact emitted `wfBody` evaluates to the semantic
 tester-implies-field proposition. -/
-theorem eval {guarding : Guarding symbols}
+theorem eval {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
     {extra : ExtraGraph guarding.encoding target}
     {environment : List (Value target)} {valueTerm : Crush.SMT.Term}
@@ -461,7 +461,7 @@ theorem eval {guarding : Guarding symbols}
 
 end GuardPart
 
-/-- Generic graph-equation theorem for a production-shaped unary recursive
+/-- Generic graph-equation theorem for an emitted unary recursive
 definition. It deliberately knows nothing about how the symbol graph or its
 body were assembled; interpreted arithmetic and datatype predicates can
 therefore share the same final model and the same command theorem. -/
@@ -520,7 +520,7 @@ namespace UnaryGuards
 /-- Exact guard syntax selected by a unary-guard family. -/
 def guarding {encoding : Encoding symbols} {target : FO.FamilyModel symbols}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
-    (guards : UnaryGuards encoding target guard) : Guarding symbols where
+    (guards : UnaryGuards encoding target guard) : GuardedEncoding symbols where
   encoding
   guard := fun sort value => guards.ident sort |>.map fun identifier =>
     .app identifier #[value]
@@ -867,7 +867,7 @@ theorem applies_iff {encoding : Encoding symbols}
     exact Or.inr ⟨sort, value, identEq, rfl, rfl⟩
 
 /-- Generic graph-equation theorem for the exact unary recursive-definition
-syntax shared with production. A component only has to identify the denotation
+syntax shared with the Crush translator. A component only has to identify the denotation
 of its `wfBody`; allocation, typing, and graph functionality are discharged
 once here. -/
 theorem wfDef_holds {encoding : Encoding symbols}
@@ -936,7 +936,7 @@ theorem applyValues_guardArgValues (target : FO.FamilyModel symbols)
       exact restIH valuation _)
     args valuation function
 
-private theorem asTrue (guarding : Guarding symbols)
+private theorem asTrue (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target)
     {environment : List (Value target)} {term : STerm} {proposition : Prop}
@@ -948,7 +948,7 @@ private theorem asTrue (guarding : Guarding symbols)
   have equal : proposition = True := propext ⟨fun _ => trivial, fun _ => valid⟩
   simpa only [modelWith_bool, boolValue, equal] using evaluated
 
-private theorem asFalse (guarding : Guarding symbols)
+private theorem asFalse (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target)
     {environment : List (Value target)} {term : STerm} {proposition : Prop}
@@ -960,7 +960,7 @@ private theorem asFalse (guarding : Guarding symbols)
   have equal : proposition = False := propext ⟨invalid, False.elim⟩
   simpa only [modelWith_bool, boolValue, equal] using evaluated
 
-private theorem boolNe (guarding : Guarding symbols)
+private theorem boolNe (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target) :
     (modelWith guarding.encoding target extra).bool true ≠
@@ -968,7 +968,7 @@ private theorem boolNe (guarding : Guarding symbols)
   exact fun equal => Bool.noConfusion
     ((modelWith guarding.encoding target extra).boolInjective equal)
 
-private theorem evalNot (guarding : Guarding symbols)
+private theorem evalNot (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target)
     {environment : List (Value target)} {term : STerm} {body : Prop}
@@ -985,7 +985,7 @@ private theorem evalNot (guarding : Guarding symbols)
       (asFalse guarding target extra evaluated valid)
     simpa [modelWith_bool, boolValue, valid] using result
 
-private theorem evalAnd (guarding : Guarding symbols)
+private theorem evalAnd (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target)
     {environment : List (Value target)} {left right : STerm}
@@ -1027,7 +1027,7 @@ private theorem evalAnd (guarding : Guarding symbols)
         (Crush.SMT.BoolValues.cons (Crush.SMT.BoolValues.cons .nil))
   all_goals simpa [modelWith_bool, boolValue, leftValid, rightValid] using result
 
-private theorem evalOr (guarding : Guarding symbols)
+private theorem evalOr (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target)
     {environment : List (Value target)} {left right : STerm}
@@ -1069,7 +1069,7 @@ private theorem evalOr (guarding : Guarding symbols)
         (Crush.SMT.BoolValues.cons (Crush.SMT.BoolValues.cons .nil))
   all_goals simpa [modelWith_bool, boolValue, leftValid, rightValid] using result
 
-private theorem evalImp (guarding : Guarding symbols)
+private theorem evalImp (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target)
     {environment : List (Value target)} {left right : STerm}
@@ -1099,7 +1099,7 @@ private theorem evalImp (guarding : Guarding symbols)
         (asFalse guarding target extra rightEval rightValid)
   all_goals simpa [modelWith_bool, boolValue, leftValid, rightValid] using result
 
-private theorem evalIff (guarding : Guarding symbols)
+private theorem evalIff (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target)
     {environment : List (Value target)} {left right : STerm}
@@ -1132,7 +1132,7 @@ private theorem evalIff (guarding : Guarding symbols)
       (asFalse guarding target extra rightEval rightValid) rfl
     simpa [modelWith_bool, boolValue, leftValid, rightValid] using result
 
-private theorem guardImpEval (guarding : Guarding symbols)
+private theorem guardImpEval (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
@@ -1159,7 +1159,7 @@ private theorem guardImpEval (guarding : Guarding symbols)
       exact evalImp guarding target extra
         (semantics.encoded sort value environment condition guardEq) bodyEval
 
-private theorem guardAndEval (guarding : Guarding symbols)
+private theorem guardAndEval (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
@@ -1186,7 +1186,7 @@ private theorem guardAndEval (guarding : Guarding symbols)
       exact evalAnd guarding target extra
         (semantics.encoded sort value environment condition guardEq) bodyEval
 
-private def GuardTermValid (guarding : Guarding symbols)
+private def GuardTermValid (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
@@ -1198,7 +1198,7 @@ private def GuardTermValid (guarding : Guarding symbols)
       (guarding.term source)
       (.typed sort (source.guardDenote target guard valuation))
 
-private def GuardArgsValid (guarding : Guarding symbols)
+private def GuardArgsValid (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
@@ -1212,7 +1212,7 @@ private def GuardArgsValid (guarding : Guarding symbols)
 
 /-- The exact guarded SMT term evaluates to its guard-restricted typed FO
 denotation in the shared extended model. -/
-theorem guardTerm_eval (guarding : Guarding symbols)
+theorem guardTerm_eval (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
     (extra : ExtraGraph guarding.encoding target)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
@@ -1227,7 +1227,7 @@ theorem guardTerm_eval (guarding : Guarding symbols)
     (motive_2 := fun _ _ args =>
       GuardArgsValid guarding target extra guard args)
     (var := fun ref valuation environment related => by
-      simpa only [Guarding.term, encodeTerm,
+      simpa only [GuardedEncoding.term, encodeTerm,
         FO.FamilyTerm.guardDenote.eq_1] using
         Crush.SMT.Eval.bvar (related.lookup target ref))
     (symbol := fun symbol args argsIH valuation environment related => by
@@ -1238,7 +1238,7 @@ theorem guardTerm_eval (guarding : Guarding symbols)
       rw [applyValues_guardArgValues]
       rfl)
     (boolLit := fun value valuation environment related => by
-      cases value <;> simpa only [Guarding.term, encodeTerm,
+      cases value <;> simpa only [GuardedEncoding.term, encodeTerm,
         FO.FamilyTerm.guardDenote.eq_3, FO.FamilyTerm.guardDenote.eq_4,
         modelWith_bool, boolValue] using
           (Crush.SMT.Eval.boolLit
@@ -1269,7 +1269,7 @@ theorem guardTerm_eval (guarding : Guarding symbols)
           right.guardDenote target guard valuation
       · have result := Crush.SMT.Eval.eqTrue leftEval rightEval
           (congrArg (Value.typed _) equal)
-        simpa [Guarding.term, FO.FamilyTerm.guardDenote.eq_10,
+        simpa [GuardedEncoding.term, FO.FamilyTerm.guardDenote.eq_10,
           modelWith_bool, boolValue, equal] using result
       · have unequal :
           Value.typed _ (left.guardDenote target guard valuation) ≠
@@ -1277,7 +1277,7 @@ theorem guardTerm_eval (guarding : Guarding symbols)
           intro equality
           exact equal (Value.typed.inj equality |>.2 |> eq_of_heq)
         have result := Crush.SMT.Eval.eqFalse leftEval rightEval unequal
-        simpa [Guarding.term, FO.FamilyTerm.guardDenote.eq_10,
+        simpa [GuardedEncoding.term, FO.FamilyTerm.guardDenote.eq_10,
           modelWith_bool, boolValue, equal] using result)
     (forallE := fun body bodyIH valuation environment related => by
       let proposition := ∀ value,
@@ -1383,7 +1383,7 @@ theorem guardTerm_eval (guarding : Guarding symbols)
         exact result)
     (nil := fun {_} valuation environment related => Crush.SMT.EvalList.nil)
     (cons := fun argument rest argumentIH restIH valuation environment related => by
-      rw [Guarding.arguments, encodeArguments, Array.toList_append,
+      rw [GuardedEncoding.arguments, encodeArguments, Array.toList_append,
         List.singleton_append, guardArgValues]
       exact Crush.SMT.EvalList.cons
         (argumentIH valuation environment related)
@@ -1393,7 +1393,7 @@ theorem guardTerm_eval (guarding : Guarding symbols)
 /-- Combining model-relative FO preservation with raw guarded evaluation: a
 source term evaluates to its encoded denotation in any symbol-related target
 model. This is the uniform entry point for ordinary and native components. -/
-theorem guardTerm_rel_eval (guarding : Guarding symbols)
+theorem guardTerm_rel_eval (guarding : GuardedEncoding symbols)
     (source target : FO.FamilyModel symbols)
     (relation : FO.CarrierRel source.carriers target.carriers)
     (models : FO.ModelRel source target relation)
@@ -1416,7 +1416,7 @@ theorem guardTerm_rel_eval (guarding : Guarding symbols)
 
 /-- Generic symbol lifting is the ordinary specialization of the same raw
 guarded theorem. -/
-theorem guardTerm_lift_eval (guarding : Guarding symbols)
+theorem guardTerm_lift_eval (guarding : GuardedEncoding symbols)
     (source : FO.FamilyModel symbols) (target : FO.Carriers)
     (relation : FO.CarrierRel source.carriers target)
     (extra : ExtraGraph guarding.encoding (source.lift target relation))
@@ -1441,7 +1441,7 @@ theorem guardTerm_lift_eval (guarding : Guarding symbols)
 /-- Every guarded assertion reflects a valid formula in the related source
 model. Quantifier guards are discharged by the same carrier relation used for
 symbol arguments and results. -/
-theorem guardedAssertions_valid (guarding : Guarding symbols)
+theorem guardedAssertions_valid (guarding : GuardedEncoding symbols)
     (source target : FO.FamilyModel symbols)
     (relation : FO.CarrierRel source.carriers target.carriers)
     (models : FO.ModelRel source target relation)
@@ -1457,7 +1457,7 @@ theorem guardedAssertions_valid (guarding : Guarding symbols)
   have listMembership : command ∈
       theory.map fun formula =>
         Crush.SMT.Command.assert (guarding.term formula) := by
-    simpa [Guarding.assertions] using arrayMembership
+    simpa [GuardedEncoding.assertions] using arrayMembership
   rcases List.mem_map.mp listMembership with ⟨formula, formulaMem, rfl⟩
   constructor
   · trivial
@@ -1483,7 +1483,7 @@ theorem guardedAssertions_valid (guarding : Guarding symbols)
 /-- Complete guarded model lifting. Native datatype commands, exact certified
 derived definitions, ordinary declarations, and guarded assertions all hold in
 one raw SMT model. -/
-theorem guarded_lift (guarding : Guarding symbols)
+theorem guarded_lift (guarding : GuardedEncoding symbols)
     {derived : Array Command} {theory : FO.FamilyTheory symbols}
     {commands : Array Command}
     (represented : GuardedTheoryRepresentation guarding derived theory commands)
@@ -1502,11 +1502,11 @@ theorem guarded_lift (guarding : Guarding symbols)
   rcases represented with ⟨declarations, same⟩
   refine ⟨modelWith guarding.encoding target extra,
     ((modelWith guarding.encoding target extra).satisfiesCommands_congr same).2 ?_⟩
-  simp only [Guarding.theory]
+  simp only [GuardedEncoding.theory]
   rw [Crush.SMT.Model.satisfiesCommands_append,
     Crush.SMT.Model.satisfiesCommands_append]
   refine ⟨nativeValid, derivedValid, ?_⟩
-  simp only [Guarding.theoryBody]
+  simp only [GuardedEncoding.theoryBody]
   rw [Crush.SMT.Model.satisfiesCommands_append,
     Crush.SMT.Model.satisfiesCommands_append]
   exact ⟨⟨sortDeclarations_valid_with guarding.encoding target extra _,

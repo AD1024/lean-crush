@@ -219,7 +219,7 @@ where
 
 /-- Select legacy or certified datatype acceptance explicitly. The legacy
 predicate remains the default so enabling the growing certified fragment cannot
-silently perturb production benchmarks. -/
+silently perturb existing benchmarks. -/
 def isSupportedDatatypeApp (n : Name) (typeArgs : Array Expr)
     (certified := false) : MetaM Bool := do
   if certified then
@@ -314,7 +314,7 @@ private def triple? {α : Type} (values : Array (Array (Array α)))
   let row ← rows[second]?
   row[third]?
 
-/-- The intrinsic native encoding determined by production's allocated names. -/
+/-- The certified SMT datatype encoding determined by the Crush translator's allocated names. -/
 def blockEncoding {arity : Nat} (names : AllocatedDataNames arity) :
     Metatheory.SMT.Datatype.BlockEncoding arity where
   name
@@ -332,11 +332,11 @@ def blockEncoding {arity : Nat} (names : AllocatedDataNames arity) :
 
 end AllocatedDataNames
 
-/-- Build a typed native command only when it equals the canonical command
+/-- Build a typed SMT datatype declaration only when it equals the canonical command
 computed from the reified datatype block. -/
-def buildNativeDatatypeCommand? (block : Metatheory.Reification.DatatypeBlock)
+def buildDatatypeDeclaration? (block : Metatheory.Reification.DatatypeBlock)
     (names : AllocatedDataNames block.arity) :
-    Option Metatheory.VCG.NativeDatatypeCommand :=
+    Option Metatheory.VCG.DatatypeDeclaration :=
   let encoding := names.blockEncoding
   let command := Metatheory.SMT.Datatype.command block.block encoding
   let sortNames := List.ofFn fun data : Fin block.arity =>
@@ -350,7 +350,7 @@ def buildNativeDatatypeCommand? (block : Metatheory.Reification.DatatypeBlock)
         if symbolsFresh : rawSymbols.all fun symbol =>
             decide (SMT.NotBuiltin symbol) then
           some {
-            owner := block
+            reifiedBlock := block
             typed := {
               blockEncoding := encoding
               command
@@ -699,13 +699,13 @@ private def partitionDefaultAppArgs (fn : Expr) (args : Array Expr) :
 /-- Pure SMT syntax corresponding to the verified metatheory's
 `Guarded.natInt.guard`.  Keeping this constructor named minimizes the refinement
 boundary between `Expr` recognition and the guarded semantic proof. -/
-def productionNatGuard (term : SMT.Term) : SMT.Term :=
+def natNonnegativeGuard (term : SMT.Term) : SMT.Term :=
   (smt| (>= $term 0))
 
 /-- Pure guard combination used by quantified binders.  Its two branches are
 the syntax counterparts of `Encoding.guardedForall` and
 `Encoding.guardedExists`. -/
-def productionGuardBody (isForall : Bool) (condition body : SMT.Term) : SMT.Term :=
+def guardedQuantifierBody (isForall : Bool) (condition body : SMT.Term) : SMT.Term :=
   if isForall then (smt| (=> $condition $body))
   else (smt| (and $condition $body))
 
@@ -809,23 +809,23 @@ mutual
       markSortDeclared sortName
       TranslateM.emitCommand (.declSort sortName 0)
       -- `app` takes the function value plus the flattened argument sorts.
-      let ⟨argumentImages, argumentBridges⟩ ←
+      let ⟨argumentImages, argumentTypesEq⟩ ←
         Metatheory.VCG.mapSortImagesM
-          (fun bridge => emitSort bridge.expr) shape.verified.flatten.1
-      let resultBridge := shape.verified.flatten.2
+          (fun reified => emitSort reified.expr) shape.flatten.1
+      let resultType := shape.flatten.2
       let resultImage : Metatheory.VCG.SortImage :=
-        { bridge := resultBridge, smt := ← emitSort resultBridge.expr }
+        { reified := resultType, smt := ← emitSort resultType.expr }
       let argSorts := (argumentImages.map (·.smt)).toArray
       let resSort := resultImage.smt
-      let appCommand := productionAppDeclaration appName sort argSorts resSort
+      let appCommand := appDeclaration appName sort argSorts resSort
       TranslateM.emitAllocatedCommand (.app {
-        arrow := shape.verified
+        arrow := shape
         name := appName
         functionSort := sort
         arguments := argumentImages
         result := resultImage
-        argumentBridges
-        resultBridge := rfl
+        argumentTypes_eq := argumentTypesEq
+        resultType_eq := rfl
         command := appCommand
         command_eq := rfl })
       markFunDeclared appName
@@ -946,9 +946,9 @@ mutual
              else .app (.symb existing) capArgs
     let cloName ← TranslateM.symbolForStructural key "clo"
     TranslateM.recordSymbolExpr cloName replayHead
-    -- Retain the same typed bridge used by `ClosureCaptureCertificate` and its
-    -- `closureDecl_args` theorem. `preserveExpr` keeps production's existing
-    -- sort-dispatch identity while the bridge supplies the intrinsic type.
+    -- Retain the same reified types used by `ClosureCaptureCertificate` and its
+    -- `closureDecl_args` theorem. `preserveExpr` keeps the Crush translator's existing
+    -- sort-dispatch identity while the reified value supplies the typed source index.
     let certifiedClosure? ← Metatheory.Reification.certifyLocalClosure? lam captures
     let evidence : Metatheory.VCG.ClosureEvidence ←
       match certifiedClosure? with
@@ -962,18 +962,18 @@ mutual
       | some certified => pure certified.captureTypes
       | none => captures.mapM fun fid => do
           Metatheory.Reification.reifyType (← fid.getType) (preserveExpr := true)
-    let ⟨captureImages, captureBridges⟩ ←
+    let ⟨captureImages, captureTypesEq⟩ ←
       Metatheory.VCG.mapSortImagesM
-        (fun bridge => emitSort bridge.expr) captureTypes.toList
+        (fun reified => emitSort reified.expr) captureTypes.toList
     let capSorts := (captureImages.map (·.smt)).toArray
     let (arrowSort, _) ← declareArrowSort lamTy
-    let closureCommand := productionClosureDeclaration cloName capSorts arrowSort
+    let closureCommand := closureDeclaration cloName capSorts arrowSort
     TranslateM.emitAllocatedCommand (.closure {
-      arrow := shape.verified
+      arrow := shape
       name := cloName
       captures := captureImages
       captureTypes := captureTypes.toList
-      captureBridges
+      captureTypes_eq := captureTypesEq
       functionSort := arrowSort
       command := closureCommand
       command_eq := rfl })
@@ -991,10 +991,10 @@ mutual
     -- Enter the λ's binders with real fvars so the body becomes closed.
     let (paramBinders, bodyTerm) ← emitLambdaBody lam shape
     let parameterRefs := paramBinders.map (fun (n, _) => SMT.Term.const n)
-    let rawEquation := productionClosureEquation appName cloApp parameterRefs bodyTerm
+    let rawEquation := closureEquation appName cloApp parameterRefs bodyTerm
     -- The defining equation holds at well-formed arguments and captures only; the body is
     -- a Lean term and has no meaning at a value outside the encoded type's image.
-    let captureTys := captureTypes.map Metatheory.Reification.TypeBridge.expr
+    let captureTys := captureTypes.map Metatheory.Reification.ReifiedType.expr
     let guard ← binderGuard ((binders ++ paramBinders).map (·.1))
       (captureTys ++ shape.args)
     let axiomBody :=
@@ -1002,9 +1002,9 @@ mutual
       | none => rawEquation
       | some g => SMT.Term.symbApp "=>" #[g, rawEquation]
     let allBinders := binders ++ paramBinders
-    let equationCommand := productionClosureAssertion allBinders axiomBody
+    let equationCommand := closureEquationCommand allBinders axiomBody
     TranslateM.emitAllocatedCommand (.closureEquation {
-      arrow := shape.verified
+      arrow := shape
       appName
       closure := cloApp
       parameters := parameterRefs
@@ -1269,9 +1269,9 @@ mutual
           ctors := ctorNames
           sels := selNames
           bases := baseSorts }
-        let some native := buildNativeDatatypeCommand? block names
-          | throwError "crush: allocated native command for `{n}` disagrees with its datatype block"
-        let _ ← TranslateM.emitNativeDatatypeCommand native
+        let some declaration := buildDatatypeDeclaration? block names
+          | throwError "crush: allocated SMT datatype declaration for `{n}` disagrees with its block"
+        let _ ← TranslateM.emitDatatypeDeclaration declaration
       else
         throwError "crush: certified mutual block size drift for `{n}`"
     else
@@ -1288,9 +1288,9 @@ mutual
       wfDefs := wfDefs.push (← datatypeWFDef mSort wfParts)
     unless wfDefs.isEmpty do
       let command := SMT.Command.defFunsRec wfDefs
-      if let some owner := certifiedBlock? then
-        TranslateM.emitAllocatedCommand (.dataGuard {
-          owner
+      if let some reifiedBlock := certifiedBlock? then
+        TranslateM.emitAllocatedCommand (.datatypeGuard {
+          reifiedBlock
           definitions := wfDefs
           command
           command_eq := rfl })
@@ -1373,7 +1373,7 @@ mutual
   partial def wfCondition (ty : Expr) (t : SMT.Term) : TranslateM (Option SMT.Term) := do
     let ty ← whnf ty
     if ty.isConstOf ``Nat then
-      return some (productionNatGuard t)
+      return some (natNonnegativeGuard t)
     if let some elem ← finiteArrayElem? ty then
       unless ← finiteArraySortSelected ty elem do return none
       let enc ← declareFiniteArray elem
@@ -2004,7 +2004,7 @@ mutual
       -- `a ++ b` puts `a` in the high bits, matching SMT `concat` (verified:
       -- `(4 : BitVec 8) ++ (5 : BitVec 4) = 0x045#12`).
       return some (smt| (concat $(← emitTerm a) $(← emitTerm b)))
-    -- Bridges between bit-vectors and the integers. `toNat` is unsigned
+    -- Conversions between bit-vectors and the integers. `toNat` is unsigned
     -- (`bv2nat`), `toInt` two's-complement signed (`sbv_to_int`); `ofInt` wraps.
     -- Both operators are supported by z3 and cvc5 (checked).
     | BitVec.toNat _ a => return some (smt| (bv2nat $(← emitTerm a)))
@@ -2100,7 +2100,7 @@ mutual
     match ← wfCondition ty (.const vname) with
     | none => return body
     | some cond =>
-      return productionGuardBody isForall cond body
+      return guardedQuantifierBody isForall cond body
 
   /-- Uninterpreted-function fallback: declare the head, translate the args.
 
@@ -2118,12 +2118,12 @@ mutual
     let partition ← partitionDefaultAppArgs fn args
     let valueArgs := partition.values
     let appExpr := mkAppN fn args
-    -- Attempt the modeled finite-signature bridge without changing fallback
-    -- behavior. Success ties `fn` to an exact intrinsic constant reference and
+    -- Attempt finite-signature reification without changing fallback
+    -- behavior. Success ties `fn` to an exact reified constant reference and
     -- its canonical flattened semantic certificate.
     let certifiedConstant? ← try
-      let .pack signatureBridge ← Metatheory.Reification.reifyTermSignature appExpr
-      pure (Metatheory.Reification.certifyConstantIn? signatureBridge fn)
+      let .pack reifiedSignature ← Metatheory.Reification.reifyTermSignature appExpr
+      pure (Metatheory.Reification.certifyConstantIn? reifiedSignature fn)
     catch _ => pure none
     if certifiedConstant?.isNone then
       TranslateM.markTrusted (.constant fn)
@@ -2154,7 +2154,7 @@ mutual
       let resSort ← emitSort resTy
       TranslateM.emitCommand (.declFun name argSorts resSort)
       if let some certified := certifiedConstant? then
-        let emission : Metatheory.Reification.LiveCertifiedConstantEmission := {
+        let emission : Metatheory.Reification.CertifiedSymbolBinding := {
           symbol := name
           constant := certified }
         let _ ← TranslateM.recordVerifiedConstant (Dynamic.mk emission)

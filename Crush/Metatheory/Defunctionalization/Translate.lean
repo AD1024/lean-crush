@@ -5,7 +5,7 @@ import Crush.Metatheory.FO.Symbols
 /-!
 # Typed references for defunctionalization
 
-This module establishes the reference-level bridge into the generated target
+This module relates the reference translation to the generated target
 signature.  It maps source variables, source constants, arrow-plan positions,
 and closure IDs to FO references with the declaration type checked by Lean.
 -/
@@ -15,16 +15,16 @@ namespace Crush.Metatheory.Defunctionalization
 variable {signature : Signature} {context : Context} {ty : Ty}
 
 /-- The total proof-facing preprocessing pipeline.  Target collection happens
-*after* eta-long normalization, just as the live translator materializes
+*after* eta-long normalization, just as the Crush translator materializes
 function values before declaring closures. -/
-structure Prepared (signature : Signature) (context : Context) (ty : Ty) where
+structure AnnotatedEtaLongTerm (signature : Signature) (context : Context) (ty : Ty) where
   source : Term signature context ty
   normalized : Term signature context ty
   annotated : AnnotatedTerm signature context ty
   annotationErases : annotated.erase = normalized
 
 /-- Eta-normalize and assign stable closure IDs. -/
-def prepare (source : Term signature context ty) : Prepared signature context ty :=
+def prepare (source : Term signature context ty) : AnnotatedEtaLongTerm signature context ty :=
   let normalized := etaLong source
   { source
     normalized
@@ -32,11 +32,11 @@ def prepare (source : Term signature context ty) : Prepared signature context ty
     annotationErases := annotate_erase normalized }
 
 /-- Collection is definitionally tied to the normalized term. -/
-def Prepared.plan (prepared : Prepared signature context ty) : Plan signature :=
+def AnnotatedEtaLongTerm.plan (prepared : AnnotatedEtaLongTerm signature context ty) : Plan signature :=
   collect prepared.normalized
 
 /-- The finite target signature selected by a prepared term. -/
-def Prepared.targetSignature (prepared : Prepared signature context ty) : FO.Signature :=
+def AnnotatedEtaLongTerm.targetSignature (prepared : AnnotatedEtaLongTerm signature context ty) : FO.Signature :=
   prepared.plan.targetSignature signature
 
 @[simp] theorem prepare_normalized (source : Term signature context ty) :

@@ -44,7 +44,7 @@ structure Fact where
   the normalized assertion. Ordinary facts carry their rewritten proof directly. -/
   negationTransform : Option Expr := none
   /-- A specialized equality connecting the original negated goal to its
-  normalized assertion. Core-directed reconstruction always receives this bridge,
+  normalized assertion. Core-directed reconstruction always receives this proof,
   because the solver no longer needs to cite the equations after rewriting. -/
   reconstructionProof : Option Expr := none
   /-- Equation facts remain quantified SMT fallbacks but are not normalized by

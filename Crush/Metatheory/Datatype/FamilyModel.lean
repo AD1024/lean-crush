@@ -1,9 +1,9 @@
 import Crush.Metatheory.Datatype.Carrier
 
 /-!
-# Native datatype components in one FO family model
+# Datatype components in one FO family model
 
-One typed ownership map identifies the constructor, selector, and tester
+One typed symbol map identifies the constructor, selector, and tester
 symbols belonging to a datatype block. The target model gives those symbols
 their full free-algebra meanings and lifts every other symbol generically.
 -/
@@ -14,8 +14,8 @@ open Crush.Metatheory.Guarded
 
 universe u
 
-/-- Datatype-owned symbols inside an otherwise generic FO symbol family. -/
-structure NativeSymbols (symbols : FO.SymbolFamily.{u}) {arity : Nat}
+/-- Datatype symbols inside an otherwise generic FO symbol family. -/
+structure DatatypeSymbols (symbols : FO.SymbolFamily.{u}) {arity : Nat}
     (block : Block arity) where
   ctor : {data : DataRef block} → {decl : CtorDecl arity} →
     CtorRef block data decl → symbols (decl.fo block data)
@@ -25,83 +25,83 @@ structure NativeSymbols (symbols : FO.SymbolFamily.{u}) {arity : Nat}
   test : {data : DataRef block} → {ctor : CtorDecl arity} →
     CtorRef block data ctor → symbols (ctor.test block data)
 
-/-- A proof that a family symbol is owned by one native datatype component. -/
-inductive NativeRef {symbols : FO.SymbolFamily.{u}} {arity : Nat}
-    {block : Block arity} (native : NativeSymbols symbols block) :
+/-- A typed reference showing that a family symbol belongs to this datatype block. -/
+inductive DatatypeSymbolRef {symbols : FO.SymbolFamily.{u}} {arity : Nat}
+    {block : Block arity} (datatypeSymbols : DatatypeSymbols symbols block) :
     {decl : FO.SymbolDecl} → symbols decl → Type u where
   | ctor {data : DataRef block} {decl : CtorDecl arity}
-      (ref : CtorRef block data decl) : NativeRef native (native.ctor ref)
+      (ref : CtorRef block data decl) : DatatypeSymbolRef datatypeSymbols (datatypeSymbols.ctor ref)
   | sel {data : DataRef block} {ctor : CtorDecl arity}
       (ctorRef : CtorRef block data ctor) {field : FieldDecl arity}
       (fieldRef : FieldRef ctor field) :
-      NativeRef native (native.sel ctorRef fieldRef)
+      DatatypeSymbolRef datatypeSymbols (datatypeSymbols.sel ctorRef fieldRef)
   | test {data : DataRef block} {ctor : CtorDecl arity}
-      (ref : CtorRef block data ctor) : NativeRef native (native.test ref)
+      (ref : CtorRef block data ctor) : DatatypeSymbolRef datatypeSymbols (datatypeSymbols.test ref)
 
 /-- No family symbol has two datatype roles in the same block. -/
-def NativeSymbols.Exclusive {symbols : FO.SymbolFamily.{u}} {arity : Nat}
-    {block : Block arity} (native : NativeSymbols symbols block) : Prop :=
+def DatatypeSymbols.RolesUnique {symbols : FO.SymbolFamily.{u}} {arity : Nat}
+    {block : Block arity} (datatypeSymbols : DatatypeSymbols symbols block) : Prop :=
   ∀ {decl : FO.SymbolDecl} (symbol : symbols decl),
-    Subsingleton (NativeRef native symbol)
+    Subsingleton (DatatypeSymbolRef datatypeSymbols symbol)
 
-/-- Source-model laws for one typed native ownership map. Selectors retain
+/-- Source-model laws for one typed datatype symbol map. Selectors retain
 their intentionally unspecified behavior away from their own constructor. -/
-structure FamilyLawful {symbols : FO.SymbolFamily.{u}} {arity : Nat}
-    {block : Block arity} (native : NativeSymbols symbols block)
+structure IsFreeDatatypeFamilyModel {symbols : FO.SymbolFamily.{u}} {arity : Nat}
+    {block : Block arity} (datatypeSymbols : DatatypeSymbols symbols block)
     (source : FO.FamilyModel symbols) where
   carrier : ∀ data : DataRef block,
     Iso (source.carriers.Base data.decl.sort)
       (Val block source.carriers.Base data)
   ctor_denote : ∀ {data : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block data ctor),
-    source.symbol (native.ctor ref) =
+    source.symbol (datatypeSymbols.ctor ref) =
       BaseLift.sourceCtor source.carriers carrier ref
   sel_ctor : ∀ {data : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block data ctor)
     {field : FieldDecl arity} (fieldRef : FieldRef ctor field)
     (args : Args block source.carriers.Base ctor.fields),
-    source.symbol (native.sel ctorRef fieldRef)
+    source.symbol (datatypeSymbols.sel ctorRef fieldRef)
         ((carrier data).«from» (.ctor ctorRef args)) =
       BaseLift.sourceField carrier field (args.get fieldRef)
   test_denote : ∀ {data : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block data ctor)
     (value : source.carriers.Base data.decl.sort),
-    source.symbol (native.test ref) value ↔
+    source.symbol (datatypeSymbols.test ref) value ↔
       IsCtor ref ((carrier data).to value)
 
-namespace NativeRef
+namespace DatatypeSymbolRef
 
-/-- Full target denotation selected by one native ownership witness. -/
+/-- Full target denotation selected by one datatype symbol reference. -/
 noncomputable def denote {symbols : FO.SymbolFamily.{u}} {arity : Nat}
-    {block : Block arity} {native : NativeSymbols symbols block}
-    {source : FO.FamilyModel symbols} (law : FamilyLawful native source)
+    {block : Block arity} {datatypeSymbols : DatatypeSymbols symbols block}
+    {source : FO.FamilyModel symbols} (law : IsFreeDatatypeFamilyModel datatypeSymbols source)
     (wf : block.WF) (productive : Productive block)
     (prior : FO.FamilyModel symbols)
     (priorRel : FO.CarrierRel source.carriers prior.carriers) :
     {decl : FO.SymbolDecl} → {symbol : symbols decl} →
-      NativeRef native symbol →
+      DatatypeSymbolRef datatypeSymbols symbol →
       FO.SymbolDenote (BaseLift.carriers productive prior.carriers)
         decl.args decl.result
   | _, _, .ctor ref =>
       BaseLift.targetCtor wf productive prior.carriers ref
   | _, _, .sel ctorRef fieldRef =>
       BaseLift.targetSel wf productive priorRel law.carrier ctorRef fieldRef
-        (source.symbol (native.sel ctorRef fieldRef))
+        (source.symbol (datatypeSymbols.sel ctorRef fieldRef))
   | _, _, .test ref =>
       BaseLift.targetTest wf productive prior.carriers ref
 
-end NativeRef
+end DatatypeSymbolRef
 
 /-! ## Dependency-ordered extension -/
 
 /-- Extend a previously related target model by one later datatype block.
-Symbols whose complete declaration is external to the new block are carried
-from the prior model; symbols mentioning a newly owned sort are lifted afresh.
-This preserves native interpretations installed by earlier dependency blocks
-without adding a parallel ownership registry. -/
-noncomputable def FamilyLawful.extend {symbols : FO.SymbolFamily.{u}}
-    {arity : Nat} {block : Block arity} {native : NativeSymbols symbols block}
-    {source : FO.FamilyModel symbols} (law : FamilyLawful native source)
+Symbols whose complete declaration is external to the new block are transported
+from the prior model; symbols mentioning a sort declared by the new block are lifted
+afresh. This preserves datatype interpretations installed by earlier dependency
+blocks without adding a parallel block-symbol registry. -/
+noncomputable def IsFreeDatatypeFamilyModel.extend {symbols : FO.SymbolFamily.{u}}
+    {arity : Nat} {block : Block arity} {datatypeSymbols : DatatypeSymbols symbols block}
+    {source : FO.FamilyModel symbols} (law : IsFreeDatatypeFamilyModel datatypeSymbols source)
     (wf : block.WF) (productive : Productive block)
     (prior : FO.FamilyModel symbols)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
@@ -111,68 +111,68 @@ noncomputable def FamilyLawful.extend {symbols : FO.SymbolFamily.{u}}
   exact {
     carriers := BaseLift.carriers productive prior.carriers
     symbol := fun {decl} symbol =>
-      if owned : Nonempty (NativeRef native symbol) then
-        (Classical.choice owned).denote law wf productive prior priorRel
+      if symbolRef : Nonempty (DatatypeSymbolRef datatypeSymbols symbol) then
+        (Classical.choice symbolRef).denote law wf productive prior priorRel
       else if external : BaseLift.ExternalDecl block decl then
-        BaseLift.carry productive external.1 external.2 (prior.symbol symbol)
+        BaseLift.transportSymbol productive external.1 external.2 (prior.symbol symbol)
       else
         FO.liftSymbol
           (BaseLift.carrierRel wf productive priorRel law.carrier)
           (source.symbol symbol) }
 
-theorem FamilyLawful.extend_symbol_owned {symbols : FO.SymbolFamily.{u}}
-    {arity : Nat} {block : Block arity} {native : NativeSymbols symbols block}
-    {source : FO.FamilyModel symbols} (law : FamilyLawful native source)
+theorem IsFreeDatatypeFamilyModel.extend_symbol_datatype {symbols : FO.SymbolFamily.{u}}
+    {arity : Nat} {block : Block arity} {datatypeSymbols : DatatypeSymbols symbols block}
+    {source : FO.FamilyModel symbols} (law : IsFreeDatatypeFamilyModel datatypeSymbols source)
     (wf : block.WF) (productive : Productive block)
     (prior : FO.FamilyModel symbols)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {decl : FO.SymbolDecl} (symbol : symbols decl)
-    (owned : Nonempty (NativeRef native symbol)) :
+    (symbolRef : Nonempty (DatatypeSymbolRef datatypeSymbols symbol)) :
     (law.extend wf productive prior priorRel priorModels).symbol symbol =
-      (Classical.choice owned).denote law wf productive prior priorRel := by
+      (Classical.choice symbolRef).denote law wf productive prior priorRel := by
   classical
-  simp [FamilyLawful.extend, owned]
+  simp [IsFreeDatatypeFamilyModel.extend, symbolRef]
 
-theorem FamilyLawful.extend_symbol_external {symbols : FO.SymbolFamily.{u}}
-    {arity : Nat} {block : Block arity} {native : NativeSymbols symbols block}
-    {source : FO.FamilyModel symbols} (law : FamilyLawful native source)
+theorem IsFreeDatatypeFamilyModel.extend_symbol_external {symbols : FO.SymbolFamily.{u}}
+    {arity : Nat} {block : Block arity} {datatypeSymbols : DatatypeSymbols symbols block}
+    {source : FO.FamilyModel symbols} (law : IsFreeDatatypeFamilyModel datatypeSymbols source)
     (wf : block.WF) (productive : Productive block)
     (prior : FO.FamilyModel symbols)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {decl : FO.SymbolDecl} (symbol : symbols decl)
-    (unowned : ¬Nonempty (NativeRef native symbol))
+    (notInBlock : ¬Nonempty (DatatypeSymbolRef datatypeSymbols symbol))
     (external : BaseLift.ExternalDecl block decl) :
     (law.extend wf productive prior priorRel priorModels).symbol symbol =
-      BaseLift.carry productive external.1 external.2
+      BaseLift.transportSymbol productive external.1 external.2
         (prior.symbol symbol) := by
   classical
-  simp [FamilyLawful.extend, unowned, external]
+  simp [IsFreeDatatypeFamilyModel.extend, notInBlock, external]
 
-theorem FamilyLawful.extend_symbol_fresh {symbols : FO.SymbolFamily.{u}}
-    {arity : Nat} {block : Block arity} {native : NativeSymbols symbols block}
-    {source : FO.FamilyModel symbols} (law : FamilyLawful native source)
+theorem IsFreeDatatypeFamilyModel.extend_symbol_fresh {symbols : FO.SymbolFamily.{u}}
+    {arity : Nat} {block : Block arity} {datatypeSymbols : DatatypeSymbols symbols block}
+    {source : FO.FamilyModel symbols} (law : IsFreeDatatypeFamilyModel datatypeSymbols source)
     (wf : block.WF) (productive : Productive block)
     (prior : FO.FamilyModel symbols)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {decl : FO.SymbolDecl} (symbol : symbols decl)
-    (unowned : ¬Nonempty (NativeRef native symbol))
+    (notInBlock : ¬Nonempty (DatatypeSymbolRef datatypeSymbols symbol))
     (fresh : ¬BaseLift.ExternalDecl block decl) :
     (law.extend wf productive prior priorRel priorModels).symbol symbol =
       FO.liftSymbol
         (BaseLift.carrierRel wf productive priorRel law.carrier)
         (source.symbol symbol) := by
   classical
-  simp [FamilyLawful.extend, unowned, fresh]
+  simp [IsFreeDatatypeFamilyModel.extend, notInBlock, fresh]
 
 /-- One dependency step preserves every source symbol. Earlier external
-interpretations use `carry_rel`; current or forward-looking symbols use the
+interpretations use `transportSymbol_rel`; current or forward-looking symbols use the
 ordinary canonical lift. -/
-theorem FamilyLawful.extend_rel {symbols : FO.SymbolFamily.{u}}
-    {arity : Nat} {block : Block arity} {native : NativeSymbols symbols block}
-    {source : FO.FamilyModel symbols} (law : FamilyLawful native source)
+theorem IsFreeDatatypeFamilyModel.extend_rel {symbols : FO.SymbolFamily.{u}}
+    {arity : Nat} {block : Block arity} {datatypeSymbols : DatatypeSymbols symbols block}
+    {source : FO.FamilyModel symbols} (law : IsFreeDatatypeFamilyModel datatypeSymbols source)
     (wf : block.WF) (productive : Productive block)
     (prior : FO.FamilyModel symbols)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
@@ -183,10 +183,10 @@ theorem FamilyLawful.extend_rel {symbols : FO.SymbolFamily.{u}}
   symbol := by
     intro decl symbol
     classical
-    by_cases owned : Nonempty (NativeRef native symbol)
-    · rw [law.extend_symbol_owned wf productive prior priorRel priorModels
-          symbol owned]
-      let ref := Classical.choice owned
+    by_cases symbolRef : Nonempty (DatatypeSymbolRef datatypeSymbols symbol)
+    · rw [law.extend_symbol_datatype wf productive prior priorRel priorModels
+          symbol symbolRef]
+      let ref := Classical.choice symbolRef
       change FO.SymbolRel _ (source.symbol symbol)
         (ref.denote law wf productive prior priorRel)
       cases ref with
@@ -203,56 +203,56 @@ theorem FamilyLawful.extend_rel {symbols : FO.SymbolFamily.{u}}
               (law.test_denote ctorRef)
     · by_cases external : BaseLift.ExternalDecl block decl
       · rw [law.extend_symbol_external wf productive prior priorRel
-            priorModels symbol owned external]
-        exact BaseLift.carry_rel wf productive priorRel law.carrier
+            priorModels symbol symbolRef external]
+        exact BaseLift.transportSymbol_rel wf productive priorRel law.carrier
           external.1 external.2 (source.symbol symbol) (prior.symbol symbol)
           (priorModels.symbol symbol)
       · rw [law.extend_symbol_fresh wf productive prior priorRel priorModels
-            symbol owned external]
+            symbol symbolRef external]
         exact FO.liftSymbol_rel
           (BaseLift.carrierRel wf productive priorRel law.carrier)
           (source.symbol symbol)
 
-/-- Exclusive ownership selects the exact current-block native operation in a
-dependency extension. -/
-theorem FamilyLawful.extend_native {symbols : FO.SymbolFamily.{u}}
-    {arity : Nat} {block : Block arity} {native : NativeSymbols symbols block}
-    {source : FO.FamilyModel symbols} (law : FamilyLawful native source)
-    (exclusive : native.Exclusive) (wf : block.WF)
+/-- `RolesUnique` ensures that a symbol reference selects exactly one datatype
+operation in the current dependency extension. -/
+theorem IsFreeDatatypeFamilyModel.extend_datatypeSymbol {symbols : FO.SymbolFamily.{u}}
+    {arity : Nat} {block : Block arity} {datatypeSymbols : DatatypeSymbols symbols block}
+    {source : FO.FamilyModel symbols} (law : IsFreeDatatypeFamilyModel datatypeSymbols source)
+    (rolesUnique : datatypeSymbols.RolesUnique) (wf : block.WF)
     (productive : Productive block) (prior : FO.FamilyModel symbols)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {decl : FO.SymbolDecl} {symbol : symbols decl}
-    (ref : NativeRef native symbol) :
+    (ref : DatatypeSymbolRef datatypeSymbols symbol) :
     (law.extend wf productive prior priorRel priorModels).symbol symbol =
       ref.denote law wf productive prior priorRel := by
-  rw [law.extend_symbol_owned wf productive prior priorRel priorModels
+  rw [law.extend_symbol_datatype wf productive prior priorRel priorModels
     symbol ⟨ref⟩]
   have chosen : Classical.choice
-      (show Nonempty (NativeRef native symbol) from ⟨ref⟩) = ref :=
-    exclusive _ |>.elim _ _
+      (show Nonempty (DatatypeSymbolRef datatypeSymbols symbol) from ⟨ref⟩) = ref :=
+    rolesUnique _ |>.elim _ _
   rw [chosen]
 
-theorem FamilyLawful.extend_ctor {symbols : FO.SymbolFamily.{u}}
-    {arity : Nat} {block : Block arity} {native : NativeSymbols symbols block}
-    {source : FO.FamilyModel symbols} (law : FamilyLawful native source)
-    (exclusive : native.Exclusive) (wf : block.WF)
+theorem IsFreeDatatypeFamilyModel.extend_ctor {symbols : FO.SymbolFamily.{u}}
+    {arity : Nat} {block : Block arity} {datatypeSymbols : DatatypeSymbols symbols block}
+    {source : FO.FamilyModel symbols} (law : IsFreeDatatypeFamilyModel datatypeSymbols source)
+    (rolesUnique : datatypeSymbols.RolesUnique) (wf : block.WF)
     (productive : Productive block) (prior : FO.FamilyModel symbols)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {data : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block data ctor) :
     (law.extend wf productive prior priorRel priorModels).symbol
-        (native.ctor ref) =
+        (datatypeSymbols.ctor ref) =
       BaseLift.targetCtor wf productive prior.carriers ref := by
-  simpa [NativeRef.denote, CtorDecl.fo] using
-    law.extend_native exclusive wf productive prior priorRel priorModels
-      (NativeRef.ctor ref)
+  simpa [DatatypeSymbolRef.denote, CtorDecl.fo] using
+    law.extend_datatypeSymbol rolesUnique wf productive prior priorRel priorModels
+      (DatatypeSymbolRef.ctor ref)
 
-theorem FamilyLawful.extend_sel {symbols : FO.SymbolFamily.{u}}
-    {arity : Nat} {block : Block arity} {native : NativeSymbols symbols block}
-    {source : FO.FamilyModel symbols} (law : FamilyLawful native source)
-    (exclusive : native.Exclusive) (wf : block.WF)
+theorem IsFreeDatatypeFamilyModel.extend_sel {symbols : FO.SymbolFamily.{u}}
+    {arity : Nat} {block : Block arity} {datatypeSymbols : DatatypeSymbols symbols block}
+    {source : FO.FamilyModel symbols} (law : IsFreeDatatypeFamilyModel datatypeSymbols source)
+    (rolesUnique : datatypeSymbols.RolesUnique) (wf : block.WF)
     (productive : Productive block) (prior : FO.FamilyModel symbols)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -260,28 +260,28 @@ theorem FamilyLawful.extend_sel {symbols : FO.SymbolFamily.{u}}
     (ctorRef : CtorRef block data ctor) {field : FieldDecl arity}
     (fieldRef : FieldRef ctor field) :
     (law.extend wf productive prior priorRel priorModels).symbol
-        (native.sel ctorRef fieldRef) =
+        (datatypeSymbols.sel ctorRef fieldRef) =
       BaseLift.targetSel wf productive priorRel law.carrier ctorRef fieldRef
-        (source.symbol (native.sel ctorRef fieldRef)) := by
-  simpa [NativeRef.denote, FieldDecl.sel] using
-    law.extend_native exclusive wf productive prior priorRel priorModels
-      (NativeRef.sel ctorRef fieldRef)
+        (source.symbol (datatypeSymbols.sel ctorRef fieldRef)) := by
+  simpa [DatatypeSymbolRef.denote, FieldDecl.sel] using
+    law.extend_datatypeSymbol rolesUnique wf productive prior priorRel priorModels
+      (DatatypeSymbolRef.sel ctorRef fieldRef)
 
-theorem FamilyLawful.extend_test {symbols : FO.SymbolFamily.{u}}
-    {arity : Nat} {block : Block arity} {native : NativeSymbols symbols block}
-    {source : FO.FamilyModel symbols} (law : FamilyLawful native source)
-    (exclusive : native.Exclusive) (wf : block.WF)
+theorem IsFreeDatatypeFamilyModel.extend_test {symbols : FO.SymbolFamily.{u}}
+    {arity : Nat} {block : Block arity} {datatypeSymbols : DatatypeSymbols symbols block}
+    {source : FO.FamilyModel symbols} (law : IsFreeDatatypeFamilyModel datatypeSymbols source)
+    (rolesUnique : datatypeSymbols.RolesUnique) (wf : block.WF)
     (productive : Productive block) (prior : FO.FamilyModel symbols)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {data : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block data ctor) :
     (law.extend wf productive prior priorRel priorModels).symbol
-        (native.test ref) =
+        (datatypeSymbols.test ref) =
       BaseLift.targetTest wf productive prior.carriers ref := by
-  simpa [NativeRef.denote, CtorDecl.test] using
-    law.extend_native exclusive wf productive prior priorRel priorModels
-      (NativeRef.test ref)
+  simpa [DatatypeSymbolRef.denote, CtorDecl.test] using
+    law.extend_datatypeSymbol rolesUnique wf productive prior priorRel priorModels
+      (DatatypeSymbolRef.test ref)
 
 /-- A target model together with its complete relation to the fixed source
 model. Packaging the dependent relation avoids parallel carrier/model arrays
@@ -327,8 +327,8 @@ noncomputable def ofBase {symbols : FO.SymbolFamily.{u}}
 relation for the complete symbol family. -/
 noncomputable def extend {symbols : FO.SymbolFamily.{u}}
     {source : FO.FamilyModel symbols} (prior : Lifted source)
-    {arity : Nat} {block : Block arity} {native : NativeSymbols symbols block}
-    (law : FamilyLawful native source) (wf : block.WF)
+    {arity : Nat} {block : Block arity} {datatypeSymbols : DatatypeSymbols symbols block}
+    (law : IsFreeDatatypeFamilyModel datatypeSymbols source) (wf : block.WF)
     (productive : Productive block) : Lifted source where
   target := law.extend wf productive prior.target prior.relation prior.models
   relation := BaseLift.carrierRel wf productive prior.relation law.carrier

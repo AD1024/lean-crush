@@ -3,7 +3,7 @@ import Crush.Metatheory.HO.Renaming
 /-!
 # Total eta-long normalization
 
-The production defunctionalizer uses an n-ary `app` symbol for the fully flattened
+The translator defunctionalizer uses an n-ary `app` symbol for the fully flattened
 shape of an arrow.  Consequently a partial application cannot be emitted as an
 under-applied target symbol: it must become a closure for its residual arrow type.
 

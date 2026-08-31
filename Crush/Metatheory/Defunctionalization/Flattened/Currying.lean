@@ -1,5 +1,5 @@
 import Crush.Metatheory.Defunctionalization.Flattened.Lambda
-import Crush.Metatheory.Defunctionalization.ProductionClosure
+import Crush.Metatheory.Defunctionalization.Flattened.ClosureCorrectness
 
 /-!
 # Currying and partial-spine refinement

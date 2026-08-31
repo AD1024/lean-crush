@@ -1,7 +1,7 @@
 import Crush.Metatheory.Notation
 
 /-!
-# Fundamental lemma for classic defunctionalization
+# Fundamental lemma for unary reference defunctionalization
 -/
 
 namespace Crush.Metatheory.Defunctionalization

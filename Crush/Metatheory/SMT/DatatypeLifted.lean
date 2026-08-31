@@ -2,11 +2,11 @@ import Crush.Metatheory.SMT.DatatypeCanonical
 import Crush.Metatheory.SMT.DatatypeGuarded
 
 /-!
-# Native datatype commands in enlarged models
+# SMT datatype declarations in enlarged models
 
 The original canonical command proof interprets a datatype through the source
 carrier isomorphism. Guarded lowering instead uses the complete free algebra
-over an already-lifted base model. This file proves the same native command laws
+over an already-lifted base model. This file proves the same SMT datatype laws
 for that target directly; no datatype axioms or source-carrier cast is used.
 -/
 
@@ -17,12 +17,12 @@ open Crush.Metatheory.Defunctionalization.Flattened
 open scoped Crush.Metatheory Crush.SMT
 
 variable {signature : Signature} {arity : Nat} {block : Block arity}
-variable {native : NativeSymbols (Symbol signature) block}
+variable {native : DatatypeSymbols (Symbol signature) block}
 
 /-- Constructor payloads embedded in the shared raw universe of the enlarged
 free-algebra model. -/
 def argValues {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (wf : block.WF)
+    (law : IsFreeDatatypeFamilyModel native source) (wf : block.WF)
     (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -50,7 +50,7 @@ def argValues {source prior : FO.FamilyModel (Symbol signature)}
 
 /-- The complete constructor telescope specialization. -/
 abbrev ctorArgs {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (wf : block.WF)
+    (law : IsFreeDatatypeFamilyModel native source) (wf : block.WF)
     (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -61,7 +61,7 @@ abbrev ctorArgs {source prior : FO.FamilyModel (Symbol signature)}
 
 /-- Embedded constructor payloads have exactly their represented field sorts. -/
 theorem argValues_typed {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (wf : block.WF)
+    (law : IsFreeDatatypeFamilyModel native source) (wf : block.WF)
     (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -109,9 +109,9 @@ theorem argValues_typed {source prior : FO.FamilyModel (Symbol signature)}
                       (fun ref => refs (.there ref)) tail)
 
 /-- Every raw list typed by a constructor telescope in the enlarged model is
-the embedding of one intrinsic payload telescope. -/
+the embedding of one typed payload telescope. -/
 theorem typed_args {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (wf : block.WF)
+    (law : IsFreeDatatypeFamilyModel native source) (wf : block.WF)
     (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -169,7 +169,7 @@ theorem typed_args {source prior : FO.FamilyModel (Symbol signature)}
 /-- Lookup in an embedded argument list recovers the corresponding field. -/
 private theorem argValues_get_aux
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (wf : block.WF)
+    (law : IsFreeDatatypeFamilyModel native source) (wf : block.WF)
     (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -193,7 +193,7 @@ private theorem argValues_get_aux
 
 /-- Lookup in the complete constructor specialization. -/
 theorem argValues_get {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (wf : block.WF)
+    (law : IsFreeDatatypeFamilyModel native source) (wf : block.WF)
     (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -211,7 +211,7 @@ theorem argValues_get {source prior : FO.FamilyModel (Symbol signature)}
 /-- Target constructor currying consumes the embedded payload list and rebuilds
 the same free constructor value. -/
 def ctorValue {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (wf : block.WF)
+    (law : IsFreeDatatypeFamilyModel native source) (wf : block.WF)
     (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -225,7 +225,7 @@ def ctorValue {source prior : FO.FamilyModel (Symbol signature)}
 
 /-- View target currying at the carrier family of `law.extend`. -/
 def curry {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (wf : block.WF)
+    (law : IsFreeDatatypeFamilyModel native source) (wf : block.WF)
     (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -243,7 +243,7 @@ def curry {source prior : FO.FamilyModel (Symbol signature)}
 
 private theorem applyValues_curry
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (wf : block.WF)
+    (law : IsFreeDatatypeFamilyModel native source) (wf : block.WF)
     (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -287,11 +287,11 @@ private theorem applyValues_curry
 
 theorem applyValues_ctor
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (wf : block.WF)
+    (law : IsFreeDatatypeFamilyModel native source) (wf : block.WF)
     (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    (exclusive : native.Exclusive)
+    (rolesUnique : native.RolesUnique)
     {data : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block data ctor)
     (args : Args block prior.carriers.Base ctor.fields) :
@@ -301,7 +301,7 @@ theorem applyValues_ctor
       ((law.extend wf productive prior priorRel priorModels).symbol (native.ctor ctorRef))
       (ctorArgs law wf productive priorRel priorModels ctorRef args) =
     ctorValue law wf productive priorRel priorModels ctorRef args := by
-  rw [law.extend_ctor exclusive wf productive prior priorRel priorModels ctorRef]
+  rw [law.extend_ctor rolesUnique wf productive prior priorRel priorModels ctorRef]
   change SMT.applyValues _ (ctor.fields.map fun field => field.fo block)
       (curry law wf productive priorRel priorModels ctorRef ctor.fields (fun ref => ref)
         (fun args => .data data rfl (.ctor ctorRef args)))
@@ -313,8 +313,8 @@ theorem applyValues_ctor
 target value. -/
 theorem ctor_apply {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -328,15 +328,15 @@ theorem ctor_apply {symbols : Symbols signature block}
       (ctorArgs law wf productive priorRel priorModels ctorRef args)
       (.typed (.base child.decl.sort)
         (ctorValue law wf productive priorRel priorModels ctorRef args)) := by
-  refine ⟨_, symbols.native.ctor ctorRef,
-    (represented.native_ctor_ident ctorRef).symm, ?_⟩
-  have applied := applyValues_ctor law wf productive priorRel priorModels exclusive
+  refine ⟨_, symbols.datatypeSymbols.ctor ctorRef,
+    (represented.flattenedCtor_ident ctorRef).symm, ?_⟩
+  have applied := applyValues_ctor law wf productive priorRel priorModels rolesUnique
     ctorRef args
   exact congrArg (Value.typed (.base child.decl.sort)) applied.symm
 
 /-- One constructor payload viewed in the corresponding enlarged FO carrier. -/
 def fieldTarget {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (wf : block.WF)
+    (law : IsFreeDatatypeFamilyModel native source) (wf : block.WF)
     (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -351,7 +351,7 @@ def fieldTarget {source prior : FO.FamilyModel (Symbol signature)}
 
 /-- One target constructor field embedded in the shared raw universe. -/
 def fieldValue {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (wf : block.WF)
+    (law : IsFreeDatatypeFamilyModel native source) (wf : block.WF)
     (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -364,7 +364,7 @@ def fieldValue {source prior : FO.FamilyModel (Symbol signature)}
     (fieldTarget law wf productive priorRel priorModels ctorRef field fieldRef value)
 
 theorem fieldValue_typed {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (wf : block.WF)
+    (law : IsFreeDatatypeFamilyModel native source) (wf : block.WF)
     (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -382,7 +382,7 @@ theorem fieldValue_typed {source prior : FO.FamilyModel (Symbol signature)}
 
 /-- The exact target selector returns `fieldTarget` on its own constructor. -/
 theorem sel_value {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (exclusive : native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel native source) (rolesUnique : native.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -395,7 +395,7 @@ theorem sel_value {source prior : FO.FamilyModel (Symbol signature)}
         (ctorValue law wf productive priorRel priorModels ctorRef args) =
       fieldTarget law wf productive priorRel priorModels ctorRef field fieldRef
         (args.get fieldRef) := by
-  rw [law.extend_sel exclusive wf productive prior priorRel priorModels]
+  rw [law.extend_sel rolesUnique wf productive prior priorRel priorModels]
   exact eq_of_heq (heq_of_eq
     (BaseLift.targetSel_ctor wf productive source.carriers prior.carriers
       priorRel law.carrier ctorRef fieldRef _ (law.sel_ctor ctorRef fieldRef)
@@ -404,8 +404,8 @@ theorem sel_value {source prior : FO.FamilyModel (Symbol signature)}
 /-- A matching selector recovers its embedded free constructor field. -/
 theorem sel_apply_ctor {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -421,20 +421,20 @@ theorem sel_apply_ctor {symbols : Symbols signature block}
         (ctorValue law wf productive priorRel priorModels ctorRef args)]
       (fieldValue law wf productive priorRel priorModels ctorRef field fieldRef
         (args.get fieldRef)) := by
-  refine ⟨_, symbols.native.sel ctorRef fieldRef,
-    (represented.native_sel_ident ctorRef fieldRef).symm, ?_⟩
+  refine ⟨_, symbols.datatypeSymbols.sel ctorRef fieldRef,
+    (represented.flattenedSelector_ident ctorRef fieldRef).symm, ?_⟩
   apply congrArg (Value.typed (field.fo block))
   simpa only [FieldDecl.sel, SMT.applyValues, SMT.decode_typed,
     FO.SymbolDenote] using
-    (sel_value law exclusive wf productive priorRel priorModels ctorRef
+    (sel_value law rolesUnique wf productive priorRel priorModels ctorRef
       fieldRef args).symm
 
-/-- A represented tester denotes the intrinsic constructor tag on every free
+/-- A represented tester denotes the typed constructor tag on every free
 target value. -/
 theorem test_apply {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -447,16 +447,16 @@ theorem test_apply {symbols : Symbols signature block}
       (.indexed "is" #[.inl (data.name (.ctor child ctorRef.index))])
       [.typed (.base child.decl.sort) (.data child rfl value)]
       (.typed .bool (IsCtor ctorRef value)) := by
-  refine ⟨_, symbols.native.test ctorRef,
-    (represented.native_test_ident ctorRef).symm, ?_⟩
+  refine ⟨_, symbols.datatypeSymbols.test ctorRef,
+    (represented.flattenedTester_ident ctorRef).symm, ?_⟩
   apply congrArg (Value.typed .bool)
-  rw [law.extend_test exclusive wf productive prior priorRel priorModels]
+  rw [law.extend_test rolesUnique wf productive prior priorRel priorModels]
   simp [SMT.applyValues, SMT.decode_typed, BaseLift.targetTest]
 
 @[simp] theorem test_apply_ctor {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -471,14 +471,14 @@ theorem test_apply {symbols : Symbols signature block}
         (ctorValue law wf productive priorRel priorModels ctorRef args)]
       ((SMT.model fo (law.extend wf productive prior priorRel priorModels)).bool true) := by
   simpa [ctorValue, SMT.model_bool, boolValue] using
-    test_apply law exclusive wf productive priorRel priorModels represented ctorRef
+    test_apply law rolesUnique wf productive priorRel priorModels represented ctorRef
       (.ctor ctorRef args)
 
 /-- A represented constructor has its exact native SMT function type in the
 enlarged model. -/
 theorem ctor_has_type {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -492,17 +492,17 @@ theorem ctor_has_type {symbols : Symbols signature block}
       (ctorDecl (block := block) data child ctorRef.index ctor).argSorts
       (dataSort data child) := by
   have typed := SMT.symbol_has_type fo
-    (law.extend wf productive prior priorRel priorModels) (symbols.native.ctor ctorRef)
-  rw [represented.native_ctor_ident ctorRef] at typed
+    (law.extend wf productive prior priorRel priorModels) (symbols.datatypeSymbols.ctor ctorRef)
+  rw [represented.flattenedCtor_ident ctorRef] at typed
   simpa [raw_ctor_argSorts, Datatype.fieldSort_eq represented,
     CtorDecl.fo, represented.sort_eq child, Function.comp_def] using typed
 
 /-- Invert a constructor application in the enlarged graph into its unique
-intrinsic payload telescope. -/
+typed payload telescope. -/
 theorem ctor_apply_inv {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -530,7 +530,7 @@ theorem ctor_apply_inv {symbols : Symbols signature block}
   let expected : SMT.Value (law.extend wf productive prior priorRel priorModels) :=
     .typed (.base child.decl.sort)
       (ctorValue law wf productive priorRel priorModels ctorRef args)
-  have expectedApply := ctor_apply law exclusive wf productive priorRel priorModels
+  have expectedApply := ctor_apply law rolesUnique wf productive priorRel priorModels
     represented ctorRef args
   have argsTyped : Crush.SMT.ValuesTyped
       (SMT.model fo (law.extend wf productive prior priorRel priorModels))
@@ -549,8 +549,8 @@ theorem ctor_apply_inv {symbols : Symbols signature block}
 /-- Enlarged free constructors are total, typed, and injective. -/
 theorem ctor_holds {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -567,10 +567,10 @@ theorem ctor_holds {symbols : Symbols signature block}
   · intro leftArgs rightArgs leftResult rightResult
       leftApply rightApply resultEq
     obtain ⟨left, leftArgsEq, leftResultEq⟩ :=
-      ctor_apply_inv law exclusive wf productive priorRel priorModels represented ctorRef
+      ctor_apply_inv law rolesUnique wf productive priorRel priorModels represented ctorRef
         leftApply.1 leftApply.2
     obtain ⟨right, rightArgsEq, rightResultEq⟩ :=
-      ctor_apply_inv law exclusive wf productive priorRel priorModels represented ctorRef
+      ctor_apply_inv law rolesUnique wf productive priorRel priorModels represented ctorRef
         rightApply.1 rightApply.2
     have valueEq :
         (Value.typed (.base child.decl.sort)
@@ -593,7 +593,7 @@ theorem ctor_holds {symbols : Symbols signature block}
 
 theorem sel_has_type {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -609,8 +609,8 @@ theorem sel_has_type {symbols : Symbols signature block}
       (fieldSort (block := block) data field.sort) := by
   have typed := SMT.symbol_has_type fo
     (law.extend wf productive prior priorRel priorModels)
-    (symbols.native.sel ctorRef fieldRef)
-  rw [represented.native_sel_ident ctorRef fieldRef] at typed
+    (symbols.datatypeSymbols.sel ctorRef fieldRef)
+  rw [represented.flattenedSelector_ident ctorRef fieldRef] at typed
   cases field with
   | mk name sort =>
       cases sort with
@@ -628,8 +628,8 @@ theorem sel_has_type {symbols : Symbols signature block}
 /-- Every selector is total and recovers its matching constructor field. -/
 theorem sel_holds {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -661,7 +661,7 @@ theorem sel_holds {symbols : Symbols signature block}
       sel_has_type law wf productive priorRel priorModels represented ctorRef fieldRef
   · intro arguments result selected ctorApplied selectedAt
     obtain ⟨args, argumentsEq, resultEq⟩ :=
-      ctor_apply_inv law exclusive wf productive priorRel priorModels represented ctorRef
+      ctor_apply_inv law rolesUnique wf productive priorRel priorModels represented ctorRef
         ctorApplied.1 ctorApplied.2
     have canonicalGet := argValues_get law wf productive priorRel priorModels ctorRef args
       fieldRef
@@ -670,12 +670,12 @@ theorem sel_holds {symbols : Symbols signature block}
     have selectedEq := Option.some.inj (selectedAt.symm.trans canonicalGet)
     rw [resultEq, selectedEq]
     simpa [indexEq, fieldValue, fieldTarget] using
-      sel_apply_ctor law exclusive wf productive priorRel priorModels represented ctorRef
+      sel_apply_ctor law rolesUnique wf productive priorRel priorModels represented ctorRef
         fieldRef args
 
 theorem test_has_type {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -688,15 +688,15 @@ theorem test_has_type {symbols : Symbols signature block}
       (ctorDecl (block := block) data child ctorRef.index ctor).tester
       [dataSort data child] Crush.SMT.boolSort := by
   have typed := SMT.symbol_has_type fo
-    (law.extend wf productive prior priorRel priorModels) (symbols.native.test ctorRef)
-  rw [represented.native_test_ident ctorRef] at typed
+    (law.extend wf productive prior priorRel priorModels) (symbols.datatypeSymbols.test ctorRef)
+  rw [represented.flattenedTester_ident ctorRef] at typed
   simpa [Crush.SMT.CtorDecl.tester, ctorDecl, CtorDecl.test,
     represented.sort_eq child, fo.bool_eq, Function.comp_def] using typed
 
 theorem test_apply_ne {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -712,7 +712,7 @@ theorem test_apply_ne {symbols : Symbols signature block}
       [.typed (.base child.decl.sort)
         (ctorValue law wf productive priorRel priorModels rightRef args)]
       ((SMT.model fo (law.extend wf productive prior priorRel priorModels)).bool false) := by
-  have applied := test_apply law exclusive wf productive priorRel priorModels represented
+  have applied := test_apply law rolesUnique wf productive priorRel priorModels represented
     leftRef (.ctor rightRef args)
   have rejected : IsCtor leftRef (.ctor rightRef args) = False := by
     apply propext
@@ -722,8 +722,8 @@ theorem test_apply_ne {symbols : Symbols signature block}
 
 theorem test_holds {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -739,18 +739,18 @@ theorem test_holds {symbols : Symbols signature block}
   · exact test_has_type law wf productive priorRel priorModels represented ctorRef
   · intro arguments result applied
     obtain ⟨args, argumentsEq, resultEq⟩ :=
-      ctor_apply_inv law exclusive wf productive priorRel priorModels represented ctorRef
+      ctor_apply_inv law rolesUnique wf productive priorRel priorModels represented ctorRef
         applied.1 applied.2
     rw [resultEq]
-    exact test_apply_ctor law exclusive wf productive priorRel priorModels represented
+    exact test_apply_ctor law rolesUnique wf productive priorRel priorModels represented
       ctorRef args
 
 /-- Every constructor emitted by the block satisfies its constructor,
 selector, and tester laws in the enlarged model. -/
 theorem ctor_laws {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -766,16 +766,16 @@ theorem ctor_laws {symbols : Symbols signature block}
       Crush.SMT.TesterHolds
         (SMT.model fo (law.extend wf productive prior priorRel priorModels)) sort rawCtor := by
   obtain ⟨child, ctor, ctorRef, rfl, rfl⟩ := raw_ctor_ref data member
-  exact ⟨ctor_holds law exclusive wf productive priorRel priorModels represented ctorRef,
-    sel_holds law exclusive wf productive priorRel priorModels represented ctorRef,
-    test_holds law exclusive wf productive priorRel priorModels represented ctorRef⟩
+  exact ⟨ctor_holds law rolesUnique wf productive priorRel priorModels represented ctorRef,
+    sel_holds law rolesUnique wf productive priorRel priorModels represented ctorRef,
+    test_holds law rolesUnique wf productive priorRel priorModels represented ctorRef⟩
 
 /-- Results of different constructors are distinct in the enlarged free
 algebra. -/
 theorem ctor_disjoint {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -804,10 +804,10 @@ theorem ctor_disjoint {symbols : Symbols signature block}
   obtain ⟨rightData, rightDecl, rightRef, rfl, rfl⟩ :=
     raw_ctor_ref data rightMem
   obtain ⟨left, leftArgsEq, leftResultEq⟩ :=
-    ctor_apply_inv law exclusive wf productive priorRel priorModels represented leftRef
+    ctor_apply_inv law rolesUnique wf productive priorRel priorModels represented leftRef
       leftApply.1 leftApply.2
   obtain ⟨right, rightArgsEq, rightResultEq⟩ :=
-    ctor_apply_inv law exclusive wf productive priorRel priorModels represented rightRef
+    ctor_apply_inv law rolesUnique wf productive priorRel priorModels represented rightRef
       rightApply.1 rightApply.2
   intro resultEq
   have valueEq :
@@ -837,12 +837,12 @@ theorem ctor_disjoint {symbols : Symbols signature block}
     simp [ctorDecl, indexEq]
   exact ctor_ne leftRef rightRef indexNe left right coreEq
 
-/-- A tester rejects a value built by another constructor of the same owned
+/-- A tester rejects a value built by another constructor of the same datatype
 datatype. -/
 theorem test_disjoint {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -877,19 +877,19 @@ theorem test_disjoint {symbols : Symbols signature block}
   rw [rightCtorEq] at applied
   rw [leftCtorEq]
   obtain ⟨args, argumentsEq, resultEq⟩ :=
-    ctor_apply_inv law exclusive wf productive priorRel priorModels represented rightRef
+    ctor_apply_inv law rolesUnique wf productive priorRel priorModels represented rightRef
       applied.1 applied.2
   rw [resultEq]
   simpa [Crush.SMT.CtorDecl.tester, ctorDecl] using
-    test_apply_ne law exclusive wf productive priorRel priorModels represented leftRef
+    test_apply_ne law rolesUnique wf productive priorRel priorModels represented leftRef
       rightRef indexNe args
 
-/-- Every value at an owned sort is built by a constructor of that exact
+/-- Every value at a datatype sort is built by a constructor of that exact
 native declaration. -/
 theorem exhaustive {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -933,12 +933,12 @@ theorem exhaustive {symbols : Symbols signature block}
       (argValues_typed law wf productive priorRel priorModels fo ctorRef ctor.fields
         (fun ref => ref) args)
   · rw [targetEq]
-    exact ctor_apply law exclusive wf productive priorRel priorModels represented ctorRef args
+    exact ctor_apply law rolesUnique wf productive priorRel priorModels represented ctorRef args
 
-/-- Structural height of values owned by this block inside the one raw value
+/-- Structural height of values declared by this block inside the one raw value
 universe. Values at other sorts have rank zero. -/
 noncomputable def rank {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (wf : block.WF)
+    (law : IsFreeDatatypeFamilyModel native source) (wf : block.WF)
     (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel) :
@@ -962,9 +962,9 @@ private theorem rank_cast {selected child : DataRef block}
   rw [proofEq]
   simp
 
-/-- The rank of an owned value is exactly its free-tree height. -/
+/-- The rank of a datatype value is exactly its free-tree height. -/
 @[simp] theorem rank_data {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (wf : block.WF)
+    (law : IsFreeDatatypeFamilyModel native source) (wf : block.WF)
     (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -987,8 +987,8 @@ private theorem rank_cast {selected child : DataRef block}
 structural rank. -/
 theorem rank_lt {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -1012,7 +1012,7 @@ theorem rank_lt {symbols : Symbols signature block}
       rank law wf productive priorRel priorModels result := by
   obtain ⟨parent, ctor, ctorRef, rfl, rfl⟩ := raw_ctor_ref data member
   obtain ⟨args, argumentsEq, resultEq⟩ :=
-    ctor_apply_inv law exclusive wf productive priorRel priorModels represented ctorRef
+    ctor_apply_inv law rolesUnique wf productive priorRel priorModels represented ctorRef
       applied.1 applied.2
   rw [raw_ctor_argSorts] at sortAt
   have rawBounds : index <
@@ -1060,8 +1060,8 @@ theorem rank_lt {symbols : Symbols signature block}
 block. -/
 theorem data_hold {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -1073,28 +1073,28 @@ theorem data_hold {symbols : Symbols signature block}
   refine ⟨supported represented.wf productive, ?_, ?_, ?_, ?_,
     rank law wf productive priorRel priorModels, ?_⟩
   · intro sort ctor member
-    exact ctor_laws law exclusive wf productive priorRel priorModels represented member
+    exact ctor_laws law rolesUnique wf productive priorRel priorModels represented member
   · intro leftSort leftCtor rightSort rightCtor leftMem rightMem different
       leftArgs leftResult rightArgs rightResult leftApply rightApply
-    exact ctor_disjoint law exclusive wf productive priorRel priorModels represented
+    exact ctor_disjoint law rolesUnique wf productive priorRel priorModels represented
       leftMem rightMem different leftApply rightApply
   · intro name count decl member value typed
-    exact exhaustive law exclusive wf productive priorRel priorModels represented member
+    exact exhaustive law rolesUnique wf productive priorRel priorModels represented member
       value typed
   · intro sort leftCtor rightCtor leftMem rightMem different arguments result
       applied
-    exact test_disjoint law exclusive wf productive priorRel priorModels represented
+    exact test_disjoint law rolesUnique wf productive priorRel priorModels represented
       leftMem rightMem different applied
   · intro sort ctor member arguments result applied index fieldSort fieldValue
       sortAt valueAt recursive
-    exact rank_lt law exclusive wf productive priorRel priorModels represented member applied
+    exact rank_lt law rolesUnique wf productive priorRel priorModels represented member applied
       index fieldSort fieldValue sortAt valueAt recursive
 
 /-- One emitted native `declare-datatypes` command is valid directly in the
 enlarged model. -/
 theorem command_sound {symbols : Symbols signature block}
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -1103,13 +1103,13 @@ theorem command_sound {symbols : Symbols signature block}
     (SMT.model fo (law.extend wf productive prior priorRel priorModels)).SatisfiesCommand
       (command block data) :=
   ⟨supported represented.wf productive,
-    data_hold law represented.exclusive wf productive priorRel priorModels
+    data_hold law represented.rolesUnique wf productive priorRel priorModels
       represented⟩
 
 /-- The command theorem stated at the actual dependency-fold step. -/
 theorem extend_sound {symbols : Symbols signature block}
     {source : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
     (prior : Lifted source) (wf : block.WF) (productive : Productive block)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Representation block symbols fo data) :

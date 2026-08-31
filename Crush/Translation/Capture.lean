@@ -1,9 +1,9 @@
 import Lean
 
 /-!
-# Pure production capture selection
+# Pure translator capture selection
 
-The stateful higher-order encoder and its metatheory bridge share this exact
+The stateful higher-order encoder and its correctness proof share this exact
 first-occurrence traversal.  It is independent of `TranslateM`, which lets proof
 objects retain the typed capture witness without creating an import cycle.
 -/
@@ -14,7 +14,7 @@ open Lean
 
 namespace collectFVarsOrdered
 
-/-- Accumulator implementation exposed to the bridge proofs. -/
+/-- Accumulator implementation exposed to the correspondence proofs. -/
 def go (expression : Expr) (accumulator : Array FVarId) : Array FVarId :=
   match expression with
   | .fvar fvar =>
@@ -34,7 +34,7 @@ order. -/
 def collectFVarsOrdered (expression : Expr) : Array FVarId :=
   collectFVarsOrdered.go expression #[]
 
-/-- Filter the production capture order by SMT-local eligibility. -/
+/-- Filter the translator capture order by SMT-local eligibility. -/
 def selectClosureCaptures (expression : Expr)
     (eligible : FVarId → Bool) : Array FVarId :=
   (collectFVarsOrdered expression).filter eligible

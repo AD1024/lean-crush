@@ -3,7 +3,7 @@ import Crush
 /-!
 Tests for bounded premise selection through Lean core's `LibrarySuggestions`.
 
-The custom selector makes the test deterministic. Production code uses whatever
+The custom selector makes the test deterministic. The Crush implementation uses whatever
 selector is registered by the importing project; importing `Crush` installs Lean's
 default SineQuaNon/current-file engine.
 -/

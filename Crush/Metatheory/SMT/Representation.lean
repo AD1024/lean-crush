@@ -3,7 +3,7 @@ import Crush.Metatheory.SMT.Semantics
 import Crush.SMT.Quote
 
 /-!
-# Representation of intrinsic first-order syntax as concrete SMT syntax
+# Representation of typed first-order syntax as concrete SMT syntax
 
 This module defines a pure specification encoder.  Its representation
 predicates are deliberately syntactic: they say exactly which concrete sort,
@@ -21,11 +21,13 @@ open Defunctionalization.Flattened
 
 /-- One concrete representation of an abstract typed FO symbol family.
 
-Most symbols are emitted as ordinary `declare-fun` commands. Native SMT
-declarations (currently monomorphic datatype blocks) instead contribute a
-command prefix and mark the sorts and symbols that prefix declares. Keeping
-this policy here gives ordinary and datatype symbols one term encoder, one
-identifier namespace, and one semantic model. -/
+Most symbols are emitted as ordinary `declare-fun` commands. A component such
+as an SMT datatype block may instead contribute a command prefix and mark the
+sorts and symbols declared by that prefix. The field prefix `native` is the
+existing generic `Encoding` API name for these component-declared symbols; in
+the present metatheory, it is used for monomorphic `declare-datatypes` blocks.
+Keeping this policy here gives ordinary and datatype symbols one term encoder,
+one identifier namespace, and one semantic model. -/
 structure Encoding (symbols : FO.SymbolFamily) where
   sort : FO.FOSort → SSort
   sort_injective : Function.Injective sort
@@ -45,7 +47,7 @@ structure Encoding (symbols : FO.SymbolFamily) where
   ordinary_ident : ∀ {decl : FO.SymbolDecl} (symbol : symbols decl),
     nativeSymbol symbol = false → ident symbol = .symb (name symbol)
 
-/-- Numeric de Bruijn index of an intrinsic FO variable. -/
+/-- Numeric de Bruijn index of an intrinsically typed FO variable. -/
 def varIndex : {context : FO.Context} → {sort : FO.FOSort} →
     FO.Var context sort → Nat
   | _ :: _, _, .here => 0
@@ -137,7 +139,7 @@ structure Declaration (symbols : FO.SymbolFamily) where
   symbol : symbols declaration
 
 /-- Emit the ordinary concrete declaration selected for one typed symbol.
-Callers establish that the symbol is not owned by a native command. -/
+Callers establish that the symbol is not declared by an SMT datatype command. -/
 def declaration {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
     (declared : Declaration symbols) : Command :=
   .declFun (encoding.name declared.symbol)
@@ -262,7 +264,7 @@ def translatedDeclarations {signature : Signature}
   source.flatMap fun formula => 𝓕⟦formula⟧.declarations.map ofDeclared
 
 /-- Pure SMT encoding of a complete finite source theory. Every sentence is
-flattened against the same intrinsic signature before their target theories
+flattened against the same reified signature before their target theories
 are concatenated. -/
 def encodeTheories {signature : Signature}
     (encoding : Encoding (Symbol signature))

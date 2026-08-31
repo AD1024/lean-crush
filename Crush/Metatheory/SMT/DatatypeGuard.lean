@@ -2,10 +2,10 @@ import Crush.Metatheory.SMT.Datatype
 import Crush.Metatheory.SMT.Semantics
 
 /-!
-# Semantics of production-shaped datatype guards
+# Semantics of emitted datatype guards
 
 The syntax builder lives in `SMT.Datatype`; this module proves how those exact
-untyped SMT terms evaluate. The final production comparison supplies the
+untyped SMT terms evaluate. The final translator comparison supplies the
 component-specific evidence that each selector guard evaluates to the typed
 `FieldDecl.WF` proposition.
 -/
@@ -80,7 +80,7 @@ theorem eval_andAll {model : Crush.SMT.Model}
       | cons second rest =>
           simpa [andAll] using Crush.SMT.Eval.and termsEval boolValues
 
-/-- Semantic evidence for one production tester/selector clause. Selector
+/-- Semantic evidence for one emitted tester/selector clause. Selector
 guards must have Boolean denotations even on a nonmatching constructor because
 SMT evaluation is strict; only a matching tester requires their conjunction to
 be true. -/
@@ -152,7 +152,7 @@ inductive PartsRun (model : Crush.SMT.Model)
         (result :: results)
 
 /-- `PartsRun` is the semantic counterpart of the exact `filterMap` performed
-by the production syntax builder. -/
+by the emitted syntax builder. -/
 theorem PartsRun.evals {model : Crush.SMT.Model}
     {environment : List model.Value} {value : Crush.SMT.Term}
     {parts : List (String × Array Crush.SMT.Term)} {results : List Bool}
@@ -177,7 +177,7 @@ theorem PartsRun.evals {model : Crush.SMT.Model}
       simpa [Array.toList_filterMap, wfClause?, nonempty, fieldsNe] using
         Crush.SMT.EvalList.cons headEval tailEval
 
-/-- The exact production body evaluates to the conjunction recorded by
+/-- The exact emitted body evaluates to the conjunction recorded by
 `PartsRun`, including values outside the guarded image. -/
 theorem eval_wfBody_eq {model : Crush.SMT.Model}
     {environment : List model.Value}
@@ -189,7 +189,7 @@ theorem eval_wfBody_eq {model : Crush.SMT.Model}
   exact eval_andAll (by
     simpa [wfBody] using runs.evals)
 
-/-- One nonempty production clause evaluates to true under precisely its typed
+/-- One nonempty emitted clause evaluates to true under precisely its typed
 tester-implies-selector-guards obligation. -/
 theorem eval_wfClause {model : Crush.SMT.Model}
     {environment : List model.Value} {ctor : String}
@@ -201,7 +201,7 @@ theorem eval_wfClause {model : Crush.SMT.Model}
       (model.bool true) := by
   exact eval_wfClause_eq nonempty evaluated.runs
 
-/-- The exact body shared with production evaluates to true when every retained
+/-- The exact body shared with the Crush translator evaluates to true when every retained
 constructor clause has the tester/selector evidence described above. -/
 theorem eval_wfBody {model : Crush.SMT.Model}
     {environment : List model.Value}

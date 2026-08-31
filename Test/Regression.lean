@@ -299,7 +299,7 @@ theorem prod_congr (x y : Int) (h : x = y) : (x, 0) = (y, 0) := by crush
 theorem option_inj (x y : Int) (h : Option.some x = Option.some y) :
     x = y := by crush
 
--- Opting into certified datatype acceptance preserves the same production
+-- Opting into certified datatype acceptance preserves the same translator
 -- encoding for a block inside the currently certified fragment.
 set_option crush.datatype.certify true in
 theorem option_inj_certified_acceptance (x y : Int)

@@ -1,7 +1,7 @@
 import Crush.Metatheory.Defunctionalization.Flattened.Symbol
 
 /-!
-# Result of flattened intrinsic translation
+# Result of flattened higher-order translation
 
 The translated FO term is bundled with every class of generated declaration or
 formula. Keeping the lists separate records what produced each formula and
@@ -35,49 +35,49 @@ end DeclaredSymbol
 
 /-- Generated declarations and formulas, separated from the translated term so
 heterogeneous collections of recursive results can accumulate them uniformly. -/
-structure GeneratedOutput (signature : Signature) where
+structure AuxiliaryTheory (signature : Signature) where
   declarations : List (DeclaredSymbol signature) := []
   equations : TargetTheory signature := []
   extensionality : TargetTheory signature := []
 
-namespace GeneratedOutput
+namespace AuxiliaryTheory
 
 variable {signature : Signature}
 
 /-- Empty generated output. -/
-def empty : GeneratedOutput signature := {}
+def empty : AuxiliaryTheory signature := {}
 
 /-- Record one structural symbol use. Repeated uses remain in this list; the
 later finite allocator proves which uses share one concrete declaration. -/
-def declare (generated : GeneratedOutput signature)
-    (declaration : DeclaredSymbol signature) : GeneratedOutput signature :=
+def declare (generated : AuxiliaryTheory signature)
+    (declaration : DeclaredSymbol signature) : AuxiliaryTheory signature :=
   { generated with
     declarations := generated.declarations ++ [declaration] }
 
 /-- Compose generated output in source traversal order. -/
-def append (left right : GeneratedOutput signature) :
-    GeneratedOutput signature :=
+def append (left right : AuxiliaryTheory signature) :
+    AuxiliaryTheory signature :=
   { declarations := left.declarations ++ right.declarations
     equations := left.equations ++ right.equations
     extensionality := left.extensionality ++ right.extensionality }
 
 /-- Generated equations followed by generated extensionality formulas. -/
-def theory (generated : GeneratedOutput signature) :
+def theory (generated : AuxiliaryTheory signature) :
     TargetTheory signature :=
   generated.equations ++ generated.extensionality
 
-end GeneratedOutput
+end AuxiliaryTheory
 
-/-- A translated intrinsic term together with the declarations, closure
+/-- A translated typed term together with the declarations, closure
 equations, and function-extensionality formulas generated for it and its
 subterms. -/
-structure TranslationResult (signature : Signature) (context : Context) (ty : Ty) where
+structure TermTranslation (signature : Signature) (context : Context) (ty : Ty) where
   term : TargetTerm signature context ty
   declarations : List (DeclaredSymbol signature) := []
   equations : TargetTheory signature := []
   extensionality : TargetTheory signature := []
 
-namespace TranslationResult
+namespace TermTranslation
 
 variable {signature : Signature} {context : Context}
 variable {ty newTy leftTy rightTy resultTy : Ty}
@@ -85,68 +85,68 @@ variable {ty newTy leftTy rightTy resultTy : Ty}
 /-- Attach accumulated generated output to a translated term. -/
 def ofGenerated
     (term : TargetTerm signature context ty)
-    (generated : GeneratedOutput signature := {}) :
-    TranslationResult signature context ty :=
+    (generated : AuxiliaryTheory signature := {}) :
+    TermTranslation signature context ty :=
   { term
     declarations := generated.declarations
     equations := generated.equations
     extensionality := generated.extensionality }
 
 /-- Forget the translated term and collect the rest of the generated output. -/
-def generated (result : TranslationResult signature context ty) :
-  GeneratedOutput signature where
+def generated (result : TermTranslation signature context ty) :
+  AuxiliaryTheory signature where
   declarations := result.declarations
   equations := result.equations
   extensionality := result.extensionality
 
 /-- Generated equations followed by generated extensionality formulas. -/
-def theory (result : TranslationResult signature context ty) :
+def theory (result : TermTranslation signature context ty) :
     TargetTheory signature :=
   result.generated.theory
 
-@[simp] theorem mem_theory (result : TranslationResult signature context ty)
+@[simp] theorem mem_theory (result : TermTranslation signature context ty)
     (formula : TargetSentence signature) :
     formula ∈ result.theory ↔
       formula ∈ result.equations ∨ formula ∈ result.extensionality := by
-  simp [theory, generated, GeneratedOutput.theory]
+  simp [theory, generated, AuxiliaryTheory.theory]
 
 /-- Replace only the translated term while retaining all other generated output. -/
-def replaceTerm (result : TranslationResult signature context ty)
+def replaceTerm (result : TermTranslation signature context ty)
     (term : TargetTerm signature context newTy) :
-    TranslationResult signature context newTy :=
+    TermTranslation signature context newTy :=
   { result with term }
 
 /-- Combine two recursive results in source traversal order and supply the term
 built from their translated subterms. -/
-def combine (left : TranslationResult signature context leftTy)
-    (right : TranslationResult signature context rightTy)
+def combine (left : TermTranslation signature context leftTy)
+    (right : TermTranslation signature context rightTy)
     (term : TargetTerm signature context resultTy) :
-    TranslationResult signature context resultTy where
+    TermTranslation signature context resultTy where
   term
   declarations := left.declarations ++ right.declarations
   equations := left.equations ++ right.equations
   extensionality := left.extensionality ++ right.extensionality
 
 /-- Retain a recursive result while appending output from the current syntax node. -/
-def appendOutput (result : TranslationResult signature context ty)
+def appendOutput (result : TermTranslation signature context ty)
     (declarations : List (DeclaredSymbol signature) := [])
     (equations extensionality :
       TargetTheory signature := []) :
-    TranslationResult signature context ty :=
+    TermTranslation signature context ty :=
   { result with
     declarations := result.declarations ++ declarations
     equations := result.equations ++ equations
     extensionality := result.extensionality ++ extensionality }
 
 /-- Replace all generated output at once. -/
-def withGeneratedOutput (result : TranslationResult signature context ty)
-    (generated : GeneratedOutput signature) :
-    TranslationResult signature context ty :=
+def withAuxiliaryTheory (result : TermTranslation signature context ty)
+    (generated : AuxiliaryTheory signature) :
+    TermTranslation signature context ty :=
   { result with
     declarations := generated.declarations
     equations := generated.equations
     extensionality := generated.extensionality }
 
-end TranslationResult
+end TermTranslation
 
 end Crush.Metatheory.Defunctionalization.Flattened

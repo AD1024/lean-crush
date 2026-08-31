@@ -1,8 +1,8 @@
 import Crush.Metatheory.Defunctionalization.Flattened.Lambda
-import Crush.Metatheory.Defunctionalization.ProductionClosure
+import Crush.Metatheory.Defunctionalization.Flattened.ClosureCorrectness
 
 /-!
-# Total flattened intrinsic translation
+# Total flattened higher-order translation
 
 This is the mathematical flattened transformation.  It is total over every
 constructor of the intrinsically typed HO language and returns both the FO term
@@ -59,7 +59,7 @@ structure SpineResult (signature : Signature) (context : Context) (result : Ty) 
   head : FunctionHead signature context headDomain headCodomain
   arguments : TargetArguments signature context
     (.arrow headDomain headCodomain) result
-  generated : GeneratedOutput signature := {}
+  generated : AuxiliaryTheory signature := {}
 
 namespace SpineResult
 
@@ -75,7 +75,7 @@ def weaken {context : Context} {result binder : Ty}
 def snoc {context : Context} {domain codomain : Ty}
     (spine : SpineResult signature context (.arrow domain codomain))
     (argument : TargetTerm signature context domain)
-    (generated : GeneratedOutput signature := {}) :
+    (generated : AuxiliaryTheory signature := {}) :
     SpineResult signature context codomain where
   headDomain := spine.headDomain
   headCodomain := spine.headCodomain
@@ -88,16 +88,16 @@ the generated flattened application symbol according to its head. -/
 def finish {context : Context} {result : Ty}
     (spine : SpineResult signature context result)
     (ground : GroundResult result) :
-    TranslationResult signature context result :=
+    TermTranslation signature context result :=
   match spine.head with
   | .value term =>
-      TranslationResult.ofGenerated
+      TermTranslation.ofGenerated
         (spine.arguments.completeApplication term ground)
         (spine.generated.declare
           (.of (Symbol.application
             { domain := spine.headDomain, codomain := spine.headCodomain })))
   | .sourceConstant constant =>
-      TranslationResult.ofGenerated
+      TermTranslation.ofGenerated
         (spine.arguments.sourceApplication constant ground)
         (spine.generated.declare
           (.of (Symbol.sourceConstant constant)))
@@ -108,7 +108,7 @@ end SpineResult
 right-hand side. -/
 structure EquationResult (signature : Signature) where
   equation : TargetSentence signature
-  generated : GeneratedOutput signature := {}
+  generated : AuxiliaryTheory signature := {}
 
 /-- Saturate a residual translated function spine with fresh variables and make
 it the right-hand side of a closure equation. -/
@@ -205,28 +205,28 @@ def finishClosure {context : Context} {domain codomain : Ty}
     (codomain_eq : closure.codomain = codomain)
     (closureTerm : TargetTerm signature context (.arrow domain codomain))
     (equation : EquationResult signature) :
-    TranslationResult signature context (.arrow domain codomain) := by
+    TermTranslation signature context (.arrow domain codomain) := by
   subst context_eq
   subst domain_eq
   subst codomain_eq
   let declarations :=
-    (GeneratedOutput.empty (signature := signature))
+    (AuxiliaryTheory.empty (signature := signature))
       |>.declare (.of (Symbol.application
         { domain := closure.domain, codomain := closure.codomain }))
       |>.declare (.of (Symbol.closure closure))
   let generated := declarations.append equation.generated
-  exact TranslationResult.ofGenerated closureTerm
+  exact TermTranslation.ofGenerated closureTerm
     { generated with equations := generated.equations ++ [equation.equation] }
 
 mutual
   /-- Translate a source term through an arbitrary typed source-context renaming. -/
   def translateWith {source target : Context}
       (r : Renaming source target) : {ty : Ty} →
-      Term signature source ty → TranslationResult signature target ty
+      Term signature source ty → TermTranslation signature target ty
     | ty, .var ref =>
         match ty with
-        | .bool => TranslationResult.ofGenerated (.var (targetVar (r ref)))
-        | .base _ => TranslationResult.ofGenerated (.var (targetVar (r ref)))
+        | .bool => TermTranslation.ofGenerated (.var (targetVar (r ref)))
+        | .base _ => TermTranslation.ofGenerated (.var (targetVar (r ref)))
         | .arrow domain codomain =>
             let renamed : Term signature target (.arrow domain codomain) :=
               .var (r ref)
@@ -241,14 +241,14 @@ mutual
     | ty, .const constant =>
         match ty with
         | .bool =>
-            TranslationResult.ofGenerated
+            TermTranslation.ofGenerated
               ((TargetArguments.nil .bool).sourceApplication constant .bool)
-              ((GeneratedOutput.empty (signature := signature)).declare
+              ((AuxiliaryTheory.empty (signature := signature)).declare
                 (.of (Symbol.sourceConstant constant)))
         | .base sort =>
-            TranslationResult.ofGenerated
+            TermTranslation.ofGenerated
               ((TargetArguments.nil (.base sort)).sourceApplication constant (.base sort))
-              ((GeneratedOutput.empty (signature := signature)).declare
+              ((AuxiliaryTheory.empty (signature := signature)).declare
                 (.of (Symbol.sourceConstant constant)))
         | .arrow domain codomain =>
             let renamed : Term signature target (.arrow domain codomain) :=
@@ -261,7 +261,7 @@ mutual
             finishClosure closure rfl rfl rfl closureTerm
               (saturateEquation closureTerm (.nil _) right)
 
-    | _, .boolLit value => TranslationResult.ofGenerated (.boolLit value)
+    | _, .boolLit value => TermTranslation.ofGenerated (.boolLit value)
     | _, .not body =>
         let translated := translateWith r body
         translated.replaceTerm (.not translated.term)
@@ -288,7 +288,7 @@ mutual
     | _, .eq (ty := operandType) left right =>
         let translatedLeft := translateWith r left
         let translatedRight := translateWith r right
-        let combined : TranslationResult signature target .bool :=
+        let combined : TermTranslation signature target .bool :=
           translatedLeft.combine translatedRight
             (.eq translatedLeft.term translatedRight.term)
         match operandType with
@@ -336,11 +336,11 @@ mutual
               (saturateEquation closureTerm (.nil _) right)
     | _, .forallE (domain := domain) body =>
         let translated := translateWith (Renaming.lift r) body
-        TranslationResult.ofGenerated (.forallE translated.term)
+        TermTranslation.ofGenerated (.forallE translated.term)
           translated.generated
     | _, .existsE (domain := domain) body =>
         let translated := translateWith (Renaming.lift r) body
-        TranslationResult.ofGenerated (.existsE translated.term)
+        TermTranslation.ofGenerated (.existsE translated.term)
           translated.generated
   termination_by ty term => 4 * termSize term + 2
   decreasing_by all_goals simp_wf <;> simp [termSize] <;> omega
@@ -435,7 +435,7 @@ end
 /-- Total flattened translation of an intrinsically typed HO term. -/
 def translate {context : Context} {ty : Ty}
     (term : Term signature context ty) :
-    TranslationResult signature context ty :=
+    TermTranslation signature context ty :=
   translateWith Renaming.id term
 
 end Crush.Metatheory.Defunctionalization.Flattened

@@ -103,15 +103,15 @@ def Model.SatisfiesTheory {signature : Signature} (model : Model signature)
 contract.  The contract is proof-relevant so clients may retain canonical
 carriers, isomorphisms, or other data used by a model-lifting proof. -/
 def SatisfiableUnder {signature : Signature}
-    (Lawful : Model signature → Sort u) (formula : Sentence signature) : Prop :=
-  ∃ model : Model signature, ∃ _law : Lawful model,
+    (ModelCondition : Model signature → Sort u) (formula : Sentence signature) : Prop :=
+  ∃ model : Model signature, ∃ _condition : ModelCondition model,
     model.Satisfies formula
 
 /-- Unsatisfiability among the source models carrying an additional semantic
 contract. -/
 def UnsatisfiableUnder {signature : Signature}
-    (Lawful : Model signature → Sort u) (formula : Sentence signature) : Prop :=
-  ∀ model : Model signature, ∀ _law : Lawful model,
+    (ModelCondition : Model signature → Sort u) (formula : Sentence signature) : Prop :=
+  ∀ model : Model signature, ∀ _condition : ModelCondition model,
     ¬model.Satisfies formula
 
 /-- Satisfiability allows the model's carriers and interpretations to vary. -/

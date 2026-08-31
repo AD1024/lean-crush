@@ -4,23 +4,23 @@ import Crush
 Smoke tests for the lean-crush skeleton. These do not exercise the (not-yet-built)
 reification pipeline; they check that the foundational layers compile and behave:
 the SMT IR printer, the `@[crush_translate]` extension mechanism, the `crush_map`
-sugar, config parsing, and a live solver round-trip.
+sugar, config parsing, and an external solver round-trip.
 -/
 
 open Crush Crush.SMT
 
-/-- Certified datatype acceptance is opt-in, preserving the production default. -/
+/-- Certified datatype acceptance is opt-in, preserving the existing default. -/
 example : ({} : Config).certifyDatatype = false := rfl
 
-/-- The live guard constructors are the exact syntax covered by the guarded
+/-- The translator's guard constructors are the exact syntax covered by the guarded
 metatheory. -/
-example (term : Term) : productionNatGuard term = (smt| (>= $term 0)) := rfl
+example (term : Term) : natNonnegativeGuard term = (smt| (>= $term 0)) := rfl
 
 example (condition body : Term) :
-    productionGuardBody true condition body = (smt| (=> $condition $body)) := rfl
+    guardedQuantifierBody true condition body = (smt| (=> $condition $body)) := rfl
 
 example (condition body : Term) :
-    productionGuardBody false condition body = (smt| (and $condition $body)) := rfl
+    guardedQuantifierBody false condition body = (smt| (and $condition $body)) := rfl
 
 /-- Unrestricted extension registrations are explicitly marked as crossing the
 trusted boundary; they are not accidentally reported as certified. -/
@@ -55,7 +55,7 @@ example : True := by
         | _ => throwError "certified negation hook emitted the wrong argument"
     | _ => throwError "certified negation hook emitted the wrong SMT term"
     unless state.certifiedHookUses.size == 1 do
-      throwError "live translation did not audit its certified-hook dispatch"
+      throwError "translator did not audit its certified-hook dispatch"
     let use := state.certifiedHookUses[0]!
     unless use.declaration == ``Not && use.targetSymbol == "not" do
       throwError "certified-hook audit recorded the wrong indexed names"
@@ -67,7 +67,7 @@ example : True := by
     | none => throwError "certified negation registration is missing"
   trivial
 
-/-- Production arrow discovery now runs through the verified `TypeBridge.flatten`
+/-- Translator arrow discovery now runs through the verified `ReifiedType.flatten`
 implementation. -/
 example : True := by
   run_tac
@@ -77,66 +77,66 @@ example : True := by
     let natToProp ← Lean.mkArrow natTy propTy
     let arrow ← Lean.mkArrow intTy natToProp
     let some shape ← arrowShape? arrow
-      | throwError "verified arrow bridge rejected a nondependent arrow"
+      | throwError "verified arrow reification rejected a nondependent arrow"
     unless shape.args.size == 2 && shape.args[0]! == intTy &&
         shape.args[1]! == natTy && shape.res == propTy do
-      throwError "verified arrow bridge returned the wrong flattened telescope"
+      throwError "verified arrow reification returned the wrong flattened telescope"
   trivial
 
-opaque bridgeCarrier : Type
-axiom bridgeFunction : bridgeCarrier → bridgeCarrier
-axiom bridgeArgument : bridgeCarrier
-axiom bridgeArgument2 : bridgeCarrier
+opaque reificationCarrier : Type
+axiom reificationFunction : reificationCarrier → reificationCarrier
+axiom reificationArgument : reificationCarrier
+axiom reificationArgument2 : reificationCarrier
 
-/-- The executable bridge reifies live constants/application and lambda binding
+/-- Executable reification converts constants, applications, and lambda binding
 into intrinsically typed source terms. -/
 example : True := by
   run_tac
-    let fn := Lean.mkConst ``bridgeFunction
-    let argument := Lean.mkConst ``bridgeArgument
+    let fn := Lean.mkConst ``reificationFunction
+    let argument := Lean.mkConst ``reificationArgument
     let fnType ← Crush.Metatheory.Reification.reifyType (← Lean.Meta.inferType fn)
     let argumentType ← Crush.Metatheory.Reification.reifyType (← Lean.Meta.inferType argument)
-    let signature := Crush.Metatheory.Reification.SignatureBridge.cons fn fnType
-      (Crush.Metatheory.Reification.SignatureBridge.cons argument argumentType
-        Crush.Metatheory.Reification.SignatureBridge.nil)
+    let signature := Crush.Metatheory.Reification.ReifiedSignature.cons fn fnType
+      (Crush.Metatheory.Reification.ReifiedSignature.cons argument argumentType
+        Crush.Metatheory.Reification.ReifiedSignature.nil)
     unless (Crush.Metatheory.Reification.certifyConstantIn? signature fn).isSome do
-      throwError "live constant certification lost the reified signature position"
+      throwError "constant certification lost the reified signature position"
     let (_, constantState) ← TranslateM.run {} (emitTerm argument)
     unless constantState.verifiedConstants.size == 1 do
-      throwError "live default declaration did not retain its constant certificate"
+      throwError "emitted default declaration did not retain its constant certificate"
     match constantState.verifiedConstants[0]? with
     | some proof =>
-        match Dynamic.get? Crush.Metatheory.Reification.LiveCertifiedConstantEmission proof with
+        match Dynamic.get? Crush.Metatheory.Reification.CertifiedSymbolBinding proof with
         | some emission =>
             unless constantState.structuralAllocations.entries.any
                 (fun entry => entry.2 == emission.symbol) do
               throwError "certified source symbol is absent from the allocation trace"
         | none => throwError "retained constant certificate has the wrong dynamic type"
     | none => throwError "retained constant certificate is missing"
-    let argument2 := Lean.mkConst ``bridgeArgument2
-    let sameTypedSignature := Crush.Metatheory.Reification.SignatureBridge.cons argument argumentType
-      (Crush.Metatheory.Reification.SignatureBridge.cons argument2 argumentType
-        Crush.Metatheory.Reification.SignatureBridge.nil)
+    let argument2 := Lean.mkConst ``reificationArgument2
+    let sameTypedSignature := Crush.Metatheory.Reification.ReifiedSignature.cons argument argumentType
+      (Crush.Metatheory.Reification.ReifiedSignature.cons argument2 argumentType
+        Crush.Metatheory.Reification.ReifiedSignature.nil)
     unless (Crush.Metatheory.Reification.certifyConstantIn?
         sameTypedSignature argument2).isSome do
       throwError "identity-bearing certification confused same-typed constants"
     let application := Lean.mkApp fn argument
     let some reifiedApplication ← Crush.Metatheory.Reification.reify? signature
-        Crush.Metatheory.Reification.ContextBridge.nil application
+        Crush.Metatheory.Reification.ReifiedContext.nil application
       | throwError "typed reification rejected a modeled constant application"
     let _ : Crush.Metatheory.Reification.Reifies signature
-        Crush.Metatheory.Reification.ContextBridge.nil application
+        Crush.Metatheory.Reification.ReifiedContext.nil application
         reifiedApplication.term := ⟨reifiedApplication.witness⟩
-    let carrier := Lean.mkConst ``bridgeCarrier
+    let carrier := Lean.mkConst ``reificationCarrier
     let identity := Lean.Expr.lam `x carrier (Lean.mkBVar 0) .default
     unless (← Crush.Metatheory.Reification.reifyTerm?
-        Crush.Metatheory.Reification.SignatureBridge.nil
-        Crush.Metatheory.Reification.ContextBridge.nil identity).isSome do
-      throwError "typed bridge rejected a modeled lambda"
+        Crush.Metatheory.Reification.ReifiedSignature.nil
+        Crush.Metatheory.Reification.ReifiedContext.nil identity).isSome do
+      throwError "typed reification rejected a modeled lambda"
     unless (← Crush.Metatheory.Reification.certifyClosure?
-        Crush.Metatheory.Reification.SignatureBridge.nil
-        Crush.Metatheory.Reification.ContextBridge.nil (fun _ => false) identity).isSome do
-      throwError "typed bridge failed to certify a closed lambda's capture list"
+        Crush.Metatheory.Reification.ReifiedSignature.nil
+        Crush.Metatheory.Reification.ReifiedContext.nil (fun _ => false) identity).isSome do
+      throwError "typed reification failed to certify a closed lambda's capture list"
     let (_, translatedState) ← TranslateM.run {} (emitTerm identity)
     unless translatedState.commandEncodings.size == 3 do
       throwError "stateful defunctionalization did not retain all command encodings"
@@ -170,22 +170,22 @@ example : True := by
             throwError "closure equation did not retain its typed semantic proof"
     | _, _, _ => throwError "stateful defunctionalization encodings have the wrong order"
     Lean.Meta.withLocalDeclD `captured carrier fun captured => do
-      let liveContext := Crush.Metatheory.Reification.ContextBridge.cons
-        captured.fvarId! argumentType Crush.Metatheory.Reification.ContextBridge.nil
+      let reifiedContext := Crush.Metatheory.Reification.ReifiedContext.cons
+        captured.fvarId! argumentType Crush.Metatheory.Reification.ReifiedContext.nil
       let capturingLambda := Lean.Expr.lam `ignored carrier captured .default
       let eligible := fun id => id == captured.fvarId!
       unless (← Crush.Metatheory.Reification.certifyClosure?
-          Crush.Metatheory.Reification.SignatureBridge.nil liveContext eligible
+          Crush.Metatheory.Reification.ReifiedSignature.nil reifiedContext eligible
           capturingLambda).isSome do
-        throwError "typed bridge failed exact ordered capture certification"
+        throwError "typed reification failed exact ordered capture certification"
       unless (← Crush.Metatheory.Reification.certifyLocalClosure?
           capturingLambda #[captured.fvarId!]).isSome do
-        throwError "live closure entry point failed to construct its certificate"
+        throwError "closure certification failed to construct its witness"
       let appliedBody := Lean.mkApp fn captured
       let constantLambda := Lean.Expr.lam `ignored carrier appliedBody .default
       unless (← Crush.Metatheory.Reification.certifyLocalClosure?
           constantLambda #[captured.fvarId!]).isSome do
-        throwError "live closure entry point failed to reify its finite signature"
+        throwError "closure certification failed to reify its finite signature"
     let equalityHead ← Lean.Meta.mkConstWithFreshMVarLevels ``Eq
     let reflexiveBody := Lean.mkApp3 equalityHead carrier (Lean.mkBVar 0) (Lean.mkBVar 0)
     let universal := Lean.Expr.forallE `x carrier reflexiveBody .default
@@ -207,10 +207,10 @@ example : True := by
     let expression := Lean.mkApp (Lean.mkFVar x)
       (Lean.mkApp (Lean.mkFVar y) (Lean.mkFVar x))
     unless collectFVarsOrdered expression == #[x, y] do
-      throwError "production capture collection lost first-occurrence order"
+      throwError "translator capture collection lost first-occurrence order"
     let selected := selectClosureCaptures expression fun id => id == y
     unless selected == #[y] do
-      throwError "production capture eligibility filtering disagrees with collection"
+      throwError "translator capture eligibility filtering disagrees with collection"
   trivial
 
 /-- IR printing round-trip. -/
@@ -405,7 +405,7 @@ example (p q : Prop) : modelLabelProbe p = modelLabelProbe q := by
       IO.println "z3 refusal round-trip: reported with `unknown` ✓"
     | .unsat .. => throwError "a refused command produced an `unsat` verdict"
 
--- Live solver round-trip (skips gracefully if z3 is absent).
+-- External solver round-trip (skips gracefully if z3 is absent).
 #eval show Lean.MetaM Unit from do
   let cfg : Config := { backend := .z3, timeout := 5 }
   if !(← Solver.backendAvailable cfg.backend) then

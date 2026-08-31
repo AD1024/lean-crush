@@ -10,7 +10,7 @@ logical relation after every argument in the source constant's flattened arrow
 telescope. `FlattenedHookRel` states exactly that condition, independently of
 symbol names and metaprogram execution.
 
-The live unrestricted attributes remain useful but are tagged
+The unrestricted translator attributes remain useful but are tagged
 `HandlerTrust.trustedBoundary`. A certified registration path must provide an
 inhabitant of the non-vacuous `CanonicalTermHookCertificate` below (or the
 guarded sort contract) and prove that its executable handler emits the
@@ -60,7 +60,7 @@ structure TermHookCertificate {sourceBase : BaseSort → Type}
     (Defunctionalization.sourceDecl ty).result
   preserves : FlattenedHookRel valueRel ty sourceValue targetValue
 
-/-- Universe-independent package stored by the live certified-hook registry.
+/-- Universe-independent package stored by the certified-hook registry.
 Unpacking it recovers the exact source type, source/target models, logical
 relation, and preservation proof; registration therefore cannot manufacture a
 `certified` tag from a bare theorem name. -/
@@ -123,7 +123,7 @@ def apply {sourceBase : BaseSort → Type} {targetCarriers : FO.Carriers}
 
 end TermHookCertificate
 
-/-! ## Canonical certificates suitable for a live trust boundary
+/-! ## Canonical certificates suitable for the translator trust boundary
 
 The generic contract above is useful compositionally but must not itself drive a
 `certified` registry: existentially choosing `valueRel := fun _ _ _ => True`
@@ -173,7 +173,7 @@ def apply {signature : Signature} {domain codomain : Ty}
 
 end CanonicalTermHookCertificate
 
-/-- The production flattened interpretation of any source value is related to
+/-- The emitted flattened interpretation of any source value is related to
 that value by the canonical model-extension relation. This is the semantic fact
 a mechanically emitted direct-symbol hook must refine. -/
 theorem flattenedDenote_canonical_related {signature : Signature}
@@ -197,8 +197,8 @@ theorem flattenedDenote_canonical_related {signature : Signature}
       rw [argumentEq]
       exact codomainIH (fn (Defunctionalization.fromCanonical source domain targetArgument))
 
-/-- Canonical semantic certificate tied to one actual intrinsic source constant.
-Indexing by `constant` prevents a live registry from presenting a theorem about
+/-- Canonical semantic certificate tied to one actual typed source constant.
+Indexing by `constant` prevents the registry from presenting a theorem about
 an unrelated value at the same type. -/
 structure CanonicalConstantHookCertificate {signature : Signature} {ty : Ty}
     (constant : Const signature ty) where
@@ -210,9 +210,9 @@ structure CanonicalConstantHookCertificate {signature : Signature} {ty : Ty}
     FlattenedHookRel (CanonicalHookValueRelation source) ty
       (source.const constant) (targetValue source)
 
-/-- Every source constant has a canonical production implementation. Certified
+/-- Every source constant has a canonical translator implementation. Certified
 built-ins may replace `targetValue` only by proving the same indexed contract. -/
-def CanonicalConstantHookCertificate.production {signature : Signature} {ty : Ty}
+def CanonicalConstantHookCertificate.canonical {signature : Signature} {ty : Ty}
     (constant : Const signature ty) : CanonicalConstantHookCertificate constant where
   targetValue := fun source =>
     Defunctionalization.Flattened.flattenedDenote source ty (source.const constant)

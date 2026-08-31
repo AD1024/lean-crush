@@ -11,10 +11,10 @@ pass.  It walks the intrinsically typed source syntax and records:
   variables it captures; and
 * every complete arrow type needed by a function-valued source subterm.
 
-The live translator performs the analogous operations through `collectFVars`,
+The Crush translator performs the analogous operations through `collectFVars`,
 `arrowShape?`, and structural keys in `emitClosure`/`declareArrowSort`.  The core
 collector is deliberately pure and total.  It identifies closures by occurrence;
-the production optimization that merges repeated alpha-equivalent closed lambdas
+the translator optimization that merges repeated alpha-equivalent closed lambdas
 is a later refinement, not part of semantic correctness.
 -/
 
@@ -135,7 +135,7 @@ def closures {signature : Signature} {context : Context} {ty : Ty}
   | .forallE body | .existsE body => closures body
 
 /-- Arrow sorts required by all typed subterms.  Duplicates are removed so this
-already models the live pass's one-sort/one-`app`-symbol-per-arrow invariant. -/
+already models the Crush translator's one-sort/one-`app`-symbol-per-arrow invariant. -/
 def arrowsInTerm {signature : Signature} {context : Context} {ty : Ty}
     (term : Term signature context ty) : List Arrow :=
   match term with
@@ -171,7 +171,7 @@ def collect (term : Term signature context ty) : Plan signature :=
 /-! ## Target signature construction -/
 
 /-- A source constant's ordinary first-order declaration.  Arrow constants are
-fully flattened, matching the live `defaultApp` path.  When such a constant is
+fully flattened, matching the translator `defaultApp` path.  When such a constant is
 used as a value, the later eta phase creates a closure around this declaration. -/
 def sourceDecl (ty : Ty) : FO.SymbolDecl :=
   let (arguments, result) := FO.flattenArrow ty
@@ -193,13 +193,13 @@ def Plan.targetSignature (sourceSignature : Signature) (plan : Plan sourceSignat
     FO.Signature :=
   sourceSignature.map sourceDecl ++ plan.appDecls ++ plan.closureDecls
 
-/-- Unary application declaration used by the classic verified core pass.  The
+/-- Unary application declaration used by the verified unary reference pass.  The
 later flattening pass replaces chains of these symbols with `FO.appDecl`. -/
 @[reducible] def unaryAppDecl (arrow : Arrow) : FO.SymbolDecl :=
   { args := [.fn arrow.domain arrow.codomain, FO.FOSort.ofTy arrow.domain]
     result := FO.FOSort.ofTy arrow.codomain }
 
-/-- Application declarations of the classic unary core. -/
+/-- Application declarations of the unary reference translation. -/
 def Plan.unaryAppDecls (plan : Plan signature) : List FO.SymbolDecl :=
   plan.arrows.map unaryAppDecl
 

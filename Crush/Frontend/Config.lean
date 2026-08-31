@@ -143,8 +143,8 @@ register_option crush.ho.mode : HOMode := {
 
 register_option crush.datatype.certify : Bool := {
   defValue := false
-  descr := "Certify datatype discovery, typed ownership, and native declarations. Disabled \
-            by default so existing production datatype behavior and benchmarks remain \
+  descr := "Certify datatype discovery, typed block membership, and SMT datatype declarations. Disabled \
+            by default so existing datatype behavior and benchmarks remain \
             unchanged while certified fragment coverage is expanded."
 }
 

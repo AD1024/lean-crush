@@ -82,7 +82,7 @@ def exprShape : Expr → ExprShape
   | .mdata _ body => .metadata (exprShape body)
   | _ => .unsupported
 
-/-- Pure recursive structural view of an intrinsic HO term. -/
+/-- Pure recursive structural view of a reified higher-order term. -/
 def termShape {signature : Signature} :
     {context : Context} → {type : Ty} →
       Term signature context type → TermShape
@@ -104,7 +104,7 @@ def PackedTerm.shape {signature : Signature} {context : Context} :
     PackedTerm signature context → TermShape
   | .pack _ term => termShape term
 
-/-- Recursive compatibility of the source and intrinsic constructor trees.
+/-- Recursive compatibility of the source and typed constructor trees.
 A Lean `forallE` may reify either as implication or as quantification, depending
 on whether its nondependent domain is a proposition. Metadata is transparent. -/
 def shapesMatch : ExprShape → TermShape → Bool
@@ -128,9 +128,9 @@ def shapesMatch : ExprShape → TermShape → Bool
   | _, _ => false
 
 /-- Erase only certified datatype type parameters before comparing the source
-and intrinsic constructor trees. Exact ownership remains in the intrinsically
-typed term and its `DataBridge`; recording the same constructor occurrences a
-second time added no soundness evidence. -/
+and reified constructor trees. Exact datatype-symbol positions remain in the
+intrinsically typed term and its `DatatypeSignaturePrefix`; recording the same
+constructor occurrences a second time added no soundness evidence. -/
 partial def eraseData (env : DatatypeEnv) (expression : Expr) :
     MetaM Expr := do
   if let some app ← env.ctorApp? expression then
@@ -156,10 +156,10 @@ partial def eraseData (env : DatatypeEnv) (expression : Expr) :
   | _ => return expression
 
 private partial def sourceShape {signature : Signature} (expression : Expr) :
-    Option (DataBridge signature) → MetaM ExprShape
+    Option (DatatypeSignaturePrefix signature) → MetaM ExprShape
   | none => return exprShape expression
-  | some bridge => do
-      return exprShape (← eraseData bridge.env expression)
+  | some reified => do
+      return exprShape (← eraseData reified.env expression)
 
 /-- Recursive shape correspondence after erasing only the certified
 datatype parameters recorded in the witness. -/
@@ -167,38 +167,38 @@ def ShapeCorrespondence {signature : Signature} {context : Context}
     (source : ExprShape) (term : PackedTerm signature context) : Prop :=
   shapesMatch source term.shape = true
 
-/-- Structural witness from one live Lean expression to one intrinsic HO term. -/
+/-- Structural witness from one elaborated Lean expression to one reified higher-order term. -/
 structure ReificationWitness {signature : Signature} {context : Context}
-    (signatureBridge : SignatureBridge signature)
-    (contextBridge : ContextBridge context) (expression : Expr)
+    (reifiedSignature : ReifiedSignature signature)
+    (reifiedContext : ReifiedContext context) (expression : Expr)
     (term : PackedTerm signature context)
-    (datatypes : Option (DataBridge signature) := none) where
+    (datatypes : Option (DatatypeSignaturePrefix signature) := none) where
   sourceShape : ExprShape
   shapeCorrespondence : ShapeCorrespondence sourceShape term
 
 /-- Existential typed result of proof-facing reification. -/
 structure Reified {signature : Signature} {context : Context}
-    (signatureBridge : SignatureBridge signature)
-    (contextBridge : ContextBridge context) (expression : Expr)
-    (datatypes : Option (DataBridge signature) := none) where
+    (reifiedSignature : ReifiedSignature signature)
+    (reifiedContext : ReifiedContext context) (expression : Expr)
+    (datatypes : Option (DatatypeSignaturePrefix signature) := none) where
   term : PackedTerm signature context
-  witness : ReificationWitness signatureBridge contextBridge expression term datatypes
+  witness : ReificationWitness reifiedSignature reifiedContext expression term datatypes
 
 /-- Proposition-level spelling used by later composition theorems. -/
 def Reifies {signature : Signature} {context : Context}
-    (signatureBridge : SignatureBridge signature)
-    (contextBridge : ContextBridge context) (expression : Expr)
+    (reifiedSignature : ReifiedSignature signature)
+    (reifiedContext : ReifiedContext context) (expression : Expr)
     (term : PackedTerm signature context)
-    (datatypes : Option (DataBridge signature) := none) : Prop :=
-  Nonempty (ReificationWitness signatureBridge contextBridge expression term datatypes)
+    (datatypes : Option (DatatypeSignaturePrefix signature) := none) : Prop :=
+  Nonempty (ReificationWitness reifiedSignature reifiedContext expression term datatypes)
 
 /-- Run the existing typed reifier and retain its structural witness. -/
 partial def reify? {signature : Signature} {context : Context}
-    (signatureBridge : SignatureBridge signature)
-    (contextBridge : ContextBridge context) (expression : Expr)
-    (datatypes : Option (DataBridge signature) := none) :
-    MetaM (Option (Reified signatureBridge contextBridge expression datatypes)) := do
-  let some term ← reifyTerm? signatureBridge contextBridge expression datatypes
+    (reifiedSignature : ReifiedSignature signature)
+    (reifiedContext : ReifiedContext context) (expression : Expr)
+    (datatypes : Option (DatatypeSignaturePrefix signature) := none) :
+    MetaM (Option (Reified reifiedSignature reifiedContext expression datatypes)) := do
+  let some term ← reifyTerm? reifiedSignature reifiedContext expression datatypes
     | return none
   let shape ← sourceShape expression datatypes
   if correspondence :
@@ -210,25 +210,25 @@ partial def reify? {signature : Signature} {context : Context}
         shapeCorrespondence := correspondence } }
   return none
 
-/-- One closed intrinsic sentence reified against an already selected exact
-datatype prefix and ordinary signature tail. This is the production-facing
+/-- One closed higher-order sentence reified against an already selected exact
+datatype prefix and ordinary signature tail. This is the translator-facing
 form: its indices prevent a retained fact witness from drifting to a different
-datatype environment or constant bridge. -/
+datatype environment or constant reification. -/
 structure ReifiedSentenceFor (expression : Expr) (env : DatatypeEnv)
-    {tail : Signature} (bridge : SignatureBridge tail) where
+    {tail : Signature} (reified : ReifiedSignature tail) where
   typeExpr : Expr
   source : Sentence (env.signature ++ tail)
-  witness : ReificationWitness (bridge.prepend env.signature) ContextBridge.nil
-    expression (.pack (.bool typeExpr) source) (some (DataBridge.of env tail))
+  witness : ReificationWitness (reified.prepend env.signature) ReifiedContext.nil
+    expression (.pack (.bool typeExpr) source) (some (DatatypeSignaturePrefix.of env tail))
 
 /-- Reify a closed proposition using an exact datatype/signature selection
-already made by production. -/
+already made by the Crush translator. -/
 partial def reifySentenceFor? (expression : Expr) (env : DatatypeEnv)
-    {tail : Signature} (bridge : SignatureBridge tail) :
-    MetaM (Option (ReifiedSentenceFor expression env bridge)) := do
-  let signatureBridge := bridge.prepend env.signature
-  let datatypes := DataBridge.of env tail
-  let some reified ← reify? signatureBridge ContextBridge.nil expression
+    {tail : Signature} (reified : ReifiedSignature tail) :
+    MetaM (Option (ReifiedSentenceFor expression env reified)) := do
+  let reifiedSignature := reified.prepend env.signature
+  let datatypes := DatatypeSignaturePrefix.of env tail
+  let some reified ← reify? reifiedSignature ReifiedContext.nil expression
       (some datatypes)
     | return none
   match reified with
@@ -237,22 +237,22 @@ partial def reifySentenceFor? (expression : Expr) (env : DatatypeEnv)
   | ⟨.pack (.base _ _) _, _⟩ | ⟨.pack (.arrow _ _ _) _, _⟩ => return none
 
 /-- Exact pointwise reification of an ordered expression list against one
-datatype environment and ordinary signature bridge. The index records the
+datatype environment and ordinary signature reified. The index records the
 source list, so successful construction cannot reorder or omit a fact. -/
 inductive ReifiedSentencesFor (env : DatatypeEnv) {tail : Signature}
-    (bridge : SignatureBridge tail) : List Expr → Type where
-  | nil : ReifiedSentencesFor env bridge []
+    (reified : ReifiedSignature tail) : List Expr → Type where
+  | nil : ReifiedSentencesFor env reified []
   | cons {expression : Expr} {expressions : List Expr}
-      (head : ReifiedSentenceFor expression env bridge)
-      (tail : ReifiedSentencesFor env bridge expressions) :
-      ReifiedSentencesFor env bridge (expression :: expressions)
+      (head : ReifiedSentenceFor expression env reified)
+      (tail : ReifiedSentencesFor env reified expressions) :
+      ReifiedSentencesFor env reified (expression :: expressions)
 
 namespace ReifiedSentencesFor
 
-/-- Intrinsic source theory retained by an exact ordered reification witness. -/
+/-- Reified higher-order theory retained by an exact ordered reification witness. -/
 def sources {env : DatatypeEnv} {tail : Signature}
-    {bridge : SignatureBridge tail} : {expressions : List Expr} →
-    ReifiedSentencesFor env bridge expressions →
+    {reified : ReifiedSignature tail} : {expressions : List Expr} →
+    ReifiedSentencesFor env reified expressions →
       Theory (env.signature ++ tail)
   | [], .nil => []
   | _ :: _, .cons head rest => head.source :: sources rest
@@ -262,42 +262,42 @@ end ReifiedSentencesFor
 /-- Reify an exact expression list against an already selected common
 datatype/signature environment. -/
 partial def reifySentencesFor? (env : DatatypeEnv) {tail : Signature}
-    (bridge : SignatureBridge tail) : (expressions : List Expr) →
-    MetaM (Option (ReifiedSentencesFor env bridge expressions))
+    (reified : ReifiedSignature tail) : (expressions : List Expr) →
+    MetaM (Option (ReifiedSentencesFor env reified expressions))
   | [] => return some .nil
   | expression :: rest => do
-      let some head ← reifySentenceFor? expression env bridge | return none
-      let some tail ← reifySentencesFor? env bridge rest | return none
+      let some head ← reifySentenceFor? expression env reified | return none
+      let some tail ← reifySentencesFor? env reified rest | return none
       return some (.cons head tail)
 
 /-- Existential common environment and exact pointwise witness for a finite
 array of closed Lean propositions. -/
 inductive ReifiedTheory (expressions : Array Expr) where
   | pack (env : DatatypeEnv) {tail : Signature}
-      (bridge : SignatureBridge tail)
-      (sentences : ReifiedSentencesFor env bridge expressions.toList) :
+      (reified : ReifiedSignature tail)
+      (sentences : ReifiedSentencesFor env reified expressions.toList) :
       ReifiedTheory expressions
 
-/-- Reify several closed propositions into one intrinsic theory. All terms
+/-- Reify several closed propositions into one reified higher-order theory. All terms
 share the datatype prefix and ordinary constant signature selected from the
 entire input array. -/
 partial def reifyTheory? (expressions : Array Expr) :
     MetaM (Option (ReifiedTheory expressions)) := do
   match ← reifyDataSignatureMany expressions with
   | .error _ => return none
-  | .ok (.pack env bridge) =>
-      let some sentences ← reifySentencesFor? env bridge expressions.toList
+  | .ok (.pack env reified) =>
+      let some sentences ← reifySentencesFor? env reified expressions.toList
         | return none
-      return some (.pack env bridge sentences)
+      return some (.pack env reified sentences)
 
-/-- Existential intrinsic sentence obtained from a closed supported Lean
+/-- Existential reified higher-order sentence obtained from a closed supported Lean
 proposition. The exact finite constant signature and structural witness remain
 available after unpacking. -/
 inductive ReifiedSentence (expression : Expr) where
-  | pack {signature : Signature} (signatureBridge : SignatureBridge signature)
-      (datatypes : DataBridge signature)
+  | pack {signature : Signature} (reifiedSignature : ReifiedSignature signature)
+      (datatypes : DatatypeSignaturePrefix signature)
       (typeExpr : Expr) (source : Sentence signature)
-      (witness : ReificationWitness signatureBridge ContextBridge.nil expression
+      (witness : ReificationWitness reifiedSignature ReifiedContext.nil expression
         (.pack (.bool typeExpr) source) (some datatypes)) : ReifiedSentence expression
 
 /-- Reify a closed Lean proposition into the typed HO sentence consumed by the
@@ -309,7 +309,7 @@ partial def reifySentence? (expression : Expr) :
   | .ok (.pack env tail) =>
       let some reified ← reifySentenceFor? expression env tail
         | return none
-      return some (.pack (tail.prepend env.signature) (DataBridge.of env _)
+      return some (.pack (tail.prepend env.signature) (DatatypeSignaturePrefix.of env _)
         reified.typeExpr reified.source reified.witness)
 
 end Crush.Metatheory.Reification

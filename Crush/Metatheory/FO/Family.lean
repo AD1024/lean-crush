@@ -8,8 +8,8 @@ verified passes are cleaner over a symbol family indexed directly by declaration
 constructing a generated symbol immediately proves its type, independently of
 where a later finite allocator places it.
 
-`FamilyTerm.reify` is the total bridge back to finite `FO.Term`, parameterized by
-a typed resolver.  The production-link proof will instantiate that resolver with
+`FamilyTerm.reify` is the total conversion back to finite `FO.Term`, parameterized by
+a typed resolver. The translator-correspondence proof instantiates that resolver with
 the collected signature and stable symbol allocation.
 -/
 
@@ -22,7 +22,7 @@ universe u
 The universe parameter is needed by symbol families that retain semantic
 contracts.  Ordinary syntactic families continue to instantiate it at
 `Type`, while a certified symbol may quantify over source models and therefore
-live one universe higher. -/
+inhabit the next universe. -/
 abbrev SymbolFamily := SymbolDecl → Type u
 
 mutual

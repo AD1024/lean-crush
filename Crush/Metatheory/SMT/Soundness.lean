@@ -5,7 +5,7 @@ import Crush.Metatheory.SMT.DatatypeCanonical
 # Semantic soundness of FO-to-SMT representation
 
 Every model of an intrinsically typed FO theory induces a model of its concrete
-SMT representation.  Values from the FO model are tagged by their intrinsic
+SMT representation. Values from the FO model are tagged by their typed
 sort.  Raw values are used only for SMT sorts outside the representation image,
 which preserves the standard nonemptiness requirement without confusing two
 represented carriers.
@@ -408,7 +408,7 @@ theorem term_eval (encoding : Encoding symbols)
         (restIH valuation environment related))
     source
 
-/-- The intrinsic FO encoder uses only Boolean literals. Other source
+/-- The typed FO encoder uses only Boolean literals. Other source
 constants are typed family symbols, so native components may give raw SMT
 numerals their interpreted meaning without changing encoded FO evaluations. -/
 theorem term_literalFree (encoding : Encoding symbols)
@@ -639,52 +639,53 @@ theorem lift (encoding : Encoding symbols)
     assertions_valid encoding target source valid⟩
 
 /-- Single model-lifting theorem for the complete representation. Ordinary
-sorts, ordinary symbols, assertions, and every native datatype block are all
+sorts, ordinary symbols, assertions, and every SMT datatype block are all
 validated in the same induced raw model. The empty datatype environment is the
-ordinary no-native case. -/
+ordinary case with no SMT datatype declarations. -/
 theorem representation_sound {signature : Signature}
     (encoding : Encoding (Symbol signature))
     {env : Datatype.Env signature}
-    (native : Datatype.EnvRepresentation encoding env)
+    (datatypes : Datatype.EnvRepresentation encoding env)
     {theory : FO.FamilyTheory (Symbol signature)} {commands : Array Command}
     (representation : TheoryRepresentation encoding theory commands)
-    (source : Model signature) (lawful : Datatype.Env.Lawful source env)
+    (source : Model signature) (freeDataModel : Datatype.Env.IsFreeDatatypeModel source env)
     (valid : canonicalModel source ⊨ᵀ theory) :
     ∃ smtModel : Crush.SMT.Model, smtModel ⊨ₛᶜ commands :=
   lift encoding representation (canonicalModel source) valid
-    (native.native_valid lawful)
+    (datatypes.datatypeCommands_valid freeDataModel)
 
 /-- Unsatisfiability of the complete represented command sequence reflects
-through the same theorem to the lawful intrinsic source semantics. -/
+through the same theorem to the free-datatype source semantics. -/
 theorem commands_unsat_implies_source_unsat {signature : Signature}
     (encoding : Encoding (Symbol signature))
     {env : Datatype.Env signature}
-    (native : Datatype.EnvRepresentation encoding env)
+    (datatypes : Datatype.EnvRepresentation encoding env)
     (formula : Sentence signature) {commands : Array Command}
     (representation : TheoryRepresentation encoding
       (translatedTheory formula) commands)
     (unsat : Crush.SMT.CommandsUnsatisfiable commands) :
     Datatype.Env.Unsatisfiable env formula := by
-  intro source lawful sourceValid
+  intro source freeDataModel sourceValid
   obtain ⟨smtModel, commandsValid⟩ :=
-    representation_sound encoding native representation source lawful
+    representation_sound encoding datatypes representation source freeDataModel
       (model_extension source formula sourceValid)
   exact unsat smtModel commandsValid
 
 /-- Unsatisfiability of one represented command array reflects through
-flattening and SMT encoding to the complete lawful source theory. -/
+flattening and SMT encoding to the complete source theory under the
+free-datatype model condition. -/
 theorem commands_unsat_implies_source_theory_unsat {signature : Signature}
     (encoding : Encoding (Symbol signature))
     {env : Datatype.Env signature}
-    (native : Datatype.EnvRepresentation encoding env)
+    (datatypes : Datatype.EnvRepresentation encoding env)
     (sourceTheory : Theory signature) {commands : Array Command}
     (representation : TheoryRepresentation encoding
       (translatedTheories sourceTheory) commands)
     (unsat : Crush.SMT.CommandsUnsatisfiable commands) :
     Datatype.Env.TheoryUnsatisfiable env sourceTheory := by
-  intro source lawful sourceValid
+  intro source freeDataModel sourceValid
   obtain ⟨smtModel, commandsValid⟩ :=
-    representation_sound encoding native representation source lawful
+    representation_sound encoding datatypes representation source freeDataModel
       (model_extension_theory source sourceTheory sourceValid)
   exact unsat smtModel commandsValid
 

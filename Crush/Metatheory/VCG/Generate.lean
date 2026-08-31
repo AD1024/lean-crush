@@ -9,7 +9,7 @@ After Lean expressions have been reified as a finite higher-order theory, this
 module translates that entire theory to first-order form and constructs its SMT
 commands. The accompanying theorem states that the generated commands impose
 exactly the translated first-order formulas. This pure function is the
-proof-facing specification used when checking the final production array.
+proof-facing specification used when checking the complete emitted command sequence.
 -/
 
 namespace Crush.Metatheory.VCG
@@ -18,7 +18,7 @@ open Defunctionalization.Flattened
 open SMT.Datatype
 open scoped Crush.Metatheory Crush.SMT
 
-/-- Exact concrete commands for a finite intrinsic source theory translated
+/-- Exact concrete commands for a finite reified higher-order theory translated
 against one common signature. -/
 def theoryCommands {signature : Signature}
     (encoding : SMT.Encoding (Symbol signature))
@@ -33,9 +33,9 @@ theorem theoryCommands_represents {signature : Signature}
       (theoryCommands encoding source) :=
   SMT.encode_theories encoding source
 
-/-- Exact guarded commands for a finite intrinsic source theory. -/
+/-- Exact guarded commands for a finite reified higher-order theory. -/
 def guardedTheoryCommands {signature : Signature}
-    (guarding : SMT.Guarding (Symbol signature))
+    (guarding : SMT.GuardedEncoding (Symbol signature))
     (derived : Array Crush.SMT.Command) (source : Theory signature) :
     Array Crush.SMT.Command :=
   guarding.theory derived (SMT.translatedDeclarations source)
@@ -44,18 +44,18 @@ def guardedTheoryCommands {signature : Signature}
 /-- Guarded finite-theory generation retains exact declarations and assertions
 in source traversal order. -/
 theorem guardedTheoryCommands_represents {signature : Signature}
-    (guarding : SMT.Guarding (Symbol signature))
+    (guarding : SMT.GuardedEncoding (Symbol signature))
     (derived : Array Crush.SMT.Command) (source : Theory signature) :
     SMT.GuardedTheoryRepresentation guarding derived (translatedTheories source)
       (guardedTheoryCommands guarding derived source) :=
   ⟨SMT.translatedDeclarations source, Crush.SMT.SameCommandSet.refl _⟩
 
 /-- Unsatisfiability of the finite-theory VCG reflects to the complete
-intrinsic source theory. -/
+reified higher-order theory. -/
 theorem theoryCommands_unsat_implies_source_unsat {signature : Signature}
     (encoding : SMT.Encoding (Symbol signature))
     (source : Theory signature)
-    (data : Reification.DataBridge signature)
+    (data : Reification.DatatypeSignaturePrefix signature)
     (native : EnvRepresentation encoding data.toModelEnv)
     (unsat : Crush.SMT.CommandsUnsatisfiable
       (theoryCommands encoding source)) :

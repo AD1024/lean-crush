@@ -15,14 +15,14 @@ import Crush.Metatheory.Notation
 import Crush.Metatheory.Defunctionalization.Fundamental
 import Crush.Metatheory.Defunctionalization.ModelExtension
 import Crush.Metatheory.Defunctionalization.FlattenedApplication
-import Crush.Metatheory.Defunctionalization.TranslationResult
+import Crush.Metatheory.Defunctionalization.TermTranslation
 import Crush.Metatheory.Defunctionalization.Flattened.Spine
 import Crush.Metatheory.Defunctionalization.Flattened.Lambda
 import Crush.Metatheory.Defunctionalization.Flattened.Translate
 import Crush.Metatheory.Defunctionalization.Flattened.Currying
 import Crush.Metatheory.Defunctionalization.Flattened.Denotation
 import Crush.Metatheory.Defunctionalization.Flattened.Theory
-import Crush.Metatheory.Defunctionalization.ProductionClosure
+import Crush.Metatheory.Defunctionalization.Flattened.ClosureCorrectness
 import Crush.Metatheory.Guarded.Encoding
 import Crush.Metatheory.Hooks
 import Crush.Metatheory.SMT.Soundness
@@ -36,7 +36,7 @@ open scoped Crush.SMT
 /-!
 Compile-time examples for the intrinsically typed metatheory language. The types of
 these definitions exercise opaque sorts, constants, functions, lambdas, application,
-equality, Boolean formulas, and quantification without relying on the production
+equality, Boolean formulas, and quantification without relying on the translator's
 translator.
 -/
 
@@ -119,7 +119,7 @@ namespace Crush.Metatheory.FO.Tests
 
 private def entity : Ty := .base ⟨"Entity"⟩
 
-/-- The live pass flattens `Entity → Entity → Bool` into a ternary target
+/-- The Crush translator flattens `Entity → Entity → Bool` into a ternary target
 application symbol: a function value followed by both source arguments. -/
 private def predicateApp : SymbolDecl :=
   appDecl entity (.arrow entity .bool)
@@ -281,7 +281,7 @@ example :
         result := .base ⟨"Entity"⟩ } :=
   flattened_binary_declaration_base entity entity ⟨"Entity"⟩
 
-/-- The classic core transformation is total even before finite symbol
+/-- The unary reference translation is total even before finite symbol
 allocation. -/
 private def translatedPartial := 𝒟⟦partialApplication⟧
 
@@ -306,14 +306,14 @@ private def flattenedAppSymbol :
 
 /-- A result with no generated formulas has an empty combined theory. -/
 private def variableTranslation :
-    Flattened.TranslationResult [] [entity] entity where
+    Flattened.TermTranslation [] [entity] entity where
   term := .var .here
 
 example : variableTranslation.theory = [] := rfl
 
 /-- Obligation classes are retained independently and combined in stable order. -/
 private def guardedTranslation :
-    Flattened.TranslationResult [] [entity] .bool where
+    Flattened.TermTranslation [] [entity] .bool where
   term := .boolLit true
   equations := [.boolLit true]
   extensionality := [.boolLit false]
@@ -348,7 +348,7 @@ private def repeatedArguments :
 
 example
     (translateTerm : {ty : Ty} → Term partialSignature [entity] ty →
-      Flattened.TranslationResult partialSignature [entity] ty)
+      Flattened.TermTranslation partialSignature [entity] ty)
     (equation : (translateTerm (.var .here :
       Term partialSignature [entity] entity)).equations = [.boolLit true]) :
     (repeatedArguments.translate translateTerm).generated.equations.length = 2 := by
@@ -475,7 +475,7 @@ example (model : Model partialSignature)
         ⟦partialApplication⟧[model, valuation] :=
   Flattened.translate_denote model partialApplication valuation
 
-/-- The flattened production shape and unary reference translation have the
+/-- The flattened emitted-symbol shape and unary reference translation have the
 same canonical denotation. -/
 example (model : Model partialSignature)
     (valuation : Valuation model.Base [entity]) :
@@ -515,7 +515,7 @@ example (theory : Theory partialSignature)
   Flattened.target_theories_unsat_implies_source_unsat theory targetUnsat
 
 /-- The complete semantic soundness theorem is exposed at the same abstract
-symbol-family level as the total classic pass. -/
+symbol-family level as the total unary reference translation. -/
 example (formula : Sentence partialSignature)
     (targetUnsat : FO.FamilyTheoryUnsatisfiable
       (defunctionalizationTheory formula)) :
@@ -691,7 +691,7 @@ private def reflexiveFormula : FO.FamilySentence NoSymbol :=
 /-- SMT quotation and the pure encoder produce the same concrete formula. -/
 example : term encoding reflexiveFormula = (smt| (= true true)) := rfl
 
-private def guarded : Guarding NoSymbol where
+private def guarded : GuardedEncoding NoSymbol where
   encoding
   guard := fun _ value => some (smt| (wf $value))
 
@@ -722,9 +722,9 @@ example : guarded.term (quantifiedReflexive false) =
     expected := rfl
 
 /-- Disabling guards recovers the ordinary encoder exactly. -/
-example : (Guarding.none encoding).term reflexiveFormula =
+example : (GuardedEncoding.none encoding).term reflexiveFormula =
     term encoding reflexiveFormula := by
-  exact Guarding.none_term encoding reflexiveFormula
+  exact GuardedEncoding.none_term encoding reflexiveFormula
 
 example : TheoryRepresentation encoding [reflexiveFormula]
     (theory encoding [] [reflexiveFormula]) :=
@@ -759,7 +759,7 @@ private def unaryGuards : UnaryGuards encoding target (fun _ _ => True) where
     intro sort identifier equal decl symbol
     nomatch symbol
 
-/-- The shared recursive-definition theorem covers the exact production
+/-- The shared recursive-definition theorem covers the exact emitted
 `wfDef` syntax; components need only prove their body denotation. -/
 example :
     (SMT.Datatype.wfDef "wf" "x" (encoding.sort .bool) #[]).Holds
@@ -770,12 +770,12 @@ example :
 
 /-- The generic guarded evaluator includes the exact empty-guard legacy path. -/
 example : Crush.SMT.Eval (modelWith encoding target (.nil encoding target)) []
-    ((Guarding.none encoding).term reflexiveFormula)
+    ((GuardedEncoding.none encoding).term reflexiveFormula)
     (.typed .bool
       (reflexiveFormula.guardDenote target (fun _ _ => True)
         (FO.Valuation.empty target.carriers))) := by
-  exact guardTerm_eval (Guarding.none encoding) target (.nil encoding target)
-    _ (Guarding.none_semantics encoding target _) reflexiveFormula _ []
+  exact guardTerm_eval (GuardedEncoding.none encoding) target (.nil encoding target)
+    _ (GuardedEncoding.none_semantics encoding target _) reflexiveFormula _ []
       (Env.empty target)
 
 /-- A fresh unary `wf` predicate discharges the same theorem with an actual
@@ -814,7 +814,7 @@ private def hookRelation : HookValueRelation (fun _ => Unit) hookCarriers :=
   fun _ _ _ => True
 
 /-- A certified unary hook consumes a related argument and returns the residual
-result certificate; this is the contract live certified handlers must carry. -/
+result certificate; this is the contract certified translation handlers must carry. -/
 private def negationCertificate :
     TermHookCertificate hookRelation (.arrow .bool .bool) where
   sourceValue := Not

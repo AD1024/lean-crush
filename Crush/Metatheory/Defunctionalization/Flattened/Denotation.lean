@@ -87,7 +87,7 @@ namespace SpineResult
     (ν : TargetValuation M context)
     (spine : SpineResult signature context (.arrow domain codomain))
     (argument : TargetTerm signature context domain)
-    (generated : GeneratedOutput signature) :
+    (generated : AuxiliaryTheory signature) :
     (spine.snoc argument generated).denote M ν =
       spine.denote M ν
         (fromCanonical M domain ⟦argument⟧[canonicalModel M, ν]) := by
@@ -105,11 +105,11 @@ theorem finish_denote (M : Model signature)
   rcases spine with ⟨headDomain, headCodomain, head, arguments, generated⟩
   cases head with
   | value term =>
-      simpa only [SpineResult.finish, TranslationResult.ofGenerated,
+      simpa only [SpineResult.finish, TermTranslation.ofGenerated,
         SpineResult.denote, FunctionHead.denote] using
         arguments.completeApp_denote M ν term ground
   | sourceConstant constant =>
-      simpa only [SpineResult.finish, TranslationResult.ofGenerated,
+      simpa only [SpineResult.finish, TermTranslation.ofGenerated,
         SpineResult.denote, FunctionHead.denote] using
         arguments.sourceApp_denote M ν constant ground
 
@@ -158,14 +158,14 @@ private theorem denote_core (M : Model signature) :
       | bool =>
           constructor
           · intro Δ r ν
-            simp only [translateWith, TranslationResult.ofGenerated,
+            simp only [translateWith, TermTranslation.ofGenerated,
               FO.FamilyTerm.denote.eq_1, Term.rename, Term.denote,
               sourceValuation]
           · trivial
       | base sort =>
           constructor
           · intro Δ r ν
-            simp only [translateWith, TranslationResult.ofGenerated,
+            simp only [translateWith, TermTranslation.ofGenerated,
               FO.FamilyTerm.denote.eq_1, Term.rename, Term.denote,
               sourceValuation]
           · trivial
@@ -185,14 +185,14 @@ private theorem denote_core (M : Model signature) :
       | bool =>
           constructor
           · intro Δ r ν
-            simpa only [translateWith, TranslationResult.ofGenerated,
+            simpa only [translateWith, TermTranslation.ofGenerated,
               Term.rename, Term.denote, TargetArguments.applyUnary] using
               (TargetArguments.nil .bool).sourceApp_denote M ν constant .bool
           · trivial
       | base sort =>
           constructor
           · intro Δ r ν
-            simpa only [translateWith, TranslationResult.ofGenerated,
+            simpa only [translateWith, TermTranslation.ofGenerated,
               Term.rename, Term.denote, TargetArguments.applyUnary] using
               (TargetArguments.nil (.base sort)).sourceApp_denote
                 M ν constant (.base sort)
@@ -210,42 +210,42 @@ private theorem denote_core (M : Model signature) :
       constructor
       · intro Δ r ν
         cases value <;>
-          simp only [translateWith, TranslationResult.ofGenerated,
+          simp only [translateWith, TermTranslation.ofGenerated,
             FO.FamilyTerm.denote.eq_3, FO.FamilyTerm.denote.eq_4,
             Term.rename, Term.denote, toCanonical]
       · trivial
   | not body bodyIH =>
       constructor
       · intro Δ r ν
-        simp only [translateWith, TranslationResult.replaceTerm,
+        simp only [translateWith, TermTranslation.replaceTerm,
           FO.FamilyTerm.denote.eq_5, Term.rename, Term.denote, toCanonical]
         rw [bodyIH.1 r ν]
       · trivial
   | and left right leftIH rightIH =>
       constructor
       · intro Δ r ν
-        simp only [translateWith, TranslationResult.combine,
+        simp only [translateWith, TermTranslation.combine,
           FO.FamilyTerm.denote.eq_6, Term.rename, Term.denote, toCanonical]
         rw [leftIH.1 r ν, rightIH.1 r ν]
       · trivial
   | or left right leftIH rightIH =>
       constructor
       · intro Δ r ν
-        simp only [translateWith, TranslationResult.combine,
+        simp only [translateWith, TermTranslation.combine,
           FO.FamilyTerm.denote.eq_7, Term.rename, Term.denote, toCanonical]
         rw [leftIH.1 r ν, rightIH.1 r ν]
       · trivial
   | imp left right leftIH rightIH =>
       constructor
       · intro Δ r ν
-        simp only [translateWith, TranslationResult.combine,
+        simp only [translateWith, TermTranslation.combine,
           FO.FamilyTerm.denote.eq_8, Term.rename, Term.denote, toCanonical]
         rw [leftIH.1 r ν, rightIH.1 r ν]
       · trivial
   | iff left right leftIH rightIH =>
       constructor
       · intro Δ r ν
-        simp only [translateWith, TranslationResult.combine,
+        simp only [translateWith, TermTranslation.combine,
           FO.FamilyTerm.denote.eq_9, Term.rename, Term.denote, toCanonical]
         rw [leftIH.1 r ν, rightIH.1 r ν]
       · trivial
@@ -255,8 +255,8 @@ private theorem denote_core (M : Model signature) :
       · intro Δ r ν
         cases operandType <;>
           simp only [translateWith.eq_13, translateWith.eq_14,
-            translateWith.eq_15, TranslationResult.combine,
-            TranslationResult.appendOutput, FO.FamilyTerm.denote.eq_10,
+            translateWith.eq_15, TermTranslation.combine,
+            TermTranslation.appendOutput, FO.FamilyTerm.denote.eq_10,
             Term.rename, Term.denote, toCanonical] <;>
           rw [leftIH.1 r ν, rightIH.1 r ν]
       · trivial
@@ -311,7 +311,7 @@ private theorem denote_core (M : Model signature) :
       constructor
       · intro Δ r ν
         cases domain <;>
-          simp only [translateWith.eq_20, TranslationResult.ofGenerated,
+          simp only [translateWith.eq_20, TermTranslation.ofGenerated,
             FO.FamilyTerm.denote.eq_11, Term.rename, Term.denote,
             toCanonical] <;>
           apply propext <;>
@@ -327,7 +327,7 @@ private theorem denote_core (M : Model signature) :
       constructor
       · intro Δ r ν
         cases domain <;>
-          simp only [translateWith.eq_21, TranslationResult.ofGenerated,
+          simp only [translateWith.eq_21, TermTranslation.ofGenerated,
             FO.FamilyTerm.denote.eq_12, Term.rename, Term.denote,
             toCanonical] <;>
           apply propext <;>
@@ -427,7 +427,7 @@ theorem unary_denote (M : Model signature)
   have mapped := congrArg (toCanonical M result) equality
   exact (mapped.trans (toCanonical_fromCanonical M _ _)).symm
 
-/-- The production-shaped flattened and unary reference translations agree
+/-- The emitted flattened and unary reference translations agree
 semantically in their canonical models. -/
 theorem flattened_refines_unary (M : Model signature)
     (term : Term signature context result)

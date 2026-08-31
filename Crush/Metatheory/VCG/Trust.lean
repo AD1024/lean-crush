@@ -31,7 +31,7 @@ inductive TrustReason where
 /-- A closure equation either retains its typed reification/capture proof or
 records why it crossed the trusted boundary. -/
 inductive ClosureEvidence where
-  | proved (certificate : LiveCertifiedClosure)
+  | proved (certificate : SomeCertifiedClosure)
   | trusted (reason : TrustReason)
 
 end Crush.Metatheory.VCG

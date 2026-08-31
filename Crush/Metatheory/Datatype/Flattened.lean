@@ -2,7 +2,7 @@ import Crush.Metatheory.Datatype.FamilyModel
 import Crush.Metatheory.Defunctionalization.Flattened.Symbol
 
 /-!
-# Datatype ownership in the flattened symbol family
+# Datatype symbols in the flattened symbol family
 
 The generic native-component model is instantiated here for the actual
 flattened symbols produced by defunctionalization.
@@ -12,7 +12,7 @@ namespace Crush.Metatheory.Datatype
 
 open Crush.Metatheory.Defunctionalization.Flattened
 
-/-- Erasing one datatype field type agrees with its intrinsic FO sort. -/
+/-- Erasing one datatype field type agrees with its typed FO sort. -/
 @[simp] theorem ofTy_field {arity : Nat} {block : Block arity}
     (field : FieldDecl arity) :
     FO.FOSort.ofTy (field.ty block) = field.fo block := by
@@ -30,7 +30,7 @@ open Crush.Metatheory.Defunctionalization.Flattened
   | nil => rfl
   | cons field fields ih => simp [ih]
 
-/-- A constructor's ordinary flattened declaration is its intrinsic datatype
+/-- A constructor's ordinary flattened declaration is its typed datatype
 declaration. -/
 theorem sourceDecl_ctor {arity : Nat} {block : Block arity}
     (fields : List (FieldDecl arity)) (result : BaseSort) :
@@ -93,10 +93,10 @@ private theorem heq_fun {α β γ : Type} (inhabited : Nonempty α)
   funext value
   exact eq_of_heq (pointwise value)
 
-/-- The flattened source-constant symbols owned by one datatype block. -/
-def Symbols.native {signature : Signature} {arity : Nat}
+/-- The flattened source-constant symbols declared by one datatype block. -/
+def Symbols.datatypeSymbols {signature : Signature} {arity : Nat}
     {block : Block arity} (symbols : Symbols signature block) :
-    NativeSymbols (Symbol signature) block where
+    DatatypeSymbols (Symbol signature) block where
   ctor := fun {data} {decl} ref => by
     exact castSymbol (by
       simpa [CtorDecl.fo, CtorDecl.ty] using
@@ -149,16 +149,16 @@ theorem flattenedDenote_curry {signature : Signature} {arity : Nat}
               exact flattenedDenote_curry source carrier rest result
                 (fun tail => build (.data ((carrier child).to value) tail))
 
-/-- A lawful HO datatype source model supplies the corresponding laws for the
-ordinary flattened FO family model. -/
-noncomputable def Lawful.flattened {signature : Signature} {arity : Nat}
+/-- A higher-order source model satisfying the free-datatype condition supplies
+the corresponding laws for the ordinary flattened FO family model. -/
+noncomputable def IsFreeDatatypeModel.flattened {signature : Signature} {arity : Nat}
     {block : Block arity} {symbols : Symbols signature block}
-    {source : Model signature} (law : Lawful symbols source) :
-    FamilyLawful symbols.native (canonicalModel source) where
+    {source : Model signature} (law : IsFreeDatatypeModel symbols source) :
+    IsFreeDatatypeFamilyModel symbols.datatypeSymbols (canonicalModel source) where
   carrier := law.carrier
   ctor_denote := by
     intro data ctor ref
-    simp only [Symbols.native]
+    simp only [Symbols.datatypeSymbols]
     apply eq_of_heq
     let equal : Defunctionalization.sourceDecl (ctor.ty block data) =
         ctor.fo block data := by
@@ -179,7 +179,7 @@ noncomputable def Lawful.flattened {signature : Signature} {arity : Nat}
     | mk name sort =>
         cases sort with
         | base base =>
-            simpa [Symbols.native, canonicalModel_sourceConstant, flattenedDenote,
+            simpa [Symbols.datatypeSymbols, canonicalModel_sourceConstant, flattenedDenote,
               Defunctionalization.fromCanonical,
               Defunctionalization.toCanonical,
               BaseLift.sourceField, FieldDecl.fromVal,
@@ -187,7 +187,7 @@ noncomputable def Lawful.flattened {signature : Signature} {arity : Nat}
               FO.SymbolDenote]
               using law.sel_ctor ctorRef fieldRef args
         | data child =>
-            simpa [Symbols.native, canonicalModel_sourceConstant, flattenedDenote,
+            simpa [Symbols.datatypeSymbols, canonicalModel_sourceConstant, flattenedDenote,
               Defunctionalization.fromCanonical,
               Defunctionalization.toCanonical,
               BaseLift.sourceField, FieldDecl.fromVal,
@@ -196,14 +196,15 @@ noncomputable def Lawful.flattened {signature : Signature} {arity : Nat}
               using law.sel_ctor ctorRef fieldRef args
   test_denote := by
     intro data ctor ref value
-    simpa [Symbols.native, flattenedDenote,
+    simpa [Symbols.datatypeSymbols, flattenedDenote,
       Defunctionalization.fromCanonical] using
       law.test_denote ref value
 
 namespace Env
 
 /-- Structural well-formedness for every dependency block. Cross-block
-ownership and dependency order are retained by `Native.Step.Ordered`. -/
+block membership and dependency order are retained by
+`Native.ModelExtension.DependencyOrdered`. -/
 inductive BlocksWF {signature : Signature} : Env signature → Type where
   | nil : BlocksWF []
   | cons {entry : Entry signature} {rest : Env signature} :
@@ -211,7 +212,7 @@ inductive BlocksWF {signature : Signature} : Env signature → Type where
 
 private noncomputable def liftAux {signature : Signature}
     (source : Model signature) :
-    (env : Env signature) → Lawful source env → BlocksWF env →
+    (env : Env signature) → IsFreeDatatypeModel source env → BlocksWF env →
       Lifted (canonicalModel source) → Lifted (canonicalModel source)
   | [], .nil, .nil, prior => prior
   | _ :: _, .cons headLaw tailLaw, .cons headWF tailWF, prior =>
@@ -222,16 +223,16 @@ private noncomputable def liftAux {signature : Signature}
 This is the entry point for interpreted carriers such as `Nat → Int`; datatype
 lifting itself is independent of which guarded base representation came first. -/
 noncomputable def liftFrom {signature : Signature} (source : Model signature)
-    (env : Env signature) (lawful : Lawful source env)
+    (env : Env signature) (freeDataModel : IsFreeDatatypeModel source env)
     (wf : BlocksWF env) (prior : Lifted (canonicalModel source)) :
     Lifted (canonicalModel source) :=
-  liftAux source env lawful wf prior
+  liftAux source env freeDataModel wf prior
 
 /-- Compose every dependency block over the identity base representation. -/
 noncomputable def lift {signature : Signature} (source : Model signature)
-    (env : Env signature) (lawful : Lawful source env)
+    (env : Env signature) (freeDataModel : IsFreeDatatypeModel source env)
     (wf : BlocksWF env) : Lifted (canonicalModel source) :=
-  liftFrom source env lawful wf (Lifted.refl (canonicalModel source))
+  liftFrom source env freeDataModel wf (Lifted.refl (canonicalModel source))
 
 end Env
 

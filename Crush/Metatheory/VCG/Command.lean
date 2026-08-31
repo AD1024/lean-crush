@@ -4,10 +4,10 @@ import Crush.SMT.Quote
 /-!
 # Syntax witnesses for emitted defunctionalization commands
 
-These encodings retain an intrinsic type witness, its ordered SMT sort images,
-and the exact command emitted by the production translator. They establish
+These encodings retain a reified type witness, its ordered SMT sort images,
+and the exact command emitted by the Crush translator. They establish
 syntactic correspondence only.  In particular, they do not assign semantics to
-arbitrary `SMT.SSort`, prove that an emitted term represents an intrinsic FO
+arbitrary `SMT.SSort`, prove that an emitted term represents an intrinsically typed FO
 term, or show that the whole command sequence preserves satisfiability.  Those
 are later representation obligations; sort handlers remain governed by
 `SortHookCertificate` or the explicit trusted boundary.
@@ -17,44 +17,44 @@ namespace Crush.Metatheory.VCG
 
 open Crush.Metatheory.Reification
 
-/-- One intrinsic type paired with the concrete SMT sort selected by the production
+/-- One reified source type paired with the concrete SMT sort selected by the Crush
 translator. -/
 structure SortImage where
-  bridge : TypeBridge
+  reified : ReifiedType
   smt : SMT.SSort
 
-/-- Traverse bridges while retaining a proof that a monadic sort emitter did not
-reorder, duplicate, or drop intrinsic types. -/
+/-- Traverse reified types while retaining a proof that a monadic sort emitter did not
+reorder, duplicate, or drop them. -/
 def mapSortImagesM {m : Type → Type} [Monad m]
-    (emit : TypeBridge → m SMT.SSort) :
-    (bridges : List TypeBridge) →
-      m { images : List SortImage // images.map (·.bridge) = bridges }
+    (emit : ReifiedType → m SMT.SSort) :
+    (reifiedTypes : List ReifiedType) →
+      m { images : List SortImage // images.map (·.reified) = reifiedTypes }
   | [] => pure ⟨[], rfl⟩
-  | bridge :: bridges => do
-      let smt ← emit bridge
-      let ⟨images, equality⟩ ← mapSortImagesM emit bridges
-      return ⟨{ bridge, smt } :: images, congrArg (bridge :: ·) equality⟩
+  | reifiedType :: reifiedTypes => do
+      let smt ← emit reifiedType
+      let ⟨images, equality⟩ ← mapSortImagesM emit reifiedTypes
+      return ⟨{ reified := reifiedType, smt } :: images, congrArg (reifiedType :: ·) equality⟩
 
 /-- Syntactic encoding of a flattened n-ary `app` declaration. -/
 structure AppDeclarationEncoding where
-  arrow : ArrowBridge
+  arrow : ReifiedArrowType
   name : String
   functionSort : SMT.SSort
   arguments : List SortImage
   result : SortImage
-  argumentBridges : arguments.map (·.bridge) = arrow.flatten.1
-  resultBridge : result.bridge = arrow.flatten.2
+  argumentTypes_eq : arguments.map (·.reified) = arrow.flatten.1
+  resultType_eq : result.reified = arrow.flatten.2
   command : SMT.Command
   command_eq : command = .declFun name
     (#[functionSort] ++ (arguments.map (·.smt)).toArray) result.smt
 
 /-- Syntactic encoding of an exact-capture closure constructor declaration. -/
 structure ClosureDeclarationEncoding where
-  arrow : ArrowBridge
+  arrow : ReifiedArrowType
   name : String
   captures : List SortImage
-  captureTypes : List TypeBridge
-  captureBridges : captures.map (·.bridge) = captureTypes
+  captureTypes : List ReifiedType
+  captureTypes_eq : captures.map (·.reified) = captureTypes
   functionSort : SMT.SSort
   command : SMT.Command
   command_eq : command = .declFun name (captures.map (·.smt)).toArray functionSort
@@ -64,7 +64,7 @@ optional guard records subtype well-formedness separately from the raw equation;
 the record does not by itself prove that either SMT term has the intended
 semantics. -/
 structure ClosureEquationEncoding where
-  arrow : ArrowBridge
+  arrow : ReifiedArrowType
   appName : String
   closure : SMT.Term
   parameters : Array SMT.Term
@@ -86,21 +86,21 @@ structure ClosureEquationEncoding where
   command_eq : command = .assert
     (if binders.isEmpty then guardedEquation else .forallE binders guardedEquation)
 
-/-- Exact production encoding of the mutually recursive well-formedness
+/-- Exact emitted encoding of the mutually recursive well-formedness
 predicates associated with one reified datatype block. Semantic field-guard
 evidence is attached by the later representation layer. -/
-structure DatatypeGuardCommand where
-  owner : DatatypeBlock
+structure DatatypeGuardDefinition where
+  reifiedBlock : DatatypeBlock
   definitions : Array SMT.FunDef
   command : SMT.Command
   command_eq : command = .defFunsRec definitions
 
-/-- Syntax descriptions retained by production translation in emission order. -/
+/-- Syntax descriptions retained by the Crush translator in emission order. -/
 inductive CommandEncoding where
   | app : AppDeclarationEncoding → CommandEncoding
   | closure : ClosureDeclarationEncoding → CommandEncoding
   | closureEquation : ClosureEquationEncoding → CommandEncoding
-  | dataGuard : DatatypeGuardCommand → CommandEncoding
+  | datatypeGuard : DatatypeGuardDefinition → CommandEncoding
 
 namespace CommandEncoding
 
@@ -108,7 +108,7 @@ def command : CommandEncoding → SMT.Command
   | .app encoding => encoding.command
   | .closure encoding => encoding.command
   | .closureEquation encoding => encoding.command
-  | .dataGuard encoding => encoding.command
+  | .datatypeGuard encoding => encoding.command
 
 private def sortHead? : SMT.SSort → Option String
   | .app (.symb name) _ => some name
@@ -120,7 +120,7 @@ private def termHead? : SMT.Term → Option String
   | _ => none
 
 /-- Principal allocated symbols determined by the encoding itself. Keeping this
-projection here prevents a production call site from supplying unrelated names
+projection here prevents a translator call site from supplying unrelated names
 while claiming command/allocation correspondence. -/
 def allocatedSymbols : CommandEncoding → Array String
   | .app encoding =>
@@ -135,7 +135,7 @@ def allocatedSymbols : CommandEncoding → Array String
       match termHead? encoding.closure with
       | some closureName => #[closureName, encoding.appName]
       | none => #[encoding.appName]
-  | .dataGuard encoding => encoding.definitions.map (·.name)
+  | .datatypeGuard encoding => encoding.definitions.map (·.name)
 
 end CommandEncoding
 

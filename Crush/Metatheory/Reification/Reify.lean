@@ -4,7 +4,7 @@ import Crush.Metatheory.Hooks
 /-!
 # Executable reification of the modeled Lean fragment
 
-`reifyTerm?` recognizes precisely the constructs represented by the intrinsic
+`reifyTerm?` recognizes precisely the constructs represented by the typed
 source language. It is intentionally partial at the fragment boundary, but every
 successful result is an intrinsically typed `PackedTerm`. Unsupported built-ins,
 dependent functions, lets, projections, metavariables, and extension handlers
@@ -34,74 +34,74 @@ private def checked? (expression : Expr)
 mutual
 
   partial def reifyTerm? {signature : Signature} {context : Context}
-      (signatureBridge : SignatureBridge signature)
-      (contextBridge : ContextBridge context) (expression : Expr)
-      (datatypes : Option (DataBridge signature) := none) :
+      (reifiedSignature : ReifiedSignature signature)
+      (reifiedContext : ReifiedContext context) (expression : Expr)
+      (datatypes : Option (DatatypeSignaturePrefix signature) := none) :
       MetaM (Option (PackedTerm signature context)) := do
     let result ←
       match expression with
       | .fvar fvar =>
-          return (contextBridge.find? fvar).map PackedTerm.ofVar
+          return (reifiedContext.find? fvar).map PackedTerm.ofVar
       | .const name _ =>
           if name == ``True then return some (PackedTerm.boolLit true)
           if name == ``False then return some (PackedTerm.boolLit false)
-          return (signatureBridge.find? expression).map PackedTerm.ofConst
+          return (reifiedSignature.find? expression).map PackedTerm.ofConst
       | .lam name domain body binderInfo =>
-          reifyLambda? signatureBridge contextBridge expression name domain body binderInfo
+          reifyLambda? reifiedSignature reifiedContext expression name domain body binderInfo
             datatypes
       | .forallE name domain body binderInfo =>
-          reifyForallOrImp? signatureBridge contextBridge name domain body binderInfo
+          reifyForallOrImp? reifiedSignature reifiedContext name domain body binderInfo
             datatypes
       | .app .. =>
-          reifyApplication? signatureBridge contextBridge expression datatypes
-      | .mdata _ body => reifyTerm? signatureBridge contextBridge body datatypes
+          reifyApplication? reifiedSignature reifiedContext expression datatypes
+      | .mdata _ body => reifyTerm? reifiedSignature reifiedContext body datatypes
       | _ => return none
     let some term := result | return none
     checked? expression term
 
   partial def reifyLambda? {signature : Signature} {context : Context}
-      (signatureBridge : SignatureBridge signature)
-      (contextBridge : ContextBridge context) (lambda : Expr) (name : Name)
+      (reifiedSignature : ReifiedSignature signature)
+      (reifiedContext : ReifiedContext context) (lambda : Expr) (name : Name)
       (domain body : Expr) (binderInfo : BinderInfo)
-      (datatypes : Option (DataBridge signature)) :
+      (datatypes : Option (DatatypeSignaturePrefix signature)) :
       MetaM (Option (PackedTerm signature context)) := do
-    let domainBridge ← reifyType domain (preserveExpr := true)
+    let reifiedDomain ← reifyType domain (preserveExpr := true)
     withLocalDecl name binderInfo domain fun localVar => do
       let instantiatedBody := body.instantiate1 localVar
       let bodyType ← inferType instantiatedBody
       if bodyType.containsFVar localVar.fvarId! then return none
-      let extended := ContextBridge.cons localVar.fvarId! domainBridge contextBridge
+      let extended := ReifiedContext.cons localVar.fvarId! reifiedDomain reifiedContext
       let some reifiedBody ← reifyTerm?
-          (context := domainBridge.ty :: context) signatureBridge extended instantiatedBody
+          (context := reifiedDomain.ty :: context) reifiedSignature extended instantiatedBody
             datatypes
         | return none
       let arrowType ← inferType lambda
-      return some (PackedTerm.lam arrowType domainBridge reifiedBody)
+      return some (PackedTerm.lam arrowType reifiedDomain reifiedBody)
 
   partial def reifyForallOrImp? {signature : Signature} {context : Context}
-      (signatureBridge : SignatureBridge signature)
-      (contextBridge : ContextBridge context) (name : Name) (domain body : Expr)
+      (reifiedSignature : ReifiedSignature signature)
+      (reifiedContext : ReifiedContext context) (name : Name) (domain body : Expr)
       (binderInfo : BinderInfo)
-      (datatypes : Option (DataBridge signature)) :
+      (datatypes : Option (DatatypeSignaturePrefix signature)) :
       MetaM (Option (PackedTerm signature context)) := do
     let domainType ← whnf (← inferType domain)
     if !body.hasLooseBVars && domainType == .sort .zero then
-      let some premise ← reifyTerm? signatureBridge contextBridge domain datatypes | return none
-      let some conclusion ← reifyTerm? signatureBridge contextBridge body datatypes | return none
+      let some premise ← reifyTerm? reifiedSignature reifiedContext domain datatypes | return none
+      let some conclusion ← reifyTerm? reifiedSignature reifiedContext body datatypes | return none
       return PackedTerm.imp? premise conclusion
-    let domainBridge ← reifyType domain (preserveExpr := true)
+    let reifiedDomain ← reifyType domain (preserveExpr := true)
     withLocalDecl name binderInfo domain fun localVar => do
-      let extended := ContextBridge.cons localVar.fvarId! domainBridge contextBridge
+      let extended := ReifiedContext.cons localVar.fvarId! reifiedDomain reifiedContext
       let some reifiedBody ←
-          reifyTerm? (context := domainBridge.ty :: context)
-            signatureBridge extended (body.instantiate1 localVar) datatypes
+          reifyTerm? (context := reifiedDomain.ty :: context)
+            reifiedSignature extended (body.instantiate1 localVar) datatypes
         | return none
-      return PackedTerm.forallE? domainBridge reifiedBody
+      return PackedTerm.forallE? reifiedDomain reifiedBody
 
   partial def reifyApplication? {signature : Signature} {context : Context}
-      (signatureBridge : SignatureBridge signature)
-      (contextBridge : ContextBridge context) (expression : Expr)
-      (datatypes : Option (DataBridge signature)) :
+      (reifiedSignature : ReifiedSignature signature)
+      (reifiedContext : ReifiedContext context) (expression : Expr)
+      (datatypes : Option (DatatypeSignaturePrefix signature)) :
       MetaM (Option (PackedTerm signature context)) := do
     let head := expression.getAppFn
     let arguments := expression.getAppArgs
@@ -109,16 +109,16 @@ mutual
         PackedTerm signature context → Option (PackedTerm signature context)) := do
       let some leftExpr := arguments[0]? | return none
       let some rightExpr := arguments[1]? | return none
-      let some left ← reifyTerm? signatureBridge contextBridge leftExpr datatypes | return none
-      let some right ← reifyTerm? signatureBridge contextBridge rightExpr datatypes | return none
+      let some left ← reifyTerm? reifiedSignature reifiedContext leftExpr datatypes | return none
+      let some right ← reifyTerm? reifiedSignature reifiedContext rightExpr datatypes | return none
       return constructor left right
-    if let some bridge := datatypes then
-      if let some term ← reifyCtorApp? signatureBridge contextBridge expression bridge then
+    if let some reified := datatypes then
+      if let some term ← reifyCtorApp? reifiedSignature reifiedContext expression reified then
         return some term
-      if let some term ← reifyProjApp? signatureBridge contextBridge expression bridge then
+      if let some term ← reifyProjApp? reifiedSignature reifiedContext expression reified then
         return some term
     if head.isConstOf ``Not && arguments.size == 1 then
-      let some body ← reifyTerm? signatureBridge contextBridge arguments[0]! datatypes
+      let some body ← reifyTerm? reifiedSignature reifiedContext arguments[0]! datatypes
         | return none
       return PackedTerm.not? body
     if head.isConstOf ``And && arguments.size == 2 then
@@ -128,29 +128,29 @@ mutual
     if head.isConstOf ``Iff && arguments.size == 2 then
       return ← reifyBinary PackedTerm.iff?
     if head.isConstOf ``Eq && arguments.size == 3 then
-      let some left ← reifyTerm? signatureBridge contextBridge arguments[1]! datatypes
+      let some left ← reifyTerm? reifiedSignature reifiedContext arguments[1]! datatypes
         | return none
-      let some right ← reifyTerm? signatureBridge contextBridge arguments[2]! datatypes
+      let some right ← reifyTerm? reifiedSignature reifiedContext arguments[2]! datatypes
         | return none
       return PackedTerm.eq? left right
     if head.isConstOf ``Exists && arguments.size == 2 then
-      return ← reifyExists? signatureBridge contextBridge arguments[0]! arguments[1]!
+      return ← reifyExists? reifiedSignature reifiedContext arguments[0]! arguments[1]!
         datatypes
     match expression with
     | .app fn argument =>
-        let some reifiedFn ← reifyTerm? signatureBridge contextBridge fn datatypes | return none
-        let some reifiedArgument ← reifyTerm? signatureBridge contextBridge argument datatypes
+        let some reifiedFn ← reifyTerm? reifiedSignature reifiedContext fn datatypes | return none
+        let some reifiedArgument ← reifyTerm? reifiedSignature reifiedContext argument datatypes
           | return none
         return PackedTerm.app? reifiedFn reifiedArgument
     | _ => return none
 
   /-- Reify a fully applied Lean constructor using its exact block and
   constructor positions. Type parameters select the monomorphic block and are
-  erased; only constructor fields become intrinsic applications. -/
+  erased; only constructor fields become typed applications. -/
   partial def reifyCtorApp? {signature : Signature} {context : Context}
-      (signatureBridge : SignatureBridge signature)
-      (contextBridge : ContextBridge context) (expression : Expr)
-      (datatypes : DataBridge signature) :
+      (reifiedSignature : ReifiedSignature signature)
+      (reifiedContext : ReifiedContext context) (expression : Expr)
+      (datatypes : DatatypeSignaturePrefix signature) :
       MetaM (Option (PackedTerm signature context)) := do
     let some app ← datatypes.env.ctorApp? expression | return none
     let symbols := datatypes.symbols app.found
@@ -160,20 +160,20 @@ mutual
       | return none
     let mut result := packed
     for argument in app.values do
-      let some reified ← reifyTerm? signatureBridge contextBridge argument
+      let some reified ← reifyTerm? reifiedSignature reifiedContext argument
           (some datatypes)
         | return none
       let some applied := PackedTerm.app? result reified | return none
       result := applied
     return some result
 
-  /-- Reify a supported structure projection as the exact selector owned by its
+  /-- Reify a supported structure projection as the exact selector declared by its
   constructor. Certified datatypes reject function-valued fields, so a valid
   projection has no additional value applications here. -/
   partial def reifyProjApp? {signature : Signature} {context : Context}
-      (signatureBridge : SignatureBridge signature)
-      (contextBridge : ContextBridge context) (expression : Expr)
-      (datatypes : DataBridge signature) :
+      (reifiedSignature : ReifiedSignature signature)
+      (reifiedContext : ReifiedContext context) (expression : Expr)
+      (datatypes : DatatypeSignaturePrefix signature) :
       MetaM (Option (PackedTerm signature context)) := do
     let some app ← datatypes.env.projApp? expression | return none
     let symbols := datatypes.symbols app.found
@@ -182,72 +182,72 @@ mutual
     let some packed := PackedTerm.ofTypedConst? type
         (symbols.sel app.ctor.ref app.field.ref)
       | return none
-    let some argument ← reifyTerm? signatureBridge contextBridge app.target
+    let some argument ← reifyTerm? reifiedSignature reifiedContext app.target
         (some datatypes)
       | return none
     return PackedTerm.app? packed argument
 
   partial def reifyExists? {signature : Signature} {context : Context}
-      (signatureBridge : SignatureBridge signature)
-      (contextBridge : ContextBridge context) (domain predicate : Expr)
-      (datatypes : Option (DataBridge signature)) :
+      (reifiedSignature : ReifiedSignature signature)
+      (reifiedContext : ReifiedContext context) (domain predicate : Expr)
+      (datatypes : Option (DatatypeSignaturePrefix signature)) :
       MetaM (Option (PackedTerm signature context)) := do
     let predicate ← whnf predicate
     let .lam name predicateDomain body binderInfo := predicate | return none
     unless ← isDefEqGuarded domain predicateDomain do return none
-    let domainBridge ← reifyType domain (preserveExpr := true)
+    let reifiedDomain ← reifyType domain (preserveExpr := true)
     withLocalDecl name binderInfo domain fun localVar => do
-      let extended := ContextBridge.cons localVar.fvarId! domainBridge contextBridge
+      let extended := ReifiedContext.cons localVar.fvarId! reifiedDomain reifiedContext
       let some reifiedBody ←
-          reifyTerm? (context := domainBridge.ty :: context)
-            signatureBridge extended (body.instantiate1 localVar) datatypes
+          reifyTerm? (context := reifiedDomain.ty :: context)
+            reifiedSignature extended (body.instantiate1 localVar) datatypes
         | return none
-      return PackedTerm.existsE? domainBridge reifiedBody
+      return PackedTerm.existsE? reifiedDomain reifiedBody
 
 end
 
-/-- A live lambda together with its intrinsic body and an exact certificate that
-production and the core choose the same ordered closure environment. -/
+/-- An elaborated lambda together with its reified body and an exact certificate that
+the Crush translator and the core choose the same ordered closure environment. -/
 inductive CertifiedClosure (signature : Signature) (context : Context) where
   | pack {domain codomain : Ty}
       (body : Term signature (domain :: context) codomain)
       (certificate : ClosureCaptureCertificate (Closure.ofBody body)) :
       CertifiedClosure signature context
 
-/-- Reify and certify a closure for a caller-supplied production eligibility
+/-- Reify and certify a closure for a caller-supplied translator eligibility
 predicate. This executable check is deliberately proof-producing: success
 returns the equality consumed by later declaration/axiom refinement, while a
 mismatch leaves the expression on the unverified translator path. -/
 partial def certifyClosure? {signature : Signature} {context : Context}
-    (signatureBridge : SignatureBridge signature)
-    (contextBridge : ContextBridge context) (eligible : FVarId → Bool)
+    (reifiedSignature : ReifiedSignature signature)
+    (reifiedContext : ReifiedContext context) (eligible : FVarId → Bool)
     (lambda : Expr) : MetaM (Option (CertifiedClosure signature context)) := do
-  let some reified ← reifyTerm? signatureBridge contextBridge lambda | return none
+  let some reified ← reifyTerm? reifiedSignature reifiedContext lambda | return none
   match reified with
   | .pack (.arrow _ _ _) (.lam body) =>
       let closure := Closure.ofBody body
-      if contextNodup : contextBridge.fvars.Nodup then
+      if contextNodup : reifiedContext.fvars.Nodup then
         if capturesEq :
             (selectClosureCaptures lambda eligible).toList =
-              closure.captureRefs.map contextBridge.fvar then
+              closure.captureRefs.map reifiedContext.fvar then
           return some (.pack body {
             lambda
-            context := contextBridge
+            context := reifiedContext
             eligible
             contextNodup := contextNodup
             captures_eq := capturesEq })
       return none
   | _ => return none
 
-/-- Existential package produced while reconstructing the intrinsic context from
-the live capture order. -/
-inductive SomeContextBridge where
-  | pack {context : Context} (bridge : ContextBridge context) : SomeContextBridge
+/-- Existential package produced while reconstructing the reified context from
+the translator capture order. -/
+inductive SomeReifiedContext where
+  | pack {context : Context} (reified : ReifiedContext context) : SomeReifiedContext
 
-/-- Reify the actual ordered production capture array into an intrinsic context.
+/-- Reify the translator's actual ordered capture array into a typed context.
 The list is consumed from right to left so its head remains de Bruijn position
 zero, matching `Closure.captureRefs`. -/
-partial def reifyCaptureContext (captures : List FVarId) : MetaM SomeContextBridge := do
+partial def reifyCaptureContext (captures : List FVarId) : MetaM SomeReifiedContext := do
   match captures with
   | [] => return .pack .nil
   | fvar :: rest =>
@@ -289,15 +289,15 @@ def isLogicalConstant : Expr → Bool
       name == ``Exists
   | _ => false
 
-inductive SomeSignatureBridge where
-  | pack {signature : Signature} (bridge : SignatureBridge signature) :
-      SomeSignatureBridge
+inductive SomeReifiedSignature where
+  | pack {signature : Signature} (reified : ReifiedSignature signature) :
+      SomeReifiedSignature
 
 /-- Certified datatype prefix paired with the ordinary expression-indexed
 signature tail needed by one Lean term. -/
 inductive SomeDataSignature where
   | pack (env : DatatypeEnv) {tail : Signature}
-      (bridge : SignatureBridge tail) : SomeDataSignature
+      (reified : ReifiedSignature tail) : SomeDataSignature
 
 /-- Add ground datatype applications from elaborated type and
 constructor/projection syntax to a stable occurrence set. This traversal does
@@ -355,13 +355,13 @@ partial def collectDatatypeRootsMany (expressions : Array Expr) :
     roots ← collectDatatypeRootsInto expression roots
   return roots
 
-private def ownedConstant (env : DatatypeEnv) (constant : Expr) : MetaM Bool := do
+private def isDatatypeConstant (env : DatatypeEnv) (constant : Expr) : MetaM Bool := do
   let .const name _ := constant | return false
   match (← getEnv).find? name with
-  | some (.ctorInfo info) => return env.ownsHead info.induct
+  | some (.ctorInfo info) => return env.containsHead info.induct
   | _ =>
       let some info ← getProjectionFnInfo? name | return false
-      return env.ownsHead info.ctorName.getPrefix
+      return env.containsHead info.ctorName.getPrefix
 
 /-- Term forms deliberately outside the first certified datatype fragment.
 Recursors need a separate correctness theorem for elimination, while quotient
@@ -371,11 +371,11 @@ private partial def dataTermReject? (env : DatatypeEnv) (expression : Expr) :
     MetaM (Option DatatypeReject) := do
   if let .const name _ := expression.getAppFn then
     let leanEnv ← getEnv
-    if Lean.isAuxRecursor leanEnv name && env.ownsHead name.getPrefix then
+    if Lean.isAuxRecursor leanEnv name && env.containsHead name.getPrefix then
       return some (.recursor name)
     match leanEnv.find? name with
     | some (.recInfo info) =>
-        if info.all.any env.ownsHead then return some (.recursor name)
+        if info.all.any env.containsHead then return some (.recursor name)
     | some (.quotInfo _) => return some (.quotient name)
     | _ => pure ()
   match expression with
@@ -392,7 +392,7 @@ private partial def dataTermReject? (env : DatatypeEnv) (expression : Expr) :
   | .mdata _ body | .proj _ _ body => dataTermReject? env body
   | _ => return none
 
-partial def reifySignature (constants : List Expr) : MetaM SomeSignatureBridge := do
+partial def reifySignature (constants : List Expr) : MetaM SomeReifiedSignature := do
   match constants with
   | [] => return .pack .nil
   | constant :: rest =>
@@ -401,8 +401,8 @@ partial def reifySignature (constants : List Expr) : MetaM SomeSignatureBridge :
       return .pack (.cons constant type tail)
 
 /-- Construct one certified datatype prefix and ordinary constant tail shared
-by several terms. Datatype-owned declarations occur exactly once and are
-reached only through their typed ownership references. -/
+by several terms. Datatype declarations occur exactly once and are reached only
+through their typed symbol references. -/
 partial def reifyDataSignatureMany (expressions : Array Expr) :
     MetaM (Except DatatypeReject SomeDataSignature) := do
   let roots ← collectDatatypeRootsMany expressions
@@ -414,93 +414,93 @@ partial def reifyDataSignatureMany (expressions : Array Expr) :
           return .error reason
       let constants ← (collectConstsOrderedMany expressions).filterM fun constant => do
         if isLogicalConstant constant then return false
-        if ← ownedConstant env constant then return false
+        if ← isDatatypeConstant env constant then return false
         return !(← whnf (← inferType constant)).isSort
-      let .pack bridge ← reifySignature constants.toList
-      return .ok (.pack env bridge)
+      let .pack reified ← reifySignature constants.toList
+      return .ok (.pack env reified)
 
 /-- Single-expression specialization of the common-signature collector. -/
 partial def reifyDataSignature (expression : Expr) :
     MetaM (Except DatatypeReject SomeDataSignature) :=
   reifyDataSignatureMany #[expression]
 
-/-- Construct the finite intrinsic signature needed by the modeled fragment.
+/-- Construct the finite reified signature needed by the modeled fragment.
 Logical constants are core constructors; constants whose type is a universe are
-type names represented by `TypeBridge`, not source term constants. -/
-partial def reifyTermSignature (expression : Expr) : MetaM SomeSignatureBridge := do
+type names represented by `ReifiedType`, not source term constants. -/
+partial def reifyTermSignature (expression : Expr) : MetaM SomeReifiedSignature := do
   let constants ← (collectConstsOrdered expression).filterM fun constant => do
     if isLogicalConstant constant then return false
     return !(← whnf (← inferType constant)).isSort
   reifySignature constants.toList
 
-/-- A proof-carrying live closure from the finite modeled fragment.
-`context` is retained explicitly so production can derive its capture telescope
+/-- A proof-carrying elaborated closure from the finite modeled fragment.
+`context` is retained explicitly so the Crush translator can derive its capture telescope
 without unpacking or duplicating the certificate's dependent indices. -/
-inductive LiveCertifiedClosure where
+inductive SomeCertifiedClosure where
   | pack {signature : Signature} {context : Context}
-      (signatureBridge : SignatureBridge signature)
-      (contextBridge : ContextBridge context)
-      (closure : CertifiedClosure signature context) : LiveCertifiedClosure
+      (reifiedSignature : ReifiedSignature signature)
+      (reifiedContext : ReifiedContext context)
+      (closure : CertifiedClosure signature context) : SomeCertifiedClosure
 
-instance : TypeName LiveCertifiedClosure := unsafe
-  (TypeName.mk _ ``LiveCertifiedClosure)
+instance : TypeName SomeCertifiedClosure := unsafe
+  (TypeName.mk _ ``SomeCertifiedClosure)
 
-namespace LiveCertifiedClosure
+namespace SomeCertifiedClosure
 
-def captureTypes : LiveCertifiedClosure → Array TypeBridge
-  | .pack _ contextBridge _ => contextBridge.types.toArray
+def captureTypes : SomeCertifiedClosure → Array ReifiedType
+  | .pack _ reifiedContext _ => reifiedContext.types.toArray
 
-end LiveCertifiedClosure
+end SomeCertifiedClosure
 
-/-- Attempt certification directly from the data available in production's
+/-- Attempt certification directly from the data available in the Crush translator's
 `emitClosure`. It supports modeled syntax, SMT-bound locals, and a finite
 signature of nondependent uninterpreted constants. Failure is explicit and does
 not manufacture a certificate. -/
 partial def certifyLocalClosure? (lambda : Expr) (captures : Array FVarId) :
-    MetaM (Option LiveCertifiedClosure) := do
-  let .pack contextBridge ← reifyCaptureContext captures.toList
-  let .pack signatureBridge ← reifyTermSignature lambda
+    MetaM (Option SomeCertifiedClosure) := do
+  let .pack reifiedContext ← reifyCaptureContext captures.toList
+  let .pack reifiedSignature ← reifyTermSignature lambda
   let eligible := fun fvar => captures.contains fvar
-  let some closure ← certifyClosure? signatureBridge contextBridge eligible lambda
+  let some closure ← certifyClosure? reifiedSignature reifiedContext eligible lambda
     | return none
-  return some (.pack signatureBridge contextBridge closure)
+  return some (.pack reifiedSignature reifiedContext closure)
 
-/-! ## Identity-bearing live constant certificates -/
+/-! ## Identity-bearing elaborated-constant certificates -/
 
-/-- A live Lean constant lookup tied to its exact intrinsic signature position
+/-- An elaborated Lean constant lookup tied to its exact reified signature position
 and the canonical semantic hook certificate for that position. -/
-inductive LiveCertifiedConstant where
+inductive CertifiedConstantLookup where
   | pack {signature : Signature}
       (expression : Expr)
-      (signatureBridge : SignatureBridge signature)
-      (type : TypeBridge)
+      (reifiedSignature : ReifiedSignature signature)
+      (type : ReifiedType)
       (constant : Const signature type.ty)
-      (lookup_eq : signatureBridge.find? expression = some (.pack type constant))
+      (lookup_eq : reifiedSignature.find? expression = some (.pack type constant))
       (semantic : Nonempty (CanonicalConstantHookCertificate constant)) :
-      LiveCertifiedConstant
+      CertifiedConstantLookup
 
-instance : TypeName LiveCertifiedConstant := unsafe
-  (TypeName.mk _ ``LiveCertifiedConstant)
+instance : TypeName CertifiedConstantLookup := unsafe
+  (TypeName.mk _ ``CertifiedConstantLookup)
 
-/-- Runtime-storable link from an emitted production symbol name to the exact
+/-- Runtime-storable link from an emitted emitted symbol name to the exact
 reified constant and its erased canonical semantic proof. -/
-structure LiveCertifiedConstantEmission where
+structure CertifiedSymbolBinding where
   symbol : String
-  constant : LiveCertifiedConstant
+  constant : CertifiedConstantLookup
 
-instance : TypeName LiveCertifiedConstantEmission := unsafe
-  (TypeName.mk _ ``LiveCertifiedConstantEmission)
+instance : TypeName CertifiedSymbolBinding := unsafe
+  (TypeName.mk _ ``CertifiedSymbolBinding)
 
-/-- Certify the exact signature position selected for a live constant. Success
+/-- Certify the exact signature position selected for an elaborated constant. Success
 cannot attach a theorem about another same-typed constant: the semantic
 certificate is indexed by the `Const` reference returned by lookup. -/
 def certifyConstantIn? {signature : Signature}
-    (signatureBridge : SignatureBridge signature) (expression : Expr) :
-    Option LiveCertifiedConstant :=
-  match equality : signatureBridge.find? expression with
+    (reifiedSignature : ReifiedSignature signature) (expression : Expr) :
+    Option CertifiedConstantLookup :=
+  match equality : reifiedSignature.find? expression with
   | none => none
   | some (.pack type constant) =>
-      some (.pack expression signatureBridge type constant equality
-        ⟨CanonicalConstantHookCertificate.production constant⟩)
+      some (.pack expression reifiedSignature type constant equality
+        ⟨CanonicalConstantHookCertificate.canonical constant⟩)
 
 end Crush.Metatheory.Reification

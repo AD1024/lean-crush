@@ -6,7 +6,7 @@ import Crush.Metatheory.Reification.Term
 # Certified reification of monomorphic Lean inductive blocks
 
 Successful reification records the exact mutual declaration order, ground type
-arguments, constructor order, and field order in an intrinsic `Datatype.Block`.
+arguments, constructor order, and field order in a typed `Datatype.Block`.
 Unsupported dependent, proof-valued, higher-order, or nonproductive declarations
 return `none` at the existing partial Lean boundary.
 -/
@@ -33,19 +33,19 @@ structure DatatypeBlock extends DatatypeShape where
 
 namespace DatatypeShape
 
-/-- The intrinsic datatype selected by one Lean mutual-block head. -/
-def find? (bridge : DatatypeShape) (name : Name) : Option (DataRef bridge.block) :=
-  match bridge.names.findFinIdx? (· == name) with
+/-- The typed datatype selected by one Lean mutual-block head. -/
+def find? (reified : DatatypeShape) (name : Name) : Option (DataRef reified.block) :=
+  match reified.names.findFinIdx? (· == name) with
   | none => none
-  | some data => some ⟨data.val, by rw [← bridge.names_size]; exact data.isLt⟩
+  | some data => some ⟨data.val, by rw [← reified.names_size]; exact data.isLt⟩
 
 end DatatypeShape
 
 namespace DatatypeBlock
 
-/-- The intrinsic datatype selected by one Lean mutual-block head. -/
-def find? (bridge : DatatypeBlock) (name : Name) : Option (DataRef bridge.block) :=
-  bridge.toDatatypeShape.find? name
+/-- The typed datatype selected by one Lean mutual-block head. -/
+def find? (reified : DatatypeBlock) (name : Name) : Option (DataRef reified.block) :=
+  reified.toDatatypeShape.find? name
 
 end DatatypeBlock
 
@@ -107,9 +107,9 @@ namespace DatatypeEnv
 def sorts (env : DatatypeEnv) : List BaseSort :=
   env.blocks.toList.flatMap fun block => block.block.sorts
 
-/-- Whether this environment owns a monomorphic instance of the given Lean
+/-- Whether this environment contains a monomorphic instance of the given Lean
 inductive head. -/
-def ownsHead (env : DatatypeEnv) (head : Name) : Bool :=
+def containsHead (env : DatatypeEnv) (head : Name) : Bool :=
   env.blocks.any fun block => block.names.contains head
 
 def signature (env : DatatypeEnv) : Signature :=
@@ -134,7 +134,7 @@ private theorem modelEntries_length (blocks : List DatatypeBlock) :
         block.block.symbolTypes).length = Nat.succ blocks.length
       rw [Datatype.Env.inRight_length, ih]
 
-/-- Canonical datatype ownership environment over `signature`; datatype terms
+/-- Canonical datatype symbol environment over `signature`; datatype terms
 remain ordinary source constants in this compact signature. -/
 def toModelEnv (env : DatatypeEnv) : Datatype.Env env.signature :=
   modelEntries env.blocks.toList
@@ -193,7 +193,7 @@ def lift {blocks : List DatatypeBlock} {block : DatatypeBlock}
   exact ref.flatMap (fun entry => entry.block.symbolTypes)
     (Datatype.Ref.ofConst constant)
 
-/-- Canonical ownership map for the selected block in the complete datatype
+/-- Canonical symbol map for the selected block in the complete datatype
 signature. -/
 def symbols {blocks : List DatatypeBlock} (found : FoundBlock blocks) :
     Symbols (blocks.flatMap fun entry : DatatypeBlock => entry.block.symbolTypes)
@@ -211,37 +211,37 @@ end DatatypeEnv
 
 /-- A certified datatype environment occupying a typed prefix of one complete
 source signature. Ordinary constants remain in `tail`. -/
-structure DataBridge (signature : Signature) where
+structure DatatypeSignaturePrefix (signature : Signature) where
   env : DatatypeEnv
   tail : Signature
   signature_eq : signature = env.signature ++ tail
 
-namespace DataBridge
+namespace DatatypeSignaturePrefix
 
-/-- Canonical bridge for a datatype prefix followed by an ordinary signature. -/
+/-- Canonical reified for a datatype prefix followed by an ordinary signature. -/
 def of (env : DatatypeEnv) (tail : Signature) :
-    DataBridge (env.signature ++ tail) :=
+    DatatypeSignaturePrefix (env.signature ++ tail) :=
   { env, tail, signature_eq := rfl }
 
-/-- The ownership environment weakened across the ordinary signature tail. -/
-def toModelEnv {signature : Signature} (bridge : DataBridge signature) :
+/-- The datatype symbol environment weakened across the ordinary signature tail. -/
+def toModelEnv {signature : Signature} (reified : DatatypeSignaturePrefix signature) :
     Datatype.Env signature :=
-  bridge.signature_eq.symm ▸ bridge.env.toModelEnv.inLeft bridge.tail
+  reified.signature_eq.symm ▸ reified.env.toModelEnv.inLeft reified.tail
 
 @[simp] theorem of_toModelEnv_length (env : DatatypeEnv) (tail : Signature) :
-    (DataBridge.of env tail).toModelEnv.length = env.blocks.size := by
+    (DatatypeSignaturePrefix.of env tail).toModelEnv.length = env.blocks.size := by
   simp [toModelEnv, of, Datatype.Env.inLeft]
 
-/-- Lift the exact ownership map of a found block through the complete source
-signature represented by this bridge. -/
-def symbols {signature : Signature} (bridge : DataBridge signature)
-    (found : DatatypeEnv.FoundBlock bridge.env.blocks.toList) :
+/-- Lift the exact symbol map of a found block through the complete source
+signature represented by this datatype prefix. -/
+def symbols {signature : Signature} (reified : DatatypeSignaturePrefix signature)
+    (found : DatatypeEnv.FoundBlock reified.env.blocks.toList) :
     Symbols signature found.block.block := by
   exact Eq.mpr
-    (congrArg (fun types => Symbols types found.block.block) bridge.signature_eq)
-    (found.symbols.inLeft bridge.tail)
+    (congrArg (fun types => Symbols types found.block.block) reified.signature_eq)
+    (found.symbols.inLeft reified.tail)
 
-end DataBridge
+end DatatypeSignaturePrefix
 
 private def renderedSort (head : Name) (typeArgs : Array Expr) : MetaM BaseSort := do
   let constant ← mkConstWithFreshMVarLevels head
@@ -394,8 +394,8 @@ private partial def reifyField? (names : Array Name)
         if ← sameArgs type.getAppArgs typeArgs then
           return some ({ name := fieldName, sort := .data data }, none)
   | _ => pure ()
-  let bridge ← reifyType type
-  match bridge with
+  let reified ← reifyType type
+  match reified with
   | .base _ sort =>
       return some ({ name := fieldName, sort := .base sort }, some type)
   | .bool _ | .arrow .. => return none
@@ -475,7 +475,7 @@ partial def reifyDatatypeShape? (name : Name) (typeArgs : Array Expr) :
 /-- Reify the first certified datatype fragment from one fully applied inductive
 head. This function is partial only because Lean metadata normalization and
 telescope traversal are partial metaprogramming operations; the returned
-intrinsic block and its semantic translation are total. -/
+reified block and its semantic translation are total. -/
 partial def reifyDatatypeBlock? (name : Name) (typeArgs : Array Expr) :
     MetaM (Option DatatypeBlock) := do
   let some shape ← reifyDatatypeShape? name typeArgs | return none
@@ -533,7 +533,7 @@ partial def reifyDatatypeEnv (roots : Array Expr) (fuel := 64) :
 /-- A supported ground datatype application together with every earlier native
 dependency discovered for it. `block` is the mutual block containing `head`, and
 `data` is the exact declaration selected by that head. This is the shared
-acceptance result consumed by both certified reification and production. -/
+acceptance result consumed by both certified reification and the Crush translator. -/
 structure DatatypeApp where
   head : Name
   typeArgs : Array Expr
@@ -543,7 +543,7 @@ structure DatatypeApp where
 
 /-- Certify one fully applied monomorphic datatype head. Dependency discovery is
 part of acceptance, so cross-block indirect recursion is rejected here rather
-than by a second production-only predicate. -/
+than by a second translator-only predicate. -/
 partial def reifyDatatypeApp (head : Name) (typeArgs : Array Expr)
     (fuel := 64) : MetaM (Except DatatypeReject DatatypeApp) := do
   let constant ← mkConstWithFreshMVarLevels head

@@ -3,7 +3,7 @@ import Crush.Metatheory.SMT.GuardedSoundness
 /-!
 # Interpreted integer guards
 
-This module gives the production term `(>= t 0)` its standard integer
+This module gives the emitted term `(>= t 0)` its standard integer
 denotation inside the shared raw SMT model. It is independent of datatypes:
 datatype well-formedness bodies merely reuse its `TermSemantics` when a field
 is represented by the nonnegative part of an integer carrier.
@@ -16,7 +16,7 @@ open scoped Crush.SMT
 
 variable {symbols : FO.SymbolFamily}
 
-/-- One intrinsic sort represented by SMT `Int`, together with its actual
+/-- One typed source sort represented by SMT `Int`, together with its actual
 integer carrier and the freshness needed to interpret SMT's `>=` symbol. -/
 structure IntView (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) where
@@ -83,8 +83,8 @@ noncomputable def extra (view : IntView encoding target) :
   literal := view.literal
   literal_typed := view.literal_typed
 
-/-- The production nonnegativity syntax at the represented integer sort. -/
-def guarding (view : IntView encoding target) : Guarding symbols where
+/-- The emitted nonnegativity syntax at the represented integer sort. -/
+def guarding (view : IntView encoding target) : GuardedEncoding symbols where
   encoding
   guard := fun sort term =>
     if sort = view.sort then some (smt| (>= $term 0)) else none
@@ -178,11 +178,11 @@ theorem guardsFresh (view : IntView encoding target)
   rcases applied with ⟨left, right, appliedIdent, valuesEq, outputEq⟩
   exact separate sort identifier identEq appliedIdent
 
-/-- Production guard syntax with integer nonnegativity taking precedence over
+/-- Emitted guard syntax with integer nonnegativity taking precedence over
 fresh datatype predicates. -/
 def withGuards (view : IntView encoding target)
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
-    (guards : UnaryGuards encoding target guard) : Guarding symbols where
+    (guards : UnaryGuards encoding target guard) : GuardedEncoding symbols where
   encoding
   guard := fun sort term =>
     if sort = view.sort then some (smt| (>= $term 0))

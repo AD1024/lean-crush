@@ -6,7 +6,7 @@ import Crush.Metatheory.Notation
 
 The executable translator's `emitFunValue`/`mkLambdaFVars'` path materializes
 every residual function value as an eta-expanded closure before using the
-production n-ary application symbol.  This file proves the corresponding pure,
+emitted n-ary application symbol.  This file proves the corresponding pure,
 total `etaLong` transformation semantics-preserving.
 -/
 
@@ -183,7 +183,7 @@ theorem etaLong_denote (model : Model signature) :
       exact (ih (valuation.extend value)).to_iff
 
 /-- In particular, η-expanding a partial application into the closure form used
-by production preserves the residual function value exactly. -/
+by the Crush translator preserves the residual function value exactly. -/
 theorem partialApplication_eta_correct (model : Model signature)
     (fn : Term signature source (.arrow domain codomain))
     (argument : Term signature source domain)

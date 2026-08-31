@@ -400,40 +400,40 @@ theorem saturate_valid (M : Model signature)
 
 /-- Componentwise validity of generated formulas; declarations carry no
 semantic obligation. -/
-structure GeneratedOutputValid (M : Model signature)
-    (generated : GeneratedOutput signature) : Prop where
+structure AuxiliaryTheoryValid (M : Model signature)
+    (generated : AuxiliaryTheory signature) : Prop where
   equations : canonicalModel M ⊨ᵀ generated.equations
   extensionality : canonicalModel M ⊨ᵀ generated.extensionality
 
-namespace GeneratedOutputValid
+namespace AuxiliaryTheoryValid
 
 variable {M : Model signature}
 
 theorem empty (M : Model signature) :
-    GeneratedOutputValid M (GeneratedOutput.empty (signature := signature)) := by
+    AuxiliaryTheoryValid M (AuxiliaryTheory.empty (signature := signature)) := by
   constructor <;> intro formula membership <;> contradiction
 
-theorem append {left right : GeneratedOutput signature}
-    (leftValid : GeneratedOutputValid M left)
-    (rightValid : GeneratedOutputValid M right) :
-    GeneratedOutputValid M (left.append right) := by
+theorem append {left right : AuxiliaryTheory signature}
+    (leftValid : AuxiliaryTheoryValid M left)
+    (rightValid : AuxiliaryTheoryValid M right) :
+    AuxiliaryTheoryValid M (left.append right) := by
   constructor
   · exact (FO.FamilyModel.satisfiesTheory_append _ _ _).2
       ⟨leftValid.equations, rightValid.equations⟩
   · exact (FO.FamilyModel.satisfiesTheory_append _ _ _).2
       ⟨leftValid.extensionality, rightValid.extensionality⟩
 
-theorem declare {generated : GeneratedOutput signature}
-    (valid : GeneratedOutputValid M generated)
+theorem declare {generated : AuxiliaryTheory signature}
+    (valid : AuxiliaryTheoryValid M generated)
     (declaration : DeclaredSymbol signature) :
-    GeneratedOutputValid M (generated.declare declaration) := by
+    AuxiliaryTheoryValid M (generated.declare declaration) := by
   exact ⟨valid.equations, valid.extensionality⟩
 
-theorem addEquation {generated : GeneratedOutput signature}
-    (valid : GeneratedOutputValid M generated)
+theorem addEquation {generated : AuxiliaryTheory signature}
+    (valid : AuxiliaryTheoryValid M generated)
     (formula : TargetSentence signature)
     (formulaValid : canonicalModel M ⊨ formula) :
-    GeneratedOutputValid M { generated with equations := generated.equations ++ [formula] } := by
+    AuxiliaryTheoryValid M { generated with equations := generated.equations ++ [formula] } := by
   constructor
   · apply (FO.FamilyModel.satisfiesTheory_append _ _ _).2
     exact ⟨valid.equations, by
@@ -444,11 +444,11 @@ theorem addEquation {generated : GeneratedOutput signature}
       exact formulaValid⟩
   · exact valid.extensionality
 
-theorem addExt {generated : GeneratedOutput signature}
-    (valid : GeneratedOutputValid M generated)
+theorem addExt {generated : AuxiliaryTheory signature}
+    (valid : AuxiliaryTheoryValid M generated)
     (formula : TargetSentence signature)
     (formulaValid : canonicalModel M ⊨ formula) :
-    GeneratedOutputValid M
+    AuxiliaryTheoryValid M
       { generated with extensionality := generated.extensionality ++ [formula] } := by
   constructor
   · exact valid.equations
@@ -460,63 +460,63 @@ theorem addExt {generated : GeneratedOutput signature}
       subst candidate
       exact formulaValid⟩
 
-theorem theory {generated : GeneratedOutput signature}
-    (valid : GeneratedOutputValid M generated) :
+theorem theory {generated : AuxiliaryTheory signature}
+    (valid : AuxiliaryTheoryValid M generated) :
     canonicalModel M ⊨ᵀ generated.theory := by
-  unfold GeneratedOutput.theory
+  unfold AuxiliaryTheory.theory
   exact (FO.FamilyModel.satisfiesTheory_append _ _ _).2
     ⟨valid.equations, valid.extensionality⟩
 
-end GeneratedOutputValid
+end AuxiliaryTheoryValid
 
-abbrev TranslationResultValid (M : Model signature)
-    (translated : TranslationResult signature context result) : Prop :=
-  GeneratedOutputValid M translated.generated
+abbrev TermTranslationValid (M : Model signature)
+    (translated : TermTranslation signature context result) : Prop :=
+  AuxiliaryTheoryValid M translated.generated
 
 abbrev SpineResultValid (M : Model signature)
     (spine : SpineResult signature context result) : Prop :=
-  GeneratedOutputValid M spine.generated
+  AuxiliaryTheoryValid M spine.generated
 
 structure EquationResultValid (M : Model signature)
     (equation : EquationResult signature) : Prop where
-  generated : GeneratedOutputValid M equation.generated
+  generated : AuxiliaryTheoryValid M equation.generated
   equation : canonicalModel M ⊨ equation.equation
 
 variable {M : Model signature}
 
-theorem TranslationResult.ofGenerated_valid
+theorem TermTranslation.ofGenerated_valid
     (M : Model signature)
     (term : TargetTerm signature context result)
-    (generated : GeneratedOutput signature)
-    (valid : GeneratedOutputValid M generated) :
-    TranslationResultValid M (TranslationResult.ofGenerated term generated) := by
+    (generated : AuxiliaryTheory signature)
+    (valid : AuxiliaryTheoryValid M generated) :
+    TermTranslationValid M (TermTranslation.ofGenerated term generated) := by
   exact valid
 
-theorem TranslationResult.replace_valid
-    (translated : TranslationResult signature context start)
+theorem TermTranslation.replace_valid
+    (translated : TermTranslation signature context start)
     (term : TargetTerm signature context result)
-    (valid : TranslationResultValid M translated) :
-    TranslationResultValid M (translated.replaceTerm term) := by
+    (valid : TermTranslationValid M translated) :
+    TermTranslationValid M (translated.replaceTerm term) := by
   exact valid
 
-theorem TranslationResult.combine_valid
-    (left : TranslationResult signature context start)
-    (right : TranslationResult signature context result)
+theorem TermTranslation.combine_valid
+    (left : TermTranslation signature context start)
+    (right : TermTranslation signature context result)
     (term : TargetTerm signature context domain)
-    (leftValid : TranslationResultValid M left) (rightValid : TranslationResultValid M right) :
-    TranslationResultValid M (left.combine right term) := by
-  exact GeneratedOutputValid.append leftValid rightValid
+    (leftValid : TermTranslationValid M left) (rightValid : TermTranslationValid M right) :
+    TermTranslationValid M (left.combine right term) := by
+  exact AuxiliaryTheoryValid.append leftValid rightValid
 
-theorem TranslationResult.addExt_valid
-    (translated : TranslationResult signature context result)
+theorem TermTranslation.addExt_valid
+    (translated : TermTranslation signature context result)
     (formula : TargetSentence signature)
-    (valid : TranslationResultValid M translated)
+    (valid : TermTranslationValid M translated)
     (formulaValid : canonicalModel M ⊨ formula) :
-    TranslationResultValid M
+    TermTranslationValid M
       (translated.appendOutput (extensionality := [formula])) := by
-  simpa only [TranslationResultValid, TranslationResult.appendOutput,
-    TranslationResult.generated, List.append_nil] using
-    GeneratedOutputValid.addExt valid formula formulaValid
+  simpa only [TermTranslationValid, TermTranslation.appendOutput,
+    TermTranslation.generated, List.append_nil] using
+    AuxiliaryTheoryValid.addExt valid formula formulaValid
 
 theorem SpineResult.weaken_valid
     (spine : SpineResult signature context result)
@@ -526,22 +526,22 @@ theorem SpineResult.weaken_valid
 theorem SpineResult.snoc_valid
     (spine : SpineResult signature context (.arrow domain codomain))
     (argument : TargetTerm signature context domain)
-    (generated : GeneratedOutput signature)
+    (generated : AuxiliaryTheory signature)
     (spineValid : SpineResultValid M spine)
-    (generatedValid : GeneratedOutputValid M generated) :
+    (generatedValid : AuxiliaryTheoryValid M generated) :
     SpineResultValid M (spine.snoc argument generated) := by
-  exact GeneratedOutputValid.append spineValid generatedValid
+  exact AuxiliaryTheoryValid.append spineValid generatedValid
 
 theorem SpineResult.finish_valid
     (spine : SpineResult signature context result)
     (ground : GroundResult result) (valid : SpineResultValid M spine) :
-    TranslationResultValid M (spine.finish ground) := by
+    TermTranslationValid M (spine.finish ground) := by
   rcases spine with ⟨headDomain, headCodomain, head, arguments, generated⟩
   cases head with
   | value term =>
-      exact GeneratedOutputValid.declare valid _
+      exact AuxiliaryTheoryValid.declare valid _
   | sourceConstant constant =>
-      exact GeneratedOutputValid.declare valid _
+      exact AuxiliaryTheoryValid.declare valid _
 
 theorem saturate_output_valid (M : Model signature)
     {closureDomain closureCodomain current : Ty}
@@ -551,7 +551,7 @@ theorem saturate_output_valid (M : Model signature)
       (.arrow closureDomain closureCodomain) current)
     (right : SpineResult signature context current)
     (valid : SpineResultValid M right) :
-    GeneratedOutputValid M (saturateEquation closureHead closureArgs right).generated := by
+    AuxiliaryTheoryValid M (saturateEquation closureHead closureArgs right).generated := by
   induction current generalizing context with
   | bool =>
       simpa only [saturateEquation] using
@@ -564,7 +564,7 @@ theorem saturate_output_valid (M : Model signature)
       apply codomainIH
       apply SpineResult.snoc_valid
       · exact SpineResult.weaken_valid right valid
-      · exact GeneratedOutputValid.empty M
+      · exact AuxiliaryTheoryValid.empty M
 
 theorem saturateEquation_valid (M : Model signature)
     {closureDomain closureCodomain current : Ty}
@@ -590,20 +590,20 @@ theorem finishClosure_valid
     (closureTerm : TargetTerm signature context (.arrow domain codomain))
     (equation : EquationResult signature)
     (valid : EquationResultValid M equation) :
-    TranslationResultValid M (finishClosure closure contextEq domainEq codomainEq
+    TermTranslationValid M (finishClosure closure contextEq domainEq codomainEq
       closureTerm equation) := by
   subst contextEq
   subst domainEq
   subst codomainEq
   let declarations :=
-    (GeneratedOutput.empty (signature := signature))
+    (AuxiliaryTheory.empty (signature := signature))
       |>.declare (.of (Symbol.application
         { domain := closure.domain, codomain := closure.codomain }))
       |>.declare (.of (Symbol.closure closure))
   let generated := declarations.append equation.generated
-  have declarationsValid : GeneratedOutputValid M declarations :=
-    (GeneratedOutputValid.empty M).declare _ |>.declare _
-  have generatedValid : GeneratedOutputValid M generated :=
+  have declarationsValid : AuxiliaryTheoryValid M declarations :=
+    (AuxiliaryTheoryValid.empty M).declare _ |>.declare _
+  have generatedValid : AuxiliaryTheoryValid M generated :=
     declarationsValid.append valid.generated
   exact generatedValid.addEquation equation.equation valid.equation
 
@@ -640,7 +640,7 @@ noncomputable def LambdaTranslationValid (M : Model signature)
 structure TranslationValid (M : Model signature)
     {Γ : Context} {ty : Ty} (term : Term signature Γ ty) : Prop where
   result : ∀ {Δ : Context} (r : Renaming Γ Δ),
-    TranslationResultValid M (translateWith r term)
+    TermTranslationValid M (translateWith r term)
   spine : SpineTranslationValid M term
   lambda : LambdaTranslationValid M term
 
@@ -652,7 +652,7 @@ theorem groundEquation_valid (M : Model signature)
       (.arrow closureDomain closureCodomain))
     (closureArgs : TargetArguments signature Δ
       (.arrow closureDomain closureCodomain) result)
-    (translatedValid : TranslationResultValid M (translateWith r term))
+    (translatedValid : TermTranslationValid M (translateWith r term))
     (correct : LambdaBodyDenotation M r term closureHead closureArgs) :
     EquationResultValid M (translateLambdaBodyWith r term closureHead closureArgs) := by
   cases ground with
@@ -724,24 +724,24 @@ private theorem translation_valid (M : Model signature) :
           refine ⟨?_, True.intro, ?_⟩
           · intro Δ r
             simp only [translateWith]
-            exact GeneratedOutputValid.empty M
+            exact AuxiliaryTheoryValid.empty M
           · intro Δ r closureDomain closureCodomain closureHead closureArgs correct
             exact groundEquation_valid M .bool r (.var ref) closureHead closureArgs
-              (by simp only [translateWith]; exact GeneratedOutputValid.empty M) correct
+              (by simp only [translateWith]; exact AuxiliaryTheoryValid.empty M) correct
       | base sort =>
           refine ⟨?_, True.intro, ?_⟩
           · intro Δ r
             simp only [translateWith]
-            exact GeneratedOutputValid.empty M
+            exact AuxiliaryTheoryValid.empty M
           · intro Δ r closureDomain closureCodomain closureHead closureArgs correct
             exact groundEquation_valid M (.base sort) r (.var ref) closureHead closureArgs
-              (by simp only [translateWith]; exact GeneratedOutputValid.empty M) correct
+              (by simp only [translateWith]; exact AuxiliaryTheoryValid.empty M) correct
       | arrow domain codomain =>
           have spineValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
               SpineResultValid M (translateSpineWith r (.var ref)) := by
             intro Δ r
             simp only [translateSpineWith]
-            exact GeneratedOutputValid.empty M
+            exact AuxiliaryTheoryValid.empty M
           refine ⟨?_, spineValid, ?_⟩
           · intro Δ r
             simp only [translateWith]
@@ -767,20 +767,20 @@ private theorem translation_valid (M : Model signature) :
       cases actualTy with
       | bool =>
           have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
-              TranslationResultValid M (translateWith r (.const constant)) := by
+              TermTranslationValid M (translateWith r (.const constant)) := by
             intro Δ r
             simp only [translateWith]
-            exact (GeneratedOutputValid.empty M).declare _
+            exact (AuxiliaryTheoryValid.empty M).declare _
           refine ⟨resultValid, True.intro, ?_⟩
           intro Δ r closureDomain closureCodomain closureHead closureArgs correct
           exact groundEquation_valid M .bool r (.const constant) closureHead closureArgs
             (resultValid r) correct
       | base sort =>
           have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
-              TranslationResultValid M (translateWith r (.const constant)) := by
+              TermTranslationValid M (translateWith r (.const constant)) := by
             intro Δ r
             simp only [translateWith]
-            exact (GeneratedOutputValid.empty M).declare _
+            exact (AuxiliaryTheoryValid.empty M).declare _
           refine ⟨resultValid, True.intro, ?_⟩
           intro Δ r closureDomain closureCodomain closureHead closureArgs correct
           exact groundEquation_valid M (.base sort) r (.const constant)
@@ -790,7 +790,7 @@ private theorem translation_valid (M : Model signature) :
               SpineResultValid M (translateSpineWith r (.const constant)) := by
             intro Δ r
             simp only [translateSpineWith]
-            exact GeneratedOutputValid.empty M
+            exact AuxiliaryTheoryValid.empty M
           refine ⟨?_, spineValid, ?_⟩
           · intro Δ r
             simp only [translateWith]
@@ -814,10 +814,10 @@ private theorem translation_valid (M : Model signature) :
   | boolLit value =>
       rename_i actualContext
       have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
-          TranslationResultValid M (translateWith r (.boolLit value)) := by
+          TermTranslationValid M (translateWith r (.boolLit value)) := by
         intro Δ r
         simp only [translateWith]
-        exact GeneratedOutputValid.empty M
+        exact AuxiliaryTheoryValid.empty M
       refine ⟨resultValid, True.intro, ?_⟩
       intro Δ r closureDomain closureCodomain closureHead closureArgs correct
       exact groundEquation_valid M .bool r (.boolLit value) closureHead closureArgs
@@ -825,10 +825,10 @@ private theorem translation_valid (M : Model signature) :
   | not body bodyIH =>
       rename_i actualContext
       have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
-          TranslationResultValid M (translateWith r (.not body)) := by
+          TermTranslationValid M (translateWith r (.not body)) := by
         intro Δ r
         simp only [translateWith]
-        exact TranslationResult.replace_valid _ _ (bodyIH.result r)
+        exact TermTranslation.replace_valid _ _ (bodyIH.result r)
       refine ⟨resultValid, True.intro, ?_⟩
       intro Δ r closureDomain closureCodomain closureHead closureArgs correct
       exact groundEquation_valid M .bool r (.not body) closureHead closureArgs
@@ -836,10 +836,10 @@ private theorem translation_valid (M : Model signature) :
   | and left right leftIH rightIH =>
       rename_i actualContext
       have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
-          TranslationResultValid M (translateWith r (.and left right)) := by
+          TermTranslationValid M (translateWith r (.and left right)) := by
         intro Δ r
         simp only [translateWith]
-        exact TranslationResult.combine_valid _ _ _
+        exact TermTranslation.combine_valid _ _ _
           (leftIH.result r) (rightIH.result r)
       refine ⟨resultValid, True.intro, ?_⟩
       intro Δ r closureDomain closureCodomain closureHead closureArgs correct
@@ -848,10 +848,10 @@ private theorem translation_valid (M : Model signature) :
   | or left right leftIH rightIH =>
       rename_i actualContext
       have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
-          TranslationResultValid M (translateWith r (.or left right)) := by
+          TermTranslationValid M (translateWith r (.or left right)) := by
         intro Δ r
         simp only [translateWith]
-        exact TranslationResult.combine_valid _ _ _
+        exact TermTranslation.combine_valid _ _ _
           (leftIH.result r) (rightIH.result r)
       refine ⟨resultValid, True.intro, ?_⟩
       intro Δ r closureDomain closureCodomain closureHead closureArgs correct
@@ -860,10 +860,10 @@ private theorem translation_valid (M : Model signature) :
   | imp left right leftIH rightIH =>
       rename_i actualContext
       have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
-          TranslationResultValid M (translateWith r (.imp left right)) := by
+          TermTranslationValid M (translateWith r (.imp left right)) := by
         intro Δ r
         simp only [translateWith]
-        exact TranslationResult.combine_valid _ _ _
+        exact TermTranslation.combine_valid _ _ _
           (leftIH.result r) (rightIH.result r)
       refine ⟨resultValid, True.intro, ?_⟩
       intro Δ r closureDomain closureCodomain closureHead closureArgs correct
@@ -872,10 +872,10 @@ private theorem translation_valid (M : Model signature) :
   | iff left right leftIH rightIH =>
       rename_i actualContext
       have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
-          TranslationResultValid M (translateWith r (.iff left right)) := by
+          TermTranslationValid M (translateWith r (.iff left right)) := by
         intro Δ r
         simp only [translateWith]
-        exact TranslationResult.combine_valid _ _ _
+        exact TermTranslation.combine_valid _ _ _
           (leftIH.result r) (rightIH.result r)
       refine ⟨resultValid, True.intro, ?_⟩
       intro Δ r closureDomain closureCodomain closureHead closureArgs correct
@@ -884,17 +884,17 @@ private theorem translation_valid (M : Model signature) :
   | eq left right leftIH rightIH =>
       rename_i actualContext operandType
       have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
-          TranslationResultValid M (translateWith r (.eq left right)) := by
+          TermTranslationValid M (translateWith r (.eq left right)) := by
         intro Δ r
         cases operandType with
         | bool | base =>
             simp only [translateWith]
-            exact TranslationResult.combine_valid _ _ _
+            exact TermTranslation.combine_valid _ _ _
               (leftIH.result r) (rightIH.result r)
         | arrow domain codomain =>
             simp only [translateWith]
-            apply TranslationResult.addExt_valid
-            · exact TranslationResult.combine_valid _ _ _
+            apply TermTranslation.addExt_valid
+            · exact TermTranslation.combine_valid _ _ _
                 (leftIH.result r) (rightIH.result r)
             · exact extensionality_valid M domain codomain
       refine ⟨resultValid, True.intro, ?_⟩
@@ -904,7 +904,7 @@ private theorem translation_valid (M : Model signature) :
   | lam body bodyIH =>
       rename_i actualContext domain codomain
       have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
-          TranslationResultValid M (translateWith r (.lam body)) := by
+          TermTranslationValid M (translateWith r (.lam body)) := by
         intro Δ r
         let closure : Closure signature :=
           Closure.ofBody
@@ -930,7 +930,7 @@ private theorem translation_valid (M : Model signature) :
           equationValid
       refine ⟨resultValid, ?_, ?_⟩
       · intro Δ r
-        simpa only [translateSpineWith, translateWith, SpineResultValid, TranslationResultValid]
+        simpa only [translateSpineWith, translateWith, SpineResultValid, TermTranslationValid]
           using resultValid r
       · intro Δ r closureDomain closureCodomain closureHead closureArgs correct
         exact openLambda_valid M r body closureHead closureArgs
@@ -940,7 +940,7 @@ private theorem translation_valid (M : Model signature) :
       cases appCodomain with
       | bool =>
           have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
-              TranslationResultValid M (translateWith r (.app fn argument)) := by
+              TermTranslationValid M (translateWith r (.app fn argument)) := by
             intro Δ r
             simp only [translateWith]
             apply SpineResult.finish_valid
@@ -953,7 +953,7 @@ private theorem translation_valid (M : Model signature) :
             closureHead closureArgs (resultValid r) correct
       | base sort =>
           have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
-              TranslationResultValid M (translateWith r (.app fn argument)) := by
+              TermTranslationValid M (translateWith r (.app fn argument)) := by
             intro Δ r
             simp only [translateWith]
             apply SpineResult.finish_valid
@@ -997,7 +997,7 @@ private theorem translation_valid (M : Model signature) :
   | forallE body bodyIH =>
       rename_i actualContext domain
       have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
-          TranslationResultValid M (translateWith r (.forallE body)) := by
+          TermTranslationValid M (translateWith r (.forallE body)) := by
         intro Δ r
         simp only [translateWith]
         exact bodyIH.result (Renaming.lift r)
@@ -1008,7 +1008,7 @@ private theorem translation_valid (M : Model signature) :
   | existsE body bodyIH =>
       rename_i actualContext domain
       have resultValid : ∀ {Δ : Context} (r : Renaming actualContext Δ),
-          TranslationResultValid M (translateWith r (.existsE body)) := by
+          TermTranslationValid M (translateWith r (.existsE body)) := by
         intro Δ r
         simp only [translateWith]
         exact bodyIH.result (Renaming.lift r)
@@ -1021,7 +1021,7 @@ private theorem translation_valid (M : Model signature) :
 theorem translateWith_generatedFormulas_valid (M : Model signature)
     {Γ Δ : Context} {ty : Ty} (r : Renaming Γ Δ)
     (term : Term signature Γ ty) :
-    TranslationResultValid M (translateWith r term) :=
+    TermTranslationValid M (translateWith r term) :=
   (translation_valid M term).result r
 
 /-- The complete auxiliary theory produced by flattened translation is valid
@@ -1029,7 +1029,7 @@ in the same canonical model as the translated term. -/
 theorem generatedFormulas_valid (M : Model signature)
     (term : Term signature context result) :
     canonicalModel M ⊨ᵀ 𝓕⟦term⟧.theory := by
-  apply GeneratedOutputValid.theory
+  apply AuxiliaryTheoryValid.theory
   exact translateWith_generatedFormulas_valid M Renaming.id term
 
 /-- Term component of a translated closed formula, exposed as an FO sentence. -/

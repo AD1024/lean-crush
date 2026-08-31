@@ -112,19 +112,19 @@ def buildScript (cfg : Config) (facts : Array Fact) :
       let body ← match data? with
         | none => emitTerm fact.prop
         | some signature => TranslateM.withDataSignature signature (emitTerm fact.prop)
-      if let some (.pack env bridge) := data? then
+      if let some (.pack env reifiedSignature) := data? then
         let reified? ← Metatheory.Reification.reifySentenceFor?
-          fact.prop env bridge
+          fact.prop env reifiedSignature
         let state ← get
-        let some productionFact := ProductionFact.build? fact.prop env bridge reified?
-            state.commands state.nativeDatatypeCommands
-            state.nativeDatatypeCommandIndices state.dataGuards
-            state.dataGuardIndices
-          | throwError "crush: final command array lost a native datatype block"
-        let _ ← TranslateM.recordProductionFact productionFact
+        let some factTranslation := FactTranslationRecord.build? fact.prop env reifiedSignature reified?
+            state.commands state.datatypeDeclarations
+            state.datatypeDeclarationIndices state.datatypeGuardDefinitions
+            state.datatypeGuardDefinitionIndices
+          | throwError "crush: emitted command sequence lost an SMT datatype declaration"
+        let _ ← TranslateM.recordFactTranslation factTranslation
       let named := Term.annot body #[.named s!"{factNamePrefix}{id}"]
       TranslateM.emitCommand (.assert named)
-    TranslateM.finalizeProductionFacts
+    TranslateM.finalizeFactTranslations
   -- Prepend set-logic. Declarations are emitted eagerly on first use (before the
   -- assertion that references them), so command order already satisfies SMT-LIB's
   -- declare-before-reference rule.

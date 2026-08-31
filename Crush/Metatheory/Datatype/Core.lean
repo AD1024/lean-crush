@@ -1,7 +1,7 @@
 import Crush.Metatheory.HO.Core
 
 /-!
-# Intrinsic descriptions of monomorphic datatype blocks
+# Typed descriptions of monomorphic datatype blocks
 
 This module describes the structural fragment shared by Lean inductive blocks
 and SMT-LIB `declare-datatypes`.  It is independent of both `Lean.Expr` and the
@@ -32,7 +32,7 @@ structure Found {α : Type u} (values : List α) where
   value : α
   ref : Ref values value
 
-/-- Every list entry paired with its intrinsic typed position, in source
+/-- Every list entry paired with its typed position, in source
 order. -/
 def all {α : Type u} : (values : List α) → List (Found values)
   | [] => []
@@ -125,7 +125,7 @@ def index {α : Type u} : {values : List α} → {value : α} →
   | here => rfl
   | there ref ih => exact ih
 
-/-- Recover the intrinsic reference at a known in-bounds position. -/
+/-- Recover the typed reference at a known in-bounds position. -/
 def ofIdx {α : Type u} : (values : List α) → (index : Nat) →
     (inBounds : index < values.length) → Ref values values[index]
   | _ :: _, 0, _ => .here
@@ -169,7 +169,7 @@ def ofFn {α : Type u} {size : Nat} (value : Fin size → α)
       | zero => rfl
       | succ index => simp [ofIdx, Ref.index, ih]
 
-/-- A position determines an intrinsic reference, including its selected value. -/
+/-- A position determines a typed reference, including its selected value. -/
 theorem heq_of_index_eq {α : Type u} {values : List α} {leftValue rightValue : α}
     (left : Ref values leftValue) (right : Ref values rightValue)
     (equal : left.index = right.index) : HEq left right := by
@@ -205,7 +205,7 @@ theorem mem_mapIdx {α : Type u} {β : Type v} {values : List α} {value : α}
 end Ref
 
 /-- An injective map preserves duplicate-freedom. Kept here because datatype
-encoders use the same fact for intrinsic positions and allocated names. -/
+encoders use the same fact for typed positions and allocated names. -/
 theorem nodup_map {α β : Type} {values : List α} {image : α → β}
     (nodup : values.Nodup) (injective : Function.Injective image) :
     (values.map image).Nodup := by
@@ -266,7 +266,7 @@ namespace Block
 
 /-- Executable structural equality for finite datatype blocks.  Comparing the
 finite declaration list, rather than proof or Lean-metadata fields, is the
-boundary needed when production reconnects an existentially stored native
+boundary needed when the Crush translator reconnects an existentially stored native
 command to its intrinsically indexed block. -/
 def same {arity : Nat} (left right : Block arity) : Bool :=
   decide (List.ofFn left.decl = List.ofFn right.decl)
@@ -309,9 +309,9 @@ instance {arity : Nat} : DecidableEq (Block arity) := fun left right =>
 
 end Block
 
-/-- Existential package for the arity-indexed intrinsic content of a datatype
+/-- Existential package for the arity-indexed typed content of a datatype
 block. Lean declaration metadata is intentionally absent: native command
-ownership depends only on this finite typed description. -/
+symbol membership depends only on this finite typed description. -/
 structure SomeBlock where
   arity : Nat
   block : Block arity

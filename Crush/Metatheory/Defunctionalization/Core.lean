@@ -2,10 +2,10 @@ import Crush.Metatheory.Defunctionalization.Translate
 import Crush.Metatheory.FO.Family
 
 /-!
-# Total classic defunctionalization core
+# Total unary reference defunctionalization core
 
 This pass uses unary application symbols.  It is the proof-friendly unary
-defunctionalization encoding and currently carries the complete intrinsic
+defunctionalization encoding and currently carries the complete typed
 soundness theorem.  The flattened development reuses it as a semantic reference,
 but the total flattened transformation and its generated-theory theorem remain
 to be constructed.
@@ -15,11 +15,11 @@ namespace Crush.Metatheory.Defunctionalization
 
 variable {signature : Signature} {context : Context} {ty : Ty}
 
-/-- In the classic core, every source constant is a first-class value. -/
+/-- In the unary reference translation, every source constant is a first-class value. -/
 @[reducible] def coreSourceDecl (ty : Ty) : FO.SymbolDecl :=
   { args := [], result := FO.FOSort.ofTy ty }
 
-/-- Finite signature used when reifying the classic core encoding. -/
+/-- Finite signature used when reifying the unary reference translation encoding. -/
 def Plan.coreTargetSignature (sourceSignature : Signature)
     (plan : Plan sourceSignature) : FO.Signature :=
   sourceSignature.map coreSourceDecl ++ plan.unaryAppDecls ++ plan.closureDecls
@@ -103,7 +103,7 @@ def closureEquations (term : Term signature context ty) :
     FO.FamilyTheory (CoreSymbol signature) :=
   (closures term).map closureEquation
 
-/-- Complete result of the total classic defunctionalization core. -/
+/-- Complete result of the total unary reference defunctionalization core. -/
 structure CoreResult (signature : Signature) (context : Context) (ty : Ty) where
   term : FO.FamilyTerm (CoreSymbol signature)
     (targetContext context) (FO.FOSort.ofTy ty)

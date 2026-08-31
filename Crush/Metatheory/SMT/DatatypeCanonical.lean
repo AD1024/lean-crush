@@ -21,7 +21,7 @@ variable {signature : Signature} {arity : Nat}
 variable {block : Block arity} {symbols : Symbols signature block}
 
 /-- Canonical constructor arguments embedded in the one generic raw universe. -/
-def argValues {source : Model signature} (law : Lawful symbols source) :
+def argValues {source : Model signature} (law : IsFreeDatatypeModel symbols source) :
     {fields : List (FieldDecl arity)} →
       Args block source.Base fields →
         List (SMT.Value
@@ -34,7 +34,7 @@ def argValues {source : Model signature} (law : Lawful symbols source) :
         argValues law (fields := _) rest
 
 /-- Embed one canonical field in the generic raw universe. -/
-def fieldValue {source : Model signature} (law : Lawful symbols source)
+def fieldValue {source : Model signature} (law : IsFreeDatatypeModel symbols source)
     (field : FieldDecl arity) :
     field.Denote block source.Base →
       SMT.Value
@@ -58,7 +58,7 @@ def fieldValue {source : Model signature} (law : Lawful symbols source)
 
 /-- Canonical constructor arguments have exactly their shared encoded sorts. -/
 theorem argValues_typed {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {fields : List (FieldDecl arity)}
     (args : Args block source.Base fields) :
@@ -92,7 +92,7 @@ theorem argValues_typed {source : Model signature}
 
 /-- Positional lookup commutes with canonical argument embedding. -/
 @[simp] theorem argValues_get {source : Model signature}
-    (law : Lawful symbols source) {fields : List (FieldDecl arity)}
+    (law : IsFreeDatatypeModel symbols source) {fields : List (FieldDecl arity)}
     (args : Args block source.Base fields) {field : FieldDecl arity}
     (ref : Datatype.Ref fields field) :
     (argValues law args)[ref.index]? = some (fieldValue law field (args.get ref)) := by
@@ -104,9 +104,9 @@ theorem argValues_typed {source : Model signature}
       | data value rest => exact ih rest
 
 /-- Every generic raw list typed by a constructor telescope comes from one
-canonical intrinsic argument telescope. -/
+canonical typed argument telescope. -/
 theorem typed_args {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     (fo : SMT.Encoding (Symbol signature))
     {fields : List (FieldDecl arity)}
     {values : List (SMT.Value
@@ -142,7 +142,7 @@ theorem typed_args {source : Model signature}
               rw [(law.carrier child).left_inv value]
               rfl
 
-/-- Erasing one datatype field type agrees with its intrinsic FO sort. -/
+/-- Erasing one datatype field type agrees with its typed FO sort. -/
 @[simp] theorem ofTy_field (field : FieldDecl arity) :
     FO.FOSort.ofTy (field.ty block) = field.fo block := by
   cases field with
@@ -159,7 +159,7 @@ theorem typed_args {source : Model signature}
   | nil => rfl
   | cons field fields ih => simp [ih]
 
-/-- Flattening a constructor telescope produces exactly its intrinsic FO
+/-- Flattening a constructor telescope produces exactly its typed FO
 declaration. -/
 @[simp] theorem sourceDecl_fields (fields : List (FieldDecl arity))
     (result : BaseSort) :
@@ -191,7 +191,7 @@ def foCurry {source : Model signature}
 curried source application. Recursive arguments cross the carrier isomorphism
 exactly once in each direction. -/
 theorem applyValues_foCurry {source : Model signature}
-    (law : Lawful symbols source) (fields : List (FieldDecl arity))
+    (law : IsFreeDatatypeModel symbols source) (fields : List (FieldDecl arity))
     (result : BaseSort)
     (build : Args block source.Base fields → source.Base result)
     (args : Args block source.Base fields) :
@@ -226,7 +226,7 @@ theorem applyValues_foCurry {source : Model signature}
 on a canonical constructor argument telescope. `HEq` exposes the declaration
 normalization without introducing a second semantic carrier. -/
 theorem applyValues_curry {source : Model signature}
-    (law : Lawful symbols source) (fields : List (FieldDecl arity))
+    (law : IsFreeDatatypeModel symbols source) (fields : List (FieldDecl arity))
     (result : BaseSort)
     (build : Args block source.Base fields → source.Base result)
     (args : Args block source.Base fields) :
@@ -277,7 +277,7 @@ theorem applyValues_curry {source : Model signature}
 
 /-- Applying an encoded datatype constructor in the shared graph yields the
 source carrier value corresponding to the canonical constructor tree. -/
-theorem ctor_apply {source : Model signature} (law : Lawful symbols source)
+theorem ctor_apply {source : Model signature} (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
@@ -300,9 +300,9 @@ theorem ctor_apply {source : Model signature} (law : Lawful symbols source)
         (sourceDecl_fields (block := block) ctor.fields child.decl.sort)).symm
     · exact applied.symm
 
-/-- A canonical field value has the shared encoding of its intrinsic FO sort. -/
+/-- A canonical field value has the shared encoding of its typed FO sort. -/
 theorem fieldValue_typed {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     (field : FieldDecl arity)
     (value : field.Denote block source.Base) :
@@ -323,7 +323,7 @@ theorem fieldValue_typed {source : Model signature}
 
 /-- An encoded selector recovers its field on its own constructor in the
 shared symbol graph. -/
-theorem sel_apply_ctor {source : Model signature} (law : Lawful symbols source)
+theorem sel_apply_ctor {source : Model signature} (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
@@ -365,7 +365,7 @@ theorem sel_apply_ctor {source : Model signature} (law : Lawful symbols source)
 
 /-- An encoded tester returns the proposition that its canonical value has the
 selected constructor. -/
-theorem test_apply {source : Model signature} (law : Lawful symbols source)
+theorem test_apply {source : Model signature} (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
@@ -389,7 +389,7 @@ theorem test_apply {source : Model signature} (law : Lawful symbols source)
       using (law.test_denote ref ((law.carrier child).«from» value)).symm
 
 @[simp] theorem test_apply_ctor {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
@@ -406,10 +406,10 @@ theorem test_apply {source : Model signature} (law : Lawful symbols source)
   simpa [SMT.model_bool, boolValue] using
     test_apply law represented ref (.ctor ref args)
 
-/-- Native constructor typing is the generic intrinsic symbol typing theorem,
+/-- SMT constructor typing is the generic typed-symbol theorem,
 specialized through the declaration representation. -/
 theorem ctor_has_type {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
@@ -430,7 +430,7 @@ theorem ctor_has_type {source : Model signature}
 
 /-- Invert a native constructor application in the shared graph. -/
 theorem ctor_apply_inv {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
@@ -479,7 +479,7 @@ theorem ctor_apply_inv {source : Model signature}
 /-- Canonical constructors are total, typed, and injective in the shared raw
 model. -/
 theorem ctor_holds {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
@@ -515,7 +515,7 @@ theorem ctor_holds {source : Model signature}
     rw [leftArgsEq, rightArgsEq, argsEq]
 
 theorem sel_has_type {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
@@ -552,7 +552,7 @@ theorem sel_has_type {source : Model signature}
 /-- All selectors emitted for a constructor are total and recover their own
 constructor field. -/
 theorem sel_holds {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
@@ -589,7 +589,7 @@ theorem sel_holds {source : Model signature}
     simpa [indexEq] using sel_apply_ctor law represented ctorRef fieldRef args
 
 theorem test_has_type {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
@@ -608,7 +608,7 @@ theorem test_has_type {source : Model signature}
     represented.sort_eq child, fo.bool_eq, Function.comp_def] using typed
 
 theorem test_apply_ne {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {leftCtor rightCtor : CtorDecl arity}
@@ -632,7 +632,7 @@ theorem test_apply_ne {source : Model signature}
   simpa [SMT.model_bool, boolValue, rejected] using applied
 
 theorem test_holds {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
@@ -653,7 +653,7 @@ theorem test_holds {source : Model signature}
 /-- Every raw constructor emitted by the native declaration satisfies its
 constructor, selector, and tester laws in the shared model. -/
 theorem ctor_laws {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {sort : Crush.SMT.SSort} {rawCtor : Crush.SMT.CtorDecl}
@@ -677,7 +677,7 @@ theorem ctor_laws {source : Model signature}
 
 /-- Results of distinct raw constructors are distinct in the shared model. -/
 theorem ctor_disjoint {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {leftSort rightSort : Crush.SMT.SSort}
@@ -736,7 +736,7 @@ theorem ctor_disjoint {source : Model signature}
 
 /-- A tester rejects values built by another constructor of the same datatype. -/
 theorem test_disjoint {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {sort : Crush.SMT.SSort} {leftCtor rightCtor : Crush.SMT.CtorDecl}
@@ -782,7 +782,7 @@ theorem test_disjoint {source : Model signature}
 /-- Every value inhabiting a declared datatype sort is built by one constructor
 from that exact native declaration. -/
 theorem exhaustive {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {name : String} {count : Nat} {decl : Crush.SMT.DatatypeDecl}
@@ -829,9 +829,9 @@ theorem exhaustive {source : Model signature}
 
 /-- Height of a datatype value inside the one shared raw SMT universe. Values
 at ordinary sorts have rank zero. The datatype sort is recovered from its
-intrinsic base-sort identity, rather than from a parallel raw-value tag. -/
+typed base-sort identity, rather than from a parallel raw-value tag. -/
 noncomputable def rank {source : Model signature}
-    (law : Lawful symbols source) :
+    (law : IsFreeDatatypeModel symbols source) :
     SMT.Value
       (canonicalModel source) →
       Nat
@@ -844,7 +844,7 @@ noncomputable def rank {source : Model signature}
   | _ => 0
 
 private theorem rank_cast {source : Model signature}
-    (law : Lawful symbols source) {selected child : DataRef block}
+    (law : IsFreeDatatypeModel symbols source) {selected child : DataRef block}
     (dataEq : selected = child)
     (sortEq : selected.decl.sort = child.decl.sort)
     (value : Val block source.Base child) :
@@ -859,7 +859,7 @@ private theorem rank_cast {source : Model signature}
 /-- On a represented datatype carrier, the shared raw rank is exactly the
 height of the canonical finite constructor tree. -/
 @[simp] theorem rank_data {source : Model signature}
-    (law : Lawful symbols source) (wf : block.WF)
+    (law : IsFreeDatatypeModel symbols source) (wf : block.WF)
     (child : DataRef block) (value : Val block source.Base child) :
     rank law (.typed (.base child.decl.sort)
       ((law.carrier child).«from» value)) = value.height := by
@@ -875,7 +875,8 @@ height of the canonical finite constructor tree. -/
   next absent =>
     exact False.elim (absent ⟨child, rfl⟩)
 
-/-- A field whose encoded sort is owned by this native block was intrinsically
+/-- A field whose encoded sort is declared by this SMT datatype block was
+intrinsically
 classified as recursive. Structural well-formedness rules out an external
 base field merely reusing a datatype sort identity. -/
 theorem field_data_ref
@@ -910,7 +911,7 @@ theorem field_data_ref
 /-- Every recursive constructor argument strictly decreases the shared raw
 rank. This is the well-foundedness clause required by native SMT datatypes. -/
 theorem rank_lt {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data)
     {sort : Crush.SMT.SSort} {rawCtor : Crush.SMT.CtorDecl}
@@ -973,10 +974,10 @@ theorem rank_lt {source : Model signature}
   simpa [childValue] using
     Args.get_height_lt_ctor args dataFieldRef ctorRef rfl
 
-/-- The ordinary SMT model induced from a lawful source model satisfies every
-semantic law of one emitted native datatype block. -/
+/-- The ordinary SMT model induced from a free-datatype source model satisfies
+every semantic law of one emitted SMT datatype block. -/
 theorem data_hold {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data) :
     Crush.SMT.DatatypesHold
@@ -1003,7 +1004,7 @@ theorem data_hold {source : Model signature}
 /-- One emitted native `declare-datatypes` command is satisfied in the same
 raw SMT model used for all ordinary symbols and formulas. -/
 theorem command_sound {source : Model signature}
-    (law : Lawful symbols source)
+    (law : IsFreeDatatypeModel symbols source)
     {fo : SMT.Encoding (Symbol signature)}
     {data : BlockEncoding arity} (represented : Representation block symbols fo data) :
     (SMT.model fo
@@ -1017,7 +1018,7 @@ theorem Represented.commands_valid {source : Model signature}
     {fo : SMT.Encoding (Symbol signature)}
     {env : Datatype.Env signature}
     (represented : Represented fo env)
-    (lawful : Datatype.Env.Lawful source env) :
+    (freeDataModel : Datatype.Env.IsFreeDatatypeModel source env) :
     SMT.model fo
         (canonicalModel source)
       ⊨ₛᶜ represented.commands := by
@@ -1025,7 +1026,7 @@ theorem Represented.commands_valid {source : Model signature}
   | nil =>
       exact satisfiesCommands_empty _
   | cons head tail ih =>
-      cases lawful with
+      cases freeDataModel with
       | cons headLaw tailLaw =>
           rw [Represented.commands, satisfiesCommands_append]
           constructor
@@ -1036,17 +1037,17 @@ theorem Represented.commands_valid {source : Model signature}
               (command_sound headLaw head)
           · exact ih tailLaw
 
-/-- Exact environment representation discharges the native-command premise of
+/-- Exact environment representation discharges the SMT-datatype-command premise of
 the generic FO-to-SMT soundness theorem. -/
-theorem EnvRepresentation.native_valid {source : Model signature}
+theorem EnvRepresentation.datatypeCommands_valid {source : Model signature}
     {fo : SMT.Encoding (Symbol signature)}
     {env : Datatype.Env signature}
     (represented : EnvRepresentation fo env)
-    (lawful : Datatype.Env.Lawful source env) :
+    (freeDataModel : Datatype.Env.IsFreeDatatypeModel source env) :
     SMT.model fo
         (canonicalModel source)
       ⊨ₛᶜ fo.nativeCommands := by
-  rw [represented.native_eq]
-  exact represented.blocks.commands_valid lawful
+  rw [represented.datatypeCommands_eq]
+  exact represented.blocks.commands_valid freeDataModel
 
 end Crush.Metatheory.SMT.Datatype

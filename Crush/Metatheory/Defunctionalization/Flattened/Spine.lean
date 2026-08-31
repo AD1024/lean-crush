@@ -1,4 +1,4 @@
-import Crush.Metatheory.Defunctionalization.TranslationResult
+import Crush.Metatheory.Defunctionalization.TermTranslation
 import Crush.Metatheory.FO.Renaming
 
 /-!
@@ -212,7 +212,7 @@ structure ArgumentsResult (signature : Signature) (context : Context)
     (types : List Ty) where
   terms : FO.FamilyArgs (Symbol signature) (targetContext context)
     (types.map FO.FOSort.ofTy)
-  generated : GeneratedOutput signature := {}
+  generated : AuxiliaryTheory signature := {}
 
 namespace AppliedArguments
 
@@ -221,7 +221,7 @@ The caller supplies the term translator, so this telescope fold can be reused by
 the total translation without introducing a separate correctness assumption. -/
 def translate
     (translateTerm : {ty : Ty} → Term signature context ty →
-      TranslationResult signature context ty) :
+      TermTranslation signature context ty) :
     {start result : Ty} →
       (arguments : AppliedArguments signature context start result) →
         ArgumentsResult signature context arguments.types

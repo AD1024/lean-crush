@@ -5,8 +5,8 @@ import Crush.Metatheory.FO.Guarded
 /-!
 # Extending a base-carrier family by one datatype block
 
-Dependency-ordered datatype blocks are interpreted one at a time. A sort owned
-by the new block becomes the complete free algebra over the prior carriers;
+Dependency-ordered datatype blocks are interpreted one at a time. A sort declared by
+the new block becomes the complete free algebra over the prior carriers;
 every other sort keeps its prior carrier. The indexed constructors make the two
 cases disjoint without a cast-heavy type-level lookup.
 -/
@@ -16,87 +16,87 @@ namespace Crush.Metatheory.Datatype
 open Crush.Metatheory.Guarded
 
 /-- Extend a prior base-carrier family by the complete free values of one
-datatype block. `external` carries an explicit non-ownership proof, so an owned
-sort contains only datatype values. -/
+datatype block. `external` carries an explicit proof that its sort is not declared by
+the block, so a declared sort contains only datatype values. -/
 inductive BaseLift {arity : Nat} (block : Block arity)
     (Prior : BaseSort → Type) (sort : BaseSort) : Type where
-  | data (owner : DataRef block) (same : owner.decl.sort = sort)
-      (value : Val block Prior owner) : BaseLift block Prior sort
+  | data (dataRef : DataRef block) (same : dataRef.decl.sort = sort)
+      (value : Val block Prior dataRef) : BaseLift block Prior sort
   | external
-      (fresh : ∀ owner : DataRef block, owner.decl.sort ≠ sort)
+      (fresh : ∀ dataRef : DataRef block, dataRef.decl.sort ≠ sort)
       (value : Prior sort) : BaseLift block Prior sort
 
 namespace BaseLift
 
-/-- An owned sort exposes its unique free-datatype value. -/
+/-- A sort declared by the block exposes its unique free-datatype value. -/
 def asData {arity : Nat} {block : Block arity} (wf : block.WF)
-    {Prior : BaseSort → Type} (owner : DataRef block) :
-    BaseLift block Prior owner.decl.sort → Val block Prior owner
+    {Prior : BaseSort → Type} (dataRef : DataRef block) :
+    BaseLift block Prior dataRef.decl.sort → Val block Prior dataRef
   | .data other same value => by
-      have equal : other = owner := wf.data_eq same
+      have equal : other = dataRef := wf.data_eq same
       subst other
       exact value
-  | .external fresh _ => False.elim (fresh owner rfl)
+  | .external fresh _ => False.elim (fresh dataRef rfl)
 
 @[simp] theorem asData_data {arity : Nat} {block : Block arity}
-    (wf : block.WF) {Prior : BaseSort → Type} (owner : DataRef block)
-    {same : owner.decl.sort = owner.decl.sort}
-    (value : Val block Prior owner) :
-    asData wf owner (.data owner same value) = value := by
+    (wf : block.WF) {Prior : BaseSort → Type} (dataRef : DataRef block)
+    {same : dataRef.decl.sort = dataRef.decl.sort}
+    (value : Val block Prior dataRef) :
+    asData wf dataRef (.data dataRef same value) = value := by
   rw [Subsingleton.elim same rfl]
   simp [asData]
 
-/-- Re-embedding the unique owned value recovers the original carrier value. -/
+/-- Re-embedding the unique datatype value recovers the original carrier value. -/
 theorem data_asData {arity : Nat} {block : Block arity}
-    (wf : block.WF) {Prior : BaseSort → Type} (owner : DataRef block)
-    (value : BaseLift block Prior owner.decl.sort) :
-    .data owner rfl (asData wf owner value) = value := by
+    (wf : block.WF) {Prior : BaseSort → Type} (dataRef : DataRef block)
+    (value : BaseLift block Prior dataRef.decl.sort) :
+    .data dataRef rfl (asData wf dataRef value) = value := by
   cases value with
   | data other same value =>
-      have equal : other = owner := wf.data_eq same
+      have equal : other = dataRef := wf.data_eq same
       subst other
       simp [asData]
-  | external fresh value => exact False.elim (fresh owner rfl)
+  | external fresh value => exact False.elim (fresh dataRef rfl)
 
 /-- A sort known to be external exposes its unchanged prior value. -/
 def asExternal {arity : Nat} {block : Block arity}
     {Prior : BaseSort → Type} (sort : BaseSort)
-    (fresh : ∀ owner : DataRef block, owner.decl.sort ≠ sort) :
+    (fresh : ∀ dataRef : DataRef block, dataRef.decl.sort ≠ sort) :
     BaseLift block Prior sort → Prior sort
-  | .data owner same _ => False.elim (fresh owner same)
+  | .data dataRef same _ => False.elim (fresh dataRef same)
   | .external _ value => value
 
 @[simp] theorem asExternal_external {arity : Nat} {block : Block arity}
     {Prior : BaseSort → Type} (sort : BaseSort)
-    (fresh : ∀ owner : DataRef block, owner.decl.sort ≠ sort)
+    (fresh : ∀ dataRef : DataRef block, dataRef.decl.sort ≠ sort)
     (value : Prior sort) :
     asExternal sort fresh (.external fresh value) = value := rfl
 
 /-- Re-embedding a known external value recovers the original carrier value. -/
 theorem external_asExternal {arity : Nat} {block : Block arity}
     {Prior : BaseSort → Type} (sort : BaseSort)
-    (fresh : ∀ owner : DataRef block, owner.decl.sort ≠ sort)
+    (fresh : ∀ dataRef : DataRef block, dataRef.decl.sort ≠ sort)
     (value : BaseLift block Prior sort) :
     .external fresh (asExternal sort fresh value) = value := by
   cases value with
-  | data owner same value => exact False.elim (fresh owner same)
+  | data dataRef same value => exact False.elim (fresh dataRef same)
   | external otherFresh value => rfl
 
-/-- An owned extended carrier is isomorphic to the corresponding complete free
+/-- A declared-sort carrier is isomorphic to the corresponding complete free
 datatype carrier. -/
 def dataIso {arity : Nat} {block : Block arity} (wf : block.WF)
-    {Prior : BaseSort → Type} (owner : DataRef block) :
-    Iso (BaseLift block Prior owner.decl.sort) (Val block Prior owner) where
-  to := asData wf owner
-  «from» := .data owner rfl
-  left_inv := data_asData wf owner
-  right_inv := asData_data wf owner
+    {Prior : BaseSort → Type} (dataRef : DataRef block) :
+    Iso (BaseLift block Prior dataRef.decl.sort) (Val block Prior dataRef) where
+  to := asData wf dataRef
+  «from» := .data dataRef rfl
+  left_inv := data_asData wf dataRef
+  right_inv := asData_data wf dataRef
 
 /-- A sort external to the block is isomorphic to its unchanged prior
 carrier. -/
 def externalIso {arity : Nat} {block : Block arity}
     {Prior : BaseSort → Type} (sort : BaseSort)
-    (fresh : ∀ owner : DataRef block, owner.decl.sort ≠ sort) :
+    (fresh : ∀ dataRef : DataRef block, dataRef.decl.sort ≠ sort) :
     Iso (BaseLift block Prior sort) (Prior sort) where
   to := asExternal sort fresh
   «from» := .external fresh
@@ -111,50 +111,50 @@ theorem nonempty {arity : Nat} {block : Block arity}
     ∀ sort, Nonempty (BaseLift block Prior sort) := by
   classical
   intro sort
-  by_cases owned : ∃ owner : DataRef block, owner.decl.sort = sort
-  · let owner := Classical.choose owned
-    have equal := Classical.choose_spec owned
-    let ⟨value⟩ := val_nonempty productive prior owner
-    exact equal ▸ ⟨.data owner rfl value⟩
-  · let fresh : ∀ owner : DataRef block, owner.decl.sort ≠ sort := by
-      intro owner equal
-      exact owned ⟨owner, equal⟩
+  by_cases dataAtSort : ∃ dataRef : DataRef block, dataRef.decl.sort = sort
+  · let dataRef := Classical.choose dataAtSort
+    have equal := Classical.choose_spec dataAtSort
+    let ⟨value⟩ := val_nonempty productive prior dataRef
+    exact equal ▸ ⟨.data dataRef rfl value⟩
+  · let fresh : ∀ dataRef : DataRef block, dataRef.decl.sort ≠ sort := by
+      intro dataRef equal
+      exact dataAtSort ⟨dataRef, equal⟩
     exact ⟨.external fresh (Classical.choice (prior sort))⟩
 
-/-- Relation at a sort owned by the new block: cross the source carrier
+/-- Representation at a sort declared by the new block: cross the source carrier
 isomorphism, then lift the complete constructor tree pointwise. -/
 def datatypeRepresentation {arity : Nat} {block : Block arity} (wf : block.WF)
     (productive : Productive block)
     {Source : BaseSort → Type} {Prior : BaseSort → Type}
     (base : BaseRepresentations Source Prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (Source owner.decl.sort) (Val block Source owner))
-    (owner : DataRef block) :
-    SubsetRepresentation (Source owner.decl.sort) (BaseLift block Prior owner.decl.sort) :=
-  let lifted := Datatype.lift base productive owner
-  { sourceNonempty := base owner.decl.sort |>.sourceNonempty
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (Source dataRef.decl.sort) (Val block Source dataRef))
+    (dataRef : DataRef block) :
+    SubsetRepresentation (Source dataRef.decl.sort) (BaseLift block Prior dataRef.decl.sort) :=
+  let lifted := Datatype.lift base productive dataRef
+  { sourceNonempty := base dataRef.decl.sort |>.sourceNonempty
     encode := fun value =>
-      .data owner rfl (lifted.encode (carrier owner |>.to value))
-    guard := fun value => lifted.guard (asData wf owner value)
+      .data dataRef rfl (lifted.encode (carrier dataRef |>.to value))
+    guard := fun value => lifted.guard (asData wf dataRef value)
     encode_guard := fun value => by
       simp only [asData_data]
       exact lifted.encode_guard _
     decode := fun value guarded =>
-      carrier owner |>.«from» (lifted.decode (asData wf owner value) guarded)
+      carrier dataRef |>.«from» (lifted.decode (asData wf dataRef value) guarded)
     decode_encode := fun value => by
       simp only [asData_data, lifted.decode_encode]
-      exact (carrier owner).left_inv value
+      exact (carrier dataRef).left_inv value
     encode_decode := fun value guarded => by
-      rw [(carrier owner).right_inv]
+      rw [(carrier dataRef).right_inv]
       simp only [lifted.encode_decode]
-      exact data_asData wf owner value }
+      exact data_asData wf dataRef value }
 
-/-- Relation at a sort not owned by the new block: wrap the existing guarded
+/-- Representation at a sort not declared by the new block: wrap the existing guarded
 relation without changing its semantic carrier. -/
 def externalRepresentation {arity : Nat} {block : Block arity}
     {Source : BaseSort → Type} {Prior : BaseSort → Type}
     (base : BaseRepresentations Source Prior) (sort : BaseSort)
-    (fresh : ∀ owner : DataRef block, owner.decl.sort ≠ sort) :
+    (fresh : ∀ dataRef : DataRef block, dataRef.decl.sort ≠ sort) :
     SubsetRepresentation (Source sort) (BaseLift block Prior sort) where
   sourceNonempty := (base sort).sourceNonempty
   encode := fun value => .external fresh ((base sort).encode value)
@@ -171,54 +171,54 @@ def externalRepresentation {arity : Nat} {block : Block arity}
     rw [(base sort).encode_decode]
     exact external_asExternal sort fresh value
 
-/-- A datatype reference whose declaration owns the selected base sort. -/
-abbrev OwnerAt {arity : Nat} (block : Block arity) (sort : BaseSort) :=
-  { owner : DataRef block // owner.decl.sort = sort }
+/-- A datatype declaration at the selected base sort. -/
+abbrev DataAtSort {arity : Nat} (block : Block arity) (sort : BaseSort) :=
+  { dataRef : DataRef block // dataRef.decl.sort = sort }
 
-/-- A total lookup deciding which base sorts are owned by one datatype block. -/
-structure Ownership {arity : Nat} (block : Block arity) where
-  decide : ∀ sort, OwnerAt block sort ⊕
-    PLift (∀ owner : DataRef block, owner.decl.sort ≠ sort)
-  complete : ∀ owner,
-    decide owner.decl.sort = Sum.inl ⟨owner, rfl⟩
+/-- A total lookup deciding which base sorts are declared by one datatype block. -/
+structure BlockSortLookup {arity : Nat} (block : Block arity) where
+  decide : ∀ sort, DataAtSort block sort ⊕
+    PLift (∀ dataRef : DataRef block, dataRef.decl.sort ≠ sort)
+  complete : ∀ dataRef,
+    decide dataRef.decl.sort = Sum.inl ⟨dataRef, rfl⟩
 
 /-- The canonical lookup induced by distinct datatype sort names. -/
-noncomputable def Ownership.ofWF {arity : Nat} {block : Block arity}
-    (wf : block.WF) : Ownership block where
-  decide := fun sort => if owned : ∃ owner : DataRef block,
-      owner.decl.sort = sort then
-    Sum.inl ⟨Classical.choose owned, Classical.choose_spec owned⟩
+noncomputable def BlockSortLookup.ofWF {arity : Nat} {block : Block arity}
+    (wf : block.WF) : BlockSortLookup block where
+  decide := fun sort => if dataAtSort : ∃ dataRef : DataRef block,
+      dataRef.decl.sort = sort then
+    Sum.inl ⟨Classical.choose dataAtSort, Classical.choose_spec dataAtSort⟩
   else
-    Sum.inr ⟨fun owner equal => owned ⟨owner, equal⟩⟩
+    Sum.inr ⟨fun dataRef equal => dataAtSort ⟨dataRef, equal⟩⟩
   complete := by
-    intro owner
+    intro dataRef
     split
-    next owned =>
+    next dataAtSort =>
       apply congrArg Sum.inl
       apply Subtype.ext
-      exact wf.data_eq (Classical.choose_spec owned)
-    next notOwned => exact False.elim (notOwned ⟨owner, rfl⟩)
+      exact wf.data_eq (Classical.choose_spec dataAtSort)
+    next absent => exact False.elim (absent ⟨dataRef, rfl⟩)
 
-theorem Ownership.external {arity : Nat} {block : Block arity}
-    (ownership : Ownership block) (sort : BaseSort)
-    (fresh : ∀ owner : DataRef block, owner.decl.sort ≠ sort) :
-    ownership.decide sort = .inr ⟨fresh⟩ := by
-  cases equal : ownership.decide sort with
-  | inl owned => exact False.elim (fresh owned.1 owned.2)
+theorem BlockSortLookup.external {arity : Nat} {block : Block arity}
+    (sortLookup : BlockSortLookup block) (sort : BaseSort)
+    (fresh : ∀ dataRef : DataRef block, dataRef.decl.sort ≠ sort) :
+    sortLookup.decide sort = .inr ⟨fresh⟩ := by
+  cases equal : sortLookup.decide sort with
+  | inl dataAtSort => exact False.elim (fresh dataAtSort.1 dataAtSort.2)
   | inr absent =>
       exact congrArg Sum.inr (Subsingleton.elim absent ⟨fresh⟩)
 
-/-- Extend every source-to-prior base relation through an explicit ownership
+/-- Extend every source-to-prior base relation through an explicit block-sort
 lookup for one productive datatype block. -/
 def representationsWith {arity : Nat} {block : Block arity}
-    (ownership : Ownership block) (wf : block.WF) (productive : Productive block)
+    (sortLookup : BlockSortLookup block) (wf : block.WF) (productive : Productive block)
     {Source : BaseSort → Type} {Prior : BaseSort → Type}
     (base : BaseRepresentations Source Prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (Source owner.decl.sort) (Val block Source owner)) :
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (Source dataRef.decl.sort) (Val block Source dataRef)) :
     (sort : BaseSort) → SubsetRepresentation (Source sort) (BaseLift block Prior sort) :=
-  fun sort => match ownership.decide sort with
-    | .inl ⟨owner, same⟩ => same ▸ datatypeRepresentation wf productive base carrier owner
+  fun sort => match sortLookup.decide sort with
+    | .inl ⟨dataRef, same⟩ => same ▸ datatypeRepresentation wf productive base carrier dataRef
     | .inr fresh => externalRepresentation base sort fresh.down
 
 /-- Canonical relation extension selected by block well-formedness. -/
@@ -226,53 +226,53 @@ noncomputable def subsetRepresentation {arity : Nat} {block : Block arity} (wf :
     (productive : Productive block)
     {Source : BaseSort → Type} {Prior : BaseSort → Type}
     (base : BaseRepresentations Source Prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (Source owner.decl.sort) (Val block Source owner)) :
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (Source dataRef.decl.sort) (Val block Source dataRef)) :
     ∀ sort, SubsetRepresentation (Source sort) (BaseLift block Prior sort) :=
-  representationsWith (Ownership.ofWF wf) wf productive base carrier
+  representationsWith (BlockSortLookup.ofWF wf) wf productive base carrier
 
 @[simp] theorem representationsWith_datatype {arity : Nat} {block : Block arity}
-    (ownership : Ownership block) (wf : block.WF) (productive : Productive block)
+    (sortLookup : BlockSortLookup block) (wf : block.WF) (productive : Productive block)
     {Source Prior : BaseSort → Type} (base : BaseRepresentations Source Prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (Source owner.decl.sort) (Val block Source owner))
-    (owner : DataRef block) :
-    representationsWith ownership wf productive base carrier owner.decl.sort =
-      datatypeRepresentation wf productive base carrier owner := by
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (Source dataRef.decl.sort) (Val block Source dataRef))
+    (dataRef : DataRef block) :
+    representationsWith sortLookup wf productive base carrier dataRef.decl.sort =
+      datatypeRepresentation wf productive base carrier dataRef := by
   unfold representationsWith
-  simp [ownership.complete owner]
+  simp [sortLookup.complete dataRef]
 
 @[simp] theorem representationsWith_external {arity : Nat} {block : Block arity}
-    (ownership : Ownership block) (wf : block.WF) (productive : Productive block)
+    (sortLookup : BlockSortLookup block) (wf : block.WF) (productive : Productive block)
     {Source Prior : BaseSort → Type} (base : BaseRepresentations Source Prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (Source owner.decl.sort) (Val block Source owner))
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (Source dataRef.decl.sort) (Val block Source dataRef))
     (sort : BaseSort)
-    (fresh : ∀ owner : DataRef block, owner.decl.sort ≠ sort) :
-    representationsWith ownership wf productive base carrier sort =
+    (fresh : ∀ dataRef : DataRef block, dataRef.decl.sort ≠ sort) :
+    representationsWith sortLookup wf productive base carrier sort =
       externalRepresentation base sort fresh := by
   unfold representationsWith
-  simp [ownership.external sort fresh]
+  simp [sortLookup.external sort fresh]
 
 @[simp] theorem subsetRepresentation_datatype {arity : Nat} {block : Block arity}
     (wf : block.WF) (productive : Productive block)
     {Source Prior : BaseSort → Type} (base : BaseRepresentations Source Prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (Source owner.decl.sort) (Val block Source owner))
-    (owner : DataRef block) :
-    subsetRepresentation wf productive base carrier owner.decl.sort =
-      datatypeRepresentation wf productive base carrier owner := by
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (Source dataRef.decl.sort) (Val block Source dataRef))
+    (dataRef : DataRef block) :
+    subsetRepresentation wf productive base carrier dataRef.decl.sort =
+      datatypeRepresentation wf productive base carrier dataRef := by
   simp [subsetRepresentation, representationsWith_datatype]
 
 @[simp] theorem subsetRepresentation_external {arity : Nat} {block : Block arity}
     (wf : block.WF) (productive : Productive block)
     {Source Prior : BaseSort → Type} (base : BaseRepresentations Source Prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (Source owner.decl.sort) (Val block Source owner))
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (Source dataRef.decl.sort) (Val block Source dataRef))
     (sort : BaseSort)
-    (fresh : ∀ owner : DataRef block, owner.decl.sort ≠ sort) :
+    (fresh : ∀ dataRef : DataRef block, dataRef.decl.sort ≠ sort) :
     subsetRepresentation wf productive base carrier sort = externalRepresentation base sort fresh := by
-  exact representationsWith_external (Ownership.ofWF wf) wf productive base carrier
+  exact representationsWith_external (BlockSortLookup.ofWF wf) wf productive base carrier
     sort fresh
 
 /-- Extend the base component of an FO carrier family by one full datatype
@@ -284,14 +284,14 @@ def carriers {arity : Nat} {block : Block arity}
   baseNonempty := nonempty productive prior.baseNonempty
   fnNonempty := prior.fnNonempty
 
-/-- Lift an existing source-to-target FO carrier relation through one lawful
-datatype block. This is the dependency-order step used to assemble the complete
+/-- Lift an existing source-to-target FO carrier relation through one free-datatype
+block. This is the dependency-order step used to assemble the complete
 target carrier family. -/
 noncomputable def carrierRel {arity : Nat} {block : Block arity}
     (wf : block.WF) (productive : Productive block)
     {source prior : FO.Carriers} (relation : FO.CarrierRel source prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (source.Base owner.decl.sort) (Val block source.Base owner)) :
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (source.Base dataRef.decl.sort) (Val block source.Base dataRef)) :
     FO.CarrierRel source (carriers productive prior) where
   base := subsetRepresentation wf productive relation.base carrier
   fn := relation.fn
@@ -299,11 +299,11 @@ noncomputable def carrierRel {arity : Nat} {block : Block arity}
 /-! ## Transport through a later disjoint block -/
 
 /-- An FO sort is unchanged by a block when it is logical, an opaque function
-sort, or a base sort not owned by that block. -/
+sort, or a base sort not declared by that block. -/
 def External {arity : Nat} (block : Block arity) : FO.FOSort → Prop
   | .bool => True
   | .fn _ _ => True
-  | .base sort => ∀ owner : DataRef block, owner.decl.sort ≠ sort
+  | .base sort => ∀ dataRef : DataRef block, dataRef.decl.sort ≠ sort
 
 /-- Every argument and the result of a symbol declaration remain unchanged by
 this datatype block. -/
@@ -339,9 +339,9 @@ def unwrap {arity : Nat} {block : Block arity}
     unwrap productive external (wrapWith productive external value) = value := by
   cases sort <;> rfl
 
-/-- Carry a curried symbol interpretation through a later block when every
+/-- Transport a curried symbol interpretation through a later block when every
 argument and its result remain external to that block. -/
-def carry {arity : Nat} {block : Block arity}
+def transportSymbol {arity : Nat} {block : Block arity}
     (productive : Productive block) {prior : FO.Carriers} :
     {arguments : List FO.FOSort} → {result : FO.FOSort} →
     (∀ sort ∈ arguments, External block sort) → External block result →
@@ -350,7 +350,7 @@ def carry {arity : Nat} {block : Block arity}
   | [], _, _, resultExternal, value =>
       wrapWith productive resultExternal value
   | argument :: arguments, _, argumentsExternal, resultExternal, function =>
-      fun value => carry productive
+      fun value => transportSymbol productive
         (fun sort member => argumentsExternal sort (by simp [member]))
         resultExternal
         (function (unwrap productive (argumentsExternal argument (by simp)) value))
@@ -361,8 +361,8 @@ theorem wrap_encode {arity : Nat} {block : Block arity}
     (wf : block.WF) (productive : Productive block)
     {source prior : FO.Carriers}
     (priorRel : FO.CarrierRel source prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (source.Base owner.decl.sort) (Val block source.Base owner))
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (source.Base dataRef.decl.sort) (Val block source.Base dataRef))
     {sort : FO.FOSort} (external : External block sort)
     (value : sort.Denote source) :
     wrapWith productive external ((priorRel sort).encode value) =
@@ -375,14 +375,14 @@ theorem wrap_encode {arity : Nat} {block : Block arity}
       rw [subsetRepresentation_external wf productive priorRel.base carrier sort external]
       rfl
 
-/-- Carrying a previously related symbol through a disjoint later block
+/-- Transporting a previously related symbol through a disjoint later block
 preserves its relation to the original source interpretation. -/
-theorem carry_rel {arity : Nat} {block : Block arity}
+theorem transportSymbol_rel {arity : Nat} {block : Block arity}
     (wf : block.WF) (productive : Productive block)
     {source prior : FO.Carriers}
     (priorRel : FO.CarrierRel source prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (source.Base owner.decl.sort) (Val block source.Base owner)) :
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (source.Base dataRef.decl.sort) (Val block source.Base dataRef)) :
     {arguments : List FO.FOSort} → {result : FO.FOSort} →
     (argumentsExternal : ∀ sort ∈ arguments, External block sort) →
     (resultExternal : External block result) →
@@ -390,7 +390,7 @@ theorem carry_rel {arity : Nat} {block : Block arity}
     (priorValue : FO.SymbolDenote prior arguments result) →
     FO.SymbolRel priorRel sourceValue priorValue →
       FO.SymbolRel (carrierRel wf productive priorRel carrier) sourceValue
-        (carry productive argumentsExternal resultExternal priorValue)
+        (transportSymbol productive argumentsExternal resultExternal priorValue)
   | [], result, _, resultExternal, sourceValue, priorValue, related => by
       change wrapWith productive resultExternal priorValue =
         ((carrierRel wf productive priorRel carrier) result).encode sourceValue
@@ -398,11 +398,11 @@ theorem carry_rel {arity : Nat} {block : Block arity}
   | argument :: arguments, result, argumentsExternal,
       resultExternal, sourceValue, priorValue, related => by
       intro value
-      simp only [carry]
+      simp only [transportSymbol]
       rw [← wrap_encode wf productive priorRel carrier
           (argumentsExternal argument (by simp)) value,
         unwrap_wrap]
-      exact carry_rel wf productive priorRel carrier
+      exact transportSymbol_rel wf productive priorRel carrier
         (fun sort member => argumentsExternal sort (by simp [member]))
         resultExternal (sourceValue value) (priorValue ((priorRel argument).encode value))
         (related value)
@@ -411,8 +411,8 @@ theorem carry_rel {arity : Nat} {block : Block arity}
 arguments cross the source carrier isomorphism into free constructor payloads. -/
 def sourceCurry {arity : Nat} {block : Block arity}
     (source : FO.Carriers)
-    (carrier : ∀ owner : DataRef block,
-      Iso (source.Base owner.decl.sort) (Val block source.Base owner)) :
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (source.Base dataRef.decl.sort) (Val block source.Base dataRef)) :
     (fields : List (FieldDecl arity)) → (result : BaseSort) →
     (Args block source.Base fields → source.Base result) →
       FO.SymbolDenote source (fields.map fun field => field.fo block) (.base result)
@@ -427,27 +427,27 @@ def sourceCurry {arity : Nat} {block : Block arity}
 /-- Source interpretation of one constructor at its flattened FO declaration. -/
 def sourceCtor {arity : Nat} {block : Block arity}
     (source : FO.Carriers)
-    (carrier : ∀ owner : DataRef block,
-      Iso (source.Base owner.decl.sort) (Val block source.Base owner))
-    {data : DataRef block} {ctor : CtorDecl arity}
-    (ctorRef : CtorRef block data ctor) :
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (source.Base dataRef.decl.sort) (Val block source.Base dataRef))
+    {dataRef : DataRef block} {ctor : CtorDecl arity}
+    (ctorRef : CtorRef block dataRef ctor) :
     FO.SymbolDenote source
-      (ctor.fields.map fun field => field.fo block) (.base data.decl.sort) :=
-  sourceCurry source carrier ctor.fields data.decl.sort fun args =>
-    (carrier data).«from» (.ctor ctorRef args)
+      (ctor.fields.map fun field => field.fo block) (.base dataRef.decl.sort) :=
+  sourceCurry source carrier ctor.fields dataRef.decl.sort fun args =>
+    (carrier dataRef).«from» (.ctor ctorRef args)
 
 /-- Curry a constructor telescope over the enlarged target carriers. External
 fields are unwrapped to their prior payload and recursive fields to their free
-datatype payload; the result is re-embedded at its owned sort. -/
+datatype payload; the result is re-embedded at its dataAtSort sort. -/
 def targetCurry {arity : Nat} {block : Block arity}
     (wf : block.WF) (productive : Productive block) (prior : FO.Carriers)
-    {data : DataRef block} {ctor : CtorDecl arity}
-    (ctorRef : CtorRef block data ctor) :
+    {dataRef : DataRef block} {ctor : CtorDecl arity}
+    (ctorRef : CtorRef block dataRef ctor) :
     (fields : List (FieldDecl arity)) →
     (refs : ∀ {field}, Ref fields field → FieldRef ctor field) →
-    (Args block prior.Base fields → BaseLift block prior.Base data.decl.sort) →
+    (Args block prior.Base fields → BaseLift block prior.Base dataRef.decl.sort) →
     FO.SymbolDenote (carriers productive prior)
-      (fields.map fun field => field.fo block) (.base data.decl.sort)
+      (fields.map fun field => field.fo block) (.base dataRef.decl.sort)
   | [], _, build => build .nil
   | field :: rest, refs, build =>
       match field with
@@ -467,12 +467,12 @@ def targetCurry {arity : Nat} {block : Block arity}
 FO carriers. -/
 def targetCtor {arity : Nat} {block : Block arity}
     (wf : block.WF) (productive : Productive block) (prior : FO.Carriers)
-    {data : DataRef block} {ctor : CtorDecl arity}
-    (ctorRef : CtorRef block data ctor) :
+    {dataRef : DataRef block} {ctor : CtorDecl arity}
+    (ctorRef : CtorRef block dataRef ctor) :
     FO.SymbolDenote (carriers productive prior)
-      (ctor.fields.map fun field => field.fo block) (.base data.decl.sort) :=
+      (ctor.fields.map fun field => field.fo block) (.base dataRef.decl.sort) :=
   targetCurry wf productive prior ctorRef ctor.fields (fun ref => ref) fun args =>
-    .data data rfl (.ctor ctorRef args)
+    .data dataRef rfl (.ctor ctorRef args)
 
 /-- Source and full target constructor currying are related whenever their
 result builders agree on pointwise encoded argument telescopes. -/
@@ -480,25 +480,25 @@ theorem curry_rel {arity : Nat} {block : Block arity}
     (wf : block.WF) (productive : Productive block)
     (source prior : FO.Carriers)
     (priorRel : FO.CarrierRel source prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (source.Base owner.decl.sort) (Val block source.Base owner))
-    {data : DataRef block} {ctor : CtorDecl arity}
-    (ctorRef : CtorRef block data ctor) :
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (source.Base dataRef.decl.sort) (Val block source.Base dataRef))
+    {dataRef : DataRef block} {ctor : CtorDecl arity}
+    (ctorRef : CtorRef block dataRef ctor) :
     (fields : List (FieldDecl arity)) →
     (refs : ∀ {field}, Ref fields field → FieldRef ctor field) →
-    (sourceBuild : Args block source.Base fields → source.Base data.decl.sort) →
+    (sourceBuild : Args block source.Base fields → source.Base dataRef.decl.sort) →
     (targetBuild : Args block prior.Base fields →
-      BaseLift block prior.Base data.decl.sort) →
+      BaseLift block prior.Base dataRef.decl.sort) →
     (∀ args, targetBuild (args.encode priorRel.base) =
-      ((carrierRel wf productive priorRel carrier) (.base data.decl.sort)).encode
+      ((carrierRel wf productive priorRel carrier) (.base dataRef.decl.sort)).encode
         (sourceBuild args)) →
     FO.SymbolRel (carrierRel wf productive priorRel carrier)
-      (sourceCurry source carrier fields data.decl.sort sourceBuild)
+      (sourceCurry source carrier fields dataRef.decl.sort sourceBuild)
       (targetCurry wf productive prior ctorRef fields refs targetBuild)
   | [], refs, sourceBuild, targetBuild, builders => by
       change targetBuild .nil =
         ((carrierRel wf productive priorRel carrier)
-          (.base data.decl.sort)).encode (sourceBuild .nil)
+          (.base dataRef.decl.sort)).encode (sourceBuild .nil)
       simpa [Args.encode] using builders .nil
   | field :: rest, refs, sourceBuild, targetBuild, builders => by
       cases field with
@@ -559,10 +559,10 @@ theorem ctor_rel {arity : Nat} {block : Block arity}
     (wf : block.WF) (productive : Productive block)
     (source prior : FO.Carriers)
     (priorRel : FO.CarrierRel source prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (source.Base owner.decl.sort) (Val block source.Base owner))
-    {data : DataRef block} {ctor : CtorDecl arity}
-    (ctorRef : CtorRef block data ctor) :
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (source.Base dataRef.decl.sort) (Val block source.Base dataRef))
+    {dataRef : DataRef block} {ctor : CtorDecl arity}
+    (ctorRef : CtorRef block dataRef ctor) :
     FO.SymbolRel (carrierRel wf productive priorRel carrier)
       (sourceCtor source carrier ctorRef)
       (targetCtor wf productive prior ctorRef) := by
@@ -570,12 +570,12 @@ theorem ctor_rel {arity : Nat} {block : Block arity}
     ctor.fields (fun ref => ref)
   intro args
   simp only [FO.CarrierRel.get, carrierRel]
-  rw [subsetRepresentation_datatype wf productive priorRel.base carrier data]
-  change BaseLift.data data rfl (.ctor ctorRef (args.encode priorRel.base)) =
-    BaseLift.data data rfl
-      (((carrier data).to
-        ((carrier data).«from» (.ctor ctorRef args))).encode priorRel.base)
-  rw [(carrier data).right_inv]
+  rw [subsetRepresentation_datatype wf productive priorRel.base carrier dataRef]
+  change BaseLift.data dataRef rfl (.ctor ctorRef (args.encode priorRel.base)) =
+    BaseLift.data dataRef rfl
+      (((carrier dataRef).to
+        ((carrier dataRef).«from» (.ctor ctorRef args))).encode priorRel.base)
+  rw [(carrier dataRef).right_inv]
   rfl
 
 /-- Canonical fallback payload for a total native selector. -/
@@ -594,8 +594,8 @@ noncomputable def fieldDefault {arity : Nat} {block : Block arity}
 its field declaration. -/
 def putField {arity : Nat} {block : Block arity} (wf : block.WF)
     (productive : Productive block) (prior : FO.Carriers)
-    {data : DataRef block} {ctor : CtorDecl arity}
-    (ctorRef : CtorRef block data ctor) (field : FieldDecl arity)
+    {dataRef : DataRef block} {ctor : CtorDecl arity}
+    (ctorRef : CtorRef block dataRef ctor) (field : FieldDecl arity)
     (fieldRef : FieldRef ctor field) :
     field.Denote block prior.Base →
       (field.fo block).Denote (carriers productive prior)
@@ -610,8 +610,8 @@ def putField {arity : Nat} {block : Block arity} (wf : block.WF)
 /-- Convert a canonical source field payload to its flattened FO carrier. -/
 def sourceField {arity : Nat} {block : Block arity}
     {source : FO.Carriers}
-    (carrier : ∀ owner : DataRef block,
-      Iso (source.Base owner.decl.sort) (Val block source.Base owner))
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (source.Base dataRef.decl.sort) (Val block source.Base dataRef))
     (field : FieldDecl arity) :
     field.Denote block source.Base → (field.fo block).Denote source :=
   match field with
@@ -623,10 +623,10 @@ field guard into exactly the shared carrier guard. -/
 theorem putField_guard {arity : Nat} {block : Block arity}
     (wf : block.WF) (productive : Productive block)
     {source prior : FO.Carriers} (priorRel : FO.CarrierRel source prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (source.Base owner.decl.sort) (Val block source.Base owner))
-    {data : DataRef block} {ctor : CtorDecl arity}
-    (ctorRef : CtorRef block data ctor) (field : FieldDecl arity)
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (source.Base dataRef.decl.sort) (Val block source.Base dataRef))
+    {dataRef : DataRef block} {ctor : CtorDecl arity}
+    (ctorRef : CtorRef block dataRef ctor) (field : FieldDecl arity)
     (fieldRef : FieldRef ctor field)
     (value : field.Denote block prior.Base) :
     ((carrierRel wf productive priorRel carrier)
@@ -659,10 +659,10 @@ followed by conversion back to the source carrier. -/
 theorem decode_putField {arity : Nat} {block : Block arity}
     (wf : block.WF) (productive : Productive block)
     {source prior : FO.Carriers} (priorRel : FO.CarrierRel source prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (source.Base owner.decl.sort) (Val block source.Base owner))
-    {data : DataRef block} {ctor : CtorDecl arity}
-    (ctorRef : CtorRef block data ctor) (field : FieldDecl arity)
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (source.Base dataRef.decl.sort) (Val block source.Base dataRef))
+    {dataRef : DataRef block} {ctor : CtorDecl arity}
+    (ctorRef : CtorRef block dataRef ctor) (field : FieldDecl arity)
     (fieldRef : FieldRef ctor field)
     (value : field.Denote block prior.Base)
     (wellFormed : field.WF (fun sort => (priorRel.base sort).guard) value) :
@@ -703,25 +703,25 @@ behavior required by the native datatype declaration on matching constructors. -
 noncomputable def targetSel {arity : Nat} {block : Block arity}
     (wf : block.WF) (productive : Productive block)
     {source prior : FO.Carriers} (priorRel : FO.CarrierRel source prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (source.Base owner.decl.sort) (Val block source.Base owner))
-    {data : DataRef block} {ctor : CtorDecl arity}
-    (ctorRef : CtorRef block data ctor) {field : FieldDecl arity}
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (source.Base dataRef.decl.sort) (Val block source.Base dataRef))
+    {dataRef : DataRef block} {ctor : CtorDecl arity}
+    (ctorRef : CtorRef block dataRef ctor) {field : FieldDecl arity}
     (fieldRef : FieldRef ctor field)
-    (sourceSel : source.Base data.decl.sort →
+    (sourceSel : source.Base dataRef.decl.sort →
       (field.fo block).Denote source) :
     FO.SymbolDenote (carriers productive prior)
-      [(.base data.decl.sort)] (field.fo block) := by
+      [(.base dataRef.decl.sort)] (field.fo block) := by
   classical
   exact fun value =>
     let relation := carrierRel wf productive priorRel carrier
-    if guarded : (relation (.base data.decl.sort)).guard value then
+    if guarded : (relation (.base dataRef.decl.sort)).guard value then
       (relation (field.fo block)).encode
-        (sourceSel ((relation (.base data.decl.sort)).decode value guarded))
+        (sourceSel ((relation (.base dataRef.decl.sort)).decode value guarded))
     else
       putField wf productive prior ctorRef field fieldRef
         (sel ctorRef fieldRef (fieldDefault productive prior field)
-          (asData wf data value))
+          (asData wf dataRef value))
 
 /-- The guarded target selector agrees with the source selector on every
 encoded source value, including its unspecified behavior on nonmatching
@@ -730,14 +730,14 @@ theorem sel_rel {arity : Nat} {block : Block arity}
     (wf : block.WF) (productive : Productive block)
     (source prior : FO.Carriers)
     (priorRel : FO.CarrierRel source prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (source.Base owner.decl.sort) (Val block source.Base owner))
-    {data : DataRef block} {ctor : CtorDecl arity}
-    (ctorRef : CtorRef block data ctor) {field : FieldDecl arity}
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (source.Base dataRef.decl.sort) (Val block source.Base dataRef))
+    {dataRef : DataRef block} {ctor : CtorDecl arity}
+    (ctorRef : CtorRef block dataRef ctor) {field : FieldDecl arity}
     (fieldRef : FieldRef ctor field)
-    (sourceSel : source.Base data.decl.sort →
+    (sourceSel : source.Base dataRef.decl.sort →
       (field.fo block).Denote source) :
-    FO.SymbolRel (arguments := [.base data.decl.sort])
+    FO.SymbolRel (arguments := [.base dataRef.decl.sort])
       (result := field.fo block)
       (carrierRel wf productive priorRel carrier)
       sourceSel
@@ -745,10 +745,10 @@ theorem sel_rel {arity : Nat} {block : Block arity}
   intro value
   simp only [targetSel]
   have guarded := ((carrierRel wf productive priorRel carrier)
-    (.base data.decl.sort)).encode_guard value
+    (.base dataRef.decl.sort)).encode_guard value
   rw [dif_pos guarded]
   rw [((carrierRel wf productive priorRel carrier)
-    (.base data.decl.sort)).decode_encode value]
+    (.base dataRef.decl.sort)).decode_encode value]
   rfl
 
 /-- On its own constructor, the guarded target selector satisfies the native
@@ -758,19 +758,19 @@ theorem targetSel_ctor {arity : Nat} {block : Block arity}
     (wf : block.WF) (productive : Productive block)
     (source prior : FO.Carriers)
     (priorRel : FO.CarrierRel source prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (source.Base owner.decl.sort) (Val block source.Base owner))
-    {data : DataRef block} {ctor : CtorDecl arity}
-    (ctorRef : CtorRef block data ctor) {field : FieldDecl arity}
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (source.Base dataRef.decl.sort) (Val block source.Base dataRef))
+    {dataRef : DataRef block} {ctor : CtorDecl arity}
+    (ctorRef : CtorRef block dataRef ctor) {field : FieldDecl arity}
     (fieldRef : FieldRef ctor field)
-    (sourceSel : source.Base data.decl.sort →
+    (sourceSel : source.Base dataRef.decl.sort →
       (field.fo block).Denote source)
     (matching : ∀ args : Args block source.Base ctor.fields,
-      sourceSel ((carrier data).«from» (.ctor ctorRef args)) =
+      sourceSel ((carrier dataRef).«from» (.ctor ctorRef args)) =
         sourceField carrier field (args.get fieldRef))
     (args : Args block prior.Base ctor.fields) :
     targetSel wf productive priorRel carrier ctorRef fieldRef sourceSel
-        (.data data rfl (.ctor ctorRef args)) =
+        (.data dataRef rfl (.ctor ctorRef args)) =
       putField wf productive prior ctorRef field fieldRef
         (args.get fieldRef) := by
   classical
@@ -778,25 +778,25 @@ theorem targetSel_ctor {arity : Nat} {block : Block arity}
   unfold targetSel
   dsimp only
   by_cases guarded :
-      (relation (.base data.decl.sort)).guard
-        (.data data rfl (.ctor ctorRef args))
+      (relation (.base dataRef.decl.sort)).guard
+        (.data dataRef rfl (.ctor ctorRef args))
   · rw [dif_pos guarded]
     have wellFormed :
         args.WF (fun sort => (priorRel.base sort).guard) := by
       change
-        (subsetRepresentation wf productive priorRel.base carrier data.decl.sort).guard
-          (.data data rfl (.ctor ctorRef args)) at guarded
-      rw [subsetRepresentation_datatype wf productive priorRel.base carrier data] at guarded
+        (subsetRepresentation wf productive priorRel.base carrier dataRef.decl.sort).guard
+          (.data dataRef rfl (.ctor ctorRef args)) at guarded
+      rw [subsetRepresentation_datatype wf productive priorRel.base carrier dataRef] at guarded
       exact guarded
     let decodedArgs := args.decode priorRel.base wellFormed
     have decoded :
-        (relation (.base data.decl.sort)).decode
-            (.data data rfl (.ctor ctorRef args)) guarded =
-          (carrier data).«from» (.ctor ctorRef decodedArgs) := by
+        (relation (.base dataRef.decl.sort)).decode
+            (.data dataRef rfl (.ctor ctorRef args)) guarded =
+          (carrier dataRef).«from» (.ctor ctorRef decodedArgs) := by
       change
-        (subsetRepresentation wf productive priorRel.base carrier data.decl.sort).decode
-            (.data data rfl (.ctor ctorRef args)) guarded = _
-      simp [subsetRepresentation_datatype wf productive priorRel.base carrier data,
+        (subsetRepresentation wf productive priorRel.base carrier dataRef.decl.sort).decode
+            (.data dataRef rfl (.ctor ctorRef args)) guarded = _
+      simp [subsetRepresentation_datatype wf productive priorRel.base carrier dataRef,
         datatypeRepresentation, decodedArgs]
       congr
     rw [decoded, matching decodedArgs]
@@ -827,43 +827,43 @@ theorem targetSel_ctor {arity : Nat} {block : Block arity}
 /-- Full target interpretation of one native constructor tester. -/
 def targetTest {arity : Nat} {block : Block arity}
     (wf : block.WF) (productive : Productive block) (prior : FO.Carriers)
-    {data : DataRef block} {ctor : CtorDecl arity}
-    (ctorRef : CtorRef block data ctor) :
+    {dataRef : DataRef block} {ctor : CtorDecl arity}
+    (ctorRef : CtorRef block dataRef ctor) :
     FO.SymbolDenote (carriers productive prior)
-      [(.base data.decl.sort)] .bool :=
-  fun value => IsCtor ctorRef (asData wf data value)
+      [(.base dataRef.decl.sort)] .bool :=
+  fun value => IsCtor ctorRef (asData wf dataRef value)
 
 /-- A native tester preserves the source tester on encoded datatype values. -/
 theorem test_rel {arity : Nat} {block : Block arity}
     (wf : block.WF) (productive : Productive block)
     (source prior : FO.Carriers)
     (priorRel : FO.CarrierRel source prior)
-    (carrier : ∀ owner : DataRef block,
-      Iso (source.Base owner.decl.sort) (Val block source.Base owner))
-    {data : DataRef block} {ctor : CtorDecl arity}
-    (ctorRef : CtorRef block data ctor)
-    (sourceTest : source.Base data.decl.sort → Prop)
+    (carrier : ∀ dataRef : DataRef block,
+      Iso (source.Base dataRef.decl.sort) (Val block source.Base dataRef))
+    {dataRef : DataRef block} {ctor : CtorDecl arity}
+    (ctorRef : CtorRef block dataRef ctor)
+    (sourceTest : source.Base dataRef.decl.sort → Prop)
     (meaning : ∀ value, sourceTest value ↔
-      IsCtor ctorRef ((carrier data).to value)) :
-    FO.SymbolRel (arguments := [.base data.decl.sort]) (result := .bool)
+      IsCtor ctorRef ((carrier dataRef).to value)) :
+    FO.SymbolRel (arguments := [.base dataRef.decl.sort]) (result := .bool)
       (carrierRel wf productive priorRel carrier)
       sourceTest (targetTest wf productive prior ctorRef) := by
   intro value
   apply propext
   have encoded :
       ((carrierRel wf productive priorRel carrier)
-        (.base data.decl.sort)).encode value =
-      .data data rfl (((carrier data).to value).encode priorRel.base) := by
+        (.base dataRef.decl.sort)).encode value =
+      .data dataRef rfl (((carrier dataRef).to value).encode priorRel.base) := by
     change
-      (subsetRepresentation wf productive priorRel.base carrier data.decl.sort).encode value = _
-    rw [subsetRepresentation_datatype wf productive priorRel.base carrier data]
+      (subsetRepresentation wf productive priorRel.base carrier dataRef.decl.sort).encode value = _
+    rw [subsetRepresentation_datatype wf productive priorRel.base carrier dataRef]
     rfl
   change IsCtor ctorRef
-      (asData wf data
+      (asData wf dataRef
         (((carrierRel wf productive priorRel carrier)
-          (.base data.decl.sort)).encode value)) ↔ sourceTest value
+          (.base dataRef.decl.sort)).encode value)) ↔ sourceTest value
   rw [encoded, asData_data, meaning]
-  exact Val.isCtor_encode_iff priorRel.base ctorRef ((carrier data).to value)
+  exact Val.isCtor_encode_iff priorRel.base ctorRef ((carrier dataRef).to value)
 
 end BaseLift
 

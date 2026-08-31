@@ -2,9 +2,9 @@ import Crush.Metatheory.Defunctionalization.Flattened.Symbol
 import Crush.Metatheory.Defunctionalization.EtaCorrectness
 
 /-!
-# Production-shaped flattened application
+# Emitted flattened application
 
-Production's `arrowShape?` flattens every leading nondependent arrow and
+The Crush translator's `arrowShape?` flattens every leading nondependent arrow and
 `declareArrowSort` declares one application symbol whose arguments are the
 function value followed by the entire arrow telescope.  This module gives that
 symbol family a total typed semantics.
@@ -12,7 +12,7 @@ symbol family a total typed semantics.
 This module discharges the local semantic obligation for complete application
 spines.  It does not yet define the total flattened term translation, compose
 the recursively generated theory, assign semantics to concrete SMT commands, or
-compare the verified translation with the production translator's output. Those
+compare the verified translation with the Crush translator's output. Those
 results are separate from this
 application lemma and from Lean `Expr` reification and handler dispatch.
 -/
@@ -21,7 +21,7 @@ namespace Crush.Metatheory.Defunctionalization.Flattened
 
 variable {signature : Signature}
 
-/-- Binary curried application is represented by one ternary production symbol,
+/-- Binary curried application is represented by one ternary emitted symbol,
 and its canonical interpretation is exactly two source applications. -/
 theorem flattened_binary_application (source : Model signature)
     (first second result : Ty)
@@ -68,7 +68,7 @@ inductive SourceArgs (signature : Signature) (context : Context) :
         (fn (Term.denote source argument valuation))
 
 /-- Syntactically apply a term to its complete leading-arrow telescope.  This is
-the pure counterpart of production's `mkAppN`/`getAppArgs` fully-applied path. -/
+the pure counterpart of the Crush translator's `mkAppN`/`getAppArgs` fully-applied path. -/
 @[reducible] def SourceArgs.applyTerm {context : Context} :
     (ty : Ty) → Term signature context ty →
       SourceArgs signature context (FO.flattenArrow ty).1 →
@@ -160,7 +160,7 @@ theorem SourceArgs.translate_apply_correct
           simp only [fromCanonical_toCanonical]
           exact codomainIH _ rest
 
-/-- A production n-ary `app` term built from a function value and the complete
+/-- An emitted n-ary `app` term built from a function value and the complete
 argument telescope of its arrow type. -/
 def flattenedApplicationTerm {context : Context} (domain codomain : Ty)
     (fn : FO.FamilyTerm (Symbol signature) (targetContext context)

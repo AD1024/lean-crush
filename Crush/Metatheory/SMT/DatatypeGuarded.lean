@@ -16,11 +16,11 @@ open Crush.Metatheory.Datatype
 open Crush.Metatheory.Defunctionalization.Flattened
 
 variable {signature : Signature} {arity : Nat} {block : Block arity}
-variable {native : NativeSymbols (Symbol signature) block}
+variable {native : DatatypeSymbols (Symbol signature) block}
 
 /-- Typed selector applications belonging to one constructor, in field order. -/
 def fieldInputs {target : FO.FamilyModel (Symbol signature)}
-    {guarding : SMT.Guarding (Symbol signature)}
+    {guarding : SMT.GuardedEncoding (Symbol signature)}
     {extra : SMT.ExtraGraph guarding.encoding target}
     {environment : List (SMT.Value target)}
     {data : DataRef block} {ctor : CtorDecl arity}
@@ -37,7 +37,7 @@ def fieldInputs {target : FO.FamilyModel (Symbol signature)}
 /-- Quantifying over the emitted selector inputs is exactly quantifying over
 the constructor's typed fields. -/
 theorem fieldInputs_iff {target : FO.FamilyModel (Symbol signature)}
-    {guarding : SMT.Guarding (Symbol signature)}
+    {guarding : SMT.GuardedEncoding (Symbol signature)}
     {extra : SMT.ExtraGraph guarding.encoding target}
     {environment : List (SMT.Value target)}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
@@ -67,7 +67,7 @@ theorem fieldInputs_iff {target : FO.FamilyModel (Symbol signature)}
 
 /-- One constructor clause with its indexed tester and typed selector inputs. -/
 def ctorPart {target : FO.FamilyModel (Symbol signature)}
-    {guarding : SMT.Guarding (Symbol signature)}
+    {guarding : SMT.GuardedEncoding (Symbol signature)}
     {extra : SMT.ExtraGraph guarding.encoding target}
     {environment : List (SMT.Value target)}
     {data : DataRef block} {ctor : CtorDecl arity}
@@ -94,7 +94,7 @@ def ctorPart {target : FO.FamilyModel (Symbol signature)}
 
 /-- Every constructor clause of one datatype declaration, in declaration order. -/
 def dataParts {target : FO.FamilyModel (Symbol signature)}
-    {guarding : SMT.Guarding (Symbol signature)}
+    {guarding : SMT.GuardedEncoding (Symbol signature)}
     {extra : SMT.ExtraGraph guarding.encoding target}
     {environment : List (SMT.Value target)}
     (data : DataRef block)
@@ -115,8 +115,8 @@ def dataParts {target : FO.FamilyModel (Symbol signature)}
       valueTerm value valueEval
 
 /-- Exact guard terms for the fields of one constructor, without semantic
-evidence. This is the proof-facing form of production's inner `wfParts`. -/
-def wfFields (guarding : SMT.Guarding (Symbol signature))
+evidence. This is the proof-facing form of the Crush translator's inner `wfParts`. -/
+def wfFields (guarding : SMT.GuardedEncoding (Symbol signature))
     {data : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block data ctor) (valueTerm : Crush.SMT.Term) :
     Array Crush.SMT.Term :=
@@ -127,7 +127,7 @@ def wfFields (guarding : SMT.Guarding (Symbol signature))
 
 /-- Exact constructor names and selector guards used by one generated `wf_T`
 body. Unlike `dataParts`, this syntax has no model-dependent evidence. -/
-def wfParts (guarding : SMT.Guarding (Symbol signature))
+def wfParts (guarding : SMT.GuardedEncoding (Symbol signature))
     (data : DataRef block)
     (ctorName : ∀ {ctor : CtorDecl arity},
       CtorRef block data ctor → String)
@@ -139,7 +139,7 @@ def wfParts (guarding : SMT.Guarding (Symbol signature))
 
 /-- One simultaneous recursive-definition array for every member of a mutual
 datatype block, in declaration order. -/
-def wfDefs (guarding : SMT.Guarding (Symbol signature))
+def wfDefs (guarding : SMT.GuardedEncoding (Symbol signature))
     (encoding : BlockEncoding arity) (guardName binder : DataRef block → String) :
     Array Crush.SMT.FunDef :=
   ((List.finRange arity).map fun data : DataRef block =>
@@ -151,7 +151,7 @@ def wfDefs (guarding : SMT.Guarding (Symbol signature))
 /-- Erasing semantic evidence from typed constructor clauses recovers the pure
 `wf_T` syntax exactly. -/
 theorem dataParts_parts {target : FO.FamilyModel (Symbol signature)}
-    {guarding : SMT.Guarding (Symbol signature)}
+    {guarding : SMT.GuardedEncoding (Symbol signature)}
     {extra : SMT.ExtraGraph guarding.encoding target}
     {environment : List (SMT.Value target)}
     (data : DataRef block)
@@ -178,7 +178,7 @@ theorem dataParts_parts {target : FO.FamilyModel (Symbol signature)}
 /-- The generated clause contract is exactly the typed tester/selector
 condition for every constructor and every field. -/
 theorem dataParts_iff {target : FO.FamilyModel (Symbol signature)}
-    {guarding : SMT.Guarding (Symbol signature)}
+    {guarding : SMT.GuardedEncoding (Symbol signature)}
     {extra : SMT.ExtraGraph guarding.encoding target}
     {environment : List (SMT.Value target)}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
@@ -227,7 +227,7 @@ theorem dataParts_iff {target : FO.FamilyModel (Symbol signature)}
 is guarded exactly when the selected free-datatype field is well formed. -/
 theorem targetSel_guard
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (exclusive : native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel native source) (rolesUnique : native.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -245,25 +245,25 @@ theorem targetSel_guard
           (native.sel ctorRef fieldRef) value) ↔
       field.WF (fun sort => (priorRel.base sort).guard)
         (sel ctorRef fieldRef fallback (BaseLift.asData wf data value)) := by
-  rw [law.extend_test exclusive wf productive prior priorRel priorModels ctorRef] at tested
+  rw [law.extend_test rolesUnique wf productive prior priorRel priorModels ctorRef] at tested
   change IsCtor ctorRef (BaseLift.asData wf data value) at tested
   rcases tested with ⟨args, equal⟩
   have valueEq : value = .data data rfl (.ctor ctorRef args) := by
     rw [← BaseLift.data_asData wf data value, ← equal]
-  rw [valueEq, law.extend_sel exclusive wf productive prior priorRel priorModels]
+  rw [valueEq, law.extend_sel rolesUnique wf productive prior priorRel priorModels]
   rw [BaseLift.targetSel_ctor wf productive source.carriers prior.carriers
     priorRel law.carrier ctorRef fieldRef _ (law.sel_ctor ctorRef fieldRef) args]
   rw [BaseLift.putField_guard, BaseLift.asData_data, sel_ctor]
 
 /-- In the canonical lifted native model, the generated tester/selector
-contract is precisely the intrinsic selector-form datatype guard. -/
+contract is precisely the typed selector-form datatype guard. -/
 theorem parts_iff_selWF
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (exclusive : native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel native source) (rolesUnique : native.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {guarding : SMT.Guarding (Symbol signature)}
+    {guarding : SMT.GuardedEncoding (Symbol signature)}
     {extra : SMT.ExtraGraph guarding.encoding
       (law.extend wf productive prior priorRel priorModels)}
     {environment : List
@@ -293,30 +293,30 @@ theorem parts_iff_selWF
   · intro every ctor ctorRef field fieldRef fallback tested
     have targetTest : (law.extend wf productive prior priorRel priorModels).symbol
         (native.test ctorRef) value := by
-      rw [law.extend_test exclusive wf productive prior priorRel priorModels]
+      rw [law.extend_test rolesUnique wf productive prior priorRel priorModels]
       exact tested
-    exact (targetSel_guard law exclusive wf productive priorRel priorModels ctorRef
+    exact (targetSel_guard law rolesUnique wf productive priorRel priorModels ctorRef
       fieldRef value targetTest fallback).mp
         (every ctor ctorRef targetTest field fieldRef)
   · intro every ctor ctorRef tested field fieldRef
     let fallback := field.fallback priorRel.base productive
     have coreTest : IsCtor ctorRef (BaseLift.asData wf data value) := by
-      rw [law.extend_test exclusive wf productive prior priorRel priorModels] at tested
+      rw [law.extend_test rolesUnique wf productive prior priorRel priorModels] at tested
       exact tested
-    exact (targetSel_guard law exclusive wf productive priorRel priorModels ctorRef
+    exact (targetSel_guard law rolesUnique wf productive priorRel priorModels ctorRef
       fieldRef value tested fallback).mpr
         (every ctor ctorRef field fieldRef fallback coreTest)
 
 /-- The exact generated body denotes the carrier guard of the lifted datatype
-sort. This closes the semantic gap between production's `wf_T` syntax and the
+sort. This closes the semantic gap between the Crush translator's `wf_T` syntax and the
 single relation used by guarded term preservation. -/
 theorem dataParts_eval_wf
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (exclusive : native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel native source) (rolesUnique : native.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {guarding : SMT.Guarding (Symbol signature)}
+    {guarding : SMT.GuardedEncoding (Symbol signature)}
     {extra : SMT.ExtraGraph guarding.encoding
       (law.extend wf productive prior priorRel priorModels)}
     {environment : List
@@ -349,7 +349,7 @@ theorem dataParts_eval_wf
         (.base data.decl.sort)).guard value)) := by
   have evaluated := SMT.GuardPart.eval semantics
     (dataParts data ctorName testIdent valueTerm value valueEval)
-  have clauses := parts_iff_selWF law exclusive wf productive priorRel priorModels data
+  have clauses := parts_iff_selWF law rolesUnique wf productive priorRel priorModels data
     ctorName testIdent valueTerm value valueEval
   have structural := Val.wf_iff_selWF priorRel.base productive
     (BaseLift.asData wf data value)
@@ -372,15 +372,15 @@ theorem dataParts_eval_wf
   rw [equal] at evaluated
   exact evaluated
 
-/-- Pure production-shaped parts have the same carrier-guard denotation as
+/-- Pure emitted parts have the same carrier-guard denotation as
 their evidence-carrying clause form. -/
 theorem wfParts_eval_wf
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful native source) (exclusive : native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel native source) (rolesUnique : native.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {guarding : SMT.Guarding (Symbol signature)}
+    {guarding : SMT.GuardedEncoding (Symbol signature)}
     {extra : SMT.ExtraGraph guarding.encoding
       (law.extend wf productive prior priorRel priorModels)}
     {environment : List
@@ -411,13 +411,13 @@ theorem wfParts_eval_wf
       (.typed .bool ((BaseLift.carrierRel wf productive priorRel law.carrier
         (.base data.decl.sort)).guard value)) := by
   rw [← dataParts_parts data ctorName testIdent valueTerm value valueEval]
-  exact dataParts_eval_wf law exclusive wf productive priorRel priorModels semantics data
+  exact dataParts_eval_wf law rolesUnique wf productive priorRel priorModels semantics data
     ctorName testIdent valueTerm value valueEval
 
 /-- The exact body assembled from typed native symbols evaluates to its
 tester-implies-field contract. -/
 theorem dataParts_eval {target : FO.FamilyModel (Symbol signature)}
-    {guarding : SMT.Guarding (Symbol signature)}
+    {guarding : SMT.GuardedEncoding (Symbol signature)}
     {extra : SMT.ExtraGraph guarding.encoding target}
     {environment : List (SMT.Value target)}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
@@ -443,13 +443,13 @@ theorem dataParts_eval {target : FO.FamilyModel (Symbol signature)}
 
 /-- The flattened native tester uses the indexed identifier fixed by the exact
 datatype representation. -/
-theorem Representation.native_test_ident
+theorem Representation.flattenedTester_ident
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {data : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block data ctor) :
-    fo.ident (symbols.native.test ref) =
+    fo.ident (symbols.datatypeSymbols.test ref) =
       .indexed "is" #[.inl (encoding.name (.ctor data ref.index))] := by
   exact represented.test_ident ref
 
@@ -459,7 +459,7 @@ def Representation.guardParts
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {target : FO.FamilyModel (Symbol signature)}
-    {guarding : SMT.Guarding (Symbol signature)}
+    {guarding : SMT.GuardedEncoding (Symbol signature)}
     (encodingEq : guarding.encoding = fo)
     {extra : SMT.ExtraGraph guarding.encoding target}
     {environment : List (SMT.Value target)}
@@ -470,9 +470,9 @@ def Representation.guardParts
       (.typed (.base data.decl.sort) value)) :
     List (SMT.GuardPart guarding target extra environment valueTerm) := by
   subst fo
-  exact dataParts (native := symbols.native) data
+  exact dataParts (native := symbols.datatypeSymbols) data
     (fun ref => encoding.name (.ctor data ref.index))
-    (fun ref => represented.native_test_ident ref)
+    (fun ref => represented.flattenedTester_ident ref)
     valueTerm value valueEval
 
 /-- Semantic fixed-point equation characterized by one block's tester and
@@ -486,10 +486,10 @@ def Representation.GuardLaw
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop) : Prop :=
   ∀ (data : DataRef block) (value : target.carriers.Base data.decl.sort),
     (∀ ctor (ctorRef : CtorRef block data ctor),
-      target.symbol (symbols.native.test ctorRef) value →
+      target.symbol (symbols.datatypeSymbols.test ctorRef) value →
         ∀ field (fieldRef : FieldRef ctor field),
           guard (field.fo block)
-            (target.symbol (symbols.native.sel ctorRef fieldRef) value)) ↔
+            (target.symbol (symbols.datatypeSymbols.sel ctorRef fieldRef) value)) ↔
       guard (.base data.decl.sort) value
 
 /-- Pointwise-equivalent predicates satisfy the same datatype guard equation. -/
@@ -509,14 +509,14 @@ theorem Representation.GuardLaw.congr
     apply (law data value).mp
     intro ctor ctorRef tested field fieldRef
     exact (same (field.fo block)
-      (target.symbol (symbols.native.sel ctorRef fieldRef) value)).mpr
+      (target.symbol (symbols.datatypeSymbols.sel ctorRef fieldRef) value)).mpr
         (every ctor ctorRef tested field fieldRef)
   · intro guarded
     have old := (law data value).mpr
       ((same (.base data.decl.sort) value).mpr guarded)
     intro ctor ctorRef tested field fieldRef
     exact (same (field.fo block)
-      (target.symbol (symbols.native.sel ctorRef fieldRef) value)).mp
+      (target.symbol (symbols.datatypeSymbols.sel ctorRef fieldRef) value)).mp
         (old ctor ctorRef tested field fieldRef)
 
 /-- The canonical extension satisfies its datatype guard equation. This is
@@ -527,7 +527,7 @@ theorem Representation.guardLaw_extend
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel) :
@@ -539,32 +539,32 @@ theorem Representation.guardLaw_extend
   have selectors :
       (∀ ctor (ctorRef : CtorRef block data ctor),
           (law.extend wf productive prior priorRel priorModels).symbol
-              (symbols.native.test ctorRef) value →
+              (symbols.datatypeSymbols.test ctorRef) value →
             ∀ field (fieldRef : FieldRef ctor field),
               (BaseLift.carrierRel wf productive priorRel law.carrier
                 (field.fo block)).guard
                 ((law.extend wf productive prior priorRel priorModels).symbol
-                  (symbols.native.sel ctorRef fieldRef) value)) ↔
+                  (symbols.datatypeSymbols.sel ctorRef fieldRef) value)) ↔
         (BaseLift.asData wf data value).SelWF
           (fun sort => (priorRel.base sort).guard) := by
     constructor
     · intro every ctor ctorRef field fieldRef fallback tested
       have targetTest :
           (law.extend wf productive prior priorRel priorModels).symbol
-            (symbols.native.test ctorRef) value := by
-        rw [law.extend_test represented.exclusive wf productive prior priorRel
+            (symbols.datatypeSymbols.test ctorRef) value := by
+        rw [law.extend_test represented.rolesUnique wf productive prior priorRel
           priorModels]
         exact tested
-      exact (targetSel_guard law represented.exclusive wf productive priorRel
+      exact (targetSel_guard law represented.rolesUnique wf productive priorRel
         priorModels ctorRef fieldRef value targetTest fallback).mp
           (every ctor ctorRef targetTest field fieldRef)
     · intro every ctor ctorRef tested field fieldRef
       let fallback := field.fallback priorRel.base productive
       have coreTest : IsCtor ctorRef (BaseLift.asData wf data value) := by
-        rw [law.extend_test represented.exclusive wf productive prior priorRel
+        rw [law.extend_test represented.rolesUnique wf productive prior priorRel
           priorModels] at tested
         exact tested
-      exact (targetSel_guard law represented.exclusive wf productive priorRel
+      exact (targetSel_guard law represented.rolesUnique wf productive priorRel
         priorModels ctorRef fieldRef value tested fallback).mpr
           (every ctor ctorRef field fieldRef fallback coreTest)
   have structural := Val.wf_iff_selWF priorRel.base productive
@@ -587,7 +587,7 @@ theorem Representation.guardParts_iff_guard
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {target : FO.FamilyModel (Symbol signature)}
-    {guarding : SMT.Guarding (Symbol signature)}
+    {guarding : SMT.GuardedEncoding (Symbol signature)}
     (encodingEq : guarding.encoding = fo)
     {extra : SMT.ExtraGraph guarding.encoding target}
     {environment : List (SMT.Value target)}
@@ -602,9 +602,9 @@ theorem Representation.guardParts_iff_guard
         (represented.guardParts encodingEq data valueTerm value valueEval) ↔
       guard (.base data.decl.sort) value := by
   subst fo
-  exact (dataParts_iff (native := symbols.native) data
+  exact (dataParts_iff (native := symbols.datatypeSymbols) data
     (fun ref => encoding.name (.ctor data ref.index))
-    (fun ref => represented.native_test_ident ref)
+    (fun ref => represented.flattenedTester_ident ref)
     valueTerm value valueEval).trans (law data value)
 
 /-- The represented clause body has the generic tester-implies-field
@@ -614,7 +614,7 @@ theorem Representation.guardParts_eval
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {target : FO.FamilyModel (Symbol signature)}
-    {guarding : SMT.Guarding (Symbol signature)}
+    {guarding : SMT.GuardedEncoding (Symbol signature)}
     (encodingEq : guarding.encoding = fo)
     {extra : SMT.ExtraGraph guarding.encoding target}
     {environment : List (SMT.Value target)}
@@ -633,18 +633,18 @@ theorem Representation.guardParts_eval
   subst fo
   exact dataParts_eval semantics data
     (fun ref => encoding.name (.ctor data ref.index))
-    (fun ref => represented.native_test_ident ref)
+    (fun ref => represented.flattenedTester_ident ref)
     valueTerm value valueEval
 
 /-- For the canonical lifted native model, the exact represented body evaluates
-to the owned datatype sort's shared carrier guard. -/
+to the declared datatype sort's shared carrier guard. -/
 theorem Representation.guardParts_eval_wf
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
@@ -675,25 +675,25 @@ theorem Representation.guardParts_eval_wf
       (law.extend wf productive prior priorRel priorModels) guards.extra)
     environment _ _
   simpa [Representation.guardParts] using
-    (dataParts_eval_wf law exclusive wf productive priorRel priorModels
+    (dataParts_eval_wf law rolesUnique wf productive priorRel priorModels
       (guards.termSemantics omitted) data
       (fun ref => encoding.name (.ctor data ref.index))
-      (fun ref => represented.native_test_ident ref)
+      (fun ref => represented.flattenedTester_ident ref)
       valueTerm value valueEval)
 
-/-- One exact production-shaped `wf_T` definition satisfies its simultaneous
+/-- One exact emitted `wf_T` definition satisfies its simultaneous
 graph equation in the guarded native model. -/
 theorem wfDef_valid
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    {guarding : SMT.Guarding (Symbol signature)}
+    {guarding : SMT.GuardedEncoding (Symbol signature)}
     {extra : SMT.ExtraGraph fo
       (law.extend wf productive prior priorRel priorModels)}
     (encodingEq : guarding.encoding = fo)
@@ -715,7 +715,7 @@ theorem wfDef_valid
           ((BaseLift.carrierRel wf productive priorRel law.carrier
             (.base data.decl.sort)).guard value)) :
     (wfDef name binder (fo.sort (.base data.decl.sort))
-      (wfParts (native := symbols.native) guarding data
+      (wfParts (native := symbols.datatypeSymbols) guarding data
         (fun ref => encoding.name (.ctor data ref.index)))).Holds
       (SMT.modelWith fo (law.extend wf productive prior priorRel priorModels)
         extra) := by
@@ -725,10 +725,10 @@ theorem wfDef_valid
   change Crush.SMT.Eval
     (SMT.modelWith guarding.encoding
       (law.extend wf productive prior priorRel priorModels) extra) _ _ _
-  exact wfParts_eval_wf law exclusive wf productive priorRel priorModels
+  exact wfParts_eval_wf law rolesUnique wf productive priorRel priorModels
     semantics data
     (fun ref => encoding.name (.ctor data ref.index))
-    (fun ref => represented.native_test_ident ref)
+    (fun ref => represented.flattenedTester_ident ref)
     (.bvar 0) value (Crush.SMT.Eval.bvar rfl)
 
 /-- Validate the exact mutual `wf_T` command in an arbitrary target model once
@@ -740,7 +740,7 @@ theorem wfDefs_valid_of_guard
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {target : FO.FamilyModel (Symbol signature)}
-    (guarding : SMT.Guarding (Symbol signature))
+    (guarding : SMT.GuardedEncoding (Symbol signature))
     (encodingEq : guarding.encoding = fo)
     (extra : SMT.ExtraGraph guarding.encoding target)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
@@ -761,10 +761,10 @@ theorem wfDefs_valid_of_guard
         output = .typed .bool (guard (.base data.decl.sort) value))
     (correct : represented.GuardLaw target guard) :
     (SMT.modelWith guarding.encoding target extra).SatisfiesCommand
-      (.defFunsRec (wfDefs (native := symbols.native) guarding
+      (.defFunsRec (wfDefs (native := symbols.datatypeSymbols) guarding
         encoding guardName binder)) := by
   subst fo
-  let definitions := wfDefs (native := symbols.native) guarding
+  let definitions := wfDefs (native := symbols.datatypeSymbols) guarding
     encoding guardName binder
   change Crush.SMT.FunsRecSupported definitions ∧
     Crush.SMT.FunsRecHold (SMT.modelWith guarding.encoding target extra)
@@ -798,9 +798,9 @@ theorem wfDefs_valid_of_guard
     have equal := propext (represented.guardParts_iff_guard rfl correct data
       (.bvar 0) value valueEval)
     rw [equal] at evaluated
-    have partsEq := dataParts_parts (native := symbols.native) data
+    have partsEq := dataParts_parts (native := symbols.datatypeSymbols) data
       (fun ref => encoding.name (.ctor data ref.index))
-      (fun ref => represented.native_test_ident ref)
+      (fun ref => represented.flattenedTester_ident ref)
       (.bvar 0) value valueEval
     simpa [Representation.guardParts, partsEq] using evaluated
 
@@ -811,12 +811,12 @@ theorem wfDefs_valid
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
     (represented : Representation block symbols fo encoding)
     {source prior : FO.FamilyModel (Symbol signature)}
-    (law : FamilyLawful symbols.native source)
-    (exclusive : symbols.native.Exclusive)
+    (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
+    (rolesUnique : symbols.datatypeSymbols.RolesUnique)
     (wf : block.WF) (productive : Productive block)
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
-    (guarding : SMT.Guarding (Symbol signature))
+    (guarding : SMT.GuardedEncoding (Symbol signature))
     (encodingEq : guarding.encoding = fo)
     (extra : SMT.ExtraGraph fo
       (law.extend wf productive prior priorRel priorModels))
@@ -842,10 +842,10 @@ theorem wfDefs_valid
             (.base data.decl.sort)).guard value)) :
     (SMT.modelWith fo (law.extend wf productive prior priorRel priorModels)
       extra).SatisfiesCommand
-      (.defFunsRec (wfDefs (native := symbols.native) guarding
+      (.defFunsRec (wfDefs (native := symbols.datatypeSymbols) guarding
         encoding guardName binder)) := by
   subst fo
-  let definitions := wfDefs (native := symbols.native) guarding
+  let definitions := wfDefs (native := symbols.datatypeSymbols) guarding
     encoding guardName binder
   change Crush.SMT.FunsRecSupported definitions ∧
     Crush.SMT.FunsRecHold
@@ -871,7 +871,7 @@ theorem wfDefs_valid
     dsimp [definitions, wfDefs] at member
     rw [List.mem_map] at member
     rcases member with ⟨data, _, rfl⟩
-    exact wfDef_valid represented law exclusive wf productive priorRel priorModels
+    exact wfDef_valid represented law rolesUnique wf productive priorRel priorModels
       rfl semantics functional data (guardName data) (binder data)
       (hasType data) (applies data)
 

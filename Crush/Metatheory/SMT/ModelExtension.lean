@@ -16,7 +16,7 @@ open Defunctionalization.Flattened
 variable {symbols : FO.SymbolFamily}
 
 mutual
-  /-- Terms whose literals are all Boolean. The intrinsic FO encoder has this
+  /-- Terms whose literals are all Boolean. The typed FO encoder has this
   property: non-Boolean constants are represented by typed symbols. Keeping the
   property explicit lets native components reinterpret SMT numerals without
   affecting already-encoded FO terms. -/
@@ -97,7 +97,7 @@ theorem valuesTyped_without_extra (encoding : Encoding symbols)
   | .cons typed rest => .cons (by simpa only [model_inSort, modelWith_inSort] using typed)
       (valuesTyped_without_extra encoding target extra rest)
 
-/-- At an identifier not owned by the extra graph, application is exactly the
+/-- At an identifier absent from the extra graph, application is exactly the
 ordinary induced-model application. -/
 theorem applies_iff_without_extra (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
@@ -152,7 +152,7 @@ theorem ctorApplies_with_extra_iff (encoding : Encoding symbols)
         inactive values output).mpr applied.2⟩
 
 /-- An extra graph is disjoint from every constructor, selector, and tester
-identifier owned by a native datatype command. -/
+identifier declared by an SMT datatype command. -/
 def ExtraGraph.InactiveOnDatatypes {encoding : Encoding symbols}
     {target : FO.FamilyModel symbols} (extra : ExtraGraph encoding target)
     (datatypes : Array (String × Nat × Crush.SMT.DatatypeDecl)) : Prop :=

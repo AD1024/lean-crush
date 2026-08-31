@@ -1,7 +1,7 @@
 import Crush.Metatheory.SMT.Representation
 
 /-!
-# Shared model induced by an intrinsic FO model
+# Shared model induced by a typed FO model
 
 This module contains the single raw SMT value universe and symbol graph used by
 both ordinary declarations and native components. It is separated from the
@@ -18,7 +18,7 @@ inductive Value (target : FO.FamilyModel symbols) where
   | typed (sort : FO.FOSort) (value : sort.Denote target.carriers)
   | raw (sort : SSort)
 
-/-- A canonical inhabitant of every intrinsic FO carrier. -/
+/-- A canonical inhabitant of every typed FO carrier. -/
 noncomputable def defaultValue (carriers : FO.Carriers) :
     (sort : FO.FOSort) → sort.Denote carriers
   | .bool => True
@@ -62,7 +62,7 @@ def boolValue (target : FO.FamilyModel symbols) : Bool → Value target
   | false => .typed .bool False
   | true => .typed .bool True
 
-/-- Decode an induced SMT value at an expected intrinsic sort. Semantic term
+/-- Decode an induced SMT value at an expected typed FO sort. Semantic term
 evaluation reaches only the matching `typed` branch; defaults make symbol graphs
 total over all raw inputs. -/
 noncomputable def decode (target : FO.FamilyModel symbols)
@@ -200,7 +200,7 @@ def AppliesWith (encoding : Encoding symbols) (target : FO.FamilyModel symbols)
   literalTyped
   apply := graph
 
-/-- Concrete SMT model induced by an intrinsic FO family model and a disjoint
+/-- Concrete SMT model induced by a typed FO family model and a disjoint
 graph for native derived symbols. -/
 noncomputable def modelWith (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target) :
@@ -279,7 +279,7 @@ theorem applies_source_iff (encoding : Encoding symbols)
   · intro applied
     exact Or.inl applied
 
-/-- Every intrinsic symbol has its encoded type in the single induced model,
+/-- Every typed FO symbol has its encoded type in the single induced model,
 independently of which component declares it. -/
 theorem symbol_has_type (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) {decl : FO.SymbolDecl}

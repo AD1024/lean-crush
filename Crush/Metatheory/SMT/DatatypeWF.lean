@@ -45,7 +45,7 @@ theorem BlockEncoding.wf_of_names {arity : Nat} (encoding : BlockEncoding arity)
   apply (List.getElem_inj (h₀ := leftLt) (h₁ := rightLt) nodup).mp
   simpa using equal
 
-/-- Every intrinsic constructor reference occurs in the raw command. -/
+/-- Every typed constructor reference occurs in the raw command. -/
 theorem raw_ctor_mem {arity : Nat} {block : Block arity}
     (encoding : BlockEncoding arity) {data : DataRef block}
     {ctor : CtorDecl arity} (ref : CtorRef block data ctor) :
@@ -79,7 +79,7 @@ private theorem mapIdx_snd {α β γ : Type} (values : List α)
         fieldSort (block := block) encoding field.sort := by
   simp [Crush.SMT.CtorDecl.argSorts, ctorDecl, mapIdx_snd]
 
-/-- Every raw constructor comes from one intrinsic typed reference. -/
+/-- Every raw constructor comes from one typed reference. -/
 theorem raw_ctor_ref {arity : Nat} {block : Block arity}
     (encoding : BlockEncoding arity) {sort : Crush.SMT.SSort}
     {rawCtor : Crush.SMT.CtorDecl}
@@ -114,7 +114,7 @@ theorem raw_ctor_ref {arity : Nat} {block : Block arity}
         congr 1
         exact (Ref.index_ofIdx (block.decl data).ctors index inBounds).symm
 
-/-- Every raw datatype entry comes from one intrinsic datatype reference. -/
+/-- Every raw datatype entry comes from one typed datatype reference. -/
 theorem raw_entry_ref {arity : Nat} (block : Block arity)
     (encoding : BlockEncoding arity) {name : String} {count : Nat}
     {decl : Crush.SMT.DatatypeDecl}
@@ -127,7 +127,7 @@ theorem raw_entry_ref {arity : Nat} (block : Block arity)
   cases equal
   exact ⟨data, rfl, rfl, rfl⟩
 
-/-- Every sort in one raw block comes from one intrinsic datatype reference. -/
+/-- Every sort in one raw block comes from one typed datatype reference. -/
 theorem raw_sort_ref {arity : Nat} (block : Block arity)
     (encoding : BlockEncoding arity) {sort : Crush.SMT.SSort}
     (member : sort ∈ Crush.SMT.datatypeSorts (entries block encoding)) :

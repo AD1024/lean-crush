@@ -4,7 +4,7 @@ import Crush.Metatheory.Defunctionalization.EtaCorrectness
 /-!
 # Total opening of flattened lambda telescopes
 
-The production translator opens every binder in a curried lambda before emitting
+The Crush translator opens every binder in a curried lambda before emitting
 one flattened closure equation. `LambdaBody` models that operation without
 partiality: it peels existing lambdas and eta-expands any residual function value
 until a Boolean or base result is reached.
