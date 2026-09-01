@@ -319,7 +319,7 @@ theorem ctor_apply {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor)
     (args : Args block prior.carriers.Base ctor.fields) :
@@ -410,7 +410,7 @@ theorem sel_apply_ctor {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) {field : FieldDecl arity}
     (fieldRef : FieldRef ctor field)
@@ -439,7 +439,7 @@ theorem test_apply {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor)
     (value : Val block prior.carriers.Base child) :
@@ -461,7 +461,7 @@ theorem test_apply {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor)
     (args : Args block prior.carriers.Base ctor.fields) :
@@ -483,7 +483,7 @@ theorem ctor_has_type {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) :
     Crush.SMT.SymbolHasType
@@ -507,7 +507,7 @@ theorem ctor_apply_inv {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor)
     {values : List (SMT.Value (law.extend wf productive prior priorRel priorModels))}
@@ -555,7 +555,7 @@ theorem ctor_holds {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) :
     Crush.SMT.ConstructorHolds
@@ -598,7 +598,7 @@ theorem sel_has_type {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) {field : FieldDecl arity}
     (fieldRef : FieldRef ctor field) :
@@ -634,7 +634,7 @@ theorem sel_holds {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) :
     Crush.SMT.SelectorsHold
@@ -680,7 +680,7 @@ theorem test_has_type {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) :
     Crush.SMT.SymbolHasType
@@ -701,7 +701,7 @@ theorem test_apply_ne {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {child : DataRef block} {leftCtor rightCtor : CtorDecl arity}
     (leftRef : CtorRef block child leftCtor)
     (rightRef : CtorRef block child rightCtor)
@@ -728,7 +728,7 @@ theorem test_holds {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {child : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block child ctor) :
     Crush.SMT.TesterHolds
@@ -755,7 +755,7 @@ theorem ctor_laws {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {sort : Crush.SMT.SSort} {rawCtor : Crush.SMT.CtorDecl}
     (member : (sort, rawCtor) ∈
       Crush.SMT.datatypeCtors (entries block data)) :
@@ -780,7 +780,7 @@ theorem ctor_disjoint {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {leftSort rightSort : Crush.SMT.SSort}
     {leftCtor rightCtor : Crush.SMT.CtorDecl}
     (leftMem : (leftSort, leftCtor) ∈
@@ -847,7 +847,7 @@ theorem test_disjoint {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {sort : Crush.SMT.SSort} {leftCtor rightCtor : Crush.SMT.CtorDecl}
     (leftMem : (sort, leftCtor) ∈
       Crush.SMT.datatypeCtors (entries block data))
@@ -894,7 +894,7 @@ theorem exhaustive {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {name : String} {count : Nat} {decl : Crush.SMT.DatatypeDecl}
     (member : (name, count, decl) ∈ (entries block data).toList)
     (value : SMT.Value (law.extend wf productive prior priorRel priorModels))
@@ -993,7 +993,7 @@ theorem rank_lt {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {sort : Crush.SMT.SSort} {rawCtor : Crush.SMT.CtorDecl}
     (member : (sort, rawCtor) ∈
       Crush.SMT.datatypeCtors (entries block data))
@@ -1066,7 +1066,7 @@ theorem data_hold {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data) :
+    (represented : Repr block symbols fo data) :
     Crush.SMT.DatatypesHold
       (SMT.model fo (law.extend wf productive prior priorRel priorModels))
       (entries block data) := by
@@ -1099,7 +1099,7 @@ theorem command_sound {symbols : Symbols signature block}
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data) :
+    (represented : Repr block symbols fo data) :
     (SMT.model fo (law.extend wf productive prior priorRel priorModels)).SatisfiesCommand
       (command block data) :=
   data_hold law represented.rolesUnique wf productive priorRel priorModels
@@ -1111,7 +1111,7 @@ theorem extend_sound {symbols : Symbols signature block}
     (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
     (prior : Lifted source) (wf : block.WF) (productive : Productive block)
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data) :
+    (represented : Repr block symbols fo data) :
     (SMT.model fo (prior.extend law wf productive).target).SatisfiesCommand
       (command block data) := by
   simpa [Lifted.extend] using

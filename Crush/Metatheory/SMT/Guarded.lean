@@ -1,4 +1,4 @@
-import Crush.Metatheory.SMT.Representation
+import Crush.Metatheory.SMT.Repr
 import Crush.Metatheory.FO.Guarded
 
 /-!
@@ -49,10 +49,10 @@ def GuardedEncoding.assertions {symbols : FO.SymbolFamily}
 /-- Ordinary command suffix paired with guarded assertion syntax. Sort and
 symbol declarations are shared with the unguarded encoder. -/
 def GuardedEncoding.theoryBody {symbols : FO.SymbolFamily}
-    (guarding : GuardedEncoding symbols) (declarations : List (Declaration symbols))
+    (guarding : GuardedEncoding symbols) (declarations : List (Decl symbols))
     (source : FO.FamilyTheory symbols) : Array Command :=
   ((ordinarySorts guarding.encoding declarations source).filterMap
-      (sortDeclaration? guarding.encoding)).toArray ++
+      (sortDecl? guarding.encoding)).toArray ++
     ((ordinaryDecls guarding.encoding declarations).map
       (declaration guarding.encoding)).toArray ++
     guarding.assertions source
@@ -62,7 +62,7 @@ as datatype `wf_T` predicates and is kept distinct from the
 native datatype prefix. -/
 def GuardedEncoding.theory {symbols : FO.SymbolFamily}
     (guarding : GuardedEncoding symbols) (derived : Array Command)
-    (declarations : List (Declaration symbols))
+    (declarations : List (Decl symbols))
     (source : FO.FamilyTheory symbols) : Array Command :=
   guarding.encoding.nativeCommands ++
     (derived ++ guarding.theoryBody declarations source)
@@ -70,10 +70,10 @@ def GuardedEncoding.theory {symbols : FO.SymbolFamily}
 /-- Semantic command-set representation for a guarded theory and its separately
 checked derived-command segment. The Crush translator may interleave declarations and assertions
 or omit duplicate occurrences without changing this model-theoretic boundary. -/
-def GuardedTheoryRepresentation {symbols : FO.SymbolFamily}
+def GuardedTheoryRepr {symbols : FO.SymbolFamily}
     (guarding : GuardedEncoding symbols) (derived : Array Command)
     (source : FO.FamilyTheory symbols) (commands : Array Command) : Prop :=
-  ∃ declarations : List (Declaration symbols),
+  ∃ declarations : List (Decl symbols),
     Crush.SMT.SameCommandSet commands
       (guarding.theory derived declarations source)
 

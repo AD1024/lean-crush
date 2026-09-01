@@ -1474,7 +1474,7 @@ theorem guardedAssertions_valid (guarding : GuardedEncoding symbols)
   have truthEq :
       formula.denote source (FO.Valuation.empty source.carriers) = True :=
     propext ⟨fun _ => trivial, fun _ => formulaValid⟩
-  simp only [FO.CarrierRel.get, Guarded.SubsetRepresentation.refl, id_eq] at evaluated
+  simp only [FO.CarrierRel.get, Guarded.SubsetRepr.refl, id_eq] at evaluated
   rw [truthEq] at evaluated
   change Crush.SMT.Eval (modelWith guarding.encoding target extra) []
     (guarding.term formula) (.typed .bool True)
@@ -1488,7 +1488,7 @@ proof. -/
 theorem guarded_valid (guarding : GuardedEncoding symbols)
     {derived : Array Command} {theory : FO.FamilyTheory symbols}
     {commands : Array Command}
-    (represented : GuardedTheoryRepresentation guarding derived theory commands)
+    (represented : GuardedTheoryRepr guarding derived theory commands)
     (source target : FO.FamilyModel symbols)
     (relation : FO.CarrierRel source.carriers target.carriers)
     (models : FO.ModelRel source target relation)
@@ -1510,7 +1510,7 @@ theorem guarded_valid (guarding : GuardedEncoding symbols)
   simp only [GuardedEncoding.theoryBody]
   rw [Crush.SMT.Model.satisfiesCommands_append,
     Crush.SMT.Model.satisfiesCommands_append]
-  exact ⟨⟨sortDeclarations_valid_with guarding.encoding target extra _,
+  exact ⟨⟨sortDecls_valid_with guarding.encoding target extra _,
     declarations_valid_with guarding.encoding target extra declarations⟩,
     guardedAssertions_valid guarding source target relation models extra
       semantics theory valid⟩
@@ -1520,7 +1520,7 @@ countermodel and not its concrete construction. -/
 theorem guarded_lift (guarding : GuardedEncoding symbols)
     {derived : Array Command} {theory : FO.FamilyTheory symbols}
     {commands : Array Command}
-    (represented : GuardedTheoryRepresentation guarding derived theory commands)
+    (represented : GuardedTheoryRepr guarding derived theory commands)
     (source target : FO.FamilyModel symbols)
     (relation : FO.CarrierRel source.carriers target.carriers)
     (models : FO.ModelRel source target relation)

@@ -1,7 +1,7 @@
 import Crush.Metatheory.Reification.Datatype
 import Crush.Metatheory.Reification.Witness
 import Crush.Metatheory.SMT.DatatypeTransport
-import Crush.Metatheory.SMT.DatatypeRepresentation
+import Crush.Metatheory.SMT.DatatypeRepr
 import Crush.Metatheory.VCG.Command
 import Crush.SMT.TermEq
 
@@ -18,13 +18,17 @@ connection; it does not claim that every other translation command is correct.
 namespace Crush.Metatheory.VCG
 
 open Reification Datatype Defunctionalization.Flattened
+open Crush.SMT (ApplyUnique CommandsUnsat CommandsUseInt FunDef Ident NotReserved)
+open Crush.SMT.Model (StandardFor)
+open SMT.Datatype.Native.ModelExt (DependencyOrdered DisjointFromSuffix GuardCommands)
 
 abbrev Command := Crush.SMT.Command
+abbrev SMTModel := Crush.SMT.Model
 
 /-- An SMT datatype declaration indexed by the exact reified datatype block it declares.
 This typed description is what the soundness proof retains after translation
 metadata has served its discovery purpose. -/
-structure DatatypeDeclarationFor (reifiedBlock : SomeBlock) where
+structure DatatypeDeclFor (reifiedBlock : SomeBlock) where
   blockEncoding : SMT.Datatype.BlockEncoding reifiedBlock.arity
   command : Command
   command_eq : command = SMT.Datatype.command reifiedBlock.block blockEncoding
@@ -34,55 +38,55 @@ structure DatatypeDeclarationFor (reifiedBlock : SomeBlock) where
 its typed reified block, and the well-formedness evidence consumed by canonical
 model lifting. Constructors, selectors, and implicit testers are all determined
 by the single declaration. -/
-structure DatatypeDeclaration where
+structure SomeDatatypeDecl where
   reifiedBlock : DatatypeBlock
-  typed : DatatypeDeclarationFor ⟨reifiedBlock.arity, reifiedBlock.block⟩
+  typed : DatatypeDeclFor ⟨reifiedBlock.arity, reifiedBlock.block⟩
 
-instance : TypeName DatatypeDeclaration := unsafe
-  (TypeName.mk _ ``DatatypeDeclaration)
+instance : TypeName SomeDatatypeDecl := unsafe
+  (TypeName.mk _ ``SomeDatatypeDecl)
 
-namespace DatatypeDeclaration
+namespace SomeDatatypeDecl
 
-@[reducible] def block (declaration : DatatypeDeclaration) : DatatypeBlock :=
+@[reducible] def block (declaration : SomeDatatypeDecl) : DatatypeBlock :=
   declaration.reifiedBlock
 
-@[reducible] def blockEncoding (declaration : DatatypeDeclaration) :
+@[reducible] def blockEncoding (declaration : SomeDatatypeDecl) :
     SMT.Datatype.BlockEncoding declaration.reifiedBlock.arity :=
   declaration.typed.blockEncoding
 
-@[reducible] def command (declaration : DatatypeDeclaration) : Command :=
+@[reducible] def command (declaration : SomeDatatypeDecl) : Command :=
   declaration.typed.command
 
-theorem command_eq (declaration : DatatypeDeclaration) :
+theorem command_eq (declaration : SomeDatatypeDecl) :
     declaration.command =
       SMT.Datatype.command declaration.block.block declaration.blockEncoding :=
   declaration.typed.command_eq
 
-theorem wf (declaration : DatatypeDeclaration) :
+theorem wf (declaration : SomeDatatypeDecl) :
     SMT.Datatype.CommandWF declaration.block.block declaration.blockEncoding :=
   declaration.typed.wf
 
 /-- Recover a command indexed by a requested reified block only after checking
 exact reified block equality. This replaces the former string-key equation;
 metadata rendering is no longer part of the proof boundary. -/
-def typedForBlock? (declaration : DatatypeDeclaration) (target : SomeBlock) :
-    Option (DatatypeDeclarationFor target) := by
+def typedForBlock? (declaration : SomeDatatypeDecl) (target : SomeBlock) :
+    Option (DatatypeDeclFor target) := by
   let source : SomeBlock := ⟨declaration.block.arity, declaration.block.block⟩
   if equal : source = target then
-    have typed : DatatypeDeclarationFor source := by
+    have typed : DatatypeDeclFor source := by
       simpa [source] using declaration.typed
     exact some (equal ▸ typed)
   else
     exact none
 
-def typedFor? (declaration : DatatypeDeclaration) (target : DatatypeBlock) :
-    Option (DatatypeDeclarationFor ⟨target.arity, target.block⟩) :=
+def typedFor? (declaration : SomeDatatypeDecl) (target : DatatypeBlock) :
+    Option (DatatypeDeclFor ⟨target.arity, target.block⟩) :=
   declaration.typedForBlock? ⟨target.arity, target.block⟩
 
 /-- Concrete allocated names used by the SMT datatype block. SMT tester
 identifiers reuse their constructor name inside `(_ is C)` and therefore do not
 allocate another symbol. -/
-def names (declaration : DatatypeDeclaration) : Array String :=
+def names (declaration : SomeDatatypeDecl) : Array String :=
   let entries := SMT.Datatype.entries declaration.block.block
     declaration.blockEncoding
   let sorts := entries.toList.map (·.1)
@@ -91,28 +95,28 @@ def names (declaration : DatatypeDeclaration) : Array String :=
       ctor.name :: ctor.selDecls.toList.map (·.1)
   (sorts ++ members).toArray
 
-end DatatypeDeclaration
+end SomeDatatypeDecl
 
 /-- Dependency-ordered SMT datatype commands indexed by the exact reified block
 environment. Command count, block identity, and source-symbol positions are
 consequences of this type, not parallel arrays or rendered keys. -/
-inductive DatatypeDeclarationLocations {signature : Signature} (emittedCommands : Array Command) :
+inductive DatatypeDeclLocations {signature : Signature} (emittedCommands : Array Command) :
     Datatype.Env signature → Type where
-  | nil : DatatypeDeclarationLocations emittedCommands []
+  | nil : DatatypeDeclLocations emittedCommands []
   | cons {entry : Datatype.Entry signature} {rest : Datatype.Env signature}
-      (command : DatatypeDeclarationFor ⟨entry.arity, entry.block⟩) (commandIndex : Nat)
+      (command : DatatypeDeclFor ⟨entry.arity, entry.block⟩) (commandIndex : Nat)
       (command_at : emittedCommands[commandIndex]? = some command.command)
-      (tail : DatatypeDeclarationLocations emittedCommands rest) :
-      DatatypeDeclarationLocations emittedCommands (entry :: rest)
+      (tail : DatatypeDeclLocations emittedCommands rest) :
+      DatatypeDeclLocations emittedCommands (entry :: rest)
 
-namespace DatatypeDeclarationLocations
+namespace DatatypeDeclLocations
 
 /-- Reconnect commands stored without a statically known block to the exact
 reified datatype environment. Each lookup checks block equality before
 refining the command's type. -/
 def ofEnv? {signature : Signature} (emittedCommands : Array Command)
-    (stored : Array DatatypeDeclaration) (indices : Array Nat) :
-    (env : Datatype.Env signature) → Option (DatatypeDeclarationLocations emittedCommands env)
+    (stored : Array SomeDatatypeDecl) (indices : Array Nat) :
+    (env : Datatype.Env signature) → Option (DatatypeDeclLocations emittedCommands env)
   | [] => some .nil
   | entry :: rest =>
       let reifiedBlock : SomeBlock := ⟨entry.arity, entry.block⟩
@@ -120,7 +124,7 @@ def ofEnv? {signature : Signature} (emittedCommands : Array Command)
           (command.typedForBlock? reifiedBlock).isSome) with
       | none => none
       | some position =>
-        match DatatypeDeclaration.typedForBlock? stored[position] reifiedBlock,
+        match SomeDatatypeDecl.typedForBlock? stored[position] reifiedBlock,
             indices[position.val]?, ofEnv? emittedCommands stored indices rest with
         | some command, some commandIndex, some tail =>
             match emittedEq : emittedCommands[commandIndex]? with
@@ -140,7 +144,7 @@ def ofEnv? {signature : Signature} (emittedCommands : Array Command)
 /-- Exact SMT datatype declarations in dependency order. -/
 def commands {signature : Signature} {emittedCommands : Array Command} :
     {env : Datatype.Env signature} →
-    DatatypeDeclarationLocations emittedCommands env → Array Command
+    DatatypeDeclLocations emittedCommands env → Array Command
   | [], .nil => #[]
   | _ :: _, .cons command _ _ tail =>
       #[command.command] ++ commands tail
@@ -148,14 +152,14 @@ def commands {signature : Signature} {emittedCommands : Array Command} :
 /-- Positions of the SMT datatype declarations in the emitted command sequence. -/
 def indices {signature : Signature} {emittedCommands : Array Command} :
     {env : Datatype.Env signature} →
-    DatatypeDeclarationLocations emittedCommands env → Array Nat
+    DatatypeDeclLocations emittedCommands env → Array Nat
   | [], .nil => #[]
   | _ :: _, .cons _ commandIndex _ tail =>
       #[commandIndex] ++ indices tail
 
 @[simp] theorem commands_size {signature : Signature}
     {env : Datatype.Env signature} {emittedCommands : Array Command}
-    (locations : DatatypeDeclarationLocations emittedCommands env) :
+    (locations : DatatypeDeclLocations emittedCommands env) :
     locations.commands.size = env.length := by
   induction locations with
   | nil => rfl
@@ -163,7 +167,7 @@ def indices {signature : Signature} {emittedCommands : Array Command} :
 
 @[simp] theorem indices_size {signature : Signature}
     {env : Datatype.Env signature} {emittedCommands : Array Command}
-    (locations : DatatypeDeclarationLocations emittedCommands env) :
+    (locations : DatatypeDeclLocations emittedCommands env) :
     locations.indices.size = env.length := by
   induction locations with
   | nil => rfl
@@ -173,7 +177,7 @@ def indices {signature : Signature} {emittedCommands : Array Command} :
 in the retained translation array. -/
 theorem commands_at {signature : Signature} {env : Datatype.Env signature}
     {emittedCommands : Array Command}
-    (locations : DatatypeDeclarationLocations emittedCommands env)
+    (locations : DatatypeDeclLocations emittedCommands env)
     (position : Nat) :
     locations.indices[position]?.bind (fun index => emittedCommands[index]?) =
       locations.commands[position]? := by
@@ -194,11 +198,11 @@ private def fromAt {signature : Signature} {emittedCommands : Array Command}
     (blocks : SMT.Datatype.Represented fo env) (start : Nat)
     (commandAt : ∀ position, position < blocks.commands.size →
       emittedCommands[start + position]? = blocks.commands[position]?) :
-    DatatypeDeclarationLocations emittedCommands env := by
+    DatatypeDeclLocations emittedCommands env := by
   cases blocks with
   | nil => exact .nil
   | @cons entry rest data head tail =>
-      let command : DatatypeDeclarationFor ⟨entry.arity, entry.block⟩ := {
+      let command : DatatypeDeclFor ⟨entry.arity, entry.block⟩ := {
         blockEncoding := data
         command := SMT.Datatype.command entry.block data
         command_eq := rfl
@@ -225,7 +229,7 @@ def fromPrefix {signature : Signature} {emittedCommands suffix : Array Command}
     {fo : SMT.Encoding (Symbol signature)} {env : Datatype.Env signature}
     (blocks : SMT.Datatype.Represented fo env)
     (emitted_eq : emittedCommands = blocks.commands ++ suffix) :
-    DatatypeDeclarationLocations emittedCommands env := by
+    DatatypeDeclLocations emittedCommands env := by
   apply fromAt blocks 0
   intro position inBounds
   rw [emitted_eq]
@@ -233,18 +237,18 @@ def fromPrefix {signature : Signature} {emittedCommands suffix : Array Command}
 
 /-- Evidence that the located SMT datatype declarations use one FO-to-SMT encoding and
 occur in datatype-dependency order. -/
-structure Representation {signature : Signature} {emittedCommands : Array Command}
+structure Repr {signature : Signature} {emittedCommands : Array Command}
     (fo : SMT.Encoding (Symbol signature)) {env : Datatype.Env signature}
-    (locations : DatatypeDeclarationLocations emittedCommands env) where
+    (locations : DatatypeDeclLocations emittedCommands env) where
   blocks : SMT.Datatype.Represented fo env
   commands_eq : blocks.commands = locations.commands
-  ordered : SMT.Datatype.Native.ModelExtension.DependencyOrdered blocks
+  ordered : DependencyOrdered blocks
 
-namespace Representation
+namespace Repr
 
 def nil {signature : Signature} {emittedCommands : Array Command}
     (fo : SMT.Encoding (Symbol signature)) :
-    Representation fo (.nil : DatatypeDeclarationLocations emittedCommands []) := {
+    Repr fo (.nil : DatatypeDeclLocations emittedCommands []) := {
   blocks := .nil
   commands_eq := rfl
   ordered := .nil }
@@ -254,87 +258,87 @@ exact command location. -/
 def cons {signature : Signature} {emittedCommands : Array Command}
     {fo : SMT.Encoding (Symbol signature)}
     {entry : Datatype.Entry signature} {restEnv : Datatype.Env signature}
-    {command : DatatypeDeclarationFor ⟨entry.arity, entry.block⟩} {commandIndex : Nat}
+    {command : DatatypeDeclFor ⟨entry.arity, entry.block⟩} {commandIndex : Nat}
     {commandAt : emittedCommands[commandIndex]? = some command.command}
-    {tail : DatatypeDeclarationLocations emittedCommands restEnv}
-    (head : SMT.Datatype.Representation entry.block entry.symbols fo
+    {tail : DatatypeDeclLocations emittedCommands restEnv}
+    (head : SMT.Datatype.Repr entry.block entry.symbols fo
       command.blockEncoding)
-    (rest : Representation fo tail)
-    (after : SMT.Datatype.Native.ModelExtension.DisjointFromSuffix head rest.blocks) :
-    Representation fo (.cons command commandIndex commandAt tail) := {
+    (rest : Repr fo tail)
+    (after : DisjointFromSuffix head rest.blocks) :
+    Repr fo (.cons command commandIndex commandAt tail) := {
   blocks := .cons head rest.blocks
   commands_eq := by
-    simp [SMT.Datatype.Represented.commands, DatatypeDeclarationLocations.commands,
-      rest.commands_eq, DatatypeDeclarationFor.command_eq]
+    simp [SMT.Datatype.Represented.commands, DatatypeDeclLocations.commands,
+      rest.commands_eq, DatatypeDeclFor.command_eq]
   ordered := .cons after rest.ordered }
 
 /-- Dependency order follows from the represented command sequence. -/
 theorem blocks_ordered {signature : Signature} {emittedCommands : Array Command}
     {fo : SMT.Encoding (Symbol signature)} {env : Datatype.Env signature}
-    {locations : DatatypeDeclarationLocations emittedCommands env}
-    (represented : Representation fo locations) :
-    SMT.Datatype.Native.ModelExtension.DependencyOrdered represented.blocks :=
+    {locations : DatatypeDeclLocations emittedCommands env}
+    (represented : Repr fo locations) :
+    DependencyOrdered represented.blocks :=
   represented.ordered
 
 @[simp] theorem blocks_commands {signature : Signature}
     {emittedCommands : Array Command} {fo : SMT.Encoding (Symbol signature)}
     {env : Datatype.Env signature}
-    {locations : DatatypeDeclarationLocations emittedCommands env}
-    (represented : Representation fo locations) :
+    {locations : DatatypeDeclLocations emittedCommands env}
+    (represented : Repr fo locations) :
     represented.blocks.commands = locations.commands :=
   represented.commands_eq
 
-end Representation
+end Repr
 
-end DatatypeDeclarationLocations
+end DatatypeDeclLocations
 
 /-! ## Exact translation datatype-guard commands -/
 
 /-- A translation datatype-guard command indexed by the exact reified block
 whose `wf_T` predicates it defines. -/
-structure DatatypeGuardDefinitionFor (_reifiedBlock : SomeBlock) where
-  definitions : Array Crush.SMT.FunDef
+structure DatatypeGuardDefFor (_reifiedBlock : SomeBlock) where
+  defs : Array FunDef
   command : Command
-  command_eq : command = .defFunsRec definitions
+  command_eq : command = .defFunsRec defs
 
-namespace DatatypeGuardDefinition
+namespace DatatypeGuardDef
 
 /-- Give a stored translation guard command the requested block index only after
 checking that it belongs to that exact reified block. -/
-def typedForBlock? (encoding : DatatypeGuardDefinition) (target : SomeBlock) :
-    Option (DatatypeGuardDefinitionFor target) := by
+def typedForBlock? (encoding : DatatypeGuardDef) (target : SomeBlock) :
+    Option (DatatypeGuardDefFor target) := by
   let source : SomeBlock :=
     ⟨encoding.reifiedBlock.arity, encoding.reifiedBlock.block⟩
   if equal : source = target then
-    let typed : DatatypeGuardDefinitionFor source := {
-      definitions := encoding.definitions
+    let typed : DatatypeGuardDefFor source := {
+      defs := encoding.defs
       command := encoding.command
       command_eq := encoding.command_eq }
     exact some (equal ▸ typed)
   else
     exact none
 
-end DatatypeGuardDefinition
+end DatatypeGuardDef
 
 /-- Dependency-ordered recursive guard commands, each linked to its exact
 position in the final translation command array. -/
-inductive DatatypeGuardDefinitionLocations {signature : Signature} (emittedCommands : Array Command) :
+inductive DatatypeGuardDefLocations {signature : Signature} (emittedCommands : Array Command) :
     Datatype.Env signature → Type where
-  | nil : DatatypeGuardDefinitionLocations emittedCommands []
+  | nil : DatatypeGuardDefLocations emittedCommands []
   | cons {entry : Datatype.Entry signature} {rest : Datatype.Env signature}
-      (command : DatatypeGuardDefinitionFor ⟨entry.arity, entry.block⟩)
+      (command : DatatypeGuardDefFor ⟨entry.arity, entry.block⟩)
       (commandIndex : Nat)
       (command_at : emittedCommands[commandIndex]? = some command.command)
-      (tail : DatatypeGuardDefinitionLocations emittedCommands rest) :
-      DatatypeGuardDefinitionLocations emittedCommands (entry :: rest)
+      (tail : DatatypeGuardDefLocations emittedCommands rest) :
+      DatatypeGuardDefLocations emittedCommands (entry :: rest)
 
-namespace DatatypeGuardDefinitionLocations
+namespace DatatypeGuardDefLocations
 
 /-- Reconnect retained translation guard encodings to an exact reified
 datatype environment. -/
 def ofEnv? {signature : Signature} (emittedCommands : Array Command)
-    (stored : Array DatatypeGuardDefinition) (indices : Array Nat) :
-    (env : Datatype.Env signature) → Option (DatatypeGuardDefinitionLocations emittedCommands env)
+    (stored : Array DatatypeGuardDef) (indices : Array Nat) :
+    (env : Datatype.Env signature) → Option (DatatypeGuardDefLocations emittedCommands env)
   | [] => some .nil
   | entry :: rest =>
       let reifiedBlock : SomeBlock := ⟨entry.arity, entry.block⟩
@@ -362,7 +366,7 @@ def ofEnv? {signature : Signature} (emittedCommands : Array Command)
 /-- Exact translation recursive guard commands in dependency order. -/
 def commands {signature : Signature} {emittedCommands : Array Command} :
     {env : Datatype.Env signature} →
-      DatatypeGuardDefinitionLocations emittedCommands env → Array Command
+      DatatypeGuardDefLocations emittedCommands env → Array Command
   | [], .nil => #[]
   | _ :: _, .cons command _ _ tail =>
       #[command.command] ++ commands tail
@@ -370,14 +374,14 @@ def commands {signature : Signature} {emittedCommands : Array Command} :
 /-- Positions of the recursive guard definitions in the emitted command sequence. -/
 def indices {signature : Signature} {emittedCommands : Array Command} :
     {env : Datatype.Env signature} →
-      DatatypeGuardDefinitionLocations emittedCommands env → Array Nat
+      DatatypeGuardDefLocations emittedCommands env → Array Nat
   | [], .nil => #[]
   | _ :: _, .cons _ commandIndex _ tail =>
       #[commandIndex] ++ indices tail
 
 @[simp] theorem commands_size {signature : Signature}
     {env : Datatype.Env signature} {emittedCommands : Array Command}
-    (locations : DatatypeGuardDefinitionLocations emittedCommands env) :
+    (locations : DatatypeGuardDefLocations emittedCommands env) :
     locations.commands.size = env.length := by
   induction locations with
   | nil => rfl
@@ -385,7 +389,7 @@ def indices {signature : Signature} {emittedCommands : Array Command} :
 
 @[simp] theorem indices_size {signature : Signature}
     {env : Datatype.Env signature} {emittedCommands : Array Command}
-    (locations : DatatypeGuardDefinitionLocations emittedCommands env) :
+    (locations : DatatypeGuardDefLocations emittedCommands env) :
     locations.indices.size = env.length := by
   induction locations with
   | nil => rfl
@@ -395,7 +399,7 @@ def indices {signature : Signature} {emittedCommands : Array Command} :
 position in the emitted command sequence. -/
 theorem commands_at {signature : Signature} {env : Datatype.Env signature}
     {emittedCommands : Array Command}
-    (locations : DatatypeGuardDefinitionLocations emittedCommands env)
+    (locations : DatatypeGuardDefLocations emittedCommands env)
     (position : Nat) :
     locations.indices[position]?.bind (fun index => emittedCommands[index]?) =
       locations.commands[position]? := by
@@ -408,13 +412,13 @@ theorem commands_at {signature : Signature} {env : Datatype.Env signature}
       | succ position =>
           simpa [indices, commands, Array.getElem?_append] using ih position
 
-end DatatypeGuardDefinitionLocations
+end DatatypeGuardDefLocations
 
 /-- One source fact, the common reified environment used to reify it, and the
 complete command sequence emitted after all selected facts were translated. The two
 location fields identify the SMT datatype declarations and recursive datatype
 guards in that array. -/
-structure FactTranslationRecord where
+structure FactTranslation where
   expression : Lean.Expr
   datatypes : DatatypeEnv
   ordinarySignature : Signature
@@ -423,14 +427,14 @@ structure FactTranslationRecord where
   its datatype component, belongs to the supported reification fragment. -/
   reifiedSentence : Option (ReifiedSentenceFor expression datatypes constants)
   emittedCommands : Array Command
-  datatypeDeclarationLocations :
-    DatatypeDeclarationLocations emittedCommands
+  datatypeDeclLocations :
+    DatatypeDeclLocations emittedCommands
       (DatatypeSignaturePrefix.of datatypes ordinarySignature).toModelEnv
-  guardDefinitionLocations :
-    DatatypeGuardDefinitionLocations emittedCommands
+  guardDefLocations :
+    DatatypeGuardDefLocations emittedCommands
       (DatatypeSignaturePrefix.of datatypes ordinarySignature).toModelEnv
 
-namespace FactTranslationRecord
+namespace FactTranslation
 
 /-- Retain a translation fact only when every datatype in its reified
 environment has matching SMT datatype declarations and recursive guard definitions in the supplied
@@ -441,27 +445,27 @@ def build? (expression : Lean.Expr) (datatypes : DatatypeEnv)
     (reifiedSentence : Option
       (ReifiedSentenceFor expression datatypes constants))
     (emittedCommands : Array Command)
-    (stored : Array DatatypeDeclaration) (indices : Array Nat)
-    (storedGuards : Array DatatypeGuardDefinition) (guardIndices : Array Nat) :
-    Option FactTranslationRecord := do
-  let datatypeDeclarationLocations ← DatatypeDeclarationLocations.ofEnv? emittedCommands stored indices
+    (stored : Array SomeDatatypeDecl) (indices : Array Nat)
+    (storedGuards : Array DatatypeGuardDef) (guardIndices : Array Nat) :
+    Option FactTranslation := do
+  let datatypeDeclLocations ← DatatypeDeclLocations.ofEnv? emittedCommands stored indices
     (DatatypeSignaturePrefix.of datatypes ordinarySignature).toModelEnv
-  let guardDefinitionLocations ← DatatypeGuardDefinitionLocations.ofEnv? emittedCommands storedGuards guardIndices
+  let guardDefLocations ← DatatypeGuardDefLocations.ofEnv? emittedCommands storedGuards guardIndices
     (DatatypeSignaturePrefix.of datatypes ordinarySignature).toModelEnv
   return {
     expression, datatypes, ordinarySignature, constants, reifiedSentence, emittedCommands,
-    datatypeDeclarationLocations,
-    guardDefinitionLocations }
+    datatypeDeclLocations,
+    guardDefLocations }
 
 /-- Recompute command locations after the translator has finished emitting all
 facts, without changing the retained reified environment. -/
-def withCommands? (translation : FactTranslationRecord) (emittedCommands : Array Command)
-    (stored : Array DatatypeDeclaration) (indices : Array Nat)
-    (storedGuards : Array DatatypeGuardDefinition) (guardIndices : Array Nat) :
-    Option FactTranslationRecord := do
-  let datatypeDeclarationLocations ← DatatypeDeclarationLocations.ofEnv? emittedCommands stored indices
+def withCommands? (translation : FactTranslation) (emittedCommands : Array Command)
+    (stored : Array SomeDatatypeDecl) (indices : Array Nat)
+    (storedGuards : Array DatatypeGuardDef) (guardIndices : Array Nat) :
+    Option FactTranslation := do
+  let datatypeDeclLocations ← DatatypeDeclLocations.ofEnv? emittedCommands stored indices
     (DatatypeSignaturePrefix.of translation.datatypes translation.ordinarySignature).toModelEnv
-  let guardDefinitionLocations ← DatatypeGuardDefinitionLocations.ofEnv? emittedCommands storedGuards guardIndices
+  let guardDefLocations ← DatatypeGuardDefLocations.ofEnv? emittedCommands storedGuards guardIndices
     (DatatypeSignaturePrefix.of translation.datatypes translation.ordinarySignature).toModelEnv
   return {
     expression := translation.expression
@@ -470,110 +474,109 @@ def withCommands? (translation : FactTranslationRecord) (emittedCommands : Array
     constants := translation.constants
     reifiedSentence := translation.reifiedSentence
     emittedCommands
-    datatypeDeclarationLocations
-    guardDefinitionLocations }
+    datatypeDeclLocations
+    guardDefLocations }
 
 /-- Complete reified signature used by this fact. -/
-def fullReifiedSignature (translation : FactTranslationRecord) :
+def fullReifiedSignature (translation : FactTranslation) :
     ReifiedSignature (translation.datatypes.signature ++ translation.ordinarySignature) :=
   translation.constants.prepend translation.datatypes.signature
 
 /-- The same datatype block environment consumed by the unified soundness
 theorem. -/
-def datatypeSignaturePrefix (translation : FactTranslationRecord) :
+def datatypeSignaturePrefix (translation : FactTranslation) :
     DatatypeSignaturePrefix (translation.datatypes.signature ++ translation.ordinarySignature) :=
   DatatypeSignaturePrefix.of translation.datatypes translation.ordinarySignature
 
 /-- SMT datatype declarations in dependency order, independent of their positions among
 the other translation commands. -/
-def datatypeDeclarations (translation : FactTranslationRecord) : Array Crush.SMT.Command :=
-  translation.datatypeDeclarationLocations.commands
+def datatypeDecls (translation : FactTranslation) : Array Command :=
+  translation.datatypeDeclLocations.commands
 
-/-- Emitted command positions corresponding to `datatypeDeclarations`. -/
-def datatypeDeclarationIndices (translation : FactTranslationRecord) : Array Nat :=
-  translation.datatypeDeclarationLocations.indices
+/-- Emitted command positions corresponding to `datatypeDecls`. -/
+def datatypeDeclIndices (translation : FactTranslation) : Array Nat :=
+  translation.datatypeDeclLocations.indices
 
 /-- Recursive datatype-guard commands in dependency order. -/
-def guardDefinitionCommands (translation : FactTranslationRecord) : Array Crush.SMT.Command :=
-  translation.guardDefinitionLocations.commands
+def guardDefCommands (translation : FactTranslation) : Array Command :=
+  translation.guardDefLocations.commands
 
-/-- Emitted positions corresponding to `guardDefinitionCommands`. -/
-def guardDefinitionIndices (translation : FactTranslationRecord) : Array Nat :=
-  translation.guardDefinitionLocations.indices
+/-- Emitted positions corresponding to `guardDefCommands`. -/
+def guardDefIndices (translation : FactTranslation) : Array Nat :=
+  translation.guardDefLocations.indices
 
-@[simp] theorem datatypeDeclarations_size (translation : FactTranslationRecord) :
-    translation.datatypeDeclarations.size = translation.datatypes.blocks.size := by
-  simp [datatypeDeclarations]
+@[simp] theorem datatypeDecls_size (translation : FactTranslation) :
+    translation.datatypeDecls.size = translation.datatypes.blocks.size := by
+  simp [datatypeDecls]
 
-@[simp] theorem datatypeDeclarationIndices_size (translation : FactTranslationRecord) :
-    translation.datatypeDeclarationIndices.size = translation.datatypes.blocks.size := by
-  simp [datatypeDeclarationIndices]
+@[simp] theorem datatypeDeclIndices_size (translation : FactTranslation) :
+    translation.datatypeDeclIndices.size = translation.datatypes.blocks.size := by
+  simp [datatypeDeclIndices]
 
-@[simp] theorem guardDefinitionCommands_size (translation : FactTranslationRecord) :
-    translation.guardDefinitionCommands.size = translation.datatypes.blocks.size := by
-  simp [guardDefinitionCommands]
+@[simp] theorem guardDefCommands_size (translation : FactTranslation) :
+    translation.guardDefCommands.size = translation.datatypes.blocks.size := by
+  simp [guardDefCommands]
 
-@[simp] theorem guardDefinitionIndices_size (translation : FactTranslationRecord) :
-    translation.guardDefinitionIndices.size = translation.datatypes.blocks.size := by
-  simp [guardDefinitionIndices]
+@[simp] theorem guardDefIndices_size (translation : FactTranslation) :
+    translation.guardDefIndices.size = translation.datatypes.blocks.size := by
+  simp [guardDefIndices]
 
 /-- Each SMT datatype declaration occurs at its recorded position in the complete
 emitted command sequence. -/
-theorem datatypeDeclaration_at (translation : FactTranslationRecord)
+theorem datatypeDecl_at (translation : FactTranslation)
     (position : Nat) :
-    translation.datatypeDeclarationIndices[position]?.bind
+    translation.datatypeDeclIndices[position]?.bind
       (fun index => translation.emittedCommands[index]?) =
-      translation.datatypeDeclarations[position]? := by
-  exact translation.datatypeDeclarationLocations.commands_at position
+      translation.datatypeDecls[position]? := by
+  exact translation.datatypeDeclLocations.commands_at position
 
 /-- Each recursive guard command occurs at its recorded position in the final
 translation command array. -/
-theorem guardDefinition_at (translation : FactTranslationRecord)
+theorem guardDef_at (translation : FactTranslation)
     (position : Nat) :
-    translation.guardDefinitionIndices[position]?.bind
+    translation.guardDefIndices[position]?.bind
       (fun index => translation.emittedCommands[index]?) =
-      translation.guardDefinitionCommands[position]? := by
-  exact translation.guardDefinitionLocations.commands_at position
+      translation.guardDefCommands[position]? := by
+  exact translation.guardDefLocations.commands_at position
 
 /-- Evidence that all located SMT datatype declarations are generated by one
 FO-to-SMT encoding and form exactly that encoding's datatype-command prefix. -/
-structure Representation (translation : FactTranslationRecord)
+structure DatatypeRepr (translation : FactTranslation)
     (fo : SMT.Encoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))) where
-  declarations : translation.datatypeDeclarationLocations.Representation fo
-  datatypeDeclarations_eq : fo.nativeCommands = translation.datatypeDeclarations
+  decls : translation.datatypeDeclLocations.Repr fo
+  datatypeDecls_eq : fo.nativeCommands = translation.datatypeDecls
 
 /-- Evidence that the located recursive guard commands use injective identifiers
 that are distinct from source and interpreted symbols, and match the datatype
 blocks fixed by the SMT datatype representation. These fields describe command
 syntax only; they do not depend on a model. -/
-structure GuardDefinitionEncoding (translation : FactTranslationRecord)
+structure GuardDefEncoding (translation : FactTranslation)
     (guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature)))
-    (represented : translation.Representation guarding.encoding) where
-  definitions :
-    SMT.Datatype.Native.ModelExtension.GuardCommands guarding represented.declarations.blocks
-  commands_eq : definitions.commands = translation.guardDefinitionCommands
-  ident : FO.FOSort → Option Crush.SMT.Ident
+    (represented : translation.DatatypeRepr guarding.encoding) where
+  defs : GuardCommands guarding represented.decls.blocks
+  commands_eq : defs.commands = translation.guardDefCommands
+  ident : FO.FOSort → Option Ident
   ident_injective : ∀ {left right identifier},
     ident left = some identifier → ident right = some identifier → left = right
-  notInterpreted : ∀ sort identifier, ident sort = some identifier →
-    Crush.SMT.NotInterpreted identifier
+  notReserved : ∀ sort identifier, ident sort = some identifier →
+    NotReserved identifier
   sourceFresh : ∀ sort identifier, ident sort = some identifier →
     ∀ {decl : FO.SymbolDecl}
       (symbol : Symbol (translation.datatypes.signature ++ translation.ordinarySignature) decl),
       identifier ≠ guarding.encoding.ident symbol
-  linked : definitions.Matches ident
+  linked : defs.Matches ident
 
-namespace GuardDefinitionEncoding
+namespace GuardDefEncoding
 
 /-- Combine the fixed SMT identifiers for guard predicates with their meaning
 in one particular target model. -/
-def toUnaryGuards {translation : FactTranslationRecord}
+def toUnaryGuards {translation : FactTranslation}
     {guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
-    {represented : translation.Representation guarding.encoding}
-    (guarded : translation.GuardDefinitionEncoding guarding represented)
+    {represented : translation.DatatypeRepr guarding.encoding}
+    (guarded : translation.GuardDefEncoding guarding represented)
     (target : FO.FamilyModel
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature)))
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop) :
@@ -581,87 +584,87 @@ def toUnaryGuards {translation : FactTranslationRecord}
   ident := guarded.ident
   ident_injective := guarded.ident_injective
   notBuiltin := fun sort identifier present =>
-    (guarded.notInterpreted sort identifier present).notLogicalBuiltin
+    (guarded.notReserved sort identifier present).notLogicalBuiltin
   sourceFresh := guarded.sourceFresh
 
-end GuardDefinitionEncoding
+end GuardDefEncoding
 
 /-- Convert the translation-specific evidence into the datatype representation
 used by the shared SMT soundness theorems. -/
-def Representation.datatypeRepresentation {translation : FactTranslationRecord}
+def DatatypeRepr.datatypeRepr {translation : FactTranslation}
     {fo : SMT.Encoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
-    (represented : translation.Representation fo) :
-    SMT.Datatype.EnvRepresentation fo translation.datatypeSignaturePrefix.toModelEnv := {
-  blocks := represented.declarations.blocks
+    (represented : translation.DatatypeRepr fo) :
+    SMT.Datatype.EnvRepr fo translation.datatypeSignaturePrefix.toModelEnv := {
+  blocks := represented.decls.blocks
   datatypeCommands_eq := by
     calc
-      fo.nativeCommands = translation.datatypeDeclarations := represented.datatypeDeclarations_eq
-      _ = translation.datatypeDeclarationLocations.commands := rfl
-      _ = represented.declarations.blocks.commands :=
-        represented.declarations.blocks_commands.symm }
+      fo.nativeCommands = translation.datatypeDecls := represented.datatypeDecls_eq
+      _ = translation.datatypeDeclLocations.commands := rfl
+      _ = represented.decls.blocks.commands :=
+        represented.decls.blocks_commands.symm }
 
 /-- One source model's complete guarded target construction. `prior` records
 representations already chosen for ordinary base types (for example
 `Nat → Int`); the remaining fields install recursive datatype guards using
 the same SMT function graph. -/
-structure GuardedModelExtension (translation : FactTranslationRecord)
+structure GuardedModelExt (translation : FactTranslation)
     (guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature)))
-    (represented : translation.Representation guarding.encoding)
-    (guarded : translation.GuardDefinitionEncoding guarding represented)
+    (represented : translation.DatatypeRepr guarding.encoding)
+    (guarded : translation.GuardDefEncoding guarding represented)
     (source : Model (translation.datatypes.signature ++ translation.ordinarySignature))
     (freeDataModel : Datatype.Env.IsFreeDatatypeModel source translation.datatypeSignaturePrefix.toModelEnv) where
   prior : Lifted (canonicalModel source)
   base : SMT.ExtraGraph guarding.encoding
-    (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target
-  baseUnique : Crush.SMT.ApplyUnique
+    (represented.datatypeRepr.liftedFrom source freeDataModel prior).target
+  baseUnique : ApplyUnique
     (SMT.modelWith guarding.encoding
-      (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target base)
+      (represented.datatypeRepr.liftedFrom source freeDataModel prior).target base)
   fresh : (guarded.toUnaryGuards
-    (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target
-    (fun sort => ((represented.datatypeRepresentation.liftedFrom source freeDataModel prior).relation
+    (represented.datatypeRepr.liftedFrom source freeDataModel prior).target
+    (fun sort => ((represented.datatypeRepr.liftedFrom source freeDataModel prior).relation
       sort).guard)).Fresh base
   semantics : guarding.TermSemantics
-    (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target
+    (represented.datatypeRepr.liftedFrom source freeDataModel prior).target
     ((guarded.toUnaryGuards
-      (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target
-      (fun sort => ((represented.datatypeRepresentation.liftedFrom source freeDataModel prior).relation
+      (represented.datatypeRepr.liftedFrom source freeDataModel prior).target
+      (fun sort => ((represented.datatypeRepr.liftedFrom source freeDataModel prior).relation
         sort).guard)).over base)
-    (fun sort => ((represented.datatypeRepresentation.liftedFrom source freeDataModel prior).relation
+    (fun sort => ((represented.datatypeRepr.liftedFrom source freeDataModel prior).relation
       sort).guard)
   /-- The induced model has the interpreted-theory laws required by the exact
   command array retained in this translation record. Boolean two-valuedness
   and functional application are always required; an integer carrier is
   required only when that array contains integer syntax. `ofIntView` supplies
   the stronger global integer interpretation. -/
-  standard : Crush.SMT.Model.StandardFor
+  standard : StandardFor
     (SMT.modelWith guarding.encoding
-      (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target
+      (represented.datatypeRepr.liftedFrom source freeDataModel prior).target
       ((guarded.toUnaryGuards
-        (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target
-        (fun sort => ((represented.datatypeRepresentation.liftedFrom source freeDataModel prior).relation
+        (represented.datatypeRepr.liftedFrom source freeDataModel prior).target
+        (fun sort => ((represented.datatypeRepr.liftedFrom source freeDataModel prior).relation
           sort).guard)).over base)) translation.emittedCommands
 
-namespace GuardedModelExtension
+namespace GuardedModelExt
 
 /-- SMT function graph implementing the guard predicates for this model, using
-the identifiers retained by `GuardDefinitionEncoding`. -/
-@[reducible] noncomputable def guards {translation : FactTranslationRecord}
+the identifiers retained by `GuardDefEncoding`. -/
+@[reducible] noncomputable def guards {translation : FactTranslation}
     {guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
-    {represented : translation.Representation guarding.encoding}
-    {guarded : translation.GuardDefinitionEncoding guarding represented}
+    {represented : translation.DatatypeRepr guarding.encoding}
+    {guarded : translation.GuardDefEncoding guarding represented}
     {source : Model (translation.datatypes.signature ++ translation.ordinarySignature)}
     {freeDataModel : Datatype.Env.IsFreeDatatypeModel source translation.datatypeSignaturePrefix.toModelEnv}
-    (model : translation.GuardedModelExtension guarding represented guarded source freeDataModel) :
+    (model : translation.GuardedModelExt guarding represented guarded source freeDataModel) :
     SMT.UnaryGuards guarding.encoding
-      (represented.datatypeRepresentation.liftedFrom source freeDataModel model.prior).target
-      (fun sort => ((represented.datatypeRepresentation.liftedFrom source freeDataModel model.prior).relation
+      (represented.datatypeRepr.liftedFrom source freeDataModel model.prior).target
+      (fun sort => ((represented.datatypeRepr.liftedFrom source freeDataModel model.prior).relation
         sort).guard) :=
   guarded.toUnaryGuards
-    (represented.datatypeRepresentation.liftedFrom source freeDataModel model.prior).target
-    (fun sort => ((represented.datatypeRepresentation.liftedFrom source freeDataModel model.prior).relation
+    (represented.datatypeRepr.liftedFrom source freeDataModel model.prior).target
+    (fun sort => ((represented.datatypeRepr.liftedFrom source freeDataModel model.prior).relation
       sort).guard)
 
 /-- Construct the complete guarded model when one ordinary base type is
@@ -670,37 +673,37 @@ The remaining premises are source-side carrier facts: integer
 nonnegativity represents the distinguished relation guard, and every other sort
 omitted by the unary allocation has a total relation guard. All raw graph,
 functionality, freshness, and guard-term semantics fields are derived here. -/
-noncomputable def ofIntView {translation : FactTranslationRecord}
+noncomputable def ofIntView {translation : FactTranslation}
     {guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
-    {represented : translation.Representation guarding.encoding}
-    {guarded : translation.GuardDefinitionEncoding guarding represented}
+    {represented : translation.DatatypeRepr guarding.encoding}
+    {guarded : translation.GuardDefEncoding guarding represented}
     {source : Model (translation.datatypes.signature ++ translation.ordinarySignature)}
     {freeDataModel : Datatype.Env.IsFreeDatatypeModel source translation.datatypeSignaturePrefix.toModelEnv}
     (prior : Lifted (canonicalModel source))
     (view : SMT.IntView guarding.encoding
-      (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target)
+      (represented.datatypeRepr.liftedFrom source freeDataModel prior).target)
     (guard_eq : guarding.guard = (view.withGuards
       (guarded.toUnaryGuards
-        (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target
-        (fun sort => ((represented.datatypeRepresentation.liftedFrom source freeDataModel prior).relation
+        (represented.datatypeRepr.liftedFrom source freeDataModel prior).target
+        (fun sort => ((represented.datatypeRepr.liftedFrom source freeDataModel prior).relation
           sort).guard))).guard)
     (omitted : ∀ sort, sort ≠ view.sort → guarded.ident sort = none →
       ∀ value,
-        ((represented.datatypeRepresentation.liftedFrom source freeDataModel prior).relation sort).guard
+        ((represented.datatypeRepr.liftedFrom source freeDataModel prior).relation sort).guard
           value)
     (integerGuard : ∀ value,
       0 ≤ view.toInt value ↔
-        ((represented.datatypeRepresentation.liftedFrom source freeDataModel prior).relation
+        ((represented.datatypeRepr.liftedFrom source freeDataModel prior).relation
           view.sort).guard value) :
-    translation.GuardedModelExtension guarding represented guarded source freeDataModel := by
-  let lifted := represented.datatypeRepresentation.liftedFrom source freeDataModel prior
+    translation.GuardedModelExt guarding represented guarded source freeDataModel := by
+  let lifted := represented.datatypeRepr.liftedFrom source freeDataModel prior
   let guards := guarded.toUnaryGuards lifted.target
     (fun sort => (lifted.relation sort).guard)
   have separate : ∀ sort identifier,
       guarded.ident sort = some identifier → identifier ≠ .symb ">=" := by
     intro sort identifier present
-    exact (guarded.notInterpreted sort identifier present).ne_integerComparison
+    exact (guarded.notReserved sort identifier present).ne_integerComparison
   have total : ∀ sort, sort ≠ view.sort → guards.ident sort = none →
       ∀ value, (lifted.relation sort).guard value := by
     intro sort unequal absent value
@@ -740,113 +743,113 @@ noncomputable def ofIntView {translation : FactTranslationRecord}
       (view.standard_withGuards guards separate).forCommands
         translation.emittedCommands }
 
-end GuardedModelExtension
+end GuardedModelExt
 
 /-- One static guard representation realized for every source model satisfying the
 free-datatype condition. Keeping this family outside the quantified source-model
 contract prevents the reflection theorem from silently discarding a source model
 merely because target-model construction evidence was not bundled with it. -/
-structure GuardDefinitionSemantics (translation : FactTranslationRecord)
+structure GuardDefInterp (translation : FactTranslation)
     (guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature)))
-    (represented : translation.Representation guarding.encoding)
-    (guarded : translation.GuardDefinitionEncoding guarding represented) where
+    (represented : translation.DatatypeRepr guarding.encoding)
+    (guarded : translation.GuardDefEncoding guarding represented) where
   realize : ∀ (source : Model
       (translation.datatypes.signature ++ translation.ordinarySignature))
       (freeDataModel : Datatype.Env.IsFreeDatatypeModel source translation.datatypeSignaturePrefix.toModelEnv),
-    translation.GuardedModelExtension guarding represented guarded source freeDataModel
+    translation.GuardedModelExt guarding represented guarded source freeDataModel
 
-namespace Representation
+namespace DatatypeRepr
 
 /-- The translation representation validates its whole SMT datatype prefix
 in the final dependency-folded target. -/
-theorem lifted_valid {translation : FactTranslationRecord}
+theorem lifted_valid {translation : FactTranslation}
     {fo : SMT.Encoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
-    (represented : translation.Representation fo)
+    (represented : translation.DatatypeRepr fo)
     (source : Model (translation.datatypes.signature ++ translation.ordinarySignature))
     (freeDataModel : Datatype.Env.IsFreeDatatypeModel source translation.datatypeSignaturePrefix.toModelEnv) :
-    (SMT.model fo (represented.datatypeRepresentation.lifted source freeDataModel).target).SatisfiesCommands
+    (SMT.model fo (represented.datatypeRepr.lifted source freeDataModel).target).SatisfiesCommands
       fo.nativeCommands :=
-  represented.datatypeRepresentation.lifted_valid represented.declarations.blocks_ordered source freeDataModel
+  represented.datatypeRepr.lifted_valid represented.decls.blocks_ordered source freeDataModel
 
 /-- SMT datatype validity over a caller-supplied interpreted or guarded base model. -/
-theorem liftedFrom_valid {translation : FactTranslationRecord}
+theorem liftedFrom_valid {translation : FactTranslation}
     {fo : SMT.Encoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
-    (represented : translation.Representation fo)
+    (represented : translation.DatatypeRepr fo)
     (source : Model (translation.datatypes.signature ++ translation.ordinarySignature))
     (freeDataModel : Datatype.Env.IsFreeDatatypeModel source translation.datatypeSignaturePrefix.toModelEnv)
     (prior : Lifted (canonicalModel source)) :
     (SMT.model fo
-      (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target).SatisfiesCommands
+      (represented.datatypeRepr.liftedFrom source freeDataModel prior).target).SatisfiesCommands
       fo.nativeCommands :=
-  represented.datatypeRepresentation.liftedFrom_valid represented.declarations.blocks_ordered
+  represented.datatypeRepr.liftedFrom_valid represented.decls.blocks_ordered
     source freeDataModel prior
 
 /-- SMT datatype declarations remain valid in the exact combined model used by
 fresh `wf_T` predicates and interpreted arithmetic. -/
-theorem lifted_valid_with {translation : FactTranslationRecord}
+theorem lifted_valid_with {translation : FactTranslation}
     {fo : SMT.Encoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
-    (represented : translation.Representation fo)
+    (represented : translation.DatatypeRepr fo)
     (source : Model (translation.datatypes.signature ++ translation.ordinarySignature))
     (freeDataModel : Datatype.Env.IsFreeDatatypeModel source translation.datatypeSignaturePrefix.toModelEnv)
-    (extra : SMT.ExtraGraph fo (represented.datatypeRepresentation.lifted source freeDataModel).target) :
-    (SMT.modelWith fo (represented.datatypeRepresentation.lifted source freeDataModel).target extra).SatisfiesCommands
+    (extra : SMT.ExtraGraph fo (represented.datatypeRepr.lifted source freeDataModel).target) :
+    (SMT.modelWith fo (represented.datatypeRepr.lifted source freeDataModel).target extra).SatisfiesCommands
       fo.nativeCommands :=
-  represented.datatypeRepresentation.lifted_valid_with represented.declarations.blocks_ordered
+  represented.datatypeRepr.lifted_valid_with represented.decls.blocks_ordered
     source freeDataModel extra
 
 /-- SMT datatype validity with derived graphs over a caller-supplied base lifting. -/
-theorem liftedFrom_valid_with {translation : FactTranslationRecord}
+theorem liftedFrom_valid_with {translation : FactTranslation}
     {fo : SMT.Encoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
-    (represented : translation.Representation fo)
+    (represented : translation.DatatypeRepr fo)
     (source : Model (translation.datatypes.signature ++ translation.ordinarySignature))
     (freeDataModel : Datatype.Env.IsFreeDatatypeModel source translation.datatypeSignaturePrefix.toModelEnv)
     (prior : Lifted (canonicalModel source))
     (extra : SMT.ExtraGraph fo
-      (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target) :
-    (SMT.modelWith fo (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target
+      (represented.datatypeRepr.liftedFrom source freeDataModel prior).target) :
+    (SMT.modelWith fo (represented.datatypeRepr.liftedFrom source freeDataModel prior).target
       extra).SatisfiesCommands fo.nativeCommands :=
-  represented.datatypeRepresentation.liftedFrom_valid_with represented.declarations.blocks_ordered
+  represented.datatypeRepr.liftedFrom_valid_with represented.decls.blocks_ordered
     source freeDataModel prior extra
 
 /-- The translation recursive guard commands are simultaneously valid in the
 target model obtained after all datatype blocks are installed, using the same
 guard identifiers throughout. -/
-theorem guards_valid {translation : FactTranslationRecord}
+theorem guards_valid {translation : FactTranslation}
     {guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
-    (represented : translation.Representation guarding.encoding)
-    (guarded : translation.GuardDefinitionEncoding guarding represented)
+    (represented : translation.DatatypeRepr guarding.encoding)
+    (guarded : translation.GuardDefEncoding guarding represented)
     (source : Model (translation.datatypes.signature ++ translation.ordinarySignature))
     (freeDataModel : Datatype.Env.IsFreeDatatypeModel source translation.datatypeSignaturePrefix.toModelEnv)
     (prior : Lifted (canonicalModel source))
     (guards : SMT.UnaryGuards guarding.encoding
-      (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target
-      (fun sort => ((represented.datatypeRepresentation.liftedFrom source freeDataModel prior).relation
+      (represented.datatypeRepr.liftedFrom source freeDataModel prior).target
+      (fun sort => ((represented.datatypeRepr.liftedFrom source freeDataModel prior).relation
         sort).guard))
     (base : SMT.ExtraGraph guarding.encoding
-      (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target)
-    (baseUnique : Crush.SMT.ApplyUnique
+      (represented.datatypeRepr.liftedFrom source freeDataModel prior).target)
+    (baseUnique : ApplyUnique
       (SMT.modelWith guarding.encoding
-        (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target base))
+        (represented.datatypeRepr.liftedFrom source freeDataModel prior).target base))
     (fresh : guards.Fresh base)
     (semantics : guarding.TermSemantics
-      (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target (guards.over base)
-      (fun sort => ((represented.datatypeRepresentation.liftedFrom source freeDataModel prior).relation
+      (represented.datatypeRepr.liftedFrom source freeDataModel prior).target (guards.over base)
+      (fun sort => ((represented.datatypeRepr.liftedFrom source freeDataModel prior).relation
         sort).guard))
-    (linked : guarded.definitions.Matches guards.ident) :
+    (linked : guarded.defs.Matches guards.ident) :
     (SMT.modelWith guarding.encoding
-      (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target
-      (guards.over base)).SatisfiesCommands translation.guardDefinitionCommands := by
+      (represented.datatypeRepr.liftedFrom source freeDataModel prior).target
+      (guards.over base)).SatisfiesCommands translation.guardDefCommands := by
   rw [← guarded.commands_eq]
-  simpa [SMT.Datatype.EnvRepresentation.liftedFrom,
-    Representation.datatypeRepresentation,
-    FactTranslationRecord.datatypeSignaturePrefix] using
-    represented.declarations.blocks_ordered.guards_valid guarded.definitions source freeDataModel
+  simpa [SMT.Datatype.EnvRepr.liftedFrom,
+    DatatypeRepr.datatypeRepr,
+    FactTranslation.datatypeSignaturePrefix] using
+    represented.decls.blocks_ordered.guards_valid guarded.defs source freeDataModel
       prior guards base
       baseUnique fresh semantics linked
 
@@ -855,35 +858,35 @@ sequence. SMT datatype declarations, exact translation-shaped `wf_T` definitions
 ordinary declarations, and guarded assertions are interpreted in the same untyped
 model. A caller may set `commands := translation.emittedCommands` when the surrounding
 array has the stated guarded representation. -/
-theorem sound {translation : FactTranslationRecord}
+theorem sound {translation : FactTranslation}
     {guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
-    (represented : translation.Representation guarding.encoding)
-    (guarded : translation.GuardDefinitionEncoding guarding represented)
+    (represented : translation.DatatypeRepr guarding.encoding)
+    (guarded : translation.GuardDefEncoding guarding represented)
     (source : Model (translation.datatypes.signature ++ translation.ordinarySignature))
     (freeDataModel : Datatype.Env.IsFreeDatatypeModel source translation.datatypeSignaturePrefix.toModelEnv)
-    (guardModel : translation.GuardedModelExtension guarding represented guarded
+    (guardModel : translation.GuardedModelExt guarding represented guarded
       source freeDataModel)
     {theory : FO.FamilyTheory
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
-    {commands : Array Crush.SMT.Command}
-    (encoding : SMT.GuardedTheoryRepresentation guarding
-      translation.guardDefinitionCommands theory commands)
-    (requirements : Crush.SMT.CommandsRequireIntegerSemantics
+    {commands : Array Command}
+    (encoding : SMT.GuardedTheoryRepr guarding
+      translation.guardDefCommands theory commands)
+    (intUseEq : CommandsUseInt
       translation.emittedCommands =
-        Crush.SMT.CommandsRequireIntegerSemantics commands)
+        CommandsUseInt commands)
     (valid : (canonicalModel source).SatisfiesTheory theory) :
-    ∃ model : Crush.SMT.Model,
+    ∃ model : SMTModel,
       model.StandardFor commands ∧ model.SatisfiesCommands commands := by
   let target :=
-    (represented.datatypeRepresentation.liftedFrom source freeDataModel
+    (represented.datatypeRepr.liftedFrom source freeDataModel
       guardModel.prior).target
   let extra := guardModel.guards.over guardModel.base
   refine ⟨SMT.modelWith guarding.encoding target extra,
-    guardModel.standard.of_requirements_eq requirements, ?_⟩
+    guardModel.standard.congr intUseEq, ?_⟩
   apply SMT.guarded_valid guarding encoding (canonicalModel source) target
-    (represented.datatypeRepresentation.liftedFrom source freeDataModel guardModel.prior).relation
-    (represented.datatypeRepresentation.liftedFrom source freeDataModel guardModel.prior).models valid
+    (represented.datatypeRepr.liftedFrom source freeDataModel guardModel.prior).relation
+    (represented.datatypeRepr.liftedFrom source freeDataModel guardModel.prior).models valid
     extra guardModel.semantics.toSemantics
   · exact represented.liftedFrom_valid_with source freeDataModel guardModel.prior extra
   · exact represented.guards_valid guarded source freeDataModel guardModel.prior
@@ -891,85 +894,85 @@ theorem sound {translation : FactTranslationRecord}
       guardModel.semantics guarded.linked
 
 /-- Semantic unsatisfiability when source models must also supply all base-type
-representations in `GuardedModelExtension`. Unlike ordinary datatype unsatisfiability,
+representations in `GuardedModelExt`. Unlike ordinary datatype unsatisfiability,
 this condition can restrict opaque source base types, for example by requiring
 a `Nat → Int` representation. -/
-theorem unsat_under {translation : FactTranslationRecord}
+theorem unsat_under {translation : FactTranslation}
     {guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
-    (represented : translation.Representation guarding.encoding)
-    (guarded : translation.GuardDefinitionEncoding guarding represented)
+    (represented : translation.DatatypeRepr guarding.encoding)
+    (guarded : translation.GuardDefEncoding guarding represented)
     (formula : Sentence
       (translation.datatypes.signature ++ translation.ordinarySignature))
-    {commands : Array Crush.SMT.Command}
-    (encoding : SMT.GuardedTheoryRepresentation guarding
-      translation.guardDefinitionCommands (translatedTheory formula) commands)
-    (requirements : Crush.SMT.CommandsRequireIntegerSemantics
+    {commands : Array Command}
+    (encoding : SMT.GuardedTheoryRepr guarding
+      translation.guardDefCommands (translatedTheory formula) commands)
+    (intUseEq : CommandsUseInt
       translation.emittedCommands =
-        Crush.SMT.CommandsRequireIntegerSemantics commands)
-    (unsat : Crush.SMT.CommandsUnsatisfiable commands) :
+        CommandsUseInt commands)
+    (unsat : CommandsUnsat commands) :
     UnsatisfiableUnder
       (fun source =>
         Σ freeDataModel : Datatype.Env.IsFreeDatatypeModel source translation.datatypeSignaturePrefix.toModelEnv,
-          translation.GuardedModelExtension guarding represented guarded source freeDataModel)
+          translation.GuardedModelExt guarding represented guarded source freeDataModel)
       formula := by
   intro source model sourceValid
   rcases model with ⟨freeDataModel, guardModel⟩
   obtain ⟨target, standard, valid⟩ := represented.sound guarded source freeDataModel
-    guardModel encoding requirements (model_extension source formula sourceValid)
+    guardModel encoding intUseEq (model_extension source formula sourceValid)
   exact unsat.noModel target standard valid
 
 /-- Reflection over every source model satisfying the free-datatype condition once the
 guard interpretation is known uniformly. Unlike `unsat_under`, the quantified
 model class contains only the free-datatype source-model condition; untyped target
-construction evidence is supplied once by `GuardDefinitionSemantics`. -/
-theorem unsat {translation : FactTranslationRecord}
+construction evidence is supplied once by `GuardDefInterp`. -/
+theorem unsat {translation : FactTranslation}
     {guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
-    (represented : translation.Representation guarding.encoding)
-    (guarded : translation.GuardDefinitionEncoding guarding represented)
-    (interpretation : translation.GuardDefinitionSemantics guarding represented guarded)
+    (represented : translation.DatatypeRepr guarding.encoding)
+    (guarded : translation.GuardDefEncoding guarding represented)
+    (interp : translation.GuardDefInterp guarding represented guarded)
     (formula : Sentence
       (translation.datatypes.signature ++ translation.ordinarySignature))
-    {commands : Array Crush.SMT.Command}
-    (encoding : SMT.GuardedTheoryRepresentation guarding
-      translation.guardDefinitionCommands (translatedTheory formula) commands)
-    (requirements : Crush.SMT.CommandsRequireIntegerSemantics
+    {commands : Array Command}
+    (encoding : SMT.GuardedTheoryRepr guarding
+      translation.guardDefCommands (translatedTheory formula) commands)
+    (intUseEq : CommandsUseInt
       translation.emittedCommands =
-        Crush.SMT.CommandsRequireIntegerSemantics commands)
-    (unsat : Crush.SMT.CommandsUnsatisfiable commands) :
+        CommandsUseInt commands)
+    (unsat : CommandsUnsat commands) :
     Datatype.Env.Unsatisfiable translation.datatypeSignaturePrefix.toModelEnv formula := by
   intro source freeDataModel sourceValid
-  exact represented.unsat_under guarded formula encoding requirements unsat source
-    ⟨freeDataModel, interpretation.realize source freeDataModel⟩ sourceValid
+  exact represented.unsat_under guarded formula encoding intUseEq unsat source
+    ⟨freeDataModel, interp.realize source freeDataModel⟩ sourceValid
 
 /-- Reflection for a complete finite source theory translated against the
 translation's one common signature and datatype environment. -/
-theorem theory_unsat {translation : FactTranslationRecord}
+theorem theory_unsat {translation : FactTranslation}
     {guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
-    (represented : translation.Representation guarding.encoding)
-    (guarded : translation.GuardDefinitionEncoding guarding represented)
-    (interpretation : translation.GuardDefinitionSemantics guarding represented guarded)
+    (represented : translation.DatatypeRepr guarding.encoding)
+    (guarded : translation.GuardDefEncoding guarding represented)
+    (interp : translation.GuardDefInterp guarding represented guarded)
     (sourceTheory : Theory
       (translation.datatypes.signature ++ translation.ordinarySignature))
-    {commands : Array Crush.SMT.Command}
-    (encoding : SMT.GuardedTheoryRepresentation guarding
-      translation.guardDefinitionCommands (translatedTheories sourceTheory) commands)
-    (requirements : Crush.SMT.CommandsRequireIntegerSemantics
+    {commands : Array Command}
+    (encoding : SMT.GuardedTheoryRepr guarding
+      translation.guardDefCommands (translatedTheories sourceTheory) commands)
+    (intUseEq : CommandsUseInt
       translation.emittedCommands =
-        Crush.SMT.CommandsRequireIntegerSemantics commands)
-    (unsat : Crush.SMT.CommandsUnsatisfiable commands) :
+        CommandsUseInt commands)
+    (unsat : CommandsUnsat commands) :
     Datatype.Env.TheoryUnsatisfiable translation.datatypeSignaturePrefix.toModelEnv
       sourceTheory := by
   intro source freeDataModel sourceValid
   obtain ⟨target, standard, valid⟩ := represented.sound guarded source freeDataModel
-    (interpretation.realize source freeDataModel) encoding requirements
+    (interp.realize source freeDataModel) encoding intUseEq
     (model_extension_theory source sourceTheory sourceValid)
   exact unsat.noModel target standard valid
 
-end Representation
+end DatatypeRepr
 
-end FactTranslationRecord
+end FactTranslation
 
 end Crush.Metatheory.VCG

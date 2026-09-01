@@ -13,7 +13,7 @@ structure CommandWF {arity : Nat} (block : Block arity)
     (encoding : BlockEncoding arity) : Prop where
   blockWF : block.WF
   /-- The exact raw declaration passes the structural check used by the
-  modeled script validator and `Command.Supported`. -/
+  modeled script validator and `Command.InFragment`. -/
   structureCheck : Crush.SMT.datatypesStructurallyWellFormed
     (entries block encoding) = true
   /-- The exact raw declaration passes the same finite-constructor check used

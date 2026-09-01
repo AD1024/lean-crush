@@ -36,7 +36,7 @@ def mapSortImagesM {m : Type → Type} [Monad m]
       return ⟨{ reified := reifiedType, smt } :: images, congrArg (reifiedType :: ·) equality⟩
 
 /-- Syntactic encoding of a flattened n-ary `app` declaration. -/
-structure AppDeclarationEncoding where
+structure AppDeclEncoding where
   arrow : ReifiedArrowType
   name : String
   functionSort : SMT.SSort
@@ -49,7 +49,7 @@ structure AppDeclarationEncoding where
     (#[functionSort] ++ (arguments.map (·.smt)).toArray) result.smt
 
 /-- Syntactic encoding of an exact-capture closure constructor declaration. -/
-structure ClosureDeclarationEncoding where
+structure ClosureDeclEncoding where
   arrow : ReifiedArrowType
   name : String
   captures : List SortImage
@@ -89,18 +89,18 @@ structure ClosureEquationEncoding where
 /-- Exact emitted encoding of the mutually recursive well-formedness
 predicates associated with one reified datatype block. Semantic field-guard
 evidence is attached by the later representation layer. -/
-structure DatatypeGuardDefinition where
+structure DatatypeGuardDef where
   reifiedBlock : DatatypeBlock
-  definitions : Array SMT.FunDef
+  defs : Array SMT.FunDef
   command : SMT.Command
-  command_eq : command = .defFunsRec definitions
+  command_eq : command = .defFunsRec defs
 
 /-- Syntax descriptions retained by the Crush translator in emission order. -/
 inductive CommandEncoding where
-  | app : AppDeclarationEncoding → CommandEncoding
-  | closure : ClosureDeclarationEncoding → CommandEncoding
+  | app : AppDeclEncoding → CommandEncoding
+  | closure : ClosureDeclEncoding → CommandEncoding
   | closureEquation : ClosureEquationEncoding → CommandEncoding
-  | datatypeGuard : DatatypeGuardDefinition → CommandEncoding
+  | datatypeGuard : DatatypeGuardDef → CommandEncoding
 
 namespace CommandEncoding
 
@@ -135,7 +135,7 @@ def allocatedSymbols : CommandEncoding → Array String
       match termHead? encoding.closure with
       | some closureName => #[closureName, encoding.appName]
       | none => #[encoding.appName]
-  | .datatypeGuard encoding => encoding.definitions.map (·.name)
+  | .datatypeGuard encoding => encoding.defs.map (·.name)
 
 end CommandEncoding
 

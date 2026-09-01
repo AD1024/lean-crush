@@ -204,7 +204,7 @@ namespace Env
 
 /-- Structural well-formedness for every dependency block. Cross-block
 block membership and dependency order are retained by
-`Native.ModelExtension.DependencyOrdered`. -/
+`Native.ModelExt.DependencyOrdered`. -/
 inductive BlocksWF {signature : Signature} : Env signature → Type where
   | nil : BlocksWF []
   | cons {entry : Entry signature} {rest : Env signature} :

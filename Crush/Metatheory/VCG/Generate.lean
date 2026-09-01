@@ -29,7 +29,7 @@ def theoryCommands {signature : Signature}
 theorem theoryCommands_represents {signature : Signature}
     (encoding : SMT.Encoding (Symbol signature))
     (source : Theory signature) :
-    SMT.TheoryRepresentation encoding (translatedTheories source)
+    SMT.TheoryRepr encoding (translatedTheories source)
       (theoryCommands encoding source) :=
   SMT.encode_theories encoding source
 
@@ -38,7 +38,7 @@ def guardedTheoryCommands {signature : Signature}
     (guarding : SMT.GuardedEncoding (Symbol signature))
     (derived : Array Crush.SMT.Command) (source : Theory signature) :
     Array Crush.SMT.Command :=
-  guarding.theory derived (SMT.translatedDeclarations source)
+  guarding.theory derived (SMT.translatedDecls source)
     (translatedTheories source)
 
 /-- Guarded finite-theory generation retains exact declarations and assertions
@@ -46,19 +46,19 @@ in source traversal order. -/
 theorem guardedTheoryCommands_represents {signature : Signature}
     (guarding : SMT.GuardedEncoding (Symbol signature))
     (derived : Array Crush.SMT.Command) (source : Theory signature) :
-    SMT.GuardedTheoryRepresentation guarding derived (translatedTheories source)
+    SMT.GuardedTheoryRepr guarding derived (translatedTheories source)
       (guardedTheoryCommands guarding derived source) :=
-  ⟨SMT.translatedDeclarations source, Crush.SMT.SameCommandSet.refl _⟩
+  ⟨SMT.translatedDecls source, Crush.SMT.SameCommandSet.refl _⟩
 
 /-- Absence of a model in the internal relational semantics reflects through
 the pure finite-theory encoder. The translator-facing theorem in
-`CommandEquivalence` additionally requires standard SMT semantics. -/
+`CommandEquiv` additionally requires standard SMT semantics. -/
 theorem theoryCommands_unsat_implies_source_unsat {signature : Signature}
     (encoding : SMT.Encoding (Symbol signature))
     (source : Theory signature)
     (data : Reification.DatatypeSignaturePrefix signature)
-    (native : EnvRepresentation encoding data.toModelEnv)
-    (unsat : Crush.SMT.AbstractCommandsUnsatisfiable
+    (native : EnvRepr encoding data.toModelEnv)
+    (unsat : Crush.SMT.RawCommandsUnsat
       (theoryCommands encoding source)) :
     Datatype.Env.TheoryUnsatisfiable data.toModelEnv source := by
   exact SMT.commands_unsat_implies_source_theory_unsat encoding native source

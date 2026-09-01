@@ -1,4 +1,4 @@
-import Crush.Metatheory.Defunctionalization.ModelExtension
+import Crush.Metatheory.Defunctionalization.ModelExt
 
 /-!
 # Symbols for flattened defunctionalization

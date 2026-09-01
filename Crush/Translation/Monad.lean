@@ -64,33 +64,33 @@ proof-facing companion: every newly allocated structural identity is recorded,
 and its projected SMT name list is intrinsically duplicate-free.  Consequently
 two distinct recorded allocations can never be represented by the same SMT
 symbol.  Reusing an existing key does not append another allocation. -/
-structure StructuralAllocationTrace where
+structure StructuralAllocTrace where
   entries : List (StructuralKey × String)
   namesNodup : (entries.map Prod.snd).Nodup
 
-instance : Inhabited StructuralAllocationTrace where
+instance : Inhabited StructuralAllocTrace where
   default := { entries := [], namesNodup := by simp }
 
 /-- Every concrete symbol returned by the shared allocator, independent of its
 semantic key class. This is the global freshness witness needed when ordinary,
 datatype, closure, and derived identifiers share one SMT namespace. -/
-structure NameAllocationTrace where
+structure NameAllocTrace where
   names : List String
   nodup : names.Nodup
 
-instance : Inhabited NameAllocationTrace where
+instance : Inhabited NameAllocTrace where
   default := { names := [], nodup := by simp }
 
-namespace NameAllocationTrace
+namespace NameAllocTrace
 
-def push (trace : NameAllocationTrace) (name : String)
-    (fresh : name ∉ trace.names) : NameAllocationTrace where
+def push (trace : NameAllocTrace) (name : String)
+    (fresh : name ∉ trace.names) : NameAllocTrace where
   names := name :: trace.names
   nodup := by simp [fresh, trace.nodup]
 
-end NameAllocationTrace
+end NameAllocTrace
 
-namespace StructuralAllocationTrace
+namespace StructuralAllocTrace
 
 private theorem pair_eq_of_snd_eq_of_nodup
     {α β : Type} {entries : List (α × β)} {left right : α × β}
@@ -100,27 +100,27 @@ private theorem pair_eq_of_snd_eq_of_nodup
   induction entries <;> grind
 
 /-- Extend an allocation trace with a name proved fresh for that trace. -/
-def cons (trace : StructuralAllocationTrace) (key : StructuralKey) (name : String)
-    (fresh : name ∉ trace.entries.map Prod.snd) : StructuralAllocationTrace where
+def cons (trace : StructuralAllocTrace) (key : StructuralKey) (name : String)
+    (fresh : name ∉ trace.entries.map Prod.snd) : StructuralAllocTrace where
   entries := (key, name) :: trace.entries
   namesNodup := by
     simp only [List.map_cons, List.nodup_cons]
     exact ⟨fresh, trace.namesNodup⟩
 
 /-- A name occurs at most once in the structural allocation history. -/
-theorem uniqueName (trace : StructuralAllocationTrace) :
+theorem uniqueName (trace : StructuralAllocTrace) :
     trace.entries.map Prod.snd |>.Nodup :=
   trace.namesNodup
 
 /-- The allocation trace is injective: equality of emitted names identifies the
 same structural allocation, and hence the same normalized structural key. -/
-theorem entry_eq_of_name_eq (trace : StructuralAllocationTrace)
+theorem entry_eq_of_name_eq (trace : StructuralAllocTrace)
     {left right : StructuralKey × String}
     (leftMem : left ∈ trace.entries) (rightMem : right ∈ trace.entries)
     (sameName : left.2 = right.2) : left = right :=
   pair_eq_of_snd_eq_of_nodup trace.namesNodup leftMem rightMem sameName
 
-theorem key_eq_of_name_eq (trace : StructuralAllocationTrace)
+theorem key_eq_of_name_eq (trace : StructuralAllocTrace)
     {leftKey rightKey : StructuralKey} {leftName rightName : String}
     (leftMem : (leftKey, leftName) ∈ trace.entries)
     (rightMem : (rightKey, rightName) ∈ trace.entries)
@@ -128,7 +128,7 @@ theorem key_eq_of_name_eq (trace : StructuralAllocationTrace)
   have := trace.entry_eq_of_name_eq leftMem rightMem sameName
   exact congrArg Prod.fst this
 
-end StructuralAllocationTrace
+end StructuralAllocTrace
 
 /-- Semantic identity for a symbol derived from an already allocated SMT symbol. -/
 structure DerivedSymbolKey where
@@ -178,21 +178,21 @@ structure RegistryCache where
 /-- Auditable link from one retained command encoding to the globally allocated
 symbols it references. Every allocator key class contributes to this one name trace,
 so ordinary structural commands and datatype guards use the same mechanism. -/
-structure CommandAllocationLink where
+structure CommandAllocLink where
   encodingIndex : Nat
   commandIndex : Nat
   symbols : Array String
-  allocation : NameAllocationTrace
+  allocation : NameAllocTrace
   symbolsAllocated : ∀ symbol ∈ symbols.toList,
     symbol ∈ allocation.names
 
 /-- Exact state position and global-allocation support for one checked native
 datatype command. -/
-structure DatatypeDeclarationAllocation where
+structure DatatypeDeclAlloc where
   commandIndex : Nat
   declarationIndex : Nat
   names : Array String
-  allocation : NameAllocationTrace
+  allocation : NameAllocTrace
   namesAllocated : ∀ name ∈ names.toList, name ∈ allocation.names
 
 /-- One successful dispatch through the restricted certified primitive registry. -/
@@ -216,9 +216,9 @@ structure TranslateState where
       `atomToName`, whose string keys are part of the user extension API. -/
   structuralToName : Std.HashMap StructuralKey String := {}
   /-- Auditable, proof-carrying allocation history for `structuralToName`. -/
-  structuralAllocations : StructuralAllocationTrace := default
+  structuralAllocs : StructuralAllocTrace := default
   /-- Global proof-facing history of every allocated SMT symbol. -/
-  nameAllocations : NameAllocationTrace := default
+  nameAllocs : NameAllocTrace := default
   nameToAtom : Std.HashMap String String := {}
   /-- Emitted SMT symbol → the Lean term it stands for.
 
@@ -242,7 +242,7 @@ structure TranslateState where
       guards. Their semantic meaning is established separately. -/
   commandEncodings : Array CommandEncoding := #[]
   /-- Checked global-name dependencies of `commandEncodings`. -/
-  commandAllocationLinks : Array CommandAllocationLink := #[]
+  commandAllocLinks : Array CommandAllocLink := #[]
   /-- Every step that crossed the explicit trusted translation boundary. -/
   trustReasons : Array TrustReason := #[]
   /-- Root expression of the legacy direct translator, recorded once even when
@@ -252,18 +252,18 @@ structure TranslateState where
   verifiedConstants : Array Dynamic := #[]
   /-- Source facts whose datatype environments and command locations were
       retained for the proof-facing translator comparison. -/
-  factTranslations : Array FactTranslationRecord := #[]
+  factTranslations : Array FactTranslation := #[]
   /-- Fact-local datatype environment used while emitting SMT datatype declarations.
       Restored after the fact has been translated. -/
   activeDataSignature : Option Metatheory.Reification.SomeDataSignature := none
   /-- SMT datatype declarations paired with their exact typed block and command
       well-formedness proof. -/
-  datatypeDeclarations : Array DatatypeDeclaration := #[]
-  /-- Command-array positions appended atomically with `datatypeDeclarations`. -/
-  datatypeDeclarationIndices : Array Nat := #[]
-  datatypeDeclarationAllocations : Array DatatypeDeclarationAllocation := #[]
+  datatypeDecls : Array SomeDatatypeDecl := #[]
+  /-- Command-array positions appended atomically with `datatypeDecls`. -/
+  datatypeDeclIndices : Array Nat := #[]
+  datatypeDeclAllocs : Array DatatypeDeclAlloc := #[]
   /-- Globally duplicate-free names declared by all retained SMT datatype declarations. -/
-  datatypeDeclarationNames : NameAllocationTrace := default
+  datatypeDeclNames : NameAllocTrace := default
   /-- Auditable successful uses of proof-carrying primitive mappings. -/
   certifiedHookUses : Array CertifiedHookUse := #[]
   /-- Provenance table indexed by fact id. -/
@@ -303,15 +303,15 @@ def Proved (state : TranslateState) : Prop :=
 /-- Retained datatype-guard encodings in their emission order. The allocation
 links select them from the shared command-encoding trace without duplicating
 mutable state. -/
-def datatypeGuardDefinitions (state : TranslateState) : Array DatatypeGuardDefinition :=
-  state.commandAllocationLinks.filterMap fun link =>
+def datatypeGuardDefs (state : TranslateState) : Array DatatypeGuardDef :=
+  state.commandAllocLinks.filterMap fun link =>
     match state.commandEncodings[link.encodingIndex]? with
     | some (CommandEncoding.datatypeGuard encoding) => some encoding
     | _ => none
 
-/-- Emitted command positions aligned with `datatypeGuardDefinitions`. -/
-def datatypeGuardDefinitionIndices (state : TranslateState) : Array Nat :=
-  state.commandAllocationLinks.filterMap fun link =>
+/-- Emitted command positions aligned with `datatypeGuardDefs`. -/
+def datatypeGuardDefIndices (state : TranslateState) : Array Nat :=
+  state.commandAllocLinks.filterMap fun link =>
     match state.commandEncodings[link.encodingIndex]? with
     | some (CommandEncoding.datatypeGuard _) => some link.commandIndex
     | _ => none
@@ -346,18 +346,18 @@ def emitAllocatedCommand
     (encoding : CommandEncoding) : TranslateM Unit := do
   let symbols := encoding.allocatedSymbols
   let state ← get
-  let allocatedNames := state.nameAllocations.names
+  let allocatedNames := state.nameAllocs.names
   if allocated : ∀ symbol ∈ symbols.toList, symbol ∈ allocatedNames then
     let index := state.commandEncodings.size
     let commandIndex := state.commands.size
     modify fun s => { s with
       commands := s.commands.push encoding.command
       commandEncodings := s.commandEncodings.push encoding
-      commandAllocationLinks := s.commandAllocationLinks.push {
+      commandAllocLinks := s.commandAllocLinks.push {
         encodingIndex := index
         commandIndex
         symbols
-        allocation := state.nameAllocations
+        allocation := state.nameAllocs
         symbolsAllocated := allocated } }
   else
     let missing := symbols.filter fun symbol => !allocatedNames.contains symbol
@@ -378,7 +378,7 @@ def markDatatypeTrusted
 
 /-- Classify the extensible direct Lean-to-SMT route as trusted exactly once.
 The metatheory proves the separately defined proof-defined command generator and
-applies to the Crush translator only after `CommandEquivalence.build?` succeeds. -/
+applies to the Crush translator only after `CommandEquiv.build?` succeeds. -/
 def markDirect (source : Expr) : TranslateM Unit := do
   if (← get).directSource.isNone then
     modify fun state => { state with
@@ -391,7 +391,7 @@ def recordVerifiedConstant (certificate : Dynamic) : TranslateM Nat := do
   return index
 
 def recordFactTranslation
-    (factTranslation : FactTranslationRecord) : TranslateM Nat := do
+    (factTranslation : FactTranslation) : TranslateM Nat := do
   let index := (← get).factTranslations.size
   modify fun state => {
     state with factTranslations := state.factTranslations.push factTranslation }
@@ -399,15 +399,15 @@ def recordFactTranslation
 
 /-- Recompute every fact's datatype-command locations after all facts have been
 translated. A fact is first recorded while its own assertion is being emitted;
-this final pass makes every retained `FactTranslationRecord` refer to the complete
+this final pass makes every retained `FactTranslation` refer to the complete
 final `TranslateState.commands` array. -/
 def finalizeFactTranslations : TranslateM Unit := do
   let state ← get
-  let mut finalizedFacts : Array FactTranslationRecord := #[]
+  let mut finalizedFacts : Array FactTranslation := #[]
   for factTranslation in state.factTranslations do
     let some factTranslation := factTranslation.withCommands? state.commands
-        state.datatypeDeclarations state.datatypeDeclarationIndices
-        state.datatypeGuardDefinitions state.datatypeGuardDefinitionIndices
+        state.datatypeDecls state.datatypeDeclIndices
+        state.datatypeGuardDefs state.datatypeGuardDefIndices
       | throwError "crush: emitted command sequence lost an SMT datatype declaration"
     finalizedFacts := finalizedFacts.push factTranslation
   modify fun current => { current with factTranslations := finalizedFacts }
@@ -422,35 +422,35 @@ def withDataSignature {α : Type}
 
 /-- Emit an SMT datatype declaration and retain its typed description in the same
 state update, so they cannot disagree. -/
-def emitDatatypeDeclaration
-    (declaration : DatatypeDeclaration) : TranslateM Nat := do
+def emitDatatypeDecl
+    (declaration : SomeDatatypeDecl) : TranslateM Nat := do
   let state ← get
   let commandIndex := state.commands.size
-  let declarationIndex := state.datatypeDeclarations.size
+  let declarationIndex := state.datatypeDecls.size
   let names := declaration.names
-  if allocated : ∀ name ∈ names.toList, name ∈ state.nameAllocations.names then
-    if namesNodup : (names.toList ++ state.datatypeDeclarationNames.names).Nodup then
+  if allocated : ∀ name ∈ names.toList, name ∈ state.nameAllocs.names then
+    if namesNodup : (names.toList ++ state.datatypeDeclNames.names).Nodup then
       modify fun current => {
         current with
           commands := current.commands.push declaration.command
-          datatypeDeclarations := current.datatypeDeclarations.push declaration
-          datatypeDeclarationIndices :=
-            current.datatypeDeclarationIndices.push commandIndex
-          datatypeDeclarationAllocations :=
-            current.datatypeDeclarationAllocations.push {
+          datatypeDecls := current.datatypeDecls.push declaration
+          datatypeDeclIndices :=
+            current.datatypeDeclIndices.push commandIndex
+          datatypeDeclAllocs :=
+            current.datatypeDeclAllocs.push {
               commandIndex
               declarationIndex
               names
-              allocation := state.nameAllocations
+              allocation := state.nameAllocs
               namesAllocated := allocated }
-          datatypeDeclarationNames := {
-            names := names.toList ++ state.datatypeDeclarationNames.names
+          datatypeDeclNames := {
+            names := names.toList ++ state.datatypeDeclNames.names
             nodup := namesNodup } }
       return commandIndex
     else
       throwError "crush: retained SMT datatype declarations declare the same symbol"
   else
-    let missing := names.filter fun name => !state.nameAllocations.names.contains name
+    let missing := names.filter fun name => !state.nameAllocs.names.contains name
     throwError "crush: SMT datatype declaration uses unallocated names: {missing}"
 
 def recordCertifiedHookUse (declaration : Name) (targetSymbol : String) :
@@ -482,12 +482,12 @@ private def reserveSymbol (hint : String) : TranslateM String := do
     else sanitized
   let used := (← get).usedNames
   if !used.contains base then
-    let trace := (← get).nameAllocations
+    let trace := (← get).nameAllocs
     if fresh : base ∉ trace.names then
       modify fun state => {
         state with
           usedNames := state.usedNames.insert base 0
-          nameAllocations := trace.push base fresh }
+          nameAllocs := trace.push base fresh }
       return base
     else
       throwError "crush: internal allocator freshness drift for `{base}`"
@@ -501,12 +501,12 @@ private def reserveSymbol (hint : String) : TranslateM String := do
         else
           (candidate, k + 1)
     let (name, next) := findUnused (used.size + 1) (used.getD base 0)
-    let trace := (← get).nameAllocations
+    let trace := (← get).nameAllocs
     if fresh : name ∉ trace.names then
       modify fun state => {
         state with
           usedNames := (state.usedNames.insert base next).insert name 0
-          nameAllocations := trace.push name fresh }
+          nameAllocs := trace.push name fresh }
       return name
     else
       throwError "crush: internal allocator freshness drift for `{name}`"
@@ -567,11 +567,11 @@ def symbolForStructural (key : StructuralKey) (hint : String) : TranslateM Strin
   | some name => return name
   | none =>
     let name ← freshSymbol hint
-    let trace := (← get).structuralAllocations
+    let trace := (← get).structuralAllocs
     if fresh : name ∉ trace.entries.map Prod.snd then
       modify fun s => { s with
         structuralToName := s.structuralToName.insert key name
-        structuralAllocations := trace.cons key name fresh
+        structuralAllocs := trace.cons key name fresh
         nameToAtom := s.nameToAtom.insert name key.tag }
       return name
     else

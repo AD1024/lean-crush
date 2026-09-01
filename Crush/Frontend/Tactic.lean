@@ -116,10 +116,10 @@ def buildScript (cfg : Config) (facts : Array Fact) :
         let reified? ← Metatheory.Reification.reifySentenceFor?
           fact.prop env reifiedSignature
         let state ← get
-        let some factTranslation := FactTranslationRecord.build? fact.prop env reifiedSignature reified?
-            state.commands state.datatypeDeclarations
-            state.datatypeDeclarationIndices state.datatypeGuardDefinitions
-            state.datatypeGuardDefinitionIndices
+        let some factTranslation := FactTranslation.build? fact.prop env reifiedSignature reified?
+            state.commands state.datatypeDecls
+            state.datatypeDeclIndices state.datatypeGuardDefs
+            state.datatypeGuardDefIndices
           | throwError "crush: emitted command sequence lost an SMT datatype declaration"
         let _ ← TranslateM.recordFactTranslation factTranslation
       let named := Term.annot body #[.named s!"{factNamePrefix}{id}"]

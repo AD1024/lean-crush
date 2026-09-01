@@ -315,7 +315,7 @@ totalized through the supplied guarded base relations. This is the initial
 model used, for example, when `Nat` is represented by guarded `Int`. -/
 noncomputable def ofBase {symbols : FO.SymbolFamily.{u}}
     (source : FO.FamilyModel symbols) {Target : BaseSort → Type}
-    (base : ∀ sort, SubsetRepresentation (source.carriers.Base sort) (Target sort)) :
+    (base : ∀ sort, SubsetRepr (source.carriers.Base sort) (Target sort)) :
     Lifted source := by
   let carriers : FO.Carriers := {
     Base := Target
@@ -324,7 +324,7 @@ noncomputable def ofBase {symbols : FO.SymbolFamily.{u}}
     fnNonempty := source.carriers.fnNonempty }
   let relation : FO.CarrierRel source.carriers carriers :=
     FO.CarrierRel.ofBase base fun domain codomain =>
-      @SubsetRepresentation.refl (source.carriers.Fn domain codomain)
+      @SubsetRepr.refl (source.carriers.Fn domain codomain)
         (source.carriers.fnNonempty domain codomain)
   exact {
     target := source.lift carriers relation

@@ -334,9 +334,9 @@ end AllocatedDataNames
 
 /-- Build a typed SMT datatype declaration only when it equals the canonical command
 computed from the reified datatype block. -/
-def buildDatatypeDeclaration? (block : Metatheory.Reification.DatatypeBlock)
+def buildDatatypeDecl? (block : Metatheory.Reification.DatatypeBlock)
     (names : AllocatedDataNames block.arity) :
-    Option Metatheory.VCG.DatatypeDeclaration :=
+    Option Metatheory.VCG.SomeDatatypeDecl :=
   let encoding := names.blockEncoding
   let command := Metatheory.SMT.Datatype.command block.block encoding
   let sortNames := List.ofFn fun data : Fin block.arity =>
@@ -1279,9 +1279,9 @@ mutual
           ctors := ctorNames
           sels := selNames
           bases := baseSorts }
-        let some declaration := buildDatatypeDeclaration? block names
+        let some declaration := buildDatatypeDecl? block names
           | throwError "crush: allocated SMT datatype declaration for `{n}` disagrees with its block"
-        let _ ← TranslateM.emitDatatypeDeclaration declaration
+        let _ ← TranslateM.emitDatatypeDecl declaration
       else
         throwError "crush: certified mutual block size drift for `{n}`"
     else
@@ -1301,7 +1301,7 @@ mutual
       if let some reifiedBlock := certifiedBlock? then
         TranslateM.emitAllocatedCommand (.datatypeGuard {
           reifiedBlock
-          definitions := wfDefs
+          defs := wfDefs
           command
           command_eq := rfl })
       else

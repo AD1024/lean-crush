@@ -18,7 +18,7 @@ open Crush.Metatheory.Defunctionalization.Flattened
 open Crush.Metatheory.Datatype.Env (IsFreeDatatypeModel BlocksWF liftFrom)
 
 /-- One actual dependency-fold extension step. -/
-structure ModelExtension {signature : Signature}
+structure ModelExt {signature : Signature}
     (source : FO.FamilyModel (Symbol signature)) where
   arity : Nat
   block : Block arity
@@ -28,13 +28,13 @@ structure ModelExtension {signature : Signature}
   productive : Productive block
   prior : Lifted source
 
-namespace ModelExtension
+namespace ModelExt
 
 variable {signature : Signature}
 variable {source : FO.FamilyModel (Symbol signature)}
 
 /-- The target produced by this exact fold step. -/
-noncomputable abbrev target (step : ModelExtension source) :
+noncomputable abbrev target (step : ModelExt source) :
     FO.FamilyModel (Symbol signature) :=
   step.law.extend step.wf step.productive step.prior.target
     step.prior.relation step.prior.models
@@ -42,7 +42,7 @@ noncomputable abbrev target (step : ModelExtension source) :
 /-- Embed one prior raw value into a later block. At an external sort this is
 the genuine carrier isomorphism; the fallback branch only totalizes the map and
 is never observed by an externally typed command. -/
-noncomputable def wrap (step : ModelExtension source) :
+noncomputable def wrap (step : ModelExt source) :
     SMT.Value step.prior.target → SMT.Value step.target
   | .typed sort value => by
       classical
@@ -53,7 +53,7 @@ noncomputable def wrap (step : ModelExtension source) :
   | .raw sort => .raw sort
 
 /-- Read a later raw value back into the preceding model. -/
-noncomputable def unwrap (step : ModelExtension source) :
+noncomputable def unwrap (step : ModelExt source) :
     SMT.Value step.target → SMT.Value step.prior.target
   | .typed sort value => by
       classical
@@ -63,27 +63,27 @@ noncomputable def unwrap (step : ModelExtension source) :
         .typed sort (SMT.defaultValue step.prior.target.carriers sort)
   | .raw sort => .raw sort
 
-@[simp] theorem wrap_typed (step : ModelExtension source) {sort : FO.FOSort}
+@[simp] theorem wrap_typed (step : ModelExt source) {sort : FO.FOSort}
     (external : BaseLift.External step.block sort)
     (value : sort.Denote step.prior.target.carriers) :
     step.wrap (.typed sort value) =
       .typed sort (BaseLift.wrapWith step.productive external value) := by
   simp [wrap, external]
 
-@[simp] theorem unwrap_typed (step : ModelExtension source) {sort : FO.FOSort}
+@[simp] theorem unwrap_typed (step : ModelExt source) {sort : FO.FOSort}
     (external : BaseLift.External step.block sort)
     (value : sort.Denote step.target.carriers) :
     step.unwrap (.typed sort value) =
       .typed sort (BaseLift.unwrap step.productive external value) := by
   simp [unwrap, external]
 
-@[simp] theorem unwrap_wrap (step : ModelExtension source) {sort : FO.FOSort}
+@[simp] theorem unwrap_wrap (step : ModelExt source) {sort : FO.FOSort}
     (external : BaseLift.External step.block sort)
     (value : sort.Denote step.prior.target.carriers) :
     step.unwrap (step.wrap (.typed sort value)) = .typed sort value := by
   simp [external]
 
-@[simp] theorem wrap_unwrap (step : ModelExtension source) {sort : FO.FOSort}
+@[simp] theorem wrap_unwrap (step : ModelExt source) {sort : FO.FOSort}
     (external : BaseLift.External step.block sort)
     (value : sort.Denote step.target.carriers) :
     step.wrap (step.unwrap (.typed sort value)) = .typed sort value := by
@@ -94,19 +94,19 @@ noncomputable def unwrap (step : ModelExtension source) :
   | fn domain codomain => rfl
   | base sort => exact BaseLift.external_asExternal sort external value
 
-private theorem wrap_typed_exists (step : ModelExtension source) (sort : FO.FOSort)
+private theorem wrap_typed_exists (step : ModelExt source) (sort : FO.FOSort)
     (value : sort.Denote step.prior.target.carriers) :
     ∃ output, step.wrap (.typed sort value) = .typed sort output := by
   simp only [wrap]
   split <;> exact ⟨_, rfl⟩
 
-private theorem unwrap_typed_exists (step : ModelExtension source) (sort : FO.FOSort)
+private theorem unwrap_typed_exists (step : ModelExt source) (sort : FO.FOSort)
     (value : sort.Denote step.target.carriers) :
     ∃ output, step.unwrap (.typed sort value) = .typed sort output := by
   simp only [unwrap]
   split <;> exact ⟨_, rfl⟩
 
-theorem wrap_inSort (step : ModelExtension source)
+theorem wrap_inSort (step : ModelExt source)
     (fo : SMT.Encoding (Symbol signature)) {sort : SMT.SSort}
     {value : SMT.Value step.prior.target}
     (typed : (SMT.model fo step.prior.target).inSort sort value) :
@@ -121,7 +121,7 @@ theorem wrap_inSort (step : ModelExtension source)
       change rawSort = sort ∧ ∀ typedSort, fo.sort typedSort ≠ rawSort
       exact typed
 
-theorem inSort_of_wrap (step : ModelExtension source)
+theorem inSort_of_wrap (step : ModelExt source)
     (fo : SMT.Encoding (Symbol signature)) {sort : SMT.SSort}
     {value : SMT.Value step.prior.target}
     (typed : (SMT.model fo step.target).inSort sort (step.wrap value)) :
@@ -136,7 +136,7 @@ theorem inSort_of_wrap (step : ModelExtension source)
       change rawSort = sort ∧ ∀ typedSort, fo.sort typedSort ≠ rawSort
       exact typed
 
-theorem unwrap_inSort (step : ModelExtension source)
+theorem unwrap_inSort (step : ModelExt source)
     (fo : SMT.Encoding (Symbol signature)) {sort : SMT.SSort}
     {value : SMT.Value step.target}
     (typed : (SMT.model fo step.target).inSort sort value) :
@@ -151,7 +151,7 @@ theorem unwrap_inSort (step : ModelExtension source)
       change rawSort = sort ∧ ∀ typedSort, fo.sort typedSort ≠ rawSort
       exact typed
 
-theorem wrap_injective (step : ModelExtension source)
+theorem wrap_injective (step : ModelExt source)
     (fo : SMT.Encoding (Symbol signature)) {sort : FO.FOSort}
     (external : BaseLift.External step.block sort)
     {left right : SMT.Value step.prior.target}
@@ -167,7 +167,7 @@ theorem wrap_injective (step : ModelExtension source)
 
 /-- Decoding a wrapped, well-typed argument and then crossing the external
 carrier isomorphism recovers the preceding argument. -/
-theorem unwrap_decode_wrap (step : ModelExtension source)
+theorem unwrap_decode_wrap (step : ModelExt source)
     (fo : SMT.Encoding (Symbol signature)) {sort : FO.FOSort}
     (external : BaseLift.External step.block sort)
     (value : SMT.Value step.prior.target)
@@ -178,7 +178,7 @@ theorem unwrap_decode_wrap (step : ModelExtension source)
   obtain ⟨input, rfl⟩ := SMT.Value.exists_typed_of_inSort fo sort value typed
   simp [external]
 
-theorem values_wrap (step : ModelExtension source)
+theorem values_wrap (step : ModelExt source)
     (fo : SMT.Encoding (Symbol signature)) :
     ∀ {sorts : List SMT.SSort}
       {values : List (SMT.Value step.prior.target)},
@@ -189,7 +189,7 @@ theorem values_wrap (step : ModelExtension source)
   | _, _, .cons head tail =>
       .cons (step.wrap_inSort fo head) (step.values_wrap fo tail)
 
-theorem values_unwrap (step : ModelExtension source)
+theorem values_unwrap (step : ModelExt source)
     (fo : SMT.Encoding (Symbol signature)) :
     ∀ {sorts : List SMT.SSort}
       {values : List (SMT.Value step.target)},
@@ -227,7 +227,7 @@ theorem values_typed_at {model : Crush.SMT.Model}
       | succ index =>
           exact ih index (by simpa using sortAt) (by simpa using valueAt)
 
-theorem wrap_unwrap_of_inSort (step : ModelExtension source)
+theorem wrap_unwrap_of_inSort (step : ModelExt source)
     (fo : SMT.Encoding (Symbol signature)) {sort : FO.FOSort}
     (external : BaseLift.External step.block sort)
     (value : SMT.Value step.target)
@@ -236,7 +236,7 @@ theorem wrap_unwrap_of_inSort (step : ModelExtension source)
   obtain ⟨input, rfl⟩ := SMT.Value.exists_typed_of_inSort fo sort value typed
   exact step.wrap_unwrap external input
 
-theorem values_wrap_unwrap (step : ModelExtension source)
+theorem values_wrap_unwrap (step : ModelExt source)
     (fo : SMT.Encoding (Symbol signature)) :
     ∀ {sorts : List FO.FOSort}
       (external : ∀ sort ∈ sorts, BaseLift.External step.block sort)
@@ -262,7 +262,7 @@ theorem values_wrap_unwrap (step : ModelExtension source)
 
 /-- Applying a preserved curried interpretation to wrapped typed arguments is
 exactly the wrapped preceding result. -/
-theorem applyValues_transport (step : ModelExtension source)
+theorem applyValues_transport (step : ModelExt source)
     (fo : SMT.Encoding (Symbol signature)) :
     ∀ {arguments : List FO.FOSort} {result : FO.FOSort}
       (argumentsExternal : ∀ sort ∈ arguments,
@@ -302,14 +302,14 @@ theorem applyValues_transport (step : ModelExtension source)
 
 /-- Evidence that a symbol installed before `step` is preserved unchanged rather
 than being declared or freshly lifted by the later block. -/
-structure SymbolPreserved (step : ModelExtension source) {decl : FO.SymbolDecl}
+structure SymbolPreserved (step : ModelExt source) {decl : FO.SymbolDecl}
     (symbol : Symbol signature decl) : Prop where
   notInBlock : ¬Nonempty (DatatypeSymbolRef step.symbols.datatypeSymbols symbol)
   external : BaseLift.ExternalDecl step.block decl
 
 /-- At a preserved encoded symbol, applying wrapped typed arguments and wrapping
 the result is equivalent to the preceding graph application. -/
-theorem apply_wrap_iff (step : ModelExtension source)
+theorem apply_wrap_iff (step : ModelExt source)
     (fo : SMT.Encoding (Symbol signature)) {decl : FO.SymbolDecl}
     (symbol : Symbol signature decl) (preserved : step.SymbolPreserved symbol)
     (values : List (SMT.Value step.prior.target))
@@ -372,7 +372,7 @@ theorem apply_wrap_iff (step : ModelExtension source)
 
 /-- Inverting a preserved target application by external unwrapping yields the
 exact preceding graph application. -/
-theorem apply_unwrap (step : ModelExtension source)
+theorem apply_unwrap (step : ModelExt source)
     (fo : SMT.Encoding (Symbol signature)) {decl : FO.SymbolDecl}
     (symbol : Symbol signature decl) (preserved : step.SymbolPreserved symbol)
     (values : List (SMT.Value step.target))
@@ -414,7 +414,7 @@ theorem apply_unwrap (step : ModelExtension source)
 
 /-- Every application at an encoded symbol returns a value of the symbol's
 encoded result sort. -/
-theorem apply_result_typed (step : ModelExtension source)
+theorem apply_result_typed (step : ModelExt source)
     (fo : SMT.Encoding (Symbol signature)) {decl : FO.SymbolDecl}
     (symbol : Symbol signature decl) (values : List (SMT.Value step.target))
     (output : SMT.Value step.target)
@@ -432,7 +432,7 @@ theorem apply_result_typed (step : ModelExtension source)
 
 /-- Totality, result typing, and graph uniqueness are preserved when an
 external symbol is preserved through a later block. -/
-theorem hasType_transport (step : ModelExtension source)
+theorem hasType_transport (step : ModelExt source)
     (fo : SMT.Encoding (Symbol signature)) {decl : FO.SymbolDecl}
     (symbol : Symbol signature decl) (preserved : step.SymbolPreserved symbol)
     (typed : Crush.SMT.SymbolHasType (SMT.model fo step.prior.target)
@@ -472,8 +472,8 @@ structure BlockPreserved
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
-    (represented : Representation oldBlock oldSymbols fo data)
-    (step : ModelExtension source) : Prop where
+    (represented : Repr oldBlock oldSymbols fo data)
+    (step : ModelExt source) : Prop where
   sort : ∀ child : DataRef oldBlock,
     BaseLift.External step.block (.base child.decl.sort)
   ctor : ∀ {child : DataRef oldBlock} {ctor : CtorDecl oldArity}
@@ -488,11 +488,11 @@ structure BlockPreserved
     step.SymbolPreserved (oldSymbols.datatypeSymbols.test ref)
 
 /-- Invert an earlier constructor application after one later carrier step. -/
-theorem ctorApplies_unwrap (step : ModelExtension source)
+theorem ctorApplies_unwrap (step : ModelExt source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
-    (represented : Representation oldBlock oldSymbols fo data)
+    (represented : Repr oldBlock oldSymbols fo data)
     (preserved : BlockPreserved represented step)
     {child : DataRef oldBlock} {ctor : CtorDecl oldArity}
     (ctorRef : CtorRef oldBlock child ctor)
@@ -516,11 +516,11 @@ theorem ctorApplies_unwrap (step : ModelExtension source)
     simpa [represented.flattenedCtor_ident ctorRef, ctorDecl] using graph
 
 /-- Wrap an earlier constructor application into the next target model. -/
-theorem ctorApplies_wrap (step : ModelExtension source)
+theorem ctorApplies_wrap (step : ModelExt source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
-    (represented : Representation oldBlock oldSymbols fo data)
+    (represented : Repr oldBlock oldSymbols fo data)
     (preserved : BlockPreserved represented step)
     {child : DataRef oldBlock} {ctor : CtorDecl oldArity}
     (ctorRef : CtorRef oldBlock child ctor)
@@ -546,11 +546,11 @@ theorem ctorApplies_wrap (step : ModelExtension source)
     simpa [represented.flattenedCtor_ident ctorRef, ctorDecl] using graph
 
 /-- Constructor totality and injectivity survive a later disjoint block. -/
-theorem ctor_holds_transport (step : ModelExtension source)
+theorem ctor_holds_transport (step : ModelExt source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
-    (represented : Representation oldBlock oldSymbols fo data)
+    (represented : Repr oldBlock oldSymbols fo data)
     (preserved : BlockPreserved represented step)
     {child : DataRef oldBlock} {ctor : CtorDecl oldArity}
     (ctorRef : CtorRef oldBlock child ctor)
@@ -605,11 +605,11 @@ theorem ctor_holds_transport (step : ModelExtension source)
 
 /-- Selector totality and the matching-constructor equation survive a later
 disjoint block. -/
-theorem sel_holds_transport (step : ModelExtension source)
+theorem sel_holds_transport (step : ModelExt source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
-    (represented : Representation oldBlock oldSymbols fo data)
+    (represented : Repr oldBlock oldSymbols fo data)
     (preserved : BlockPreserved represented step)
     {child : DataRef oldBlock} {ctor : CtorDecl oldArity}
     (ctorRef : CtorRef oldBlock child ctor)
@@ -702,7 +702,7 @@ theorem sel_holds_transport (step : ModelExtension source)
     simpa [represented.flattenedSelector_ident ctorRef fieldRef, ctorDecl, indexEq,
       resultRound, selectedRound] using mapped
 
-@[simp] theorem wrap_bool (step : ModelExtension source)
+@[simp] theorem wrap_bool (step : ModelExt source)
     (value : Bool) :
     step.wrap (SMT.boolValue step.prior.target value) =
       SMT.boolValue step.target value := by
@@ -716,11 +716,11 @@ theorem sel_holds_transport (step : ModelExtension source)
 
 /-- A tester for an earlier constructor remains total and recognizes that
 constructor after one later disjoint block. -/
-theorem test_holds_transport (step : ModelExtension source)
+theorem test_holds_transport (step : ModelExt source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
-    (represented : Representation oldBlock oldSymbols fo data)
+    (represented : Repr oldBlock oldSymbols fo data)
     (preserved : BlockPreserved represented step)
     {child : DataRef oldBlock} {ctor : CtorDecl oldArity}
     (ctorRef : CtorRef oldBlock child ctor)
@@ -774,11 +774,11 @@ theorem test_holds_transport (step : ModelExtension source)
       Crush.SMT.CtorDecl.tester, ctorDecl, resultRound] using mapped
 
 /-- All three local laws of an earlier raw constructor survive one step. -/
-theorem ctor_laws_transport (step : ModelExtension source)
+theorem ctor_laws_transport (step : ModelExt source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
-    (represented : Representation oldBlock oldSymbols fo data)
+    (represented : Repr oldBlock oldSymbols fo data)
     (preserved : BlockPreserved represented step)
     {sort : Crush.SMT.SSort} {rawCtor : Crush.SMT.CtorDecl}
     (member : (sort, rawCtor) ∈
@@ -798,11 +798,11 @@ theorem ctor_laws_transport (step : ModelExtension source)
     step.test_holds_transport represented preserved ctorRef holds.2.2⟩
 
 /-- Distinct earlier constructors remain disjoint after one step. -/
-theorem ctor_disjoint_transport (step : ModelExtension source)
+theorem ctor_disjoint_transport (step : ModelExt source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
-    (represented : Representation oldBlock oldSymbols fo data)
+    (represented : Repr oldBlock oldSymbols fo data)
     (preserved : BlockPreserved represented step)
     {leftSort rightSort : Crush.SMT.SSort}
     {leftCtor rightCtor : Crush.SMT.CtorDecl}
@@ -834,11 +834,11 @@ theorem ctor_disjoint_transport (step : ModelExtension source)
   exact holds _ _ _ _ oldLeft oldRight (congrArg step.unwrap equal)
 
 /-- An earlier tester still rejects values of a distinct constructor. -/
-theorem test_disjoint_transport (step : ModelExtension source)
+theorem test_disjoint_transport (step : ModelExt source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
-    (represented : Representation oldBlock oldSymbols fo data)
+    (represented : Repr oldBlock oldSymbols fo data)
     (preserved : BlockPreserved represented step)
     {sort : Crush.SMT.SSort} {leftCtor rightCtor : Crush.SMT.CtorDecl}
     (leftMem : (sort, leftCtor) ∈
@@ -898,11 +898,11 @@ theorem test_disjoint_transport (step : ModelExtension source)
     Crush.SMT.CtorDecl.tester, ctorDecl, resultRound] using mapped
 
 /-- Exhaustiveness of an earlier datatype sort survives one step. -/
-theorem exhaustive_transport (step : ModelExtension source)
+theorem exhaustive_transport (step : ModelExt source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
-    (represented : Representation oldBlock oldSymbols fo data)
+    (represented : Repr oldBlock oldSymbols fo data)
     (preserved : BlockPreserved represented step)
     {name : String} {count : Nat} {decl : Crush.SMT.DatatypeDecl}
     (member : (name, count, decl) ∈ (entries oldBlock data).toList)
@@ -954,11 +954,11 @@ theorem exhaustive_transport (step : ModelExtension source)
 
 /-- The preceding structural rank, composed with unwrapping, still decreases
 on every recursive field of an earlier constructor. -/
-theorem rank_lt_transport (step : ModelExtension source)
+theorem rank_lt_transport (step : ModelExt source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
-    (represented : Representation oldBlock oldSymbols fo data)
+    (represented : Repr oldBlock oldSymbols fo data)
     (preserved : BlockPreserved represented step)
     (rank : SMT.Value step.prior.target → Nat)
     (decreases : ∀ dataSort rawCtor,
@@ -997,11 +997,11 @@ theorem rank_lt_transport (step : ModelExtension source)
 
 /-- One later disjoint dependency block preserves every semantic component of
 an earlier native datatype declaration, with no datatype-specific re-modeling. -/
-theorem data_hold_transport (step : ModelExtension source)
+theorem data_hold_transport (step : ModelExt source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
-    (represented : Representation oldBlock oldSymbols fo data)
+    (represented : Repr oldBlock oldSymbols fo data)
     (preserved : BlockPreserved represented step)
     (holds : Crush.SMT.DatatypesHold (SMT.model fo step.prior.target)
       (entries oldBlock data)) :
@@ -1031,11 +1031,11 @@ theorem data_hold_transport (step : ModelExtension source)
 
 /-- Validity of an earlier `declare-datatypes` command survives one later
 disjoint dependency block. -/
-theorem command_sound_transport (step : ModelExtension source)
+theorem command_sound_transport (step : ModelExt source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
-    (represented : Representation oldBlock oldSymbols fo data)
+    (represented : Repr oldBlock oldSymbols fo data)
     (preserved : BlockPreserved represented step)
     (valid : (SMT.model fo step.prior.target).SatisfiesCommand
       (command oldBlock data)) :
@@ -1046,7 +1046,7 @@ theorem command_sound_transport (step : ModelExtension source)
 /-- Exact interpretation of a preserved unary symbol. The later model unwraps its
 external argument, applies the preceding interpretation, then wraps the external
 result. -/
-theorem symbol_unary_transport (step : ModelExtension source)
+theorem symbol_unary_transport (step : ModelExt source)
     {argument result : FO.FOSort}
     (symbol : Symbol signature { args := [argument], result })
     (preserved : step.SymbolPreserved symbol)
@@ -1066,7 +1066,7 @@ theorem symbol_unary_transport (step : ModelExtension source)
 
 /-- On a sort external to a later datatype block, the composed carrier guard
 is exactly the preceding guard after unwrapping the external carrier. -/
-theorem relation_guard (step : ModelExtension source) (sort : FO.FOSort)
+theorem relation_guard (step : ModelExt source) (sort : FO.FOSort)
     (external : BaseLift.External step.block sort)
     (value : sort.Denote step.target.carriers) :
     ((BaseLift.carrierRel step.wf step.productive step.prior.relation
@@ -1077,20 +1077,20 @@ theorem relation_guard (step : ModelExtension source) (sort : FO.FOSort)
   | bool => rfl
   | fn domain codomain => rfl
   | base base =>
-      change (BaseLift.subsetRepresentation step.wf step.productive step.prior.relation.base
+      change (BaseLift.subsetRepr step.wf step.productive step.prior.relation.base
         step.law.carrier base).guard value ↔ _
-      rw [BaseLift.subsetRepresentation_external step.wf step.productive
+      rw [BaseLift.subsetRepr_external step.wf step.productive
         step.prior.relation.base step.law.carrier base external]
       rfl
 
 /-- The semantic tester/selector guard equation for an earlier block survives
 one later dependency extension whenever the new guard is transported through
 the same external carrier isomorphism. -/
-theorem guardLaw_transport (step : ModelExtension source)
+theorem guardLaw_transport (step : ModelExt source)
     {oldArity : Nat} {oldBlock : Block oldArity}
     {oldSymbols : Symbols signature oldBlock}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding oldArity}
-    (represented : Representation oldBlock oldSymbols fo data)
+    (represented : Repr oldBlock oldSymbols fo data)
     (preserved : BlockPreserved represented step)
     (oldGuard : ∀ sort : FO.FOSort,
       sort.Denote step.prior.target.carriers → Prop)
@@ -1200,8 +1200,8 @@ structure BlocksDisjoint
     {fo : SMT.Encoding (Symbol signature)}
     {earlierData : BlockEncoding earlierArity}
     {laterData : BlockEncoding laterArity}
-    (earlier : Representation earlierBlock earlierSymbols fo earlierData)
-    (_later : Representation laterBlock laterSymbols fo laterData) : Prop where
+    (earlier : Repr earlierBlock earlierSymbols fo earlierData)
+    (_later : Repr laterBlock laterSymbols fo laterData) : Prop where
   sort : ∀ child : DataRef earlierBlock,
     BaseLift.External laterBlock (.base child.decl.sort)
   ctor : ∀ {child : DataRef earlierBlock} {ctor : CtorDecl earlierArity}
@@ -1234,8 +1234,8 @@ theorem preserved
     {fo : SMT.Encoding (Symbol signature)}
     {earlierData : BlockEncoding earlierArity}
     {laterData : BlockEncoding laterArity}
-    {earlier : Representation earlierBlock earlierSymbols fo earlierData}
-    {later : Representation laterBlock laterSymbols fo laterData}
+    {earlier : Repr earlierBlock earlierSymbols fo earlierData}
+    {later : Repr laterBlock laterSymbols fo laterData}
     (disjoint : BlocksDisjoint earlier later)
     (law : IsFreeDatatypeFamilyModel laterSymbols.datatypeSymbols source)
     (wf : laterBlock.WF) (productive : Productive laterBlock)
@@ -1248,7 +1248,7 @@ theorem preserved
          wf := wf
          productive := productive
          prior := prior } :
-        ModelExtension source) := by
+        ModelExt source) := by
   refine {
     sort := disjoint.sort
     ctor := fun {_child} {_ctor} ref =>
@@ -1266,14 +1266,14 @@ inductive DisjointFromSuffix
     {earlierSymbols : Symbols signature earlierBlock}
     {fo : SMT.Encoding (Symbol signature)}
     {earlierData : BlockEncoding earlierArity}
-    (earlier : Representation earlierBlock earlierSymbols fo earlierData) :
+    (earlier : Repr earlierBlock earlierSymbols fo earlierData) :
     {env : List (Entry signature)} →
       Represented fo env → Prop where
   | nil : DisjointFromSuffix earlier .nil
   | cons {entry : Entry signature}
       {rest : List (Entry signature)}
       {data : BlockEncoding entry.arity}
-      {later : Representation entry.block entry.symbols fo data}
+      {later : Repr entry.block entry.symbols fo data}
       {tail : Represented fo rest} :
       BlocksDisjoint earlier later → DisjointFromSuffix earlier tail →
         DisjointFromSuffix earlier (.cons later tail)
@@ -1288,7 +1288,7 @@ inductive DependencyOrdered {fo : SMT.Encoding (Symbol signature)} :
   | cons {entry : Entry signature}
       {rest : List (Entry signature)}
       {data : BlockEncoding entry.arity}
-      {head : Representation entry.block entry.symbols fo data}
+      {head : Repr entry.block entry.symbols fo data}
       {tail : Represented fo rest} :
       DisjointFromSuffix head tail → DependencyOrdered tail → DependencyOrdered (.cons head tail)
 
@@ -1298,7 +1298,7 @@ the same untyped command that the translator emits. -/
 structure GuardCommand
     {entry : Entry signature} {data : BlockEncoding entry.arity}
     {guarding : SMT.GuardedEncoding (Symbol signature)}
-    (_head : Representation entry.block entry.symbols guarding.encoding data)
+    (_head : Repr entry.block entry.symbols guarding.encoding data)
     where
   name : DataRef entry.block → String
   binder : DataRef entry.block → String
@@ -1314,7 +1314,7 @@ inductive GuardCommands (guarding : SMT.GuardedEncoding (Symbol signature)) :
   | nil : GuardCommands guarding .nil
   | cons {entry : Entry signature} {rest : List (Entry signature)}
       {data : BlockEncoding entry.arity}
-      {head : Representation entry.block entry.symbols guarding.encoding data}
+      {head : Repr entry.block entry.symbols guarding.encoding data}
       {tail : Represented guarding.encoding rest}
       (command : GuardCommand head)
       (rest : GuardCommands guarding tail) :
@@ -1354,7 +1354,7 @@ the names of one mutual guard definition injective. -/
 theorem name_injective
     {entry : Entry signature} {data : BlockEncoding entry.arity}
     {guarding : SMT.GuardedEncoding (Symbol signature)}
-    {head : Representation entry.block entry.symbols guarding.encoding data}
+    {head : Repr entry.block entry.symbols guarding.encoding data}
     (command : GuardCommand head)
     (ident : FO.FOSort → Option Crush.SMT.Ident)
     (ident_injective : ∀ {left right identifier},
@@ -1380,7 +1380,7 @@ theorem DisjointFromSuffix.command_valid
     {earlierSymbols : Symbols signature earlierBlock}
     {fo : SMT.Encoding (Symbol signature)}
     {earlierData : BlockEncoding earlierArity}
-    {earlier : Representation earlierBlock earlierSymbols fo earlierData}
+    {earlier : Repr earlierBlock earlierSymbols fo earlierData}
     {env : List (Entry signature)}
     {tail : Represented fo env}
     (after : DisjointFromSuffix earlier tail)
@@ -1405,7 +1405,7 @@ theorem DisjointFromSuffix.command_valid
           | cons headWF tailWF =>
               let next := prior.extend headLaw.flattened headWF
                 headLaw.productive
-              let step : ModelExtension (canonicalModel sourceModel) := {
+              let step : ModelExt (canonicalModel sourceModel) := {
                 arity := entry.arity
                 block := entry.block
                 symbols := entry.symbols
@@ -1417,7 +1417,7 @@ theorem DisjointFromSuffix.command_valid
                 headLaw.productive prior
               have nextValid : (SMT.model fo next.target).SatisfiesCommand
                   (command earlierBlock earlierData) := by
-                simpa [next, step, ModelExtension.target, Lifted.extend] using
+                simpa [next, step, ModelExt.target, Lifted.extend] using
                   step.command_sound_transport earlier preserved valid
               exact ih tailLaw tailWF next nextValid
 
@@ -1429,7 +1429,7 @@ theorem DisjointFromSuffix.guardLaw
     {earlierSymbols : Symbols signature earlierBlock}
     {fo : SMT.Encoding (Symbol signature)}
     {earlierData : BlockEncoding earlierArity}
-    {earlier : Representation earlierBlock earlierSymbols fo earlierData}
+    {earlier : Repr earlierBlock earlierSymbols fo earlierData}
     {env : List (Entry signature)}
     {tail : Represented fo env}
     (after : DisjointFromSuffix earlier tail)
@@ -1453,7 +1453,7 @@ theorem DisjointFromSuffix.guardLaw
       | cons headLaw tailLaw =>
           cases wf with
           | cons headWF tailWF =>
-              let step : ModelExtension (canonicalModel sourceModel) := {
+              let step : ModelExt (canonicalModel sourceModel) := {
                 arity := entry.arity
                 block := entry.block
                 symbols := entry.symbols
@@ -1474,10 +1474,10 @@ theorem DisjointFromSuffix.guardLaw
                   | bool => rfl
                   | fn domain codomain => rfl
                   | base base =>
-                      change (BaseLift.subsetRepresentation step.wf step.productive
+                      change (BaseLift.subsetRepr step.wf step.productive
                         step.prior.relation.base step.law.carrier base).guard
                           value ↔ _
-                      rw [BaseLift.subsetRepresentation_external step.wf step.productive
+                      rw [BaseLift.subsetRepr_external step.wf step.productive
                         step.prior.relation.base step.law.carrier base external]
                       rfl)
                 (by simpa [step] using law)
@@ -1489,7 +1489,7 @@ the installation step and transported internally through the suffix. -/
 theorem DisjointFromSuffix.wfDefs_valid
     {entry : Entry signature} {data : BlockEncoding entry.arity}
     {fo : SMT.Encoding (Symbol signature)}
-    {head : Representation entry.block entry.symbols fo data}
+    {head : Repr entry.block entry.symbols fo data}
     {env : List (Entry signature)} {tail : Represented fo env}
     (after : DisjointFromSuffix head tail)
     (sourceModel : Model signature)
@@ -1677,7 +1677,7 @@ theorem DependencyOrdered.commands_valid
                   (Crush.SMT.Model.satisfiesCommands_empty _) headValid,
                 tailValid⟩
 
-end ModelExtension
+end ModelExt
 
 end Crush.Metatheory.SMT.Datatype.Native
 
@@ -1690,11 +1690,11 @@ open Crush.Metatheory.Datatype.Env (IsFreeDatatypeModel liftFrom)
 /-- Any `ExtraGraph` is inactive on a represented native datatype block: every
 raw constructor, selector, and tester identifier is the encoding of a declared
 source symbol, and `ExtraGraph.source_fresh` excludes exactly those identifiers. -/
-theorem Representation.extra_inactive
+theorem Repr.extra_inactive
     {signature : Signature} {arity : Nat} {block : Block arity}
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     (target : FO.FamilyModel (Symbol signature))
     (extra : SMT.ExtraGraph fo target) :
     extra.InactiveOnDatatypes (entries block data) := by
@@ -1741,11 +1741,11 @@ source datatype has its free-algebra interpretation and the shared target
 supplies the standard integer view used by the proved SMT fragment.  This is
 the non-vacuity counterpart of `command_sound`: it installs the integer graph
 in the same model without disturbing constructors, selectors, or testers. -/
-theorem Representation.standardModel_exists
+theorem Repr.standardModel_exists
     {signature : Signature} {arity : Nat} {block : Block arity}
     {symbols : Symbols signature block} {source : Model signature}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     (freeDataModel : Datatype.IsFreeDatatypeModel symbols source)
     (integer : SMT.IntView fo (canonicalModel source)) :
     ∃ model : Crush.SMT.Model,
@@ -1759,14 +1759,14 @@ theorem Representation.standardModel_exists
 
 /-- Under the same explicit source and integer interpretations, a represented
 datatype declaration alone cannot satisfy the semantic UNSAT premise. -/
-theorem Representation.not_commandsUnsatisfiable
+theorem Repr.not_commandsUnsat
     {signature : Signature} {arity : Nat} {block : Block arity}
     {symbols : Symbols signature block} {source : Model signature}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     (freeDataModel : Datatype.IsFreeDatatypeModel symbols source)
     (integer : SMT.IntView fo (canonicalModel source)) :
-    ¬Crush.SMT.CommandsUnsatisfiable #[command block data] := by
+    ¬Crush.SMT.CommandsUnsat #[command block data] := by
   intro unsat
   obtain ⟨model, standard, commandValid⟩ :=
     represented.standardModel_exists freeDataModel integer
@@ -1813,7 +1813,7 @@ theorem Native.block_valid_with_guards
     {signature : Signature} {arity : Nat} {block : Block arity}
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {source prior : FO.FamilyModel (Symbol signature)}
     (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
     (wf : block.WF) (productive : Productive block)
@@ -1870,7 +1870,7 @@ theorem Native.block_valid_with_int
     {signature : Signature} {arity : Nat} {block : Block arity}
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     {source prior : FO.FamilyModel (Symbol signature)}
     (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
     (wf : block.WF) (productive : Productive block)
@@ -1903,11 +1903,11 @@ theorem Native.block_valid_with_int
 
 /-- The exact native command prefix is valid after installing every datatype
 block over an arbitrary already-guarded base model. -/
-theorem EnvRepresentation.liftedFrom_valid
+theorem EnvRepr.liftedFrom_valid
     {signature : Signature} {fo : SMT.Encoding (Symbol signature)}
     {env : List (Entry signature)}
-    (represented : EnvRepresentation fo env)
-    (ordered : Native.ModelExtension.DependencyOrdered represented.blocks)
+    (represented : EnvRepr fo env)
+    (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     (source : Model signature)
     (freeDataModel : IsFreeDatatypeModel source env)
     (prior : Lifted (canonicalModel source)) :
@@ -1923,25 +1923,25 @@ theorem EnvRepresentation.liftedFrom_valid
     prior
 
 /-- Identity-base specialization of `liftedFrom_valid`. -/
-theorem EnvRepresentation.lifted_valid
+theorem EnvRepr.lifted_valid
     {signature : Signature} {fo : SMT.Encoding (Symbol signature)}
     {env : List (Entry signature)}
-    (represented : EnvRepresentation fo env)
-    (ordered : Native.ModelExtension.DependencyOrdered represented.blocks)
+    (represented : EnvRepr fo env)
+    (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     (source : Model signature)
     (freeDataModel : IsFreeDatatypeModel source env) :
     (SMT.model fo (represented.lifted source freeDataModel).target).SatisfiesCommands
       fo.nativeCommands := by
-  simpa [EnvRepresentation.lifted, EnvRepresentation.liftedFrom, Env.lift] using
+  simpa [EnvRepr.lifted, EnvRepr.liftedFrom, Env.lift] using
     represented.liftedFrom_valid ordered source freeDataModel
       (Lifted.refl (canonicalModel source))
 
 /-- The complete native prefix remains valid over an arbitrary prior lifting
 after installing the combined guard/arithmetic graph. -/
-theorem EnvRepresentation.liftedFrom_valid_with
+theorem EnvRepr.liftedFrom_valid_with
     {signature : Signature} {fo : SMT.Encoding (Symbol signature)}
-    {env : List (Entry signature)} (represented : EnvRepresentation fo env)
-    (ordered : Native.ModelExtension.DependencyOrdered represented.blocks)
+    {env : List (Entry signature)} (represented : EnvRepr fo env)
+    (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     (source : Model signature) (freeDataModel : IsFreeDatatypeModel source env)
     (prior : Lifted (canonicalModel source))
     (extra : SMT.ExtraGraph fo
@@ -1956,15 +1956,15 @@ theorem EnvRepresentation.liftedFrom_valid_with
       exact represented.liftedFrom_valid ordered source freeDataModel prior)
 
 /-- Identity-base specialization of `liftedFrom_valid_with`. -/
-theorem EnvRepresentation.lifted_valid_with
+theorem EnvRepr.lifted_valid_with
     {signature : Signature} {fo : SMT.Encoding (Symbol signature)}
-    {env : List (Entry signature)} (represented : EnvRepresentation fo env)
-    (ordered : Native.ModelExtension.DependencyOrdered represented.blocks)
+    {env : List (Entry signature)} (represented : EnvRepr fo env)
+    (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     (source : Model signature) (freeDataModel : IsFreeDatatypeModel source env)
     (extra : SMT.ExtraGraph fo (represented.lifted source freeDataModel).target) :
     (SMT.modelWith fo (represented.lifted source freeDataModel).target extra).SatisfiesCommands
       fo.nativeCommands := by
-  simpa [EnvRepresentation.lifted, EnvRepresentation.liftedFrom, Env.lift] using
+  simpa [EnvRepr.lifted, EnvRepr.liftedFrom, Env.lift] using
     represented.liftedFrom_valid_with ordered source freeDataModel
       (Lifted.refl (canonicalModel source)) extra
 
@@ -1972,10 +1972,10 @@ theorem EnvRepresentation.lifted_valid_with
 All blocks use the existing dependency fold, and the integer interpretation is
 added only after that fold, so this theorem introduces no parallel datatype
 model construction. -/
-theorem EnvRepresentation.standardModel_exists
+theorem EnvRepr.standardModel_exists
     {signature : Signature} {fo : SMT.Encoding (Symbol signature)}
-    {env : List (Entry signature)} (represented : EnvRepresentation fo env)
-    (ordered : Native.ModelExtension.DependencyOrdered represented.blocks)
+    {env : List (Entry signature)} (represented : EnvRepr fo env)
+    (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     (source : Model signature) (freeDataModel : IsFreeDatatypeModel source env)
     (integer : SMT.IntView fo
       (represented.lifted source freeDataModel).target) :
@@ -1987,14 +1987,14 @@ theorem EnvRepresentation.standardModel_exists
 
 /-- A represented datatype prefix cannot be UNSAT merely because datatype
 declarations were installed. -/
-theorem EnvRepresentation.not_commandsUnsatisfiable
+theorem EnvRepr.not_commandsUnsat
     {signature : Signature} {fo : SMT.Encoding (Symbol signature)}
-    {env : List (Entry signature)} (represented : EnvRepresentation fo env)
-    (ordered : Native.ModelExtension.DependencyOrdered represented.blocks)
+    {env : List (Entry signature)} (represented : EnvRepr fo env)
+    (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     (source : Model signature) (freeDataModel : IsFreeDatatypeModel source env)
     (integer : SMT.IntView fo
       (represented.lifted source freeDataModel).target) :
-    ¬Crush.SMT.CommandsUnsatisfiable fo.nativeCommands := by
+    ¬Crush.SMT.CommandsUnsat fo.nativeCommands := by
   intro unsat
   obtain ⟨model, standard, commandsValid⟩ :=
     represented.standardModel_exists ordered source freeDataModel integer
@@ -2003,13 +2003,13 @@ theorem EnvRepresentation.not_commandsUnsatisfiable
 /-- Whole-theory model lifting over a caller-supplied interpreted or guarded
 base model. Native datatypes, derived graphs, ordinary declarations, and
 assertions share one raw model. -/
-theorem EnvRepresentation.soundFrom
+theorem EnvRepr.soundFrom
     {signature : Signature} {fo : SMT.Encoding (Symbol signature)}
-    {env : List (Entry signature)} (represented : EnvRepresentation fo env)
-    (ordered : Native.ModelExtension.DependencyOrdered represented.blocks)
+    {env : List (Entry signature)} (represented : EnvRepr fo env)
+    (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     {theory : FO.FamilyTheory (Symbol signature)}
     {commands : Array Crush.SMT.Command}
-    (representation : SMT.TheoryRepresentation fo theory commands)
+    (repr : SMT.TheoryRepr fo theory commands)
     (source : Model signature) (freeDataModel : IsFreeDatatypeModel source env)
     (prior : Lifted (canonicalModel source))
     (extra : SMT.ExtraGraph fo
@@ -2017,24 +2017,24 @@ theorem EnvRepresentation.soundFrom
     (valid : (represented.liftedFrom source freeDataModel prior).target.SatisfiesTheory
       theory) :
     ∃ model : Crush.SMT.Model, model.SatisfiesCommands commands :=
-  SMT.lift_with_extra fo representation
+  SMT.lift_with_extra fo repr
     (represented.liftedFrom source freeDataModel prior).target valid extra
     (represented.liftedFrom_valid_with ordered source freeDataModel prior extra)
 
 /-- Identity-base specialization of `soundFrom`. -/
-theorem EnvRepresentation.sound_with
+theorem EnvRepr.sound_with
     {signature : Signature} {fo : SMT.Encoding (Symbol signature)}
-    {env : List (Entry signature)} (represented : EnvRepresentation fo env)
-    (ordered : Native.ModelExtension.DependencyOrdered represented.blocks)
+    {env : List (Entry signature)} (represented : EnvRepr fo env)
+    (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     {theory : FO.FamilyTheory (Symbol signature)}
     {commands : Array Crush.SMT.Command}
-    (representation : SMT.TheoryRepresentation fo theory commands)
+    (repr : SMT.TheoryRepr fo theory commands)
     (source : Model signature) (freeDataModel : IsFreeDatatypeModel source env)
     (extra : SMT.ExtraGraph fo (represented.lifted source freeDataModel).target)
     (valid : (represented.lifted source freeDataModel).target.SatisfiesTheory theory) :
     ∃ model : Crush.SMT.Model, model.SatisfiesCommands commands := by
-  simpa [EnvRepresentation.lifted, EnvRepresentation.liftedFrom, Env.lift] using
-    represented.soundFrom ordered representation source freeDataModel
+  simpa [EnvRepr.lifted, EnvRepr.liftedFrom, Env.lift] using
+    represented.soundFrom ordered repr source freeDataModel
       (Lifted.refl (canonicalModel source)) extra valid
 
 end Crush.Metatheory.SMT.Datatype

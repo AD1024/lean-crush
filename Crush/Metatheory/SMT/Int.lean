@@ -187,8 +187,8 @@ private theorem propositionValue_eq_false (target : FO.FamilyModel symbols)
   rfl
 
 /-- The standard integer structure induced by an `IntView`. -/
-noncomputable def integerInterpretation (view : IntView encoding target) :
-    Crush.SMT.Model.IntegerInterpretation
+noncomputable def intInterp (view : IntView encoding target) :
+    Crush.SMT.Model.IntInterp
       (modelWith encoding target view.extra) where
   int := fun value => .typed view.sort (view.«from» value)
   int_typed := by
@@ -249,7 +249,7 @@ and integer model required at the external SMT boundary. -/
 theorem standard (view : IntView encoding target) :
     Crush.SMT.Model.Standard (modelWith encoding target view.extra) where
   bool_exhaustive := modelWith_bool_exhaustive encoding target view.extra
-  integer := ⟨view.integerInterpretation⟩
+  integer := ⟨view.intInterp⟩
   apply_unique := view.applyUnique
 
 /-- A family of allocated unary predicates is disjoint from interpreted `>=`
@@ -341,12 +341,12 @@ theorem applyUnique_withGuards (view : IntView encoding target)
 
 /-- The integer structure remains standard after installing fresh unary
 datatype guards. -/
-noncomputable def integerInterpretation_withGuards (view : IntView encoding target)
+noncomputable def intInterp_withGuards (view : IntView encoding target)
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (guards : UnaryGuards encoding target guard)
     (separate : ∀ sort identifier, guards.ident sort = some identifier →
       identifier ≠ .symb ">=") :
-    Crush.SMT.Model.IntegerInterpretation
+    Crush.SMT.Model.IntInterp
       (modelWith encoding target (guards.over view.extra)) where
   int := fun value => .typed view.sort (view.«from» value)
   int_typed := by
@@ -417,7 +417,7 @@ theorem standard_withGuards (view : IntView encoding target)
       (modelWith encoding target (guards.over view.extra)) where
   bool_exhaustive :=
     modelWith_bool_exhaustive encoding target (guards.over view.extra)
-  integer := ⟨view.integerInterpretation_withGuards guards separate⟩
+  integer := ⟨view.intInterp_withGuards guards separate⟩
   apply_unique := view.applyUnique_withGuards guards separate
 
 end IntView

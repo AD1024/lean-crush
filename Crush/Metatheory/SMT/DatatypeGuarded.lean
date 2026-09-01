@@ -1,5 +1,5 @@
 import Crush.Metatheory.Datatype.Flattened
-import Crush.Metatheory.SMT.DatatypeRepresentation
+import Crush.Metatheory.SMT.DatatypeRepr
 import Crush.Metatheory.SMT.GuardedSoundness
 
 /-!
@@ -358,9 +358,9 @@ theorem dataParts_eval_wf
           (.base data.decl.sort)).guard value ↔
         (BaseLift.asData wf data value).WF
           (fun sort => (priorRel.base sort).guard) := by
-    change (BaseLift.subsetRepresentation wf productive priorRel.base law.carrier
+    change (BaseLift.subsetRepr wf productive priorRel.base law.carrier
       data.decl.sort).guard value ↔ _
-    rw [BaseLift.subsetRepresentation_datatype]
+    rw [BaseLift.subsetRepr_datatype]
     rfl
   have equal : SMT.GuardPart.Holds
       (fun sort => (BaseLift.carrierRel wf productive priorRel law.carrier
@@ -443,10 +443,10 @@ theorem dataParts_eval {target : FO.FamilyModel (Symbol signature)}
 
 /-- The flattened native tester uses the indexed identifier fixed by the exact
 datatype representation. -/
-theorem Representation.flattenedTester_ident
+theorem Repr.flattenedTester_ident
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
-    (represented : Representation block symbols fo encoding)
+    (represented : Repr block symbols fo encoding)
     {data : DataRef block} {ctor : CtorDecl arity}
     (ref : CtorRef block data ctor) :
     fo.ident (symbols.datatypeSymbols.test ref) =
@@ -454,10 +454,10 @@ theorem Representation.flattenedTester_ident
   exact represented.test_ident ref
 
 /-- Exact represented constructor clauses for one datatype member. -/
-def Representation.guardParts
+def Repr.guardParts
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
-    (represented : Representation block symbols fo encoding)
+    (represented : Repr block symbols fo encoding)
     {target : FO.FamilyModel (Symbol signature)}
     {guarding : SMT.GuardedEncoding (Symbol signature)}
     (encodingEq : guarding.encoding = fo)
@@ -478,10 +478,10 @@ def Representation.guardParts
 /-- Semantic fixed-point equation characterized by one block's tester and
 selector symbols. It is independent of raw syntax and is therefore the compact
 invariant transported through later dependency blocks. -/
-def Representation.GuardLaw
+def Repr.GuardLaw
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
-    (_represented : Representation block symbols fo encoding)
+    (_represented : Repr block symbols fo encoding)
     (target : FO.FamilyModel (Symbol signature))
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop) : Prop :=
   ∀ (data : DataRef block) (value : target.carriers.Base data.decl.sort),
@@ -493,10 +493,10 @@ def Representation.GuardLaw
       guard (.base data.decl.sort) value
 
 /-- Pointwise-equivalent predicates satisfy the same datatype guard equation. -/
-theorem Representation.GuardLaw.congr
+theorem Repr.GuardLaw.congr
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
-    {represented : Representation block symbols fo encoding}
+    {represented : Repr block symbols fo encoding}
     {target : FO.FamilyModel (Symbol signature)}
     {left right : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (law : represented.GuardLaw target left)
@@ -522,10 +522,10 @@ theorem Representation.GuardLaw.congr
 /-- The canonical extension satisfies its datatype guard equation. This is
 derived from the free-datatype tester and selector laws, rather than supplied
 as an assumption to the final soundness theorem. -/
-theorem Representation.guardLaw_extend
+theorem Repr.guardLaw_extend
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
-    (represented : Representation block symbols fo encoding)
+    (represented : Repr block symbols fo encoding)
     {source prior : FO.FamilyModel (Symbol signature)}
     (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
     (wf : block.WF) (productive : Productive block)
@@ -574,18 +574,18 @@ theorem Representation.guardLaw_extend
           (.base data.decl.sort)).guard value ↔
         (BaseLift.asData wf data value).WF
           (fun sort => (priorRel.base sort).guard) := by
-    change (BaseLift.subsetRepresentation wf productive priorRel.base law.carrier
+    change (BaseLift.subsetRepr wf productive priorRel.base law.carrier
       data.decl.sort).guard value ↔ _
-    rw [BaseLift.subsetRepresentation_datatype]
+    rw [BaseLift.subsetRepr_datatype]
     rfl
   exact selectors.trans (structural.symm.trans nativeGuard.symm)
 
 /-- A `GuardLaw` is exactly the denotation of the evidence-carrying clause list
 used to build the raw `wf_T` body. -/
-theorem Representation.guardParts_iff_guard
+theorem Repr.guardParts_iff_guard
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
-    (represented : Representation block symbols fo encoding)
+    (represented : Repr block symbols fo encoding)
     {target : FO.FamilyModel (Symbol signature)}
     {guarding : SMT.GuardedEncoding (Symbol signature)}
     (encodingEq : guarding.encoding = fo)
@@ -609,10 +609,10 @@ theorem Representation.guardParts_iff_guard
 
 /-- The represented clause body has the generic tester-implies-field
 denotation. -/
-theorem Representation.guardParts_eval
+theorem Repr.guardParts_eval
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
-    (represented : Representation block symbols fo encoding)
+    (represented : Repr block symbols fo encoding)
     {target : FO.FamilyModel (Symbol signature)}
     {guarding : SMT.GuardedEncoding (Symbol signature)}
     (encodingEq : guarding.encoding = fo)
@@ -638,10 +638,10 @@ theorem Representation.guardParts_eval
 
 /-- For the canonical lifted native model, the exact represented body evaluates
 to the declared datatype sort's shared carrier guard. -/
-theorem Representation.guardParts_eval_wf
+theorem Repr.guardParts_eval_wf
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
-    (represented : Representation block symbols fo encoding)
+    (represented : Repr block symbols fo encoding)
     {source prior : FO.FamilyModel (Symbol signature)}
     (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
     (rolesUnique : symbols.datatypeSymbols.RolesUnique)
@@ -674,7 +674,7 @@ theorem Representation.guardParts_eval_wf
     (SMT.modelWith guards.guarding.encoding
       (law.extend wf productive prior priorRel priorModels) guards.extra)
     environment _ _
-  simpa [Representation.guardParts] using
+  simpa [Repr.guardParts] using
     (dataParts_eval_wf law rolesUnique wf productive priorRel priorModels
       (guards.termSemantics omitted) data
       (fun ref => encoding.name (.ctor data ref.index))
@@ -686,7 +686,7 @@ graph equation in the guarded native model. -/
 theorem wfDef_valid
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
-    (represented : Representation block symbols fo encoding)
+    (represented : Repr block symbols fo encoding)
     {source prior : FO.FamilyModel (Symbol signature)}
     (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
     (rolesUnique : symbols.datatypeSymbols.RolesUnique)
@@ -738,7 +738,7 @@ the suffix-stable interface; the canonical one-step theorem below discharges
 theorem wfDefs_valid_of_guard
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
-    (represented : Representation block symbols fo encoding)
+    (represented : Repr block symbols fo encoding)
     {target : FO.FamilyModel (Symbol signature)}
     (guarding : SMT.GuardedEncoding (Symbol signature))
     (encodingEq : guarding.encoding = fo)
@@ -764,7 +764,7 @@ theorem wfDefs_valid_of_guard
   subst fo
   let definitions := wfDefs (native := symbols.datatypeSymbols) guarding
     encoding guardName binder
-  change Crush.SMT.FunctionDefinitionsHold
+  change Crush.SMT.FunDefsHold
     (SMT.modelWith guarding.encoding target extra) definitions
   intro definition member
   dsimp [definitions, wfDefs] at member
@@ -784,14 +784,14 @@ theorem wfDefs_valid_of_guard
     (fun ref => encoding.name (.ctor data ref.index))
     (fun ref => represented.flattenedTester_ident ref)
     (.bvar 0) value valueEval
-  simpa [Representation.guardParts, partsEq] using evaluated
+  simpa [Repr.guardParts, partsEq] using evaluated
 
 /-- The complete mutual `define-funs-rec` command for one represented block is
 valid in the same guarded model as its native datatype declaration. -/
 theorem wfDefs_valid
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {encoding : BlockEncoding arity}
-    (represented : Representation block symbols fo encoding)
+    (represented : Repr block symbols fo encoding)
     {source prior : FO.FamilyModel (Symbol signature)}
     (law : IsFreeDatatypeFamilyModel symbols.datatypeSymbols source)
     (rolesUnique : symbols.datatypeSymbols.RolesUnique)
@@ -827,7 +827,7 @@ theorem wfDefs_valid
   subst fo
   let definitions := wfDefs (native := symbols.datatypeSymbols) guarding
     encoding guardName binder
-  change Crush.SMT.FunctionDefinitionsHold
+  change Crush.SMT.FunDefsHold
     (SMT.modelWith guarding.encoding
       (law.extend wf productive prior priorRel priorModels) extra)
     definitions

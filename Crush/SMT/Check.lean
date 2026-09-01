@@ -68,7 +68,7 @@ private structure CheckMode where
   modeledTheoriesOnly : Bool
   /-- Select the association-list mirror whose concrete evaluation can be
   checked by the kernel. Ordinary frontend checks use the hash-map fields. -/
-  kernelReducible : Bool
+  useAssoc : Bool
 
 private structure FunSig where
   args : Array SSort
@@ -79,50 +79,50 @@ duplicate declarations before insertion, so association-list lookup has the
 same result as hash-map lookup. The mode selects one representation, keeping
 the frontend fast while allowing concrete metatheory certificates to reduce in
 the kernel without evaluating opaque `String.hash`. -/
-private abbrev NameMap (α : Type) := List (String × α)
+private abbrev NameAssoc (α : Type) := List (String × α)
 
 @[simp]
-private def NameMap.get? {α : Type} (entries : NameMap α) (name : String) : Option α :=
+private def NameAssoc.get? {α : Type} (entries : NameAssoc α) (name : String) : Option α :=
   (entries.find? fun entry => entry.1 == name).map (·.2)
 
 @[simp]
-private def NameMap.contains {α : Type} (entries : NameMap α) (name : String) : Bool :=
+private def NameAssoc.contains {α : Type} (entries : NameAssoc α) (name : String) : Bool :=
   (entries.get? name).isSome
 
 @[simp]
-private def NameMap.insert {α : Type} (entries : NameMap α) (name : String) (value : α) :
-    NameMap α :=
+private def NameAssoc.insert {α : Type} (entries : NameAssoc α) (name : String) (value : α) :
+    NameAssoc α :=
   (name, value) :: entries
 
 private structure CheckEnv where
   funs : Std.HashMap String FunSig := {}
-  reducibleFuns : NameMap FunSig := []
+  assocFuns : NameAssoc FunSig := []
   /-- Result sort of each datatype constructor introduced so far. Keeping this
   separate from `funs` prevents `(_ is f)` from treating an ordinary function
   as a datatype constructor. -/
   constructors : Std.HashMap String SSort := {}
-  reducibleConstructors : NameMap SSort := []
+  assocConstructors : NameAssoc SSort := []
   sorts : Std.HashMap String Nat := {}
-  reducibleSorts : NameMap Nat := []
+  assocSorts : NameAssoc Nat := []
 
 private def CheckEnv.fun? (mode : CheckMode) (env : CheckEnv)
     (name : String) : Option FunSig :=
-  if mode.kernelReducible then env.reducibleFuns.get? name
+  if mode.useAssoc then env.assocFuns.get? name
   else env.funs.get? name
 
 private def CheckEnv.constructor? (mode : CheckMode) (env : CheckEnv)
     (name : String) : Option SSort :=
-  if mode.kernelReducible then env.reducibleConstructors.get? name
+  if mode.useAssoc then env.assocConstructors.get? name
   else env.constructors.get? name
 
 private def CheckEnv.sortArity? (mode : CheckMode) (env : CheckEnv)
     (name : String) : Option Nat :=
-  if mode.kernelReducible then env.reducibleSorts.get? name
+  if mode.useAssoc then env.assocSorts.get? name
   else env.sorts.get? name
 
 private def CheckEnv.containsSort (mode : CheckMode) (env : CheckEnv)
     (name : String) : Bool :=
-  if mode.kernelReducible then env.reducibleSorts.contains name
+  if mode.useAssoc then env.assocSorts.contains name
   else env.sorts.contains name
 
 /-- A malformed command found by `checkScript`. -/
@@ -201,8 +201,8 @@ private def insertSort (mode : CheckMode) (env : CheckEnv)
       throw s!"sort `{name}` is declared more than once"
     else
       return env
-  if mode.kernelReducible then
-    return { env with reducibleSorts := env.reducibleSorts.insert name arity }
+  if mode.useAssoc then
+    return { env with assocSorts := env.assocSorts.insert name arity }
   else
     return { env with sorts := env.sorts.insert name arity }
 
@@ -539,8 +539,8 @@ private def insertFun (mode : CheckMode) (env : CheckEnv) (name : String)
   else
   match env.fun? mode name with
   | none =>
-      if mode.kernelReducible then
-        pure { env with reducibleFuns := env.reducibleFuns.insert name sig }
+      if mode.useAssoc then
+        pure { env with assocFuns := env.assocFuns.insert name sig }
       else
         pure { env with funs := env.funs.insert name sig }
   | some previous =>
@@ -723,9 +723,9 @@ private def checkCommand (mode : CheckMode) (env : CheckEnv)
       for ctor in datatype.ctors do
         for (_, fieldSort) in ctor.selDecls do checkSort mode env fieldSort
         env ← insertFun mode env ctor.name { args := ctor.selDecls.map (·.2), res := sort }
-        env := if mode.kernelReducible then
-          { env with reducibleConstructors :=
-              env.reducibleConstructors.insert ctor.name sort }
+        env := if mode.useAssoc then
+          { env with assocConstructors :=
+              env.assocConstructors.insert ctor.name sort }
         else
           { env with constructors := env.constructors.insert ctor.name sort }
     for (sortName, _, datatype) in datatypes do
@@ -784,20 +784,20 @@ def closedScriptWellSorted (commands : Array Command) : Bool :=
 
 /-- Type-check a closed command sequence in exactly the first-order theory
 fragment whose denotation is mechanized by `Crush.Metatheory.SMT`. -/
-def checkMetatheoryScript (commands : Array Command) : Except SortError Unit :=
+def checkModeledScript (commands : Array Command) : Except SortError Unit :=
   checkScriptWith ⟨true, true, true⟩ commands
 
-/-- Computable success flag for `checkMetatheoryScript`. -/
-def metatheoryScriptWellTyped (commands : Array Command) : Bool :=
-  (checkMetatheoryScript commands).isOk
+/-- Computable success flag for `checkModeledScript`. -/
+def modeledScriptWellTyped (commands : Array Command) : Bool :=
+  (checkModeledScript commands).isOk
 
 /-- Normalize a concrete modeled-fragment checker run into a kernel-checked
 equality proof. The tactic unfolds the total structural recursors above; it
 does not invoke compiled evaluation or add a native-decision axiom. -/
-macro "prove_metatheory_script_well_typed" : tactic =>
-  `(tactic| simp [metatheoryScriptWellTyped, checkMetatheoryScript,
+macro "prove_modeled_script_well_typed" : tactic =>
+  `(tactic| simp [modeledScriptWellTyped, checkModeledScript,
       checkScriptWith, checkCommand, checkSort, checkSortList,
-      checkCommandList, NameMap.get?, NameMap.contains, NameMap.insert,
+      checkCommandList, NameAssoc.get?, NameAssoc.contains, NameAssoc.insert,
       CheckEnv.fun?, CheckEnv.constructor?, CheckEnv.sortArity?,
       CheckEnv.containsSort,
       inferTerm, inferTermList, inferBindingList, inferAttrList,
@@ -816,21 +816,21 @@ macro "prove_metatheory_script_well_typed" : tactic =>
       Term.symbApp] <;> rfl)
 
 /-- Kernel-checked regression for the smallest unsatisfiable script. -/
-theorem metatheoryScriptWellTyped_assertFalse :
-    metatheoryScriptWellTyped #[.assert (.lit (.bool false))] = true := by
-  prove_metatheory_script_well_typed
+theorem modeledScriptWellTyped_assertFalse :
+    modeledScriptWellTyped #[.assert (.lit (.bool false))] = true := by
+  prove_modeled_script_well_typed
 
 /-- Kernel-checked regression for a well-typed integer equality. -/
-theorem metatheoryScriptWellTyped_distinctNumerals : metatheoryScriptWellTyped
+theorem modeledScriptWellTyped_distinctNumerals : modeledScriptWellTyped
     #[.assert (.symbApp "=" #[.lit (.num 0), .lit (.num 1)])] = true := by
-  prove_metatheory_script_well_typed
+  prove_modeled_script_well_typed
 
 /-- Kernel-checked regression that exercises declaration insertion and a
 subsequent lookup in nonempty checker state. -/
-theorem metatheoryScriptWellTyped_declaredBooleanConstant :
-    metatheoryScriptWellTyped #[
+theorem modeledScriptWellTyped_declaredBooleanConstant :
+    modeledScriptWellTyped #[
       .declFun "p" #[] boolSort,
       .assert (.symbApp "p" #[])] = true := by
-  prove_metatheory_script_well_typed
+  prove_modeled_script_well_typed
 
 end Crush.SMT

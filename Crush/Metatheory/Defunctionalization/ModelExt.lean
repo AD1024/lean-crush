@@ -1,7 +1,7 @@
 import Crush.Metatheory.Defunctionalization.Fundamental
 
 /-!
-# Canonical target-model extension
+# Canonical target-model extension for defunctionalization
 
 The canonical model interprets every target function-value sort by the
 corresponding source function space.  Exact closure captures are reconstructed

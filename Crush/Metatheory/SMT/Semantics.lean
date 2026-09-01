@@ -44,8 +44,8 @@ countermodel constructions, but by itself it is not an SMT-LIB model: its
 Boolean carrier may contain extra values, numerals may collapse, and `>=` may
 be an arbitrary graph. `Standard` closes exactly those degrees of freedom used
 by the SMT subset covered by the soundness theorem. Other SMT theories remain outside
-`Command.Supported` until an analogous interpretation is added here. -/
-structure Model.IntegerInterpretation (model : Model) where
+`Command.InFragment` until an analogous interpretation is added here. -/
+structure Model.IntInterp (model : Model) where
   int : Int → model.Value
   int_typed : ∀ value, model.inSort intSort (int value)
   int_injective : Function.Injective int
@@ -68,7 +68,7 @@ the separate, model-dependent `SMT.IntView` premise to establish this clause. -/
 structure Model.Standard (model : Model) : Prop where
   bool_exhaustive : ∀ value, model.inSort boolSort value →
     ∃ boolean, value = model.bool boolean
-  integer : Nonempty model.IntegerInterpretation
+  integer : Nonempty model.IntInterp
   apply_unique : ∀ symbol values left right,
     model.apply symbol values left → model.apply symbol values right →
       left = right
@@ -79,161 +79,161 @@ mutual
   /-- Whether a concrete SMT sort contains the built-in integer sort. Compound
   sorts are traversed because an integer carrier can occur beneath another sort
   constructor, for example as an array index or datatype field. -/
-  @[reducible] def SSort.requiresIntegerSemantics : SSort → Bool
+  @[reducible] def SSort.usesInt : SSort → Bool
     | .bvar _ => false
     | .app (.symb "Int") arguments =>
-        true || SSort.listRequiresIntegerSemantics arguments.toList
+        true || SSort.listUsesInt arguments.toList
     | .app _ arguments =>
-        SSort.listRequiresIntegerSemantics arguments.toList
+        SSort.listUsesInt arguments.toList
   termination_by sort => sort.structuralSize
   decreasing_by all_goals simp [SSort.structuralSize] <;> omega
 
-  @[reducible] def SSort.listRequiresIntegerSemantics : List SSort → Bool
+  @[reducible] def SSort.listUsesInt : List SSort → Bool
     | [] => false
     | sort :: sorts =>
-        sort.requiresIntegerSemantics ||
-          SSort.listRequiresIntegerSemantics sorts
+        sort.usesInt ||
+          SSort.listUsesInt sorts
   termination_by sorts => SSort.listStructuralSize sorts
   decreasing_by all_goals simp [SSort.listStructuralSize] <;> omega
 end
 
-@[simp] theorem SSort.requiresIntegerSemantics_boolSort :
-    boolSort.requiresIntegerSemantics = false := by
-  rw [SSort.requiresIntegerSemantics.eq_def]
-  simp [boolSort, SSort.listRequiresIntegerSemantics.eq_def]
+@[simp] theorem SSort.usesInt_boolSort :
+    boolSort.usesInt = false := by
+  rw [SSort.usesInt.eq_def]
+  simp [boolSort, SSort.listUsesInt.eq_def]
 
-@[simp] theorem SSort.listRequiresIntegerSemantics_nil :
-    SSort.listRequiresIntegerSemantics [] = false := by
-  rw [SSort.listRequiresIntegerSemantics.eq_def]
+@[simp] theorem SSort.listUsesInt_nil :
+    SSort.listUsesInt [] = false := by
+  rw [SSort.listUsesInt.eq_def]
 
-@[simp] theorem SSort.listRequiresIntegerSemantics_cons
+@[simp] theorem SSort.listUsesInt_cons
     (sort : SSort) (sorts : List SSort) :
-    SSort.listRequiresIntegerSemantics (sort :: sorts) =
-      (sort.requiresIntegerSemantics ||
-        SSort.listRequiresIntegerSemantics sorts) := by
-  rw [SSort.listRequiresIntegerSemantics.eq_def]
+    SSort.listUsesInt (sort :: sorts) =
+      (sort.usesInt ||
+        SSort.listUsesInt sorts) := by
+  rw [SSort.listUsesInt.eq_def]
 
 mutual
   /-- Whether a concrete term uses syntax whose SMT-LIB meaning depends on the
   standard integer carrier. Explicit sorts are inspected at binders; numerals
   and the currently modeled integer comparison are inspected at term nodes. -/
-  @[reducible] def Term.requiresIntegerSemantics : Term → Bool
+  @[reducible] def Term.usesInt : Term → Bool
     | .lit (.num _) => true
     | .lit _ | .bvar _ => false
     | .app (.symb ">=") arguments =>
-        true || Term.listRequiresIntegerSemantics arguments.toList
+        true || Term.listUsesInt arguments.toList
     | .app _ arguments =>
-        Term.listRequiresIntegerSemantics arguments.toList
+        Term.listUsesInt arguments.toList
     | .letE bindings body =>
-        Term.bindingListRequiresIntegerSemantics bindings.toList ||
-          body.requiresIntegerSemantics
+        Term.bindingListUsesInt bindings.toList ||
+          body.usesInt
     | .forallE binders body | .existsE binders body | .lam binders body =>
-        SSort.listRequiresIntegerSemantics (binders.toList.map (·.2)) ||
-          body.requiresIntegerSemantics
-    | .annot body _ => body.requiresIntegerSemantics
+        SSort.listUsesInt (binders.toList.map (·.2)) ||
+          body.usesInt
+    | .annot body _ => body.usesInt
   termination_by term => term.structuralSize
   decreasing_by all_goals simp [Term.structuralSize] <;> omega
 
-  @[reducible] def Term.listRequiresIntegerSemantics : List Term → Bool
+  @[reducible] def Term.listUsesInt : List Term → Bool
     | [] => false
     | term :: terms =>
-        term.requiresIntegerSemantics ||
-          Term.listRequiresIntegerSemantics terms
+        term.usesInt ||
+          Term.listUsesInt terms
   termination_by terms => Term.listStructuralSize terms
   decreasing_by all_goals simp [Term.listStructuralSize] <;> omega
 
-  @[reducible] def Term.bindingListRequiresIntegerSemantics :
+  @[reducible] def Term.bindingListUsesInt :
       List (String × Term) → Bool
     | [] => false
     | (_, term) :: bindings =>
-        term.requiresIntegerSemantics ||
-          Term.bindingListRequiresIntegerSemantics bindings
+        term.usesInt ||
+          Term.bindingListUsesInt bindings
   termination_by bindings => Term.bindingListStructuralSize bindings
   decreasing_by all_goals simp [Term.bindingListStructuralSize] <;> omega
 
 end
 
-@[simp] theorem Term.requiresIntegerSemantics_bvar (index : Nat) :
-    (Term.bvar index).requiresIntegerSemantics = false := by
-  rw [Term.requiresIntegerSemantics.eq_def]
+@[simp] theorem Term.usesInt_bvar (index : Nat) :
+    (Term.bvar index).usesInt = false := by
+  rw [Term.usesInt.eq_def]
 
-@[simp] theorem Term.requiresIntegerSemantics_app_integerComparison
+@[simp] theorem Term.usesInt_app_integerComparison
     (arguments : Array Term) :
-    (Term.app (.symb ">=") arguments).requiresIntegerSemantics = true := by
-  rw [Term.requiresIntegerSemantics.eq_def]
+    (Term.app (.symb ">=") arguments).usesInt = true := by
+  rw [Term.usesInt.eq_def]
   simp
 
-@[simp] theorem Term.requiresIntegerSemantics_app_of_ne
+@[simp] theorem Term.usesInt_app_of_ne
     (identifier : Ident) (arguments : Array Term)
     (notIntegerComparison : identifier ≠ .symb ">=") :
-    (Term.app identifier arguments).requiresIntegerSemantics =
-      Term.listRequiresIntegerSemantics arguments.toList := by
-  simp only [Term.requiresIntegerSemantics.eq_def]
+    (Term.app identifier arguments).usesInt =
+      Term.listUsesInt arguments.toList := by
+  simp only [Term.usesInt.eq_def]
 
-@[simp] theorem Term.requiresIntegerSemantics_forallE
+@[simp] theorem Term.usesInt_forallE
     (binders : Array (String × SSort)) (body : Term) :
-    (Term.forallE binders body).requiresIntegerSemantics =
-      (SSort.listRequiresIntegerSemantics (binders.toList.map (·.2)) ||
-        body.requiresIntegerSemantics) := by
-  rw [Term.requiresIntegerSemantics.eq_def]
+    (Term.forallE binders body).usesInt =
+      (SSort.listUsesInt (binders.toList.map (·.2)) ||
+        body.usesInt) := by
+  rw [Term.usesInt.eq_def]
 
-@[simp] theorem Term.requiresIntegerSemantics_existsE
+@[simp] theorem Term.usesInt_existsE
     (binders : Array (String × SSort)) (body : Term) :
-    (Term.existsE binders body).requiresIntegerSemantics =
-      (SSort.listRequiresIntegerSemantics (binders.toList.map (·.2)) ||
-        body.requiresIntegerSemantics) := by
-  rw [Term.requiresIntegerSemantics.eq_def]
+    (Term.existsE binders body).usesInt =
+      (SSort.listUsesInt (binders.toList.map (·.2)) ||
+        body.usesInt) := by
+  rw [Term.usesInt.eq_def]
 
-@[simp] theorem Term.listRequiresIntegerSemantics_nil :
-    Term.listRequiresIntegerSemantics [] = false := by
-  rw [Term.listRequiresIntegerSemantics.eq_def]
+@[simp] theorem Term.listUsesInt_nil :
+    Term.listUsesInt [] = false := by
+  rw [Term.listUsesInt.eq_def]
 
-@[simp] theorem Term.listRequiresIntegerSemantics_cons
+@[simp] theorem Term.listUsesInt_cons
     (term : Term) (terms : List Term) :
-    Term.listRequiresIntegerSemantics (term :: terms) =
-      (term.requiresIntegerSemantics ||
-        Term.listRequiresIntegerSemantics terms) := by
-  rw [Term.listRequiresIntegerSemantics.eq_def]
+    Term.listUsesInt (term :: terms) =
+      (term.usesInt ||
+        Term.listUsesInt terms) := by
+  rw [Term.listUsesInt.eq_def]
 
-@[simp] theorem Term.requiresIntegerSemantics_annot
+@[simp] theorem Term.usesInt_annot
     (body : Term) (attributes : Array Attr) :
-    (Term.annot body attributes).requiresIntegerSemantics =
-      body.requiresIntegerSemantics := by
-  rw [Term.requiresIntegerSemantics.eq_def]
+    (Term.annot body attributes).usesInt =
+      body.usesInt := by
+  rw [Term.usesInt.eq_def]
 
-@[reducible] def FunDef.requiresIntegerSemantics (definition : FunDef) : Bool :=
-  SSort.listRequiresIntegerSemantics (definition.args.toList.map (·.2)) ||
-    definition.resSort.requiresIntegerSemantics ||
-      definition.body.requiresIntegerSemantics
+@[reducible] def FunDef.usesInt (definition : FunDef) : Bool :=
+  SSort.listUsesInt (definition.args.toList.map (·.2)) ||
+    definition.resSort.usesInt ||
+      definition.body.usesInt
 
-@[reducible] def CtorDecl.requiresIntegerSemantics (constructor : CtorDecl) : Bool :=
-  SSort.listRequiresIntegerSemantics (constructor.selDecls.toList.map (·.2))
+@[reducible] def CtorDecl.usesInt (constructor : CtorDecl) : Bool :=
+  SSort.listUsesInt (constructor.selDecls.toList.map (·.2))
 
-@[reducible] def DatatypeDecl.requiresIntegerSemantics
+@[reducible] def DatatypeDecl.usesInt
     (datatype : DatatypeDecl) : Bool :=
-  datatype.ctors.toList.any CtorDecl.requiresIntegerSemantics
+  datatype.ctors.toList.any CtorDecl.usesInt
 
 /-- Whether one command requires the standard integer carrier. The test is
 conservative on malformed syntax; `CommandsWellTyped` separately establishes
 that accepted commands use only the modeled integer operations. -/
-@[reducible] def Command.requiresIntegerSemantics : Command → Bool
+@[reducible] def Command.usesInt : Command → Bool
   | .declFun _ arguments result =>
-      SSort.listRequiresIntegerSemantics arguments.toList ||
-        result.requiresIntegerSemantics
-  | .defFun definition => definition.requiresIntegerSemantics
+      SSort.listUsesInt arguments.toList ||
+        result.usesInt
+  | .defFun definition => definition.usesInt
   | .defFunsRec definitions =>
-      definitions.toList.any FunDef.requiresIntegerSemantics
+      definitions.toList.any FunDef.usesInt
   | .declDatatypes datatypes =>
       datatypes.toList.any fun (_, _, datatype) =>
-        datatype.requiresIntegerSemantics
-  | .assert term => term.requiresIntegerSemantics
+        datatype.usesInt
+  | .assert term => term.usesInt
   | .setLogic _ | .setOption _ _ | .declSort _ _ | .checkSat |
       .getModel | .getProof | .getUnsatCore | .echo _ | .exit => false
 
 /-- Whether any command requires standard integer semantics. -/
-@[reducible] def CommandsRequireIntegerSemantics
+@[reducible] def CommandsUseInt
     (commands : Array Command) : Bool :=
-  commands.toList.any Command.requiresIntegerSemantics
+  commands.toList.any Command.usesInt
 
 /-- The standard laws needed for one concrete command array. Boolean
 two-valuedness and functional application are always required. The integer
@@ -242,8 +242,8 @@ occurs in that array. -/
 structure Model.StandardFor (model : Model) (commands : Array Command) : Prop where
   bool_exhaustive : ∀ value, model.inSort boolSort value →
     ∃ boolean, value = model.bool boolean
-  integer : CommandsRequireIntegerSemantics commands = true →
-    Nonempty model.IntegerInterpretation
+  integer : CommandsUseInt commands = true →
+    Nonempty model.IntInterp
   apply_unique : ∀ symbol values left right,
     model.apply symbol values left → model.apply symbol values right →
       left = right
@@ -257,10 +257,10 @@ theorem Model.Standard.forCommands {model : Model} (standard : model.Standard)
 
 /-- Transfer command-indexed standardness when two arrays require the same
 interpreted theories. -/
-theorem Model.StandardFor.of_requirements_eq {model : Model}
+theorem Model.StandardFor.congr {model : Model}
     {left right : Array Command} (standard : model.StandardFor left)
-    (equal : CommandsRequireIntegerSemantics left =
-      CommandsRequireIntegerSemantics right) : model.StandardFor right where
+    (equal : CommandsUseInt left =
+      CommandsUseInt right) : model.StandardFor right where
   bool_exhaustive := standard.bool_exhaustive
   integer := by
     intro required
@@ -562,12 +562,12 @@ private theorem NotBuiltin.ne_or {symbol : Ident} (fresh : NotBuiltin symbol) :
 
 /-- An identifier available to encoded source symbols: it is neither a
 logical built-in handled by dedicated evaluation rules nor the interpreted
-integer comparison constrained by `IntegerInterpretation`. -/
-structure NotInterpreted (identifier : Ident) : Prop where
+integer comparison constrained by `IntInterp`. -/
+structure NotReserved (identifier : Ident) : Prop where
   notLogicalBuiltin : NotBuiltin identifier
   ne_integerComparison : identifier ≠ .symb ">="
 
-instance (identifier : Ident) : Decidable (NotInterpreted identifier) :=
+instance (identifier : Ident) : Decidable (NotReserved identifier) :=
   decidable_of_iff
     (NotBuiltin identifier ∧ identifier ≠ .symb ">=")
     ⟨fun properties => ⟨properties.1, properties.2⟩,
@@ -801,7 +801,7 @@ def DatatypesStructurallyWellFormed
 
 /-- Complete datatype admission condition. Structural validity is paired with
 the same executable finite-constructor check used by
-`checkMetatheoryScript`. -/
+`checkModeledScript`. -/
 def DatatypesWellFormed
     (datatypes : Array (String × Nat × DatatypeDecl)) : Prop :=
   DatatypesStructurallyWellFormed datatypes ∧
@@ -895,27 +895,27 @@ def FunDef.Holds (model : Model) (definition : FunDef) : Prop :=
 
 /-- Every member of a function-definition group satisfies its equation in the
 shared model. A nonrecursive `define-fun` uses the singleton specialization. -/
-def FunctionDefinitionsHold (model : Model) (definitions : Array FunDef) : Prop :=
+def FunDefsHold (model : Model) (definitions : Array FunDef) : Prop :=
   ∀ definition ∈ definitions.toList, definition.Holds model
 
 /-- Semantic side conditions not expressible as ordinary SMT typing. The
 declaration-aware type checker handles terms, scopes, symbol signatures, and
 the distinction between recursive and nonrecursive definitions. Native
 datatypes additionally require the free-algebra side conditions below. -/
-def Command.Supported : Command → Prop
+def Command.InFragment : Command → Prop
   | .declDatatypes datatypes => DatatypesWellFormed datatypes
   | _ => True
 
 /-- Semantic condition imposed by one command. Static membership in the modeled
-fragment is tracked separately by `Command.Supported`; it is a required field of
-`CommandsUnsatisfiable`, not a way to make command satisfaction false. -/
+fragment is tracked separately by `Command.InFragment`; it is a required field of
+`CommandsUnsat`, not a way to make command satisfaction false. -/
 def Model.SatisfiesCommand (model : Model) : Command → Prop
   | .declFun name arguments result =>
       SymbolHasType model (.symb name) arguments.toList result
   | .assert formula => Holds model [] formula
   | .declDatatypes datatypes => DatatypesHold model datatypes
   | .defFun definition => definition.Holds model
-  | .defFunsRec definitions => FunctionDefinitionsHold model definitions
+  | .defFunsRec definitions => FunDefsHold model definitions
   | _ => True
 
 /-- Satisfaction of every command in an array by one global SMT model. The raw
@@ -927,8 +927,8 @@ def Model.SatisfiesCommands (model : Model) (commands : Array Command) : Prop :=
 condition separate from model satisfaction prevents an unmodeled command from
 making a script appear unsatisfiable merely because its satisfaction predicate
 is false. -/
-def CommandsSupported (commands : Array Command) : Prop :=
-  ∀ command ∈ commands.toList, command.Supported
+def CommandsInFragment (commands : Array Command) : Prop :=
+  ∀ command ∈ commands.toList, command.InFragment
 
 /-- The concrete command sequence is accepted by the declaration-aware type
 checker for the modeled first-order SMT fragment. This judgment is
@@ -936,7 +936,7 @@ order-sensitive, unlike `SameCommandSet`: it rejects unknown symbols,
 use-before-declaration, out-of-scope variables, ill-sorted terms, unsupported
 theory operators, and lambda syntax. -/
 def CommandsWellTyped (commands : Array Command) : Prop :=
-  Crush.SMT.metatheoryScriptWellTyped commands = true
+  Crush.SMT.modeledScriptWellTyped commands = true
 
 /-- Two arrays impose exactly the same semantic command obligations. Command
 order and duplicate occurrences are intentionally irrelevant here; concrete
@@ -976,21 +976,21 @@ lemmas, but it is deliberately not identified with SMT-LIB unsatisfiability:
 `Model` alone does not fix interpreted theories. Requiring the same static
 checks as the external notion prevents an ill-formed script from establishing
 this stronger no-raw-model premise vacuously. -/
-structure AbstractCommandsUnsatisfiable (commands : Array Command) : Prop where
-  supported : CommandsSupported commands
+structure RawCommandsUnsat (commands : Array Command) : Prop where
+  inFragment : CommandsInFragment commands
   wellTyped : CommandsWellTyped commands
   noModel : ∀ model : Model, ¬model.SatisfiesCommands commands
 
 /-- A well-typed command sequence with no standard model.
 
-Both static fields are logically important. `supported` records the additional
-free-datatype conditions; `wellTyped` rejects malformed or semantically
-unmodeled syntax. `noModel` quantifies only over models satisfying the standard
+Both static fields are logically important. `inFragment` says that every command
+has semantics in this model; `wellTyped` rejects malformed or ill-sorted syntax.
+`noModel` quantifies only over models satisfying the standard
 laws for the theories used by this command array. In particular, integer laws
 are mandatory for arrays containing integer syntax, but not for Boolean-only
 arrays. -/
-structure CommandsUnsatisfiable (commands : Array Command) : Prop where
-  supported : CommandsSupported commands
+structure CommandsUnsat (commands : Array Command) : Prop where
+  inFragment : CommandsInFragment commands
   wellTyped : CommandsWellTyped commands
   noModel : ∀ model : Model, model.StandardFor commands →
     ¬model.SatisfiesCommands commands
@@ -1000,7 +1000,7 @@ theorem Model.satisfiesCommands_empty (model : Model) :
   intro command membership
   contradiction
 
-theorem commandsSupported_empty : CommandsSupported #[] := by
+theorem commandsInFragment_empty : CommandsInFragment #[] := by
   intro command membership
   contradiction
 
@@ -1012,10 +1012,10 @@ theorem Model.satisfiesCommands_append (model : Model)
   simp only [Array.toList_append, List.mem_append]
   grind
 
-theorem commandsSupported_append (left right : Array Command) :
-    CommandsSupported (left ++ right) ↔
-      CommandsSupported left ∧ CommandsSupported right := by
-  unfold CommandsSupported
+theorem commandsInFragment_append (left right : Array Command) :
+    CommandsInFragment (left ++ right) ↔
+      CommandsInFragment left ∧ CommandsInFragment right := by
+  unfold CommandsInFragment
   simp only [Array.toList_append, List.mem_append]
   grind
 
@@ -1030,14 +1030,14 @@ theorem Model.satisfiesCommands_congr (model : Model)
     exact valid command (same.1 command member)
 
 /-- Fragment membership, like satisfaction, depends only on the command set. -/
-theorem commandsSupported_congr {left right : Array Command}
+theorem commandsInFragment_congr {left right : Array Command}
     (same : SameCommandSet left right) :
-    CommandsSupported left ↔ CommandsSupported right := by
+    CommandsInFragment left ↔ CommandsInFragment right := by
   constructor
-  · intro supported command member
-    exact supported command (same.2 command member)
-  · intro supported command member
-    exact supported command (same.1 command member)
+  · intro inFragment command member
+    exact inFragment command (same.2 command member)
+  · intro inFragment command member
+    exact inFragment command (same.1 command member)
 
 /-- A model of an extended command sequence is a model of its prefix. -/
 theorem Model.satisfiesCommands_weaken (model : Model)

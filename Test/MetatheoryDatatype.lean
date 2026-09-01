@@ -9,10 +9,10 @@ import Crush.Metatheory.Reification.Witness
 import Crush.Metatheory.SMT.Datatype
 import Crush.Metatheory.SMT.DatatypeTransport
 import Crush.Metatheory.SMT.DatatypeGuard
-import Crush.Metatheory.SMT.DatatypeRepresentation
+import Crush.Metatheory.SMT.DatatypeRepr
 import Crush.Metatheory.SMT.Soundness
 import Crush.Metatheory.SMT.Semantics
-import Crush.Metatheory.VCG.CommandEquivalence
+import Crush.Metatheory.VCG.CommandEquiv
 import Crush.Frontend.Tactic
 
 /-!
@@ -270,7 +270,7 @@ example : ¬Crush.SMT.DatatypesWellFormed #[] := by
       Crush.SMT.datatypesStructurallyWellFormed]) valid.1
 
 #eval show IO Unit from do
-  if Crush.SMT.metatheoryScriptWellTyped #[.declDatatypes #[]] then
+  if Crush.SMT.modeledScriptWellTyped #[.declDatatypes #[]] then
     throw <| IO.userError "empty datatype block was accepted"
 
 example : ¬Crush.SMT.DatatypesWellFormed #[
@@ -282,7 +282,7 @@ example : ¬Crush.SMT.DatatypesWellFormed #[
       Crush.SMT.datatypesStructurallyWellFormed]) valid.1
 
 #eval show IO Unit from do
-  if Crush.SMT.metatheoryScriptWellTyped #[.declDatatypes #[
+  if Crush.SMT.modeledScriptWellTyped #[.declDatatypes #[
       ("Bad", 0, { params := #[], ctors := #[] })]] then
     throw <| IO.userError "constructor-free datatype was accepted"
 
@@ -341,20 +341,20 @@ private theorem rawLoop_not_wellFormed :
   contradiction
 
 #eval show IO Unit from do
-  if Crush.SMT.metatheoryScriptWellTyped #[.declDatatypes rawLoop] then
+  if Crush.SMT.modeledScriptWellTyped #[.declDatatypes rawLoop] then
     throw <| IO.userError "nonproductive self-recursive datatype was accepted"
 
-example : ¬Crush.SMT.CommandsUnsatisfiable
+example : ¬Crush.SMT.CommandsUnsat
     #[.declDatatypes rawLoop] := by
   intro unsat
   exact rawLoop_not_wellFormed
-    (unsat.supported (.declDatatypes rawLoop) (by simp))
+    (unsat.inFragment (.declDatatypes rawLoop) (by simp))
 
-example : ¬Crush.SMT.AbstractCommandsUnsatisfiable
+example : ¬Crush.SMT.RawCommandsUnsat
     #[.declDatatypes rawLoop] := by
   intro unsat
   exact rawLoop_not_wellFormed
-    (unsat.supported (.declDatatypes rawLoop) (by simp))
+    (unsat.inFragment (.declDatatypes rawLoop) (by simp))
 
 private def rawCycle : Array (String × Nat × Crush.SMT.DatatypeDecl) := #[
   ("Left", 0, { ctors := #[
@@ -375,13 +375,13 @@ example : ¬Crush.SMT.DatatypesWellFormed rawCycle := by
   contradiction
 
 #eval show IO Unit from do
-  if Crush.SMT.metatheoryScriptWellTyped #[.declDatatypes rawCycle] then
+  if Crush.SMT.modeledScriptWellTyped #[.declDatatypes rawCycle] then
     throw <| IO.userError "nonproductive mutual datatype cycle was accepted"
 
 /- A productive mutual cycle remains valid because each datatype also has a
 finite base constructor. -/
 #eval show IO Unit from do
-  unless Crush.SMT.metatheoryScriptWellTyped #[.declDatatypes rawMutual] do
+  unless Crush.SMT.modeledScriptWellTyped #[.declDatatypes rawMutual] do
     throw <| IO.userError "productive mutual datatype block was rejected"
 
 private def nestedRecursiveField :
@@ -394,7 +394,7 @@ private def nestedRecursiveField :
 /- The current modeled subset has no positivity/nonemptiness semantics for a
 same-block datatype nested under another sort constructor. -/
 #eval show IO Unit from do
-  if Crush.SMT.metatheoryScriptWellTyped
+  if Crush.SMT.modeledScriptWellTyped
       #[.declDatatypes nestedRecursiveField] then
     throw <| IO.userError "nested same-block datatype field was accepted"
 
@@ -411,7 +411,7 @@ example : ¬Crush.SMT.DatatypesWellFormed duplicateCtor := by
       Crush.SMT.CtorDecl.tester, duplicateCtor]) valid.1
 
 #eval show IO Unit from do
-  if Crush.SMT.metatheoryScriptWellTyped #[.declDatatypes duplicateCtor] then
+  if Crush.SMT.modeledScriptWellTyped #[.declDatatypes duplicateCtor] then
     throw <| IO.userError "duplicate datatype symbol was accepted"
 
 example : ¬Crush.SMT.DatatypesWellFormed #[
@@ -427,7 +427,7 @@ example : ¬Crush.SMT.DatatypesWellFormed #[
       Crush.SMT.datatypesStructurallyWellFormed]) valid.1
 
 #eval show IO Unit from do
-  if Crush.SMT.metatheoryScriptWellTyped #[.declDatatypes #[
+  if Crush.SMT.modeledScriptWellTyped #[.declDatatypes #[
       ("Parametric", 1, {
         params := #["α"]
         ctors := #[{ name := "mk", selDecls := #[] }] })]] then
@@ -452,16 +452,16 @@ example : SMT.Datatype.wfBody
 /- A scoped body is not enough: the command type system also checks its
 result sort. -/
 #eval show IO Unit from do
-  if Crush.SMT.metatheoryScriptWellTyped
+  if Crush.SMT.modeledScriptWellTyped
       #[.declSort "Tree" 0, .defFun rawWFDef] then
     throw <| IO.userError "ill-sorted nonrecursive definition was accepted"
 
 #eval show IO Unit from do
-  if Crush.SMT.metatheoryScriptWellTyped #[.defFunsRec #[]] then
+  if Crush.SMT.modeledScriptWellTyped #[.defFunsRec #[]] then
     throw <| IO.userError "empty recursive-definition group was accepted"
 
 #eval show IO Unit from do
-  if Crush.SMT.metatheoryScriptWellTyped
+  if Crush.SMT.modeledScriptWellTyped
       #[.declSort "Tree" 0, .defFunsRec #[rawWFDef, rawWFDef]] then
     throw <| IO.userError "duplicate recursive definitions were accepted"
 
@@ -529,8 +529,8 @@ the same construction used for recursive and mutual datatypes. -/
 
 private abbrev NatBase : BaseSort → Type := fun _ => Nat
 
-private def natBase : Guarded.BaseRepresentations NatBase IntBase :=
-  fun _ => Guarded.natInt.representation
+private def natBase : Guarded.BaseReprs NatBase IntBase :=
+  fun _ => Guarded.natInt.repr
 
 private abbrev NoSymbols : FO.SymbolFamily := fun _ => Empty
 
@@ -752,7 +752,7 @@ variable {symbols : Symbols signature block} {source : Model signature}
 variable {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding n}
 
 example (freeDataModel : IsFreeDatatypeModel symbols source)
-    (represented : Representation block symbols fo data) :
+    (represented : Repr block symbols fo data) :
     (SMT.model fo (canonicalModel source)).SatisfiesCommand
       (command block data) :=
   command_sound freeDataModel represented
@@ -761,23 +761,23 @@ example (freeDataModel : IsFreeDatatypeModel symbols source)
 the internal relational model, when the represented integer carrier is
 available. -/
 example (freeDataModel : IsFreeDatatypeModel symbols source)
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     (integer : SMT.IntView fo (canonicalModel source)) :
     ∃ model : Crush.SMT.Model,
       model.Standard ∧ model.SatisfiesCommand (command block data) :=
   represented.standardModel_exists freeDataModel integer
 
 example (freeDataModel : IsFreeDatatypeModel symbols source)
-    (represented : Representation block symbols fo data)
+    (represented : Repr block symbols fo data)
     (integer : SMT.IntView fo (canonicalModel source)) :
-    ¬Crush.SMT.CommandsUnsatisfiable #[command block data] :=
-  represented.not_commandsUnsatisfiable freeDataModel integer
+    ¬Crush.SMT.CommandsUnsat #[command block data] :=
+  represented.not_commandsUnsat freeDataModel integer
 
 /-- Additional derived graphs compose with the same FO representation: ordinary
 symbols and assertions remain valid by disjointness. -/
 example (extra : SMT.ExtraGraph fo (canonicalModel source))
     (formula : Sentence signature) {commands : Array Crush.SMT.Command}
-    (encoded : SMT.TheoryRepresentation fo (translatedTheory formula) commands)
+    (encoded : SMT.TheoryRepr fo (translatedTheory formula) commands)
     (valid : canonicalModel source ⊨ᵀ translatedTheory formula)
     (datatypeCommandsValid : SMT.modelWith fo (canonicalModel source) extra ⊨ₛᶜ
       fo.nativeCommands) :
@@ -787,21 +787,21 @@ example (extra : SMT.ExtraGraph fo (canonicalModel source))
 /-- The ordinary case uses the same theorem with an empty environment. -/
 example (empty : fo.nativeCommands = #[]) (formula : Sentence signature)
     {commands : Array Crush.SMT.Command}
-    (encoded : SMT.TheoryRepresentation fo (translatedTheory formula) commands)
+    (encoded : SMT.TheoryRepr fo (translatedTheory formula) commands)
     (valid : canonicalModel source ⊨ᵀ translatedTheory formula) :
     ∃ smtModel, smtModel ⊨ₛᶜ commands :=
   SMT.representation_sound fo (.nil fo empty) encoded source .nil valid
 
-example {env : Datatype.Env signature} (represented : EnvRepresentation fo env)
+example {env : Datatype.Env signature} (represented : EnvRepr fo env)
     (formula : Sentence signature) {commands : Array Crush.SMT.Command}
-    (encoded : SMT.TheoryRepresentation fo (translatedTheory formula) commands)
-    (unsat : Crush.SMT.AbstractCommandsUnsatisfiable commands) :
+    (encoded : SMT.TheoryRepr fo (translatedTheory formula) commands)
+    (unsat : Crush.SMT.RawCommandsUnsat commands) :
     Datatype.Env.Unsatisfiable env formula :=
   SMT.commands_unsat_implies_source_unsat fo represented formula encoded unsat
 
 /-- Dependency-ordered blocks assemble into one guarded target and one model
 relation for the complete flattened symbol family. -/
-example {env : Datatype.Env signature} (represented : EnvRepresentation fo env)
+example {env : Datatype.Env signature} (represented : EnvRepr fo env)
     (freeDataModel : Datatype.Env.IsFreeDatatypeModel source env) :
     FO.ModelRel (canonicalModel source)
       (represented.lifted source freeDataModel).target
@@ -810,8 +810,8 @@ example {env : Datatype.Env signature} (represented : EnvRepresentation fo env)
 
 /-- Every earlier SMT datatype declaration survives the complete dependency fold when
 the representation records the cross-block ordering condition. -/
-example {env : Datatype.Env signature} (represented : EnvRepresentation fo env)
-    (ordered : Native.ModelExtension.DependencyOrdered represented.blocks)
+example {env : Datatype.Env signature} (represented : EnvRepr fo env)
+    (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     (freeDataModel : Datatype.Env.IsFreeDatatypeModel source env) :
     (SMT.model fo (represented.lifted source freeDataModel).target).SatisfiesCommands
       fo.nativeCommands :=
@@ -819,8 +819,8 @@ example {env : Datatype.Env signature} (represented : EnvRepresentation fo env)
 
 /-- Fresh derived graphs, including the combined integer/datatype-guard graph,
 do not disturb the SMT datatype prefix. -/
-example {env : Datatype.Env signature} (represented : EnvRepresentation fo env)
-    (ordered : Native.ModelExtension.DependencyOrdered represented.blocks)
+example {env : Datatype.Env signature} (represented : EnvRepr fo env)
+    (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     (freeDataModel : Datatype.Env.IsFreeDatatypeModel source env)
     (extra : SMT.ExtraGraph fo (represented.lifted source freeDataModel).target) :
     (SMT.modelWith fo (represented.lifted source freeDataModel).target extra).SatisfiesCommands
@@ -829,12 +829,12 @@ example {env : Datatype.Env signature} (represented : EnvRepresentation fo env)
 
 /-- The guarded target uses the same complete representation theorem rather
 than a datatype-only soundness path. -/
-example {env : Datatype.Env signature} (represented : EnvRepresentation fo env)
-    (ordered : Native.ModelExtension.DependencyOrdered represented.blocks)
+example {env : Datatype.Env signature} (represented : EnvRepr fo env)
+    (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     (freeDataModel : Datatype.Env.IsFreeDatatypeModel source env)
     {theory : FO.FamilyTheory (Symbol signature)}
     {commands : Array Crush.SMT.Command}
-    (encoded : SMT.TheoryRepresentation fo theory commands)
+    (encoded : SMT.TheoryRepr fo theory commands)
     (extra : SMT.ExtraGraph fo (represented.lifted source freeDataModel).target)
     (valid : (represented.lifted source freeDataModel).target.SatisfiesTheory theory) :
     ∃ model : Crush.SMT.Model, model.SatisfiesCommands commands :=
@@ -842,13 +842,13 @@ example {env : Datatype.Env signature} (represented : EnvRepresentation fo env)
 
 /-- Interpreted carriers enter before datatype blocks and then use the same
 whole-theory theorem. This is the route used by guarded `Nat → Int` fields. -/
-example {env : Datatype.Env signature} (represented : EnvRepresentation fo env)
-    (ordered : Native.ModelExtension.DependencyOrdered represented.blocks)
+example {env : Datatype.Env signature} (represented : EnvRepr fo env)
+    (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     (freeDataModel : Datatype.Env.IsFreeDatatypeModel source env)
     (prior : Lifted (canonicalModel source))
     {theory : FO.FamilyTheory (Symbol signature)}
     {commands : Array Crush.SMT.Command}
-    (encoded : SMT.TheoryRepresentation fo theory commands)
+    (encoded : SMT.TheoryRepr fo theory commands)
     (extra : SMT.ExtraGraph fo
       (represented.liftedFrom source freeDataModel prior).target)
     (valid : (represented.liftedFrom source freeDataModel prior).target.SatisfiesTheory
@@ -858,14 +858,14 @@ example {env : Datatype.Env signature} (represented : EnvRepresentation fo env)
 
 /-- A translation fact enters the existing shared soundness API
 through one representation boundary; no datatype-only solver theorem is added. -/
-example (translation : FactTranslationRecord)
+example (translation : FactTranslation)
     (encoding : SMT.Encoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature)))
-    (locations : translation.datatypeDeclarationLocations.Representation encoding)
-    (native : encoding.nativeCommands = translation.datatypeDeclarations) :
-    EnvRepresentation encoding translation.datatypeSignaturePrefix.toModelEnv :=
-  ({ declarations := locations, datatypeDeclarations_eq := native } :
-    translation.Representation encoding).datatypeRepresentation
+    (locations : translation.datatypeDeclLocations.Repr encoding)
+    (native : encoding.nativeCommands = translation.datatypeDecls) :
+    EnvRepr encoding translation.datatypeSignaturePrefix.toModelEnv :=
+  ({ decls := locations, datatypeDecls_eq := native } :
+    translation.DatatypeRepr encoding).datatypeRepr
 
 /-- Command equivalence follows semantic command-set equality: declaration
 and assertion interleaving plus duplicate elimination do not change which
@@ -883,53 +883,53 @@ private def commandB : Crush.SMT.Command := .assert (smt| true)
 /-- The single-fact theorem is indexed by the retained source fact and final
 command array. Root-level `:named` annotations are removed only through the
 semantic transparency theorem above. -/
-example (translation : FactTranslationRecord)
+example (translation : FactTranslation)
     (guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature)))
-    (represented : translation.Representation guarding.encoding)
-    (guarded : translation.GuardDefinitionEncoding guarding represented) :
-    Option (SomeFactCommandRepresentation translation guarding represented guarded) :=
-  FactCommandRepresentation.build?
+    (represented : translation.DatatypeRepr guarding.encoding)
+    (guarded : translation.GuardDefEncoding guarding represented) :
+    Option (SomeFactCommandRepr translation guarding represented guarded) :=
+  FactCommandRepr.build?
 
-example (translation : FactTranslationRecord)
+example (translation : FactTranslation)
     (guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature)))
-    (represented : translation.Representation guarding.encoding)
-    (guarded : translation.GuardDefinitionEncoding guarding represented)
+    (represented : translation.DatatypeRepr guarding.encoding)
+    (_guarded : translation.GuardDefEncoding guarding represented)
     {expressions : List Lean.Expr}
     (reified : Reification.ReifiedSentencesFor translation.datatypes
       translation.constants expressions) :
-    Option (PLift (ValidatedCommandEquivalence (guarding := guarding) reified)) :=
-  CommandEquivalence.build? reified
+    Option (PLift (CommandEquivCert (guarding := guarding) reified)) :=
+  CommandEquiv.build? reified
 
-example (translation : FactTranslationRecord)
+example (translation : FactTranslation)
     (guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature)))
-    (represented : translation.Representation guarding.encoding)
-    (guarded : translation.GuardDefinitionEncoding guarding represented)
+    (represented : translation.DatatypeRepr guarding.encoding)
+    (guarded : translation.GuardDefEncoding guarding represented)
     (reified : Reification.ReifiedSentenceFor translation.expression translation.datatypes
       translation.constants)
-    (representation : FactCommandRepresentation translation guarding represented guarded
+    (representation : FactCommandRepr translation guarding represented guarded
       reified)
-    (interpretation : translation.GuardDefinitionSemantics guarding represented guarded)
-    (unsat : Crush.SMT.CommandsUnsatisfiable translation.emittedCommands) :
+    (interpretation : translation.GuardDefInterp guarding represented guarded)
+    (unsat : Crush.SMT.CommandsUnsat translation.emittedCommands) :
     Datatype.Env.Unsatisfiable translation.datatypeSignaturePrefix.toModelEnv reified.source :=
   representation.unsat_source interpretation unsat
 
 /-- The leading `set-logic` command returned by `buildScript` is accounted for
 by semantic equivalence rather than silently dropped. -/
-example (translation : FactTranslationRecord)
+example (translation : FactTranslation)
     (guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature)))
-    (represented : translation.Representation guarding.encoding)
-    (guarded : translation.GuardDefinitionEncoding guarding represented)
+    (represented : translation.DatatypeRepr guarding.encoding)
+    (guarded : translation.GuardDefEncoding guarding represented)
     (reified : Reification.ReifiedSentenceFor translation.expression translation.datatypes
       translation.constants)
-    (representation : FactCommandRepresentation translation guarding represented guarded
+    (representation : FactCommandRepr translation guarding represented guarded
       reified)
-    (interpretation : translation.GuardDefinitionSemantics guarding represented guarded)
+    (interpretation : translation.GuardDefInterp guarding represented guarded)
     (logic : String)
-    (unsat : Crush.SMT.CommandsUnsatisfiable
+    (unsat : Crush.SMT.CommandsUnsat
       (#[.setLogic logic] ++ translation.emittedCommands)) :
     Datatype.Env.Unsatisfiable translation.datatypeSignaturePrefix.toModelEnv reified.source :=
   representation.unsat_source_script interpretation logic unsat
@@ -1207,13 +1207,13 @@ run_meta do
             throwError "certified point changed the established translation script"
           unless certifiedState.factTranslations.size == 1 do
             throwError "opt-in translation did not retain one translation fact"
-          unless certifiedState.datatypeDeclarations.size == 1 do
+          unless certifiedState.datatypeDecls.size == 1 do
             throwError "opt-in translation did not retain one certified SMT datatype declaration"
-          unless certifiedState.datatypeDeclarationAllocations.size == 1 do
+          unless certifiedState.datatypeDeclAllocs.size == 1 do
             throwError "certified SMT datatype declaration lost its global allocation link"
-          let some declaration := certifiedState.datatypeDeclarations[0]?
+          let some declaration := certifiedState.datatypeDecls[0]?
             | throwError "certified SMT datatype declaration disappeared"
-          let some commandIndex := certifiedState.datatypeDeclarationIndices[0]?
+          let some commandIndex := certifiedState.datatypeDeclIndices[0]?
             | throwError "certified SMT datatype declaration lost its state index"
           let some emitted := certifiedState.commands[commandIndex]?
             | throwError "certified SMT datatype declaration index is out of bounds"
@@ -1229,22 +1229,22 @@ run_meta do
           unless translation.emittedCommands.map Crush.SMT.commandToString ==
               certifiedState.commands.map Crush.SMT.commandToString do
             throwError "retained translation fact lost the emitted command sequence"
-          unless translation.datatypeDeclarationIndices.size == translation.datatypes.blocks.size do
+          unless translation.datatypeDeclIndices.size == translation.datatypes.blocks.size do
             throwError "retained datatype environment is not completely linked"
-          unless translation.datatypeDeclarations.size == translation.datatypes.blocks.size do
+          unless translation.datatypeDecls.size == translation.datatypes.blocks.size do
             throwError "retained datatype environment lost dependency-ordered commands"
-          let some linkedIndex := translation.datatypeDeclarationIndices[0]?
+          let some linkedIndex := translation.datatypeDeclIndices[0]?
             | throwError "retained SMT datatype declaration lost its command index"
           let some linkedCommand := translation.emittedCommands[linkedIndex]?
             | throwError "retained SMT datatype declaration index is outside the emitted command sequence"
-          let some retainedCommand := translation.datatypeDeclarations[0]?
+          let some retainedCommand := translation.datatypeDecls[0]?
             | throwError "retained SMT datatype declaration disappeared"
           unless Crush.SMT.commandToString linkedCommand ==
               Crush.SMT.commandToString retainedCommand do
             throwError "retained SMT datatype declaration does not match the emitted command sequence"
           let (_, repeated) ← Crush.buildScript
             { certifyDatatype := true } #[fact, fact]
-          unless repeated.datatypeDeclarations.size == 1 &&
+          unless repeated.datatypeDecls.size == 1 &&
               repeated.factTranslations.size == 2 do
             throwError "repeated facts duplicated an SMT datatype block or lost a fact link"
 
@@ -1263,9 +1263,9 @@ run_meta do
       unless legacy.commands.map Crush.SMT.commandToString ==
           state.commands.map Crush.SMT.commandToString do
         throwError "{label}: certified and legacy translation commands differ"
-      unless state.datatypeDeclarations.size == declarationCount do
+      unless state.datatypeDecls.size == declarationCount do
         throwError "{label}: expected {declarationCount} certified SMT datatype blocks, got \
-          {state.datatypeDeclarations.size}"
+          {state.datatypeDecls.size}"
       unless state.factTranslations.size == 1 do
         throwError "{label}: expected one finalized fact-local datatype translation"
       let some translation := state.factTranslations[0]?
@@ -1274,14 +1274,14 @@ run_meta do
         throwError "{label}: finalized translation lost its reified higher-order sentence"
       unless translation.emittedCommands.size == state.commands.size do
         throwError "{label}: datatype translation retained an intermediate command prefix"
-      unless translation.datatypeDeclarations.size == declarationCount do
+      unless translation.datatypeDecls.size == declarationCount do
         throwError "{label}: finalized SMT datatype declaration list has the wrong size"
-      unless translation.guardDefinitionCommands.size == guardCount do
+      unless translation.guardDefCommands.size == guardCount do
         throwError "{label}: finalized guard command list has the wrong size"
       for position in [:declarationCount] do
-        let some index := translation.datatypeDeclarationIndices[position]?
+        let some index := translation.datatypeDeclIndices[position]?
           | throwError "{label}: SMT datatype declaration lost its emitted-sequence index"
-        let some retained := translation.datatypeDeclarations[position]?
+        let some retained := translation.datatypeDecls[position]?
           | throwError "{label}: retained SMT datatype declaration disappeared"
         let some emitted := state.commands[index]?
           | throwError "{label}: SMT datatype declaration index is outside the emitted command sequence"
@@ -1289,9 +1289,9 @@ run_meta do
             Crush.SMT.commandToString retained do
           throwError "{label}: SMT datatype declaration does not match the emitted command sequence"
       for position in [:guardCount] do
-        let some index := translation.guardDefinitionIndices[position]?
+        let some index := translation.guardDefIndices[position]?
           | throwError "{label}: guard definition lost its emitted-sequence index"
-        let some retained := translation.guardDefinitionCommands[position]?
+        let some retained := translation.guardDefCommands[position]?
           | throwError "{label}: retained guard command disappeared"
         let some emitted := state.commands[index]?
           | throwError "{label}: guard definition index is outside the emitted command sequence"
@@ -1304,9 +1304,9 @@ run_meta do
       unless guards.size == guardCount do
         throwError "{label}: expected {guardCount} certified datatype guards, got \
           {guards.size}"
-      unless state.commandAllocationLinks.size == state.commandEncodings.size do
+      unless state.commandAllocLinks.size == state.commandEncodings.size do
         throwError "{label}: an encoded command lost its global allocation link"
-      for link in state.commandAllocationLinks do
+      for link in state.commandAllocLinks do
         let some encoding := state.commandEncodings[link.encodingIndex]?
           | throwError "{label}: encoded-command link index is out of bounds"
         let some emitted := state.commands[link.commandIndex]?
@@ -1314,7 +1314,7 @@ run_meta do
         unless Crush.SMT.commandToString emitted ==
             Crush.SMT.commandToString encoding.command do
           throwError "{label}: retained command encoding drifted from translation state"
-      unless state.datatypeDeclarationIndices.toList.Pairwise (· < ·) do
+      unless state.datatypeDeclIndices.toList.Pairwise (· < ·) do
         throwError "{label}: dependency-ordered datatype command indices were reordered"
   checkTranslatedCommands "Option Int" optionInt 1 1
   checkTranslatedCommands "recursive tree" (mkApp (mkConst ``ReifiedTree) int) 1 1
@@ -1333,7 +1333,7 @@ run_meta do
       proof := none
       descr := "datatype name colliding with Bool" }
     let (_, state) ← Crush.buildScript { certifyDatatype := true } #[fact]
-    let some declaration := state.datatypeDeclarations[0]?
+    let some declaration := state.datatypeDecls[0]?
       | throwError "reserved datatype-name test lost its SMT datatype declaration"
     let first : Fin declaration.block.arity := ⟨0, declaration.wf.blockWF.nonempty⟩
     unless declaration.blockEncoding.name (.sort first) != "Bool" do

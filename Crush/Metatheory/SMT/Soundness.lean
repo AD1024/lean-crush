@@ -1,4 +1,4 @@
-import Crush.Metatheory.SMT.ModelExtension
+import Crush.Metatheory.SMT.ModelExt
 import Crush.Metatheory.SMT.DatatypeCanonical
 
 /-!
@@ -14,6 +14,7 @@ represented carriers.
 namespace Crush.Metatheory.SMT
 
 open Defunctionalization.Flattened
+open Crush.SMT (RawCommandsUnsat)
 open Crush.SMT.Model (satisfiesCommands_append)
 open scoped Crush.Metatheory
 open scoped Crush.SMT
@@ -23,14 +24,14 @@ variable {symbols : FO.SymbolFamily}
 /-- Each ordinary symbol declaration emitted by the pure encoder is satisfied
 by the same induced model used for native symbols. -/
 theorem declaration_valid (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (declared : Declaration symbols)
+    (target : FO.FamilyModel symbols) (declared : Decl symbols)
     (ordinary : encoding.nativeSymbol declared.symbol = false) :
     (model encoding target).SatisfiesCommand (declaration encoding declared) := by
   rw [declaration]
   change Crush.SMT.SymbolHasType (model encoding target)
     (.symb (encoding.name declared.symbol))
-    (declared.declaration.args.map encoding.sort)
-    (encoding.sort declared.declaration.result)
+    (declared.decl.args.map encoding.sort)
+    (encoding.sort declared.decl.result)
   rw [← encoding.ordinary_ident declared.symbol ordinary]
   exact symbol_has_type encoding target declared.symbol
 
@@ -471,7 +472,7 @@ theorem assertions_valid (encoding : Encoding symbols)
 /-- Every emitted symbol declaration is valid in the induced relational
 symbol graph. -/
 theorem declarations_valid (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (declarations : List (Declaration symbols)) :
+    (target : FO.FamilyModel symbols) (declarations : List (Decl symbols)) :
     model encoding target ⊨ₛᶜ
       ((ordinaryDecls encoding declarations).map
         (declaration encoding)).toArray := by
@@ -490,20 +491,20 @@ theorem declarations_valid (encoding : Encoding symbols)
 
 /-- Sort declarations carry no constraint beyond belonging to the supported
 command fragment. -/
-theorem sortDeclarations_valid (encoding : Encoding symbols)
+theorem sortDecls_valid (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) (sorts : List FO.FOSort) :
     model encoding target ⊨ₛᶜ
-      (sorts.filterMap (sortDeclaration? encoding)).toArray := by
+      (sorts.filterMap (sortDecl? encoding)).toArray := by
   intro command membership
   have arrayMembership : command ∈
-      (sorts.filterMap (sortDeclaration? encoding)).toArray :=
+      (sorts.filterMap (sortDecl? encoding)).toArray :=
     Array.mem_toList_iff.mp membership
   have listMembership : command ∈
-      sorts.filterMap (sortDeclaration? encoding) := by
+      sorts.filterMap (sortDecl? encoding) := by
     simpa using arrayMembership
   rcases List.mem_filterMap.mp listMembership with
     ⟨sort, sortMem, declarationEqual⟩
-  unfold sortDeclaration? at declarationEqual
+  unfold sortDecl? at declarationEqual
   split at declarationEqual <;> try contradiction
   split at declarationEqual <;> try contradiction
   cases declarationEqual
@@ -514,15 +515,15 @@ theorem sortDeclarations_valid (encoding : Encoding symbols)
 /-- Ordinary source-symbol declarations remain valid in an extended model. -/
 theorem declaration_valid_with (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
-    (declared : Declaration symbols)
+    (declared : Decl symbols)
     (ordinary : encoding.nativeSymbol declared.symbol = false) :
     (modelWith encoding target extra).SatisfiesCommand
       (declaration encoding declared) := by
   rw [declaration]
   change Crush.SMT.SymbolHasType (modelWith encoding target extra)
     (.symb (encoding.name declared.symbol))
-    (declared.declaration.args.map encoding.sort)
-    (encoding.sort declared.declaration.result)
+    (declared.decl.args.map encoding.sort)
+    (encoding.sort declared.decl.result)
   rw [← encoding.ordinary_ident declared.symbol ordinary]
   exact symbol_has_type_with encoding target extra declared.symbol
 
@@ -558,7 +559,7 @@ theorem assertions_valid_with (encoding : Encoding symbols)
 model. -/
 theorem declarations_valid_with (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
-    (declarations : List (Declaration symbols)) :
+    (declarations : List (Decl symbols)) :
     modelWith encoding target extra ⊨ₛᶜ
       ((ordinaryDecls encoding declarations).map
         (declaration encoding)).toArray := by
@@ -576,21 +577,21 @@ theorem declarations_valid_with (encoding : Encoding symbols)
   simpa using filtered.2
 
 /-- Sort declarations are graph-independent. -/
-theorem sortDeclarations_valid_with (encoding : Encoding symbols)
+theorem sortDecls_valid_with (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
     (sorts : List FO.FOSort) :
     modelWith encoding target extra ⊨ₛᶜ
-      (sorts.filterMap (sortDeclaration? encoding)).toArray := by
+      (sorts.filterMap (sortDecl? encoding)).toArray := by
   intro command membership
   have arrayMembership : command ∈
-      (sorts.filterMap (sortDeclaration? encoding)).toArray :=
+      (sorts.filterMap (sortDecl? encoding)).toArray :=
     Array.mem_toList_iff.mp membership
   have listMembership : command ∈
-      sorts.filterMap (sortDeclaration? encoding) := by
+      sorts.filterMap (sortDecl? encoding) := by
     simpa using arrayMembership
   rcases List.mem_filterMap.mp listMembership with
     ⟨sort, sortMem, declarationEqual⟩
-  unfold sortDeclaration? at declarationEqual
+  unfold sortDecl? at declarationEqual
   split at declarationEqual <;> try contradiction
   split at declarationEqual <;> try contradiction
   cases declarationEqual
@@ -601,13 +602,13 @@ symbols. This is the extension point used by certified datatype guards; all
 ordinary declarations and assertions retain their existing proofs. -/
 theorem lift_with_extra (encoding : Encoding symbols)
     {source : FO.FamilyTheory symbols} {commands : Array Command}
-    (representation : TheoryRepresentation encoding source commands)
+    (repr : TheoryRepr encoding source commands)
     (target : FO.FamilyModel symbols) (valid : target ⊨ᵀ source)
     (extra : ExtraGraph encoding target)
     (nativeValid : modelWith encoding target extra ⊨ₛᶜ
       encoding.nativeCommands) :
     ∃ smtModel : Crush.SMT.Model, smtModel ⊨ₛᶜ commands := by
-  rcases representation with ⟨declarations, same⟩
+  rcases repr with ⟨declarations, same⟩
   refine ⟨modelWith encoding target extra,
     ((modelWith encoding target extra).satisfiesCommands_congr same).2 ?_⟩
   simp only [theory]
@@ -615,7 +616,7 @@ theorem lift_with_extra (encoding : Encoding symbols)
   refine ⟨nativeValid, ?_⟩
   simp only [theoryBody]
   rw [satisfiesCommands_append, satisfiesCommands_append]
-  exact ⟨⟨sortDeclarations_valid_with encoding target extra _,
+  exact ⟨⟨sortDecls_valid_with encoding target extra _,
     declarations_valid_with encoding target extra declarations⟩,
     assertions_valid_with encoding target extra source valid⟩
 
@@ -623,11 +624,11 @@ theorem lift_with_extra (encoding : Encoding symbols)
 below obtains `nativeValid` from the exact component representation. -/
 theorem lift (encoding : Encoding symbols)
     {source : FO.FamilyTheory symbols} {commands : Array Command}
-    (representation : TheoryRepresentation encoding source commands)
+    (repr : TheoryRepr encoding source commands)
     (target : FO.FamilyModel symbols) (valid : target ⊨ᵀ source)
     (nativeValid : model encoding target ⊨ₛᶜ encoding.nativeCommands) :
     ∃ smtModel : Crush.SMT.Model, smtModel ⊨ₛᶜ commands := by
-  rcases representation with ⟨declarations, same⟩
+  rcases repr with ⟨declarations, same⟩
   refine ⟨model encoding target,
     ((model encoding target).satisfiesCommands_congr same).2 ?_⟩
   simp only [theory]
@@ -635,7 +636,7 @@ theorem lift (encoding : Encoding symbols)
   refine ⟨nativeValid, ?_⟩
   simp only [theoryBody]
   rw [satisfiesCommands_append, satisfiesCommands_append]
-  exact ⟨⟨sortDeclarations_valid encoding target _,
+  exact ⟨⟨sortDecls_valid encoding target _,
     declarations_valid encoding target declarations⟩,
     assertions_valid encoding target source valid⟩
 
@@ -646,13 +647,13 @@ ordinary case with no SMT datatype declarations. -/
 theorem representation_sound {signature : Signature}
     (encoding : Encoding (Symbol signature))
     {env : Datatype.Env signature}
-    (datatypes : Datatype.EnvRepresentation encoding env)
+    (datatypes : Datatype.EnvRepr encoding env)
     {theory : FO.FamilyTheory (Symbol signature)} {commands : Array Command}
-    (representation : TheoryRepresentation encoding theory commands)
+    (repr : TheoryRepr encoding theory commands)
     (source : Model signature) (freeDataModel : Datatype.Env.IsFreeDatatypeModel source env)
     (valid : canonicalModel source ⊨ᵀ theory) :
     ∃ smtModel : Crush.SMT.Model, smtModel ⊨ₛᶜ commands :=
-  lift encoding representation (canonicalModel source) valid
+  lift encoding repr (canonicalModel source) valid
     (datatypes.datatypeCommands_valid freeDataModel)
 
 /-- Unsatisfiability of the complete represented command sequence reflects
@@ -660,15 +661,15 @@ through the same theorem to the free-datatype source semantics. -/
 theorem commands_unsat_implies_source_unsat {signature : Signature}
     (encoding : Encoding (Symbol signature))
     {env : Datatype.Env signature}
-    (datatypes : Datatype.EnvRepresentation encoding env)
+    (datatypes : Datatype.EnvRepr encoding env)
     (formula : Sentence signature) {commands : Array Command}
-    (representation : TheoryRepresentation encoding
+    (repr : TheoryRepr encoding
       (translatedTheory formula) commands)
-    (unsat : Crush.SMT.AbstractCommandsUnsatisfiable commands) :
+    (unsat : RawCommandsUnsat commands) :
     Datatype.Env.Unsatisfiable env formula := by
   intro source freeDataModel sourceValid
   obtain ⟨smtModel, commandsValid⟩ :=
-    representation_sound encoding datatypes representation source freeDataModel
+    representation_sound encoding datatypes repr source freeDataModel
       (model_extension source formula sourceValid)
   exact unsat.noModel smtModel commandsValid
 
@@ -678,15 +679,15 @@ free-datatype model condition. -/
 theorem commands_unsat_implies_source_theory_unsat {signature : Signature}
     (encoding : Encoding (Symbol signature))
     {env : Datatype.Env signature}
-    (datatypes : Datatype.EnvRepresentation encoding env)
+    (datatypes : Datatype.EnvRepr encoding env)
     (sourceTheory : Theory signature) {commands : Array Command}
-    (representation : TheoryRepresentation encoding
+    (repr : TheoryRepr encoding
       (translatedTheories sourceTheory) commands)
-    (unsat : Crush.SMT.AbstractCommandsUnsatisfiable commands) :
+    (unsat : RawCommandsUnsat commands) :
     Datatype.Env.TheoryUnsatisfiable env sourceTheory := by
   intro source freeDataModel sourceValid
   obtain ⟨smtModel, commandsValid⟩ :=
-    representation_sound encoding datatypes representation source freeDataModel
+    representation_sound encoding datatypes repr source freeDataModel
       (model_extension_theory source sourceTheory sourceValid)
   exact unsat.noModel smtModel commandsValid
 

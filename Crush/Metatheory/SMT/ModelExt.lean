@@ -1,7 +1,7 @@
 import Crush.Metatheory.SMT.Model
 
 /-!
-# Preservation under derived-symbol graph extension
+# Model extension by derived-symbol graphs
 
 An `ExtraGraph` is disjoint from every encoded source identifier. Consequently
 all evaluations already established in the ordinary induced model remain valid

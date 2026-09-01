@@ -1,5 +1,5 @@
 import Crush.Metatheory.Defunctionalization.FlattenedApplication
-import Crush.Metatheory.Defunctionalization.ModelExtension
+import Crush.Metatheory.Defunctionalization.ModelExt
 import Crush.Metatheory.Guarded.Encoding
 
 /-!

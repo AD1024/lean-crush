@@ -16,38 +16,38 @@ open Crush.Metatheory.Guarded
 /-- Guarded relations for all nonlogical FO carriers. Boolean propositions are
 fixed to the identity relation, so logical truth is never re-encoded. -/
 structure CarrierRel (source target : Carriers) where
-  base : ∀ sort, SubsetRepresentation (source.Base sort) (target.Base sort)
+  base : ∀ sort, SubsetRepr (source.Base sort) (target.Base sort)
   fn : ∀ domain codomain,
-    SubsetRepresentation (source.Fn domain codomain) (target.Fn domain codomain)
+    SubsetRepr (source.Fn domain codomain) (target.Fn domain codomain)
 
 /-- Relation selected by one typed FO sort. -/
 def CarrierRel.get {source target : Carriers}
     (relation : CarrierRel source target) :
-    (sort : FOSort) → SubsetRepresentation (sort.Denote source) (sort.Denote target)
-  | .bool => SubsetRepresentation.refl Prop
+    (sort : FOSort) → SubsetRepr (sort.Denote source) (sort.Denote target)
+  | .bool => SubsetRepr.refl Prop
   | .base sort => relation.base sort
   | .fn domain codomain => relation.fn domain codomain
 
 instance {source target : Carriers} : CoeFun (CarrierRel source target)
     (fun _ => (sort : FOSort) →
-      SubsetRepresentation (sort.Denote source) (sort.Denote target)) where
+      SubsetRepr (sort.Denote source) (sort.Denote target)) where
   coe := CarrierRel.get
 
 /-- Assemble a full FO carrier relation from base and defunctionalized-function
 relations. Boolean propositions use the identity relation. -/
 def CarrierRel.ofBase {source target : Carriers}
-    (base : ∀ sort, SubsetRepresentation (source.Base sort) (target.Base sort))
+    (base : ∀ sort, SubsetRepr (source.Base sort) (target.Base sort))
     (fn : ∀ domain codomain,
-      SubsetRepresentation (source.Fn domain codomain) (target.Fn domain codomain)) :
+      SubsetRepr (source.Fn domain codomain) (target.Fn domain codomain)) :
     CarrierRel source target where
   base
   fn
 
 /-- Identity relation on one complete FO carrier family. -/
 def CarrierRel.refl (carriers : Carriers) : CarrierRel carriers carriers where
-  base := fun sort => @SubsetRepresentation.refl (carriers.Base sort) (carriers.baseNonempty sort)
+  base := fun sort => @SubsetRepr.refl (carriers.Base sort) (carriers.baseNonempty sort)
   fn := fun domain codomain =>
-    @SubsetRepresentation.refl (carriers.Fn domain codomain) (carriers.fnNonempty domain codomain)
+    @SubsetRepr.refl (carriers.Fn domain codomain) (carriers.fnNonempty domain codomain)
 
 /-- Lift one curried typed symbol interpretation through pointwise guarded
 carrier relations. Decoding is total outside the guarded image, while every
@@ -101,7 +101,7 @@ theorem liftSymbol_rel {source target : Carriers}
   | cons argument arguments ih =>
       intro value
       simp only [liftSymbol]
-      rw [SubsetRepresentation.decodeDefault_encode]
+      rw [SubsetRepr.decodeDefault_encode]
       exact ih (function value)
 
 /-- Every symbol interpretation is related to itself by the identity carrier
@@ -111,11 +111,11 @@ theorem SymbolRel.refl (carriers : Carriers) {arguments : List FOSort}
     SymbolRel (CarrierRel.refl carriers) value value := by
   induction arguments with
   | nil => cases result <;>
-      simp [SymbolRel, CarrierRel.refl, CarrierRel.get, SubsetRepresentation.refl]
+      simp [SymbolRel, CarrierRel.refl, CarrierRel.get, SubsetRepr.refl]
   | cons argument arguments ih =>
       intro input
       cases argument <;>
-        simpa [CarrierRel.refl, CarrierRel.get, SubsetRepresentation.refl] using ih (value input)
+        simpa [CarrierRel.refl, CarrierRel.get, SubsetRepr.refl] using ih (value input)
 
 /-- Canonical target model obtained by lifting every source symbol through one
 shared carrier relation. -/
@@ -287,7 +287,7 @@ theorem FamilyTerm.guardDenote_rel {symbols : SymbolFamily}
         argsIH valuation (source.symbol symbol) (target.symbol symbol)
           (models.symbol symbol))
     (boolLit := fun value valuation => by
-      cases value <;> simp [CarrierRel.get, SubsetRepresentation.refl])
+      cases value <;> simp [CarrierRel.get, SubsetRepr.refl])
     (not := fun body bodyIH valuation => by
       simp only [FamilyTerm.guardDenote.eq_5, FamilyTerm.denote.eq_5]
       rw [bodyIH valuation]
@@ -314,7 +314,7 @@ theorem FamilyTerm.guardDenote_rel {symbols : SymbolFamily}
       exact propext ((relation _).encode_eq_iff _ _))
     (forallE := fun body bodyIH valuation => by
       simp only [FamilyTerm.guardDenote.eq_11, FamilyTerm.denote.eq_11,
-        CarrierRel.get, SubsetRepresentation.refl, id_eq]
+        CarrierRel.get, SubsetRepr.refl, id_eq]
       change (∀ value,
           (relation _).guard value →
             body.guardDenote target
@@ -330,7 +330,7 @@ theorem FamilyTerm.guardDenote_rel {symbols : SymbolFamily}
       exact Iff.of_eq (bodyIH (valuation.extend value)).symm)
     (existsE := fun body bodyIH valuation => by
       simp only [FamilyTerm.guardDenote.eq_12, FamilyTerm.denote.eq_12,
-        CarrierRel.get, SubsetRepresentation.refl, id_eq]
+        CarrierRel.get, SubsetRepr.refl, id_eq]
       change (∃ value,
           (relation _).guard value ∧
             body.guardDenote target

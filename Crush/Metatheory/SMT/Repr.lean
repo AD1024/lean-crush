@@ -3,7 +3,7 @@ import Crush.Metatheory.SMT.Semantics
 import Crush.SMT.Quote
 
 /-!
-# Representation of typed first-order syntax as concrete SMT syntax
+# Encoding typed first-order syntax as concrete SMT syntax
 
 This module defines a pure specification encoder.  Its representation
 predicates are deliberately syntactic: they say exactly which concrete sort,
@@ -47,7 +47,7 @@ structure Encoding (symbols : FO.SymbolFamily) where
   ident_injective : ∀ {decl : FO.SymbolDecl} (left right : symbols decl),
     ident left = ident right → left = right
   ident_fresh : ∀ {decl : FO.SymbolDecl} (symbol : symbols decl),
-    Crush.SMT.NotInterpreted (ident symbol)
+    Crush.SMT.NotReserved (ident symbol)
   nativeSort : FO.FOSort → Bool
   nativeSymbol : {decl : FO.SymbolDecl} → symbols decl → Bool
   nativeCommands : Array Command
@@ -141,17 +141,17 @@ attribute [simp]
   encodeArguments.eq_1 encodeArguments.eq_2 term arguments
 
 /-- Existential package for a typed symbol declaration. -/
-structure Declaration (symbols : FO.SymbolFamily) where
-  declaration : FO.SymbolDecl
-  symbol : symbols declaration
+structure Decl (symbols : FO.SymbolFamily) where
+  decl : FO.SymbolDecl
+  symbol : symbols decl
 
 /-- Emit the ordinary concrete declaration selected for one typed symbol.
 Callers establish that the symbol is not declared by an SMT datatype command. -/
 def declaration {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
-    (declared : Declaration symbols) : Command :=
+    (declared : Decl symbols) : Command :=
   .declFun (encoding.name declared.symbol)
-    (declared.declaration.args.map encoding.sort).toArray
-    (encoding.sort declared.declaration.result)
+    (declared.decl.args.map encoding.sort).toArray
+    (encoding.sort declared.decl.result)
 
 mutual
   /-- All sorts occurring in a typed family term. -/
@@ -182,17 +182,17 @@ end
 
 /-- Stable first-occurrence list of the sorts used by declarations and formulas. -/
 def usedSorts {symbols : FO.SymbolFamily}
-    (declarations : List (Declaration symbols))
+    (declarations : List (Decl symbols))
     (theory : FO.FamilyTheory symbols) : List FO.FOSort :=
   ((declarations.flatMap fun declared =>
-      declared.declaration.args ++ [declared.declaration.result]) ++
+      declared.decl.args ++ [declared.decl.result]) ++
     theory.flatMap termSorts).eraseDups
 
 /-- Declare a represented sort exactly when it is a non-built-in nullary SMT
 symbol. Built-in, indexed, and compound sorts require no synthetic declaration
 here. In particular, an FO sort represented by SMT `Int` never causes an
 invalid `(declare-sort Int 0)` command, independently of `nativeSort`. -/
-def sortDeclaration? {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
+def sortDecl? {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
     (sort : FO.FOSort) : Option Command :=
   match encoding.sort sort with
   | .app (.symb name) arguments =>
@@ -207,56 +207,56 @@ theorem builtin_sort_not_declared {symbols : FO.SymbolFamily}
     (encoding : Encoding symbols) (sort : FO.FOSort) (name : String)
     (encoded : encoding.sort sort = .app (.symb name) #[])
     (builtin : Crush.SMT.Ident.isBuiltinSort (.symb name) = true) :
-    sortDeclaration? encoding sort = none := by
-  simp [sortDeclaration?, encoded, builtin]
+    sortDecl? encoding sort = none := by
+  simp [sortDecl?, encoded, builtin]
 
 @[simp] theorem int_sort_not_declared {symbols : FO.SymbolFamily}
     (encoding : Encoding symbols) (sort : FO.FOSort)
     (encoded : encoding.sort sort = Crush.SMT.intSort) :
-    sortDeclaration? encoding sort = none := by
+    sortDecl? encoding sort = none := by
   apply builtin_sort_not_declared encoding sort "Int"
   · simpa [Crush.SMT.intSort] using encoded
   · rfl
 
 /-- Ordinary sorts not already declared by a native command. -/
 def ordinarySorts {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
-    (declarations : List (Declaration symbols))
+    (declarations : List (Decl symbols))
     (source : FO.FamilyTheory symbols) : List FO.FOSort :=
   (usedSorts declarations source).filter fun sort =>
     sort != .bool && !encoding.nativeSort sort
 
 /-- Ordinary symbols not already declared by a native command. -/
 def ordinaryDecls {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
-    (declarations : List (Declaration symbols)) : List (Declaration symbols) :=
+    (declarations : List (Decl symbols)) : List (Decl symbols) :=
   declarations.filter fun declared => !encoding.nativeSymbol declared.symbol
 
 /-- The non-native suffix of the pure command encoder: remaining sort and symbol
 declarations followed by assertions, each in stable source order. -/
 def theoryBody {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
-    (declarations : List (Declaration symbols))
+    (declarations : List (Decl symbols))
     (source : FO.FamilyTheory symbols) : Array Command :=
   ((ordinarySorts encoding declarations source).filterMap
-      (sortDeclaration? encoding)).toArray ++
+      (sortDecl? encoding)).toArray ++
     ((ordinaryDecls encoding declarations).map (declaration encoding)).toArray ++
     (source.map fun formula => .assert (term encoding formula)).toArray
 
 /-- Pure command encoder: native declarations followed by the ordinary body. -/
 def theory {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
-    (declarations : List (Declaration symbols))
+    (declarations : List (Decl symbols))
     (source : FO.FamilyTheory symbols) : Array Command :=
   encoding.nativeCommands ++ theoryBody encoding declarations source
 
 @[simp] theorem native_sort_omitted {symbols : FO.SymbolFamily}
     (encoding : Encoding symbols)
-    (declarations : List (Declaration symbols))
+    (declarations : List (Decl symbols))
     (source : FO.FamilyTheory symbols) (sort : FO.FOSort)
     (native : encoding.nativeSort sort = true) :
     sort ∉ ordinarySorts encoding declarations source := by
   simp [ordinarySorts, native]
 
 @[simp] theorem native_decl_omitted {symbols : FO.SymbolFamily}
-    (encoding : Encoding symbols) (declarations : List (Declaration symbols))
-    (declared : Declaration symbols)
+    (encoding : Encoding symbols) (declarations : List (Decl symbols))
+    (declared : Decl symbols)
     (native : encoding.nativeSymbol declared.symbol = true) :
     declared ∉ ordinaryDecls encoding declarations := by
   simp [ordinaryDecls, native]
@@ -265,16 +265,16 @@ def theory {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
 semantic commands produced from the explicit ordered list of declarations.
 Script validation remains responsible for declaration-before-use ordering;
 the model semantics deliberately ignores order and duplicate occurrences. -/
-def TheoryRepresentation {symbols : FO.SymbolFamily}
+def TheoryRepr {symbols : FO.SymbolFamily}
     (encoding : Encoding symbols) (source : FO.FamilyTheory symbols)
     (commands : Array Command) : Prop :=
-  ∃ declarations : List (Declaration symbols),
+  ∃ declarations : List (Decl symbols),
     Crush.SMT.SameCommandSet commands (theory encoding declarations source)
 
 /-- Convert the flattened translator's declaration package to the generic
 representation package without changing order or symbol identity. -/
 def ofDeclared {signature : Signature}
-    (declared : DeclaredSymbol signature) : Declaration (Symbol signature) :=
+    (declared : DeclaredSymbol signature) : Decl (Symbol signature) :=
   ⟨declared.declaration, declared.symbol⟩
 
 set_option quotPrecheck false
@@ -287,8 +287,8 @@ scoped notation:max "𝒶⟦" source "⟧[" encoding "]" => term encoding source
 /-- Ordered list of every flattened symbol declaration generated for a finite
 source theory. Repeated occurrences remain explicit, matching the
 single-sentence translator's result. -/
-def translatedDeclarations {signature : Signature}
-    (source : Theory signature) : List (Declaration (Symbol signature)) :=
+def translatedDecls {signature : Signature}
+    (source : Theory signature) : List (Decl (Symbol signature)) :=
   source.flatMap fun formula => 𝓕⟦formula⟧.declarations.map ofDeclared
 
 /-- Pure SMT encoding of a complete finite source theory. Every sentence is
@@ -297,14 +297,14 @@ are concatenated. -/
 def encodeTheories {signature : Signature}
     (encoding : Encoding (Symbol signature))
     (source : Theory signature) : Array Command :=
-  theory encoding (translatedDeclarations source) (translatedTheories source)
+  theory encoding (translatedDecls source) (translatedTheories source)
 
 /-- The finite-theory encoder represents exactly the combined flattened
 target theory by construction. -/
 theorem encode_theories {signature : Signature}
     (encoding : Encoding (Symbol signature)) (source : Theory signature) :
-    TheoryRepresentation encoding (translatedTheories source)
+    TheoryRepr encoding (translatedTheories source)
       (encodeTheories encoding source) :=
-  ⟨translatedDeclarations source, Crush.SMT.SameCommandSet.refl _⟩
+  ⟨translatedDecls source, Crush.SMT.SameCommandSet.refl _⟩
 
 end Crush.Metatheory.SMT

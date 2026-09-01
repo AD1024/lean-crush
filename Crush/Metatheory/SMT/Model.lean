@@ -1,4 +1,4 @@
-import Crush.Metatheory.SMT.Representation
+import Crush.Metatheory.SMT.Repr
 
 /-!
 # Shared model induced by a typed FO model

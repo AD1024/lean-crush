@@ -108,7 +108,7 @@ example : True := by
     | some proof =>
         match Dynamic.get? Crush.Metatheory.Reification.CertifiedSymbolBinding proof with
         | some emission =>
-            unless constantState.structuralAllocations.entries.any
+            unless constantState.structuralAllocs.entries.any
                 (fun entry => entry.2 == emission.symbol) do
               throwError "certified source symbol is absent from the allocation trace"
         | none => throwError "retained constant certificate has the wrong dynamic type"
@@ -140,13 +140,13 @@ example : True := by
     let (_, translatedState) ← TranslateM.run {} (emitTerm identity)
     unless translatedState.commandEncodings.size == 3 do
       throwError "stateful defunctionalization did not retain all command encodings"
-    unless translatedState.commandAllocationLinks.map (·.encodingIndex) == #[0, 1, 2] do
+    unless translatedState.commandAllocLinks.map (·.encodingIndex) == #[0, 1, 2] do
       throwError "defunctionalization allocation links drifted from encoding order"
-    let allocatedNames := translatedState.nameAllocations.names
-    unless translatedState.commandAllocationLinks.all fun link =>
+    let allocatedNames := translatedState.nameAllocs.names
+    unless translatedState.commandAllocLinks.all fun link =>
         link.symbols.all fun symbol => allocatedNames.contains symbol do
       throwError "an encoded command retained an unallocated symbol"
-    unless translatedState.commandAllocationLinks.map (·.symbols.size) == #[2, 2, 2] do
+    unless translatedState.commandAllocLinks.map (·.symbols.size) == #[2, 2, 2] do
       throwError "app/closure/equation structural dependencies were not fully linked"
     match translatedState.status with
     | .trusted reasons =>
@@ -354,9 +354,9 @@ example (p q : Prop) : modelLabelProbe p = modelLabelProbe q := by
     throwError "one structural identity did not reuse its allocated SMT symbol"
   if name0 == name1 then
     throwError "universe-distinct expressions shared one SMT symbol"
-  unless state.structuralAllocations.entries.length == 2 do
+  unless state.structuralAllocs.entries.length == 2 do
     throwError "structural allocation trace recorded reuse as a fresh allocation"
-  have _ := state.structuralAllocations.namesNodup
+  have _ := state.structuralAllocs.namesNodup
 
 -- Definitional equality of universe maxima should not split an SMT symbol.
 #eval show Lean.MetaM Unit from do

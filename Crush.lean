@@ -28,7 +28,7 @@ import Crush.Metatheory.Defunctionalization.Core
 import Crush.Metatheory.Defunctionalization.LogicalRelation
 import Crush.Metatheory.Notation
 import Crush.Metatheory.Defunctionalization.Fundamental
-import Crush.Metatheory.Defunctionalization.ModelExtension
+import Crush.Metatheory.Defunctionalization.ModelExt
 import Crush.Metatheory.Defunctionalization.FlattenedApplication
 import Crush.Metatheory.Defunctionalization.Flattened.ClosureCorrectness
 import Crush.Metatheory.Defunctionalization.Flattened.Denotation
@@ -41,11 +41,11 @@ import Crush.Metatheory.SMT.DatatypeGuarded
 import Crush.Metatheory.SMT.DatatypeLifted
 import Crush.Metatheory.SMT.DatatypeTransport
 import Crush.Metatheory.SMT.Semantics
-import Crush.Metatheory.SMT.Representation
+import Crush.Metatheory.SMT.Repr
 import Crush.Metatheory.SMT.Guarded
 import Crush.Metatheory.SMT.Model
-import Crush.Metatheory.SMT.ModelExtension
-import Crush.Metatheory.SMT.DatatypeRepresentation
+import Crush.Metatheory.SMT.ModelExt
+import Crush.Metatheory.SMT.DatatypeRepr
 import Crush.Metatheory.SMT.DatatypeCanonical
 import Crush.Metatheory.SMT.Soundness
 import Crush.Metatheory.SMT.GuardedSoundness
@@ -63,7 +63,7 @@ import Crush.Metatheory.VCG.Generate
 import Crush.Frontend.Config
 import Crush.Frontend.Collect
 import Crush.Translation.Monad
-import Crush.Metatheory.VCG.CommandEquivalence
+import Crush.Metatheory.VCG.CommandEquiv
 import Crush.Translation.Attr
 import Crush.Translation.Unfold
 import Crush.Translation.Preprocess
