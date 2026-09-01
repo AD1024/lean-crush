@@ -57,11 +57,14 @@ structure Model.IntegerInterpretation (model : Model) where
       (right ≤ left ∧ output = model.bool true) ∨
         (¬right ≤ left ∧ output = model.bool false)
 
-/-- A raw model is standard for the currently certified SMT theories when its
+/-- A raw model is standard for the currently modeled SMT theories when its
 Boolean carrier is exactly two-valued, it carries a standard integer
 interpretation, and every identifier graph is single-valued. `Nonempty` keeps
 this predicate proof-valued while retaining the integer embedding needed to
-state the laws. -/
+state the laws. The integer clause is unconditional even for a command array
+that does not mention integers; `standardModel_exists` below proves that this
+global model class is inhabited. An induced model built from an FO model uses
+the separate, model-dependent `SMT.IntView` premise to establish this clause. -/
 structure Model.Standard (model : Model) : Prop where
   bool_exhaustive : ∀ value, model.inSort boolSort value →
     ∃ boolean, value = model.bool boolean

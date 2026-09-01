@@ -16,8 +16,14 @@ open scoped Crush.SMT
 
 variable {symbols : FO.SymbolFamily}
 
-/-- One typed source sort represented by SMT `Int`, together with its actual
-integer carrier and the freshness needed to interpret SMT's `>=` symbol. -/
+/-- Evidence needed to give an induced raw model the standard SMT integer
+interpretation. It selects one FO sort whose concrete encoding is SMT `Int`,
+proves that the corresponding target carrier is isomorphic to Lean `Int`, and
+keeps the source-symbol namespace disjoint from the interpreted `>=` operator.
+
+This is an explicit model-construction premise. It is not implied by
+`Encoding`: an encoding fixes sort syntax, whereas the carrier and its
+isomorphism depend on the particular target model. -/
 structure IntView (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) where
   sort : FO.FOSort

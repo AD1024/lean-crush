@@ -17,31 +17,6 @@ instance : DecidableEq Literal := fun left right => by
 namespace Term
 
 mutual
-  private def size : Term → Nat
-    | .lit _ | .bvar _ => 1
-    | .app _ arguments => listSize arguments.toList + 1
-    | .letE bindings body => bindingSize bindings.toList + size body + 1
-    | .forallE _ body | .existsE _ body | .lam _ body => size body + 1
-    | .annot body attributes => size body + attrListSize attributes.toList + 1
-
-  private def attrSize : Attr → Nat
-    | .named _ | .keyword _ _ => 1
-    | .pattern terms => listSize terms.toList + 1
-
-  private def listSize : List Term → Nat
-    | [] => 0
-    | term :: terms => size term + listSize terms + 1
-
-  private def attrListSize : List Attr → Nat
-    | [] => 0
-    | head :: tail => attrSize head + attrListSize tail + 1
-
-  private def bindingSize : List (String × Term) → Nat
-    | [] => 0
-    | (_, term) :: bindings => size term + bindingSize bindings + 1
-end
-
-mutual
   private def decEq : (left right : Term) → Decidable (left = right)
     | .lit left, .lit right =>
         if equal : left = right then isTrue (by cases equal; rfl)
@@ -130,9 +105,9 @@ mutual
     | .annot _ _, .bvar _ | .annot _ _, .app _ _ | .annot _ _, .letE _ _
     | .annot _ _, .forallE _ _ | .annot _ _, .existsE _ _
     | .annot _ _, .lam _ _ => isFalse nofun
-  termination_by left right => size left + size right
+  termination_by left right => structuralSize left + structuralSize right
   decreasing_by all_goals
-    simp [size] <;> omega
+    simp [structuralSize] <;> omega
 
   private def attrDecEq : (left right : Attr) → Decidable (left = right)
     | .named left, .named right =>
@@ -160,9 +135,9 @@ mutual
     | .named _, .pattern _ | .named _, .keyword _ _
     | .pattern _, .named _ | .pattern _, .keyword _ _
     | .keyword _ _, .named _ | .keyword _ _, .pattern _ => isFalse nofun
-  termination_by left right => attrSize left + attrSize right
+  termination_by left right => attrStructuralSize left + attrStructuralSize right
   decreasing_by all_goals
-    simp [attrSize] <;> omega
+    simp [attrStructuralSize] <;> omega
 
   private def listDecEq : (left right : List Term) → Decidable (left = right)
     | [], [] => isTrue rfl
@@ -181,9 +156,9 @@ mutual
               cases headEq
               cases tailEq
               rfl)
-  termination_by left right => listSize left + listSize right
+  termination_by left right => listStructuralSize left + listStructuralSize right
   decreasing_by all_goals
-    simp [listSize] <;> omega
+    simp [listStructuralSize] <;> omega
 
   private def attrListDecEq :
       (left right : List Attr) → Decidable (left = right)
@@ -203,9 +178,10 @@ mutual
               cases headEq
               cases tailEq
               rfl)
-  termination_by left right => attrListSize left + attrListSize right
+  termination_by left right =>
+    attrListStructuralSize left + attrListStructuralSize right
   decreasing_by all_goals
-    simp [attrListSize] <;> omega
+    simp [attrListStructuralSize] <;> omega
 
   private def bindingDecEq :
       (left right : List (String × Term)) → Decidable (left = right)
@@ -230,9 +206,10 @@ mutual
         else isFalse fun equal => by
           injection equal with headEq
           exact nameEq (congrArg Prod.fst headEq)
-  termination_by left right => bindingSize left + bindingSize right
+  termination_by left right =>
+    bindingListStructuralSize left + bindingListStructuralSize right
   decreasing_by all_goals
-    simp [bindingSize] <;> omega
+    simp [bindingListStructuralSize] <;> omega
 end
 
 end Term

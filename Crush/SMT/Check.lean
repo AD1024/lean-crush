@@ -24,9 +24,9 @@ binder, or a preceding declaration.
 
 namespace Crush.SMT
 
-/- The metatheory retains successful checker runs as proof data. The executable
-definitions below are reducible so small concrete obligations can normalize in
-the kernel and proof-facing regressions can use ordinary reduction. -/
+/- The metatheory retains successful checker runs as proof data. Recursive
+sort and term checking is total, and the generated equation theorems let small
+concrete successes be proved by kernel-checked simplification. -/
 
 /-- Solver-defined operators recognized by the shared SMT checker. An
 identifier in this table cannot be redeclared as an uninterpreted function in
@@ -93,44 +93,53 @@ private def requireArity (name : String) (actual expected : Nat) : Except String
   if actual == expected then pure ()
   else throw s!"`{name}` expects {expected} argument(s), got {actual}"
 
-private def builtinSortArity? : Ident → Option Nat
-  | .symb "Bool" | .symb "Int" | .symb "String" => some 0
-  | .symb "Array" => some 2
-  | .symb "->" => none
-  | .indexed "BitVec" #[.inr _] => some 0
-  | _ => none
-
-private partial def checkSort (mode : CheckMode) (env : CheckEnv)
-    (sort : SSort) : Except String Unit := do
-  match sort with
-  | .bvar _ =>
-      if mode.modeledTheoriesOnly then
-        throw "sort variables are outside the modeled monomorphic SMT fragment"
-  | .app identifier arguments =>
-      for argument in arguments do
-        checkSort mode env argument
-      if identifier == .symb "->" then
+mutual
+  @[simp]
+  private def checkSort (mode : CheckMode) (env : CheckEnv) :
+      SSort → Except String Unit
+    | .bvar _ => do
         if mode.modeledTheoriesOnly then
-          throw "function sorts are outside the modeled first-order SMT fragment"
-        if arguments.size < 2 then
-          throw "function sort expects at least one domain and one codomain"
-        return
-      if let some arity := builtinSortArity? identifier then
-        requireArity s!"sort `{identifier}`" arguments.size arity
-        return
-      match identifier with
-      | .symb name =>
-          if let some arity := env.sorts.get? name then
-            requireArity s!"sort `{name}`" arguments.size arity
-          else if mode.rejectUnknown then
-            throw s!"undeclared sort `{name}`"
-      | .indexed _ _ =>
-          if mode.rejectUnknown then
-            throw s!"unknown indexed sort `{identifier}`"
+          throw "sort variables are outside the modeled monomorphic SMT fragment"
+    | .app identifier arguments => do
+        checkSortList mode env arguments.toList
+        if identifier = .symb "->" then
+          if mode.modeledTheoriesOnly then
+            throw "function sorts are outside the modeled first-order SMT fragment"
+          if arguments.size < 2 then
+            throw "function sort expects at least one domain and one codomain"
+          return
+        if let some arity := identifier.builtinSortArity? then
+          requireArity s!"sort `{identifier}`" arguments.size arity
+          return
+        match identifier with
+        | .symb name =>
+            if let some arity := env.sorts.get? name then
+              requireArity s!"sort `{name}`" arguments.size arity
+            else if mode.rejectUnknown then
+              throw s!"undeclared sort `{name}`"
+        | .indexed _ _ =>
+            if mode.rejectUnknown then
+              throw s!"unknown indexed sort `{identifier}`"
+  termination_by sort => sort.structuralSize
+  decreasing_by all_goals simp [SSort.structuralSize] <;> omega
+
+  @[simp]
+  private def checkSortList (mode : CheckMode) (env : CheckEnv) :
+      List SSort → Except String Unit
+    | [] => pure ()
+    | sort :: sorts => do
+        checkSort mode env sort
+        checkSortList mode env sorts
+  termination_by sorts => SSort.listStructuralSize sorts
+  decreasing_by all_goals simp [SSort.listStructuralSize] <;> omega
+end
+
+attribute [simp] checkSort.eq_1 checkSort.eq_2
+  checkSortList.eq_1 checkSortList.eq_2
 
 private def insertSort (mode : CheckMode) (env : CheckEnv)
     (name : String) (arity : Nat) : Except String CheckEnv := do
-  if (builtinSortArity? (.symb name)).isSome || name == "->" then
+  if Ident.isBuiltinSort (.symb name) then
     throw s!"built-in sort `{name}` cannot be redeclared"
   if env.sorts.contains name then
     if mode.rejectUnknown then
@@ -142,18 +151,19 @@ private def insertSort (mode : CheckMode) (env : CheckEnv)
 private def lookupLocal (locals : List (String × SSort)) (name : String) : Option SSort :=
   (locals.find? fun entry => entry.1 == name).map (·.2)
 
+@[reducible, simp]
 private def requireSort (where_ : String) (actual : Option SSort) (expected : SSort) :
     Except String Unit :=
   match actual with
   | some actual =>
-    if actual == expected then pure ()
+    if actual = expected then pure ()
     else throw s!"{where_} has sort `{actual}`, expected `{expected}`"
   | none => pure ()
 
 private def requireSame (where_ : String) (a b : Option SSort) : Except String Unit :=
   match a, b with
   | some a, some b =>
-    if a == b then pure ()
+    if a = b then pure ()
     else throw s!"{where_} combines incompatible sorts `{a}` and `{b}`"
   | _, _ => pure ()
 
@@ -193,47 +203,45 @@ private def checkSignature (name : String) (sig : FunSig)
   for i in [0:args.size] do
     requireSort s!"argument {i + 1} of `{name}`" args[i]! sig.args[i]!
 
-private partial def inferTerm (mode : CheckMode) (env : CheckEnv)
-    (locals : List (String × SSort))
-    (bvars : List SSort) (term : Term) : Except String (Option SSort) := do
-  match term with
-  | .lit (.str value) =>
+mutual
+  @[simp]
+  private def inferTerm (mode : CheckMode) (env : CheckEnv)
+      (locals : List (String × SSort)) (bvars : List SSort) :
+      Term → Except String (Option SSort)
+  | .lit (.str value) => do
     if mode.modeledTheoriesOnly then
       throw "string literals are outside the modeled SMT fragment"
     validateStringLiteral value
     return some stringSort
-  | .lit (.num _) => return some intSort
-  | .lit (.bitvec width _) =>
+  | .lit (.num _) => do return some intSort
+  | .lit (.bitvec width _) => do
     if mode.modeledTheoriesOnly then
       throw "bit-vector literals are outside the modeled SMT fragment"
     return some (.app (.indexed "BitVec" #[.inr width]) #[])
-  | .lit (.bool _) => return some boolSort
-  | .bvar index =>
+  | .lit (.bool _) => do return some boolSort
+  | .bvar index => do
     match bvars[index]? with
     | some sort => return some sort
     | none => throw s!"unbound SMT de Bruijn variable `{index}`"
-  | .app ident args =>
-    let argSorts ← args.mapM (inferTerm mode env locals bvars)
-    inferApp mode env locals ident argSorts
-  | .letE bindings body =>
-    let mut bindingSorts : Array (String × SSort) := #[]
-    for (name, value) in bindings do
-      if let some sort ← inferTerm mode env locals bvars value then
-        bindingSorts := bindingSorts.push (name, sort)
-    inferTerm mode env (bindingSorts.toList.reverse ++ locals) bvars body
-  | .forallE binders body =>
+  | .app ident args => do
+    let argSorts ← inferTermList mode env locals bvars args.toList
+    inferApp mode env locals ident argSorts.toArray
+  | .letE bindings body => do
+    let bindingSorts ← inferBindingList mode env locals bvars bindings.toList
+    inferTerm mode env (bindingSorts.reverse ++ locals) bvars body
+  | .forallE binders body => do
     for (_, sort) in binders do checkSort mode env sort
     let bodySort ← inferTerm mode env (binders.toList.reverse ++ locals)
       (binders.toList.reverse.map (·.2) ++ bvars) body
     requireSort "body of `forall`" bodySort boolSort
     return some boolSort
-  | .existsE binders body =>
+  | .existsE binders body => do
     for (_, sort) in binders do checkSort mode env sort
     let bodySort ← inferTerm mode env (binders.toList.reverse ++ locals)
       (binders.toList.reverse.map (·.2) ++ bvars) body
     requireSort "body of `exists`" bodySort boolSort
     return some boolSort
-  | .lam binders body =>
+  | .lam binders body => do
     if mode.modeledTheoriesOnly then
       throw "lambda terms are outside the modeled first-order SMT fragment"
     for (_, sort) in binders do checkSort mode env sort
@@ -241,13 +249,12 @@ private partial def inferTerm (mode : CheckMode) (env : CheckEnv)
       (binders.toList.reverse.map (·.2) ++ bvars) body
     return bodySort.map fun result =>
       .app (.symb "->") (binders.map (·.2) |>.push result)
-  | .annot body attrs =>
+  | .annot body attrs => do
     let sort ← inferTerm mode env locals bvars body
-    for attr in attrs do
-      if let .pattern terms := attr then
-        for pattern in terms do
-          let _ ← inferTerm mode env locals bvars pattern
+    inferAttrList mode env locals bvars attrs.toList
     return sort
+  termination_by term => Term.structuralSize term
+  decreasing_by all_goals simp [Term.structuralSize] <;> omega
 where
   inferApp (mode : CheckMode) (env : CheckEnv)
       (locals : List (String × SSort)) (ident : Ident)
@@ -416,6 +423,50 @@ where
         if mode.rejectUnknown then throw s!"undeclared or unknown symbol `{name}`"
         return none
 
+  private def inferTermList (mode : CheckMode) (env : CheckEnv)
+      (locals : List (String × SSort)) (bvars : List SSort) :
+      List Term → Except String (List (Option SSort))
+    | [] => pure []
+    | term :: terms => do
+        let sort ← inferTerm mode env locals bvars term
+        let sorts ← inferTermList mode env locals bvars terms
+        return sort :: sorts
+  termination_by terms => Term.listStructuralSize terms
+  decreasing_by all_goals simp [Term.listStructuralSize] <;> omega
+
+  private def inferBindingList (mode : CheckMode) (env : CheckEnv)
+      (locals : List (String × SSort)) (bvars : List SSort) :
+      List (String × Term) → Except String (List (String × SSort))
+    | [] => pure []
+    | (name, value) :: bindings => do
+        let sort ← inferTerm mode env locals bvars value
+        let bindingSorts ← inferBindingList mode env locals bvars bindings
+        return match sort with
+          | some sort => (name, sort) :: bindingSorts
+          | none => bindingSorts
+  termination_by bindings => Term.bindingListStructuralSize bindings
+  decreasing_by all_goals simp [Term.bindingListStructuralSize] <;> omega
+
+  private def inferAttrList (mode : CheckMode) (env : CheckEnv)
+      (locals : List (String × SSort)) (bvars : List SSort) :
+      List Attr → Except String Unit
+    | [] => pure ()
+    | attr :: attrs => do
+        match attr with
+        | .pattern terms =>
+            let _ ← inferTermList mode env locals bvars terms.toList
+        | .named _ | .keyword _ _ => pure ()
+        inferAttrList mode env locals bvars attrs
+  termination_by attrs => Term.attrListStructuralSize attrs
+  decreasing_by all_goals simp [Term.attrListStructuralSize,
+    Term.attrStructuralSize] <;> omega
+end
+
+attribute [simp] inferTerm.eq_1 inferTerm.eq_2 inferTerm.eq_3 inferTerm.eq_4
+  inferTerm.eq_5 inferTerm.eq_6 inferTerm.eq_7 inferTerm.eq_8 inferTerm.eq_9
+  inferTerm.eq_10 inferTerm.eq_11 inferTermList.eq_1 inferTermList.eq_2
+  inferBindingList.eq_1 inferBindingList.eq_2 inferAttrList.eq_1 inferAttrList.eq_2
+
 private def insertFun (mode : CheckMode) (env : CheckEnv) (name : String)
     (sig : FunSig) :
     Except String CheckEnv :=
@@ -427,7 +478,7 @@ private def insertFun (mode : CheckMode) (env : CheckEnv) (name : String)
   | some previous =>
     if mode.rejectUnknown then
       throw s!"symbol `{name}` is declared more than once"
-    else if previous.args == sig.args && previous.res == sig.res then pure env
+    else if previous.args = sig.args ∧ previous.res = sig.res then pure env
     else throw s!"symbol `{name}` is redeclared at incompatible signatures"
 
 /-! ## Monomorphic datatype well-foundedness -/
@@ -554,6 +605,7 @@ def datatypesProductive
   datatypes.all fun (name, _, _) =>
     datatypeHasFiniteValue datatypes datatypes.size name
 
+@[reducible, simp]
 private def checkCommand (mode : CheckMode) (env : CheckEnv)
     (command : Command) : Except String CheckEnv := do
   match command with
@@ -657,5 +709,34 @@ def checkMetatheoryScript (commands : Array Command) : Except SortError Unit :=
 /-- Computable success flag for `checkMetatheoryScript`. -/
 def metatheoryScriptWellTyped (commands : Array Command) : Bool :=
   (checkMetatheoryScript commands).isOk
+
+/-- Normalize a concrete modeled-fragment checker run into a kernel-checked
+equality proof. The tactic unfolds the total structural recursors above; it
+does not invoke compiled evaluation or add a native-decision axiom. -/
+macro "prove_metatheory_script_well_typed" : tactic =>
+  `(tactic| simp [metatheoryScriptWellTyped, checkMetatheoryScript,
+      checkScriptWith, checkCommand, checkSort, checkSortList,
+      inferTerm, inferTermList, inferBindingList, inferAttrList,
+      inferTerm.eq_1, inferTerm.eq_2, inferTerm.eq_3, inferTerm.eq_4,
+      inferTerm.eq_5, inferTerm.eq_6, inferTerm.eq_7, inferTerm.eq_8,
+      inferTerm.eq_9, inferTerm.eq_10, inferTerm.eq_11,
+      inferTermList.eq_1, inferTermList.eq_2,
+      inferBindingList.eq_1, inferBindingList.eq_2,
+      inferAttrList.eq_1, inferAttrList.eq_2,
+      inferTerm.inferApp, insertSort, insertFun, requireSort, requireSame,
+      requireBoolArgs, requireIntArgs, requireBvArgs, checkSignature,
+      arrowSig?, requireArity, lookupLocal,
+      validateStringLiteral, isKnownTheoryOperator, isModeledTheoryOperator,
+      Term.symbApp] <;> rfl)
+
+/-- Kernel-checked regression for the smallest unsatisfiable script. -/
+theorem metatheoryScriptWellTyped_assertFalse :
+    metatheoryScriptWellTyped #[.assert (.lit (.bool false))] = true := by
+  prove_metatheory_script_well_typed
+
+/-- Kernel-checked regression for a well-typed integer equality. -/
+theorem metatheoryScriptWellTyped_distinctNumerals : metatheoryScriptWellTyped
+    #[.assert (.symbApp "=" #[.lit (.num 0), .lit (.num 1)])] = true := by
+  prove_metatheory_script_well_typed
 
 end Crush.SMT

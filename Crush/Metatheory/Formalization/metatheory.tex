@@ -1303,12 +1303,15 @@ witness, so this class of models is not empty.
 Let $\Sigma_q=(\Sigma_{\mathsf{sort}},\Sigma_{\mathsf{fun}})$ record the arity
 of each preceding sort declaration and the argument/result sorts of each
 preceding symbol declaration. Let $\Gamma_q$ record named local binders and
-$\Delta_q$ record the sorts of de Bruijn variables. The partial function
+$\Delta_q$ record the sorts of de Bruijn variables. The total checking function
 \[
  \mathsf{infer}(\Sigma_q,\Gamma_q,\Delta_q,q)=\tau
 \]
-computes the sort of $q$ or reports an error. It checks literal and variable
-sorts, declared applications, the modeled logical and integer operators,
+returns the sort of $q$ or an error. Its Lean definition uses structurally
+justified recursion over raw sorts, terms, and their nested arrays; it has no
+fuel parameter or fuel-exhaustion case. Concrete successful checks can therefore
+be retained as kernel-checked equality proofs without native evaluation. It
+checks literal and variable sorts, declared applications, the modeled logical and integer operators,
 quantifier bodies, simultaneous \texttt{let} bindings, and annotations. The
 modeled fragment rejects unknown symbols and sorts, use before declaration,
 lambda terms, and theory constructs for which this document has no semantics.
@@ -1495,6 +1498,28 @@ homomorphically.
 \leanfile{SMT/Representation.lean}
 \end{definition}
 
+\begin{definition}[Integer view for an induced model]\label{def:integer-view}
+An encoding $\mathcal E$ chooses syntax, not the carrier of a particular typed
+target model $M_t$. To construct a standard raw SMT model from
+$(\mathcal E,M_t)$, an \emph{integer view} therefore supplies:
+\begin{itemize}[leftmargin=*]
+ \item an FO sort $\kappa_{\mathbb Z}$ with
+       $\mathcal E_s(\kappa_{\mathbb Z})=\mathtt{Int}$;
+ \item mutually inverse maps
+       $M_t(\kappa_{\mathbb Z})\to\mathbb Z$ and
+       $\mathbb Z\to M_t(\kappa_{\mathbb Z})$; and
+ \item freshness of the interpreted SMT identifier \texttt{>=} from every
+       source-symbol identifier selected by $\mathcal E$.
+\end{itemize}
+This is the Lean structure \texttt{SMT.IntView}. It is an explicit
+model-construction premise, not a consequence of \texttt{SMT.Encoding}, because
+the carrier and its isomorphism vary with $M_t$. It is also different from a
+sort-declaration condition: SMT \texttt{Int} is a built-in sort, and the theory
+encoder never emits \texttt{(declare-sort Int 0)}, whether or not the selected
+FO sort is marked as belonging to the native datatype prefix.
+\leanfiles{SMT/Int.lean and SMT/Representation.lean}
+\end{definition}
+
 \begin{definition}[Pure theory encoder]
 For an ordered declaration list $D$ and typed theory $T$, define
 \[
@@ -1505,6 +1530,8 @@ For an ordered declaration list $D$ and typed theory $T$, define
  C_{\mathsf{assert}}.
 \]
 SMT datatype sorts and symbols are omitted from the ordinary declaration segments.
+Built-in SMT sorts, including \texttt{Bool} and \texttt{Int}, are likewise used
+directly rather than redeclared.
 Used ordinary sorts, declarations, and assertions retain stable source order.
 \leanfile{SMT/Representation.lean}
 \end{definition}
@@ -1655,9 +1682,10 @@ remains valid after every later disjoint block is installed.
 \end{theorem}
 
 \begin{theorem}[Non-vacuity of represented datatype commands]
-Assume the same free-datatype source model and an integer view giving the
-shared target the standard interpretation required by the modeled SMT
-fragment. Then there exists one \emph{standard} raw SMT model satisfying the
+Assume the same free-datatype source model and an integer view in the sense of
+Definition~\ref{def:integer-view}, giving the shared target the standard
+interpretation required by the modeled SMT fragment. Then there exists one
+\emph{standard} raw SMT model satisfying the
 represented datatype declaration. For a dependency-ordered datatype
 environment, one standard model satisfies the complete native datatype prefix.
 Consequently neither the single declaration nor that prefix can satisfy

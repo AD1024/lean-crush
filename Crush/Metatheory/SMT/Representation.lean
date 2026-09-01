@@ -27,7 +27,14 @@ sorts and symbols declared by that prefix. The field prefix `native` is the
 existing generic `Encoding` API name for these component-declared symbols; in
 the present metatheory, it is used for monomorphic `declare-datatypes` blocks.
 Keeping this policy here gives ordinary and datatype symbols one term encoder,
-one identifier namespace, and one semantic model. -/
+one identifier namespace, and one semantic model.
+
+`Encoding` chooses concrete syntax; it does not assert that a target carrier
+has the standard meaning of an SMT theory sort. In particular, constructing a
+standard induced model for integer guards separately requires an `IntView` of
+the target model: some FO sort must map to SMT `Int`, and that sort's carrier
+must be isomorphic to `Int`. This obligation depends on the target model and
+therefore cannot be a field of this syntax-only structure. -/
 structure Encoding (symbols : FO.SymbolFamily) where
   sort : FO.FOSort → SSort
   sort_injective : Function.Injective sort
@@ -181,14 +188,35 @@ def usedSorts {symbols : FO.SymbolFamily}
       declared.declaration.args ++ [declared.declaration.result]) ++
     theory.flatMap termSorts).eraseDups
 
-/-- Declare a represented sort exactly when it is a simple nullary SMT symbol.
-Built-in, indexed, and compound sorts require no synthetic declaration here. -/
+/-- Declare a represented sort exactly when it is a non-built-in nullary SMT
+symbol. Built-in, indexed, and compound sorts require no synthetic declaration
+here. In particular, an FO sort represented by SMT `Int` never causes an
+invalid `(declare-sort Int 0)` command, independently of `nativeSort`. -/
 def sortDeclaration? {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
     (sort : FO.FOSort) : Option Command :=
   match encoding.sort sort with
   | .app (.symb name) arguments =>
-      if arguments.isEmpty then some (.declSort name 0) else none
+      if arguments.isEmpty && !Crush.SMT.Ident.isBuiltinSort (.symb name) then
+        some (.declSort name 0)
+      else none
   | _ => none
+
+/-- A source sort mapped to a built-in nullary SMT sort is used directly and
+is never redeclared. -/
+theorem builtin_sort_not_declared {symbols : FO.SymbolFamily}
+    (encoding : Encoding symbols) (sort : FO.FOSort) (name : String)
+    (encoded : encoding.sort sort = .app (.symb name) #[])
+    (builtin : Crush.SMT.Ident.isBuiltinSort (.symb name) = true) :
+    sortDeclaration? encoding sort = none := by
+  simp [sortDeclaration?, encoded, builtin]
+
+@[simp] theorem int_sort_not_declared {symbols : FO.SymbolFamily}
+    (encoding : Encoding symbols) (sort : FO.FOSort)
+    (encoded : encoding.sort sort = Crush.SMT.intSort) :
+    sortDeclaration? encoding sort = none := by
+  apply builtin_sort_not_declared encoding sort "Int"
+  · simpa [Crush.SMT.intSort] using encoded
+  · rfl
 
 /-- Ordinary sorts not already declared by a native command. -/
 def ordinarySorts {symbols : FO.SymbolFamily} (encoding : Encoding symbols)

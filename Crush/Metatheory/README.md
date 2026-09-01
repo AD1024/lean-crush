@@ -62,8 +62,13 @@ boundary.
    declaration-aware type-checking certificate, the additional free-datatype
    conditions, and absence of a model with standard Boolean and integer
    interpretations. `SMT.standardModel_exists` shows that this standard-model
-   class is inhabited. The fixed-theory operators covered by the soundness
-   theorem are Boolean logic, equality, integer numerals, and integer `>=`;
+   class is inhabited. Constructing such a model from a typed FO model uses an
+   explicit `SMT.IntView`: one FO sort must map to SMT `Int`, and its target
+   carrier must be isomorphic to Lean `Int`. This model-dependent obligation is
+   not implied by the syntax-only `SMT.Encoding`. Built-in SMT sorts are used
+   directly and are never emitted as ordinary sort declarations. The
+   fixed-theory operators covered by the soundness theorem are Boolean logic,
+   equality, integer numerals, and integer `>=`;
    other arithmetic and bit-vector, array, and string operators are rejected by
    the metatheory checker. See
    [`SMT/Representation.lean`](SMT/Representation.lean)

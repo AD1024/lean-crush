@@ -628,6 +628,10 @@ structure GuardedModelExtension (translation : FactTranslationRecord)
         sort).guard)).over base)
     (fun sort => ((represented.datatypeRepresentation.liftedFrom source freeDataModel prior).relation
       sort).guard)
+  /-- Standard Boolean and integer semantics for the completed raw model.
+  `ofIntView` constructs this field from an explicit FO sort mapped to SMT
+  `Int` whose target carrier is isomorphic to `Int`; `Encoding` alone does not
+  provide that model-dependent fact. -/
   standard : Crush.SMT.Model.Standard
     (SMT.modelWith guarding.encoding
       (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target

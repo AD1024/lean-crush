@@ -29,6 +29,24 @@ inductive Ident where
   | indexed : String → Array (String ⊕ Nat) → Ident
   deriving BEq, DecidableEq, Inhabited, Repr
 
+/-- Whether an identifier is an SMT-LIB built-in sort constructor recognized
+by the shared syntax and checker. -/
+def Ident.isBuiltinSort : Ident → Bool
+  | .symb "Bool" | .symb "Int" | .symb "String"
+  | .symb "Array" | .symb "->" => true
+  | .indexed "BitVec" #[.inr _] => true
+  | _ => false
+
+/-- Fixed arity of a recognized SMT-LIB built-in sort constructor. The
+variadic function sort `->` and unknown identifiers both return `none`;
+`isBuiltinSort` distinguishes those cases. -/
+def Ident.builtinSortArity? : Ident → Option Nat
+  | .symb "Bool" | .symb "Int" | .symb "String" => some 0
+  | .symb "Array" => some 2
+  | .symb "->" => none
+  | .indexed "BitVec" #[.inr _] => some 0
+  | _ => none
+
 /-- An SMT sort: a bound parameter in a parametric sort declaration or an
 applied sort constructor `(S s₀ … sₙ)`. Nullary constructors render as bare
 symbols. The proved monomorphic fragment never uses `bvar`. -/
@@ -157,6 +175,45 @@ mutual
     | keyword : String → Option String → Attr
     deriving Inhabited, Repr
 end
+
+namespace Term
+
+mutual
+  /-- Structural size of one SMT term. This measure is shared by total
+  recursive operations over the array-nested term syntax. -/
+  def structuralSize : Term → Nat
+    | .lit _ | .bvar _ => 1
+    | .app _ arguments => listStructuralSize arguments.toList + 1
+    | .letE bindings body =>
+        bindingListStructuralSize bindings.toList + structuralSize body + 1
+    | .forallE _ body | .existsE _ body | .lam _ body => structuralSize body + 1
+    | .annot body attributes =>
+        structuralSize body + attrListStructuralSize attributes.toList + 1
+
+  /-- Structural size of one SMT term attribute. -/
+  def attrStructuralSize : Attr → Nat
+    | .named _ | .keyword _ _ => 1
+    | .pattern terms => listStructuralSize terms.toList + 1
+
+  /-- Structural size of a list of SMT terms. -/
+  def listStructuralSize : List Term → Nat
+    | [] => 0
+    | term :: terms => structuralSize term + listStructuralSize terms + 1
+
+  /-- Structural size of a list of SMT term attributes. -/
+  def attrListStructuralSize : List Attr → Nat
+    | [] => 0
+    | attr :: attributes =>
+        attrStructuralSize attr + attrListStructuralSize attributes + 1
+
+  /-- Structural size of simultaneous SMT `let` bindings. -/
+  def bindingListStructuralSize : List (String × Term) → Nat
+    | [] => 0
+    | (_, term) :: bindings =>
+        structuralSize term + bindingListStructuralSize bindings + 1
+end
+
+end Term
 
 /-- A datatype constructor declaration with its selectors. -/
 structure CtorDecl where

@@ -662,18 +662,19 @@ example : definedBoolModel.SatisfiesCommand (.defFun trueDefinition) := by
   if metatheoryScriptWellTyped #[.defFunsRec #[]] then
     throw <| IO.userError "empty recursive-definition group was accepted"
 
-#eval show IO Unit from do
-  unless metatheoryScriptWellTyped #[.assert (.lit (.bool false))] do
-    throw <| IO.userError "well-sorted false assertion was rejected"
+example : CommandsWellTyped #[.assert (.lit (.bool false))] := by
+  unfold CommandsWellTyped
+  exact metatheoryScriptWellTyped_assertFalse
 
-example (wellTyped : CommandsWellTyped #[.assert (.lit (.bool false))]) :
+example :
     CommandsUnsatisfiable #[.assert (.lit (.bool false))] := by
   refine ⟨?_, ?_, ?_⟩
   · intro command member
     simp at member
     subst command
     trivial
-  · exact wellTyped
+  · unfold CommandsWellTyped
+    exact metatheoryScriptWellTyped_assertFalse
   · intro model standard valid
     have evaluated := valid (.assert (.lit (.bool false))) (by simp)
     change Eval model [] (.lit (.bool false)) (model.bool true) at evaluated
@@ -690,18 +691,19 @@ example : ¬CommandsUnsatisfiable #[] := by
 
 /- Standard integer semantics prevents distinct numerals from collapsing in
 the relational model. -/
-#eval show IO Unit from do
-  unless metatheoryScriptWellTyped #[.assert (smt| (= 0 1))] do
-    throw <| IO.userError "well-sorted integer equality was rejected"
+example : CommandsWellTyped #[.assert (smt| (= 0 1))] := by
+  unfold CommandsWellTyped
+  exact metatheoryScriptWellTyped_distinctNumerals
 
-example (wellTyped : CommandsWellTyped #[.assert (smt| (= 0 1))]) :
+example :
     CommandsUnsatisfiable #[.assert (smt| (= 0 1))] := by
   refine ⟨?_, ?_, ?_⟩
   · intro command member
     simp at member
     subst command
     trivial
-  · exact wellTyped
+  · unfold CommandsWellTyped
+    exact metatheoryScriptWellTyped_distinctNumerals
   · intro model standard valid
     have evaluated := valid (.assert (smt| (= 0 1))) (by simp)
     change Eval model [] (smt| (= 0 1)) (model.bool true) at evaluated
@@ -1534,7 +1536,7 @@ whole-theory comparison must return `some`. -/
   unless decide (generatedTwoConstantCommands = twoConstantCommands) do
     throw <| IO.userError "the formal encoder disagrees with the concrete two-constant commands"
   unless Crush.SMT.metatheoryScriptWellTyped twoConstantCommands do
-    throw <| IO.userError "the concrete two-constant commands failed SMT validation"
+    throw <| IO.userError "the concrete two-constant commands are not well typed"
   unless checkedCommandEquivalence.isSome do
     throw <| IO.userError "CommandEquivalence.build? rejected the concrete two-constant translation"
 
