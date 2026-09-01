@@ -120,6 +120,27 @@ theorem active_of_used {env : Env} {commands : Array Command}
     (ofCommands env commands).active theory = true :=
   active_of_required used
 
+/-- Command-induced combinations depend only on semantic command membership,
+not array order or duplicate occurrences. -/
+theorem ofCommands_congr {env : Env} {left right : Array Command}
+    (same : SameCommandSet left right) :
+    ofCommands env left = ofCommands env right := by
+  apply Comb.ext
+  intro theory
+  change env.closure.close (env.sigEnv.usesCommands left) theory =
+    env.closure.close (env.sigEnv.usesCommands right) theory
+  have requirementsEq : env.sigEnv.usesCommands left =
+      env.sigEnv.usesCommands right := by
+    funext selected
+    rw [Bool.eq_iff_iff]
+    simp only [SigEnv.usesCommands, List.any_eq_true]
+    constructor
+    · rintro ⟨command, member, used⟩
+      exact ⟨command, same.1 command member, used⟩
+    · rintro ⟨command, member, used⟩
+      exact ⟨command, same.2 command member, used⟩
+  rw [requirementsEq]
+
 theorem union_empty_left {env : Env} (comb : Comb env) :
     union (empty env) comb = comb := by
   ext theory
@@ -153,11 +174,17 @@ structure Models {env : Env} (comb : Comb env) (model : Model) : Prop where
     (env.decl theory).Models
       (Model.reduct model (env.sigEnv.modeled.get theory).sig)
 
+/-- Model evidence transports across extensionally equal combinations. -/
+theorem Models.congr {env : Env} {left right : Comb env} {model : Model}
+    (models : Models left model) (equal : left = right) : Models right model := by
+  subst right
+  exact models
+
 /-- A well-typed command sequence with no model of its command-induced theory
 combination. -/
 structure CommandsUnsat (env : Env) (commands : Array Command) : Prop where
   inFragment : CommandsInFragment commands
-  wellTyped : CommandsWellTyped commands
+  wellTyped : CommandsWellTypedIn env.sigEnv commands
   noModel : ∀ model : Model, Models (ofCommands env commands) model →
     ¬model.SatisfiesCommands commands
 

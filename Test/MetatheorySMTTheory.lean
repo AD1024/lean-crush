@@ -1,4 +1,5 @@
 import Crush.Metatheory.SMT.IntTheory
+import Crush.Metatheory.SMT.ModelExt
 
 /-!
 # Modular SMT theory tests
@@ -13,6 +14,86 @@ namespace Crush.Metatheory.SMT.MixedTheoryTests
 
 open Crush.SMT
 open Crush.SMT.Theory
+
+private abbrev RelModel := Crush.SMT.Model
+
+/-! ## Composable fixed-carrier model extensions -/
+
+private def falseExt (model : RelModel) : ModelExt model.Value where
+  literal? := fun
+    | .bool false => some (model.bool false)
+    | _ => none
+  apply := fun _ _ _ => False
+
+private def trueExt (model : RelModel) : ModelExt model.Value where
+  literal? := fun
+    | .bool true => some (model.bool true)
+    | _ => none
+  apply := fun _ _ _ => False
+
+private theorem falseExt_wf (model : RelModel) :
+    (falseExt model).WF model where
+  literal_typed := by
+    intro literal value present
+    cases literal with
+    | bool boolean =>
+        cases boolean <;> simp [falseExt] at present
+        subst value
+        exact model.boolTyped false
+    | num number | str string | bitvec width number =>
+        simp [falseExt] at present
+  apply_unique := by simp [falseExt]
+  base_agree := by simp [falseExt]
+
+private theorem trueExt_wf (model : RelModel) :
+    (trueExt model).WF model where
+  literal_typed := by
+    intro literal value present
+    cases literal with
+    | bool boolean =>
+        cases boolean <;> simp [trueExt] at present
+        subst value
+        exact model.boolTyped true
+    | num number | str string | bitvec width number =>
+        simp [trueExt] at present
+  apply_unique := by simp [trueExt]
+  base_agree := by simp [trueExt]
+
+private theorem boolExt_disjoint (model : RelModel) :
+    (falseExt model).Disjoint (trueExt model) where
+  literal := by
+    intro literal falseValue trueValue falsePresent truePresent
+    cases literal with
+    | bool boolean => cases boolean <;> simp [falseExt, trueExt] at falsePresent truePresent
+    | num number | str string | bitvec width number =>
+        simp [falseExt] at falsePresent
+  apply := by simp [falseExt]
+
+private theorem boolExt_inactiveOnInt (model : RelModel) :
+    ((falseExt model).union (trueExt model)).InactiveOn intSig where
+  literal := by
+    intro literal present
+    cases literal <;>
+      simp [intSig, Sig.ofClassifiers, Sig.containsLiteral,
+        falseExt, trueExt] at present ⊢
+  apply := by simp [falseExt, trueExt, ModelExt.union]
+
+/-- Two nonempty, disjoint literal contributions combine over one carrier and
+preserve the already established integer theory. This is a concrete witness
+that extension union and its preservation theorem do not rely on an empty
+model class. -/
+private theorem modelExt_union_hasIntModel :
+    ∃ model : RelModel,
+      model.WF ∧ Int.Models (Model.reduct model intSig) := by
+  rcases standardModel_exists with ⟨base, standard⟩
+  let ext := (falseExt base).union (trueExt base)
+  have extWF : ext.WF base := ModelExt.WF.union
+    (falseExt_wf base) (trueExt_wf base) (boolExt_disjoint base)
+  have inactive : ext.InactiveOn intSig := boolExt_inactiveOnInt base
+  refine ⟨base.withExt ext extWF.toLiteralWF,
+    standard.wf.withExt extWF, ?_⟩
+  exact ModelExt.theory extWF.toLiteralWF inactive Int.theory
+    (Int.ofStandard standard)
 
 private abbrev colorSort : SSort := .app (.symb "Color") #[]
 
@@ -295,6 +376,7 @@ private theorem sigEnv_wf : sigEnv.WF := by
     core_compatible := ?_
     modeled_compatible := ?_
     deps_resolve := ?_
+    deps_complete := ?_
     deps_before := ?_ }
   · intro identifier provider found
     simp only [sigEnv] at found ⊢
@@ -399,6 +481,17 @@ private theorem sigEnv_wf : sigEnv.WF := by
       simp [intId, colorId, intEntry, colorEntry]
     next notColor =>
       exact False.elim (List.not_mem_nil member)
+  · intro theory key member
+    cases id_cases theory with
+    | inl equal =>
+        subst theory
+        change key ∈ [] at member
+        exact False.elim (List.not_mem_nil member)
+    | inr equal =>
+        subst theory
+        have keyEq : key = `Int := List.mem_singleton.mp member
+        subst key
+        exact ⟨intId, List.mem_singleton.mpr rfl, rfl⟩
   · intro theory dependency member
     simp only [sigEnv] at member
     unfold deps at member
@@ -470,32 +563,11 @@ private def closure : Theory.Closure sigEnv where
         apply includes colorId
         simpa [closeReqs, intId, colorId] using active
 
-/-- Color is an uninterpreted-sort theory with a typed, total `rank`
-operation. `Struct.WF` states precisely the usual EUF carrier and function
-conditions; no equation constrains which integer rank a color receives. -/
-private def colorTheory : Crush.Metatheory.SMT.Theory colorSig where
-  Models := Struct.WF
-  models_wf := id
-  iso_closed := Struct.WF.ofIso
-
-private def env : Theory.Env where
-  sigEnv := sigEnv
-  sig_wf := sigEnv_wf
-  decl := by
-    intro theory
-    by_cases integer : theory = intId
-    · subst theory
-      exact Int.theory
-    · have color : theory = colorId :=
-        Or.resolve_left (id_cases theory) integer
-      subst theory
-      exact colorTheory
-  closure := closure
-
 /-- Model-theoretic expansion by the new `color.rank` symbol. The carrier,
 sorts, literals, and existing symbols are unchanged; every Color value is sent
 to integer zero. -/
-private def expandColor (model : Model) (integers : model.IntInterp) : Model where
+private def expandColor (model : RelModel)
+    (integers : model.IntInterp) : RelModel where
   Value := model.Value
   inSort := model.inSort
   sortNonempty := model.sortNonempty
@@ -513,7 +585,8 @@ private def expandColor (model : Model) (integers : model.IntInterp) : Model whe
 
 /-- Integer laws are preserved by the Color expansion because the new symbol
 has a distinct identifier. -/
-private def expandColorIntegers (model : Model) (integers : model.IntInterp) :
+private def expandColorIntegers (model : RelModel)
+    (integers : model.IntInterp) :
     (expandColor model integers).IntInterp where
   int := integers.int
   int_typed := integers.int_typed
@@ -524,7 +597,7 @@ private def expandColorIntegers (model : Model) (integers : model.IntInterp) :
     intro left right output
     simpa [expandColor] using integers.ge left right output
 
-private theorem expandColor_standard (model : Model)
+private theorem expandColor_standard (model : RelModel)
     (standard : model.Standard) (integers : model.IntInterp) :
     (expandColor model integers).Standard where
   bool_exhaustive := standard.bool_exhaustive
@@ -577,9 +650,57 @@ private theorem colorApp_rank {identifier : Ident}
           change Except.error _ = Except.ok _ at inferred
           contradiction
 
+private theorem colorSig_wf : colorSig.WF where
+  literalSort := by
+    intro literal present
+    cases literal <;>
+      simp [colorSig, Sig.containsLiteral, Sig.ofClassifiers] at present
+  appSorts := by
+    intro identifier argumentSorts resultSort inferred
+    have present : colorSig.containsIdent identifier = true :=
+      colorSig.inferApp_present identifier
+        (argumentSorts.map some).toArray (by rw [inferred]; rfl)
+    rcases colorApp_rank present inferred with
+      ⟨identifierEq, argumentSortsEq, resultSortEq⟩
+    subst identifier
+    subst argumentSorts
+    subst resultSort
+    simp only [Sig.containsSortList_cons, Sig.containsSortList_nil,
+      Bool.and_true]
+    constructor
+    · simp [colorSig, Sig.containsSort, Sig.ofClassifiers,
+        colorSortArity?]
+    · rw [Sig.containsSort.eq_def]
+      simp [intSort, colorSig, Sig.ofClassifiers,
+        colorSortArity?, Sig.containsSortList.eq_def]
+
+/-- Color is an uninterpreted-sort theory with a typed, total `rank`
+operation. `Struct.WF` states precisely the usual EUF carrier and function
+conditions; no equation constrains which integer rank a color receives. -/
+private def colorTheory : Crush.Metatheory.SMT.Theory colorSig where
+  sig_wf := colorSig_wf
+  Models := Struct.WF
+  models_wf := id
+  iso_closed := Struct.WF.ofIso
+
+private def env : Theory.Env where
+  sigEnv := sigEnv
+  sig_wf := sigEnv_wf
+  decl := by
+    intro theory
+    by_cases integer : theory = intId
+    · subst theory
+      exact Int.theory
+    · have color : theory = colorId :=
+        Or.resolve_left (id_cases theory) integer
+      subst theory
+      exact colorTheory
+  closure := closure
+
 /-- The expanded model has a well-formed reduct for Color. This is the EUF
 totality proof for `color.rank`; it is independent of any command assertion. -/
-private theorem colorReduct_wf (model : Model) (integers : model.IntInterp) :
+private theorem colorReduct_wf (model : RelModel)
+    (integers : model.IntInterp) :
     (Model.reduct (expandColor model integers) colorSig).WF where
   sortNonempty := by
     intro sort present
@@ -620,7 +741,7 @@ private theorem colorReduct_wf (model : Model) (integers : model.IntInterp) :
 the Int and Color theories. Thus adding a theory to the combination cannot
 make the model class empty by construction. -/
 private theorem combModels_exists (comb : Theory.Comb env) :
-    ∃ model : Model, Theory.Comb.Models comb model := by
+    ∃ model : RelModel, Theory.Comb.Models comb model := by
   rcases standardModel_exists with ⟨model, standard⟩
   rcases standard.integer with ⟨integers⟩
   let expanded := expandColor model integers
@@ -689,7 +810,7 @@ private theorem commands_activateInt :
 /-- Every model of the induced combination satisfies the reflexive running
 example. The proof uses Color's typed-total function law to evaluate `rank`
 and the logical evaluator's equality rule. -/
-private theorem models_satisfyCommands (model : Model)
+private theorem models_satisfyCommands (model : RelModel)
     (models : Theory.Comb.Models (Theory.Comb.ofCommands env commands) model) :
     model.SatisfiesCommands commands := by
   have colorModels := models.theory colorId commands_activateColor
@@ -722,7 +843,7 @@ private theorem models_satisfyCommands (model : Model)
 /-- The exact mixed-theory command has a model of the exact command-induced
 combination, not merely separately inhabited component theories. -/
 private theorem commands_haveModel :
-    ∃ model : Model,
+    ∃ model : RelModel,
       Theory.Comb.Models (Theory.Comb.ofCommands env commands) model ∧
         model.SatisfiesCommands commands := by
   rcases combModels_exists (Theory.Comb.ofCommands env commands) with

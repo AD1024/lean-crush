@@ -99,12 +99,6 @@ theorem models_ofIso {left right : Struct intSig}
   rcases models with ⟨wf, ⟨interp⟩⟩
   exact ⟨Struct.WF.ofIso iso wf, ⟨Interp.ofIso iso interp⟩⟩
 
-/-- Semantic integer theory for the current modeled signature. -/
-def theory : Crush.Metatheory.SMT.Theory intSig where
-  Models := Models
-  models_wf := And.left
-  iso_closed := models_ofIso
-
 private theorem intApp_rank {identifier : Ident}
     {argumentSorts : List SSort} {resultSort : SSort}
     (present : intSig.containsIdent identifier = true)
@@ -154,6 +148,36 @@ private theorem intApp_rank {identifier : Ident}
           | cons third rest =>
               change Except.error _ = Except.ok (some resultSort) at inferred
               contradiction
+
+private theorem sig_wf : intSig.WF where
+  literalSort := by
+    intro literal present
+    cases literal with
+    | num value => exact intSig_containsSort_int
+    | str value | bitvec width value | bool value =>
+        simp [intSig, Sig.containsLiteral, Sig.ofClassifiers] at present
+  appSorts := by
+    intro identifier argumentSorts resultSort inferred
+    have present : intSig.containsIdent identifier = true :=
+      intSig.inferApp_present identifier
+        (argumentSorts.map some).toArray (by rw [inferred]; rfl)
+    rcases intApp_rank present inferred with
+      ⟨identifierEq, argumentSortsEq, resultSortEq⟩
+    subst identifier
+    subst argumentSorts
+    subst resultSort
+    simp only [Sig.containsSortList_cons, Sig.containsSortList_nil,
+      Bool.and_true]
+    constructor
+    · simp only [intSig_containsSort_int, Bool.true_and]
+    · exact intSig_containsSort_bool
+
+/-- Semantic integer theory for the current modeled signature. -/
+def theory : Crush.Metatheory.SMT.Theory intSig where
+  sig_wf := sig_wf
+  Models := Models
+  models_wf := And.left
+  iso_closed := models_ofIso
 
 /-- The reduct of a standard full model is a well-formed integer structure. -/
 private theorem reduct_wf (model : Model) (interp : model.IntInterp)
@@ -482,4 +506,17 @@ theorem commandsUnsat_iff (commands : Array Command) :
         exact unsat.noModel model
           ((combModels_iff_standardFor commands model).mp models) }
 
-end Crush.Metatheory.SMT.Int
+end Int
+
+/-- Default modular UNSAT boundary used by the lowering theorem. The selected
+combination is computed from the same registry used by the modeled checker. -/
+abbrev CommandsUnsat (commands : Array Crush.SMT.Command) : Prop :=
+  Theory.Comb.CommandsUnsat Int.env commands
+
+/-- Compatibility theorem retained while downstream proofs migrate away from
+the integer-specific command boundary. -/
+theorem commandsUnsat_iff_legacy (commands : Array Crush.SMT.Command) :
+    CommandsUnsat commands ↔ Crush.SMT.CommandsUnsat commands :=
+  Int.commandsUnsat_iff commands
+
+end Crush.Metatheory.SMT

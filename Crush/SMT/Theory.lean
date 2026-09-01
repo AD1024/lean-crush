@@ -123,6 +123,29 @@ end
     empty.containsSort sort = false := by
   cases sort <;> simp [empty, containsSort]
 
+/-- A signature is closed under the sorts used by its literals and complete
+operator typings. This is a syntactic condition: it prevents totality in
+`Struct.WF` from becoming vacuous because an argument or result sort is absent
+from the same signature. -/
+structure WF (sig : Sig) : Prop where
+  literalSort : ∀ literal,
+    sig.containsLiteral literal = true →
+      sig.containsSort literal.sort = true
+  appSorts : ∀ identifier argumentSorts resultSort,
+    sig.inferApp? identifier (argumentSorts.map some).toArray =
+      some (.ok (some resultSort)) →
+        sig.containsSortList argumentSorts = true ∧
+          sig.containsSort resultSort = true
+
+/-- The empty signature is well formed. -/
+theorem empty_wf : empty.WF where
+  literalSort := by
+    intro literal present
+    simp [containsLiteral, empty] at present
+  appSorts := by
+    intro identifier argumentSorts resultSort present
+    simp [empty] at present
+
 /-- Inclusion of one signature in another, preserving every shared typing
 judgment. -/
 structure Sub (small large : Sig) : Prop where
@@ -328,6 +351,55 @@ theorem sub_sum_right (left right : Sig) (compatible : left.Compatible right) :
             leftPresent rightPresent)⟩
     next leftAbsent =>
       exact ⟨rightResult, rightPresent, AppResult.agrees_refl rightResult⟩
+
+/-- Compatible well-formed signatures have a well-formed least common
+expansion. -/
+theorem WF.sum {left right : Sig} (leftWF : left.WF) (rightWF : right.WF)
+    (compatible : left.Compatible right) :
+    (left.sum right compatible).WF where
+  literalSort := by
+    intro literal present
+    unfold containsLiteral at present
+    change (match left.literalSort? literal with
+      | some sort => some sort
+      | none => right.literalSort? literal).isSome = true at present
+    split at present
+    next leftSort leftPresent =>
+      have leftMember : left.containsLiteral literal = true := by
+        simp [containsLiteral, leftPresent]
+      exact containsSort_mono (sub_sum_left left right compatible)
+        literal.sort (leftWF.literalSort literal leftMember)
+    next leftAbsent =>
+      have rightMember : right.containsLiteral literal = true := by
+        simpa [containsLiteral, leftAbsent] using present
+      exact containsSort_mono (sub_sum_right left right compatible)
+        literal.sort (rightWF.literalSort literal rightMember)
+  appSorts := by
+    intro identifier argumentSorts resultSort inferred
+    change (match left.inferApp? identifier
+        (argumentSorts.map some).toArray with
+      | some result => some result
+      | none => right.inferApp? identifier
+          (argumentSorts.map some).toArray) =
+        some (.ok (some resultSort)) at inferred
+    split at inferred
+    next leftResult leftPresent =>
+      have resultEq : leftResult = .ok (some resultSort) :=
+        Option.some.inj inferred
+      subst leftResult
+      rcases leftWF.appSorts identifier argumentSorts resultSort leftPresent with
+        ⟨arguments, result⟩
+      exact ⟨containsSortList_mono
+          (sub_sum_left left right compatible) argumentSorts arguments,
+        containsSort_mono (sub_sum_left left right compatible)
+          resultSort result⟩
+    next leftAbsent =>
+      rcases rightWF.appSorts identifier argumentSorts resultSort inferred with
+        ⟨arguments, result⟩
+      exact ⟨containsSortList_mono
+          (sub_sum_right left right compatible) argumentSorts arguments,
+        containsSort_mono (sub_sum_right left right compatible)
+          resultSort result⟩
 
 /-- Every signature is compatible with itself. -/
 theorem compatible_refl (sig : Sig) : sig.Compatible sig where
@@ -707,6 +779,10 @@ structure WF (env : SigEnv) : Prop where
   deps_resolve : ∀ index dependency,
     dependency ∈ env.depIds index →
       (env.modeled.get dependency).key ∈ (env.modeled.get index).deps
+  deps_complete : ∀ index key,
+    key ∈ (env.modeled.get index).deps →
+      ∃ dependency, dependency ∈ env.depIds index ∧
+        (env.modeled.get dependency).key = key
   deps_before : ∀ index dependency,
     dependency ∈ env.depIds index → dependency.val < index.val
 
@@ -1051,6 +1127,13 @@ theorem currentEnv_wf : currentEnv.WF where
   deps_resolve := by
     intro index dependency member
     change dependency ∈ [] at member
+    contradiction
+  deps_complete := by
+    rintro ⟨index, bound⟩ key member
+    change index < 1 at bound
+    have indexEq : index = 0 := by omega
+    subst index
+    change key ∈ [] at member
     contradiction
   deps_before := by
     intro index dependency member

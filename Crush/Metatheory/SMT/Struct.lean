@@ -230,6 +230,48 @@ theorem unit : WF Struct.unit where
     intro identifier present
     simp [Sig.empty] at present
 
+/-- Every list of sorts formed by a well-formed signature has a pointwise
+typed value list. This lemma makes the premise of `appTyped` visibly
+inhabited. -/
+theorem valuesTyped_exists {sig : Sig} {model : Struct sig}
+    (wf : model.WF) : ∀ sorts,
+    sig.containsSortList sorts = true →
+      ∃ values, ValuesTyped model sorts values
+  | [], present => ⟨[], .nil⟩
+  | sort :: sorts, present => by
+      have parts : sig.containsSort sort = true ∧
+          sig.containsSortList sorts = true := by
+        simpa only [Sig.containsSortList_cons, Bool.and_eq_true] using present
+      rcases wf.sortNonempty sort parts.1 with ⟨value, typed⟩
+      rcases valuesTyped_exists wf sorts parts.2 with ⟨values, rest⟩
+      exact ⟨value :: values, .cons parts.1 typed rest⟩
+
+/-- Every complete operator typing in a well-formed signature has a typed
+input and a unique typed output in every well-formed structure. Thus operator
+totality cannot hold merely because its input sorts are missing. -/
+theorem app_exists {sig : Sig} (sigWF : sig.WF) {model : Struct sig}
+    (wf : model.WF) {identifier : Ident} {argumentSorts : List SSort}
+    {resultSort : SSort}
+    (inferred : sig.inferApp? identifier
+      (argumentSorts.map some).toArray = some (.ok (some resultSort))) :
+    ∃ values output,
+      ValuesTyped model argumentSorts values ∧
+      model.inSort resultSort (sigWF.appSorts identifier argumentSorts
+        resultSort inferred).2 output ∧
+      model.apply identifier
+        (sig.inferApp_present identifier (argumentSorts.map some).toArray
+          (by rw [inferred]; rfl)) values output := by
+  have closed := sigWF.appSorts identifier argumentSorts resultSort inferred
+  rcases valuesTyped_exists wf argumentSorts closed.1 with ⟨values, typed⟩
+  let present := sig.inferApp_present identifier
+    (argumentSorts.map some).toArray (by rw [inferred]; rfl)
+  rcases wf.appTyped identifier present argumentSorts resultSort inferred
+      values typed with
+    ⟨resultPresent, output, outputTyped, applied, unique⟩
+  refine ⟨values, output, typed, ?_, ?_⟩
+  · simpa only using outputTyped
+  · simpa only using applied
+
 /-- Well-formedness is invariant under structure isomorphism. -/
 theorem ofIso {sig : Sig} {left right : Struct sig} (iso : Iso left right)
     (wf : WF left) : WF right where
@@ -288,5 +330,127 @@ def Model.reduct (model : Model) (sig : Sig) : Struct sig where
     | .bool value => model.bool value
     | other => model.literal other
   apply := fun identifier _ => model.apply identifier
+
+/-- Restricting a full model directly or through a larger signature gives the
+same observations, up to the identity carrier map. This is the bridge between
+the full-model presentation and SMT-LIB reduct-based theory combination. -/
+def Model.reductSubIso (model : Model) {small large : Sig}
+    (sub : small.Sub large) :
+    Struct.Iso (Model.reduct model small)
+      (Struct.reduct sub (Model.reduct model large)) where
+  to := id
+  inv := id
+  to_inv := by simp
+  inv_to := by simp
+  inSort := by intro sort present value; rfl
+  bool := by intro value; rfl
+  literal := by
+    intro literal present
+    cases literal <;> rfl
+  apply := by
+    intro identifier present values output
+    change model.apply identifier values output ↔
+      model.apply identifier (values.map id) (id output)
+    simp only [List.map_id_fun, id_eq]
+
+/-- Re-index a typed value list between two restricted views of the same full
+model once the destination signature contains all listed sorts. -/
+theorem Struct.ValuesTyped.forSig (model : Model) {source target : Sig}
+    {sorts : List SSort} {values : List model.Value}
+    (closed : target.containsSortList sorts = true)
+    (typed : Struct.ValuesTyped (Model.reduct model source) sorts values) :
+    Struct.ValuesTyped (Model.reduct model target) sorts values := by
+  induction sorts generalizing values with
+  | nil =>
+      have empty := Struct.ValuesTyped.eq_nil typed
+      subst values
+      exact .nil
+  | cons sort sorts ih =>
+      have parts : target.containsSort sort = true ∧
+          target.containsSortList sorts = true := by
+        simpa only [Sig.containsSortList_cons, Bool.and_eq_true] using closed
+      rcases Struct.ValuesTyped.exists_cons typed with
+        ⟨value, rest, rfl, head, tail⟩
+      apply Struct.ValuesTyped.cons parts.1
+      · change model.inSort sort value at head ⊢
+        exact head
+      · exact ih parts.2 tail
+
+/-- Component well-formedness over one full model combines into
+well-formedness of the least common signature. -/
+theorem Model.reduct_sum_wf (model : Model) {left right : Sig}
+    (leftSigWF : left.WF) (rightSigWF : right.WF)
+    (compatible : left.Compatible right)
+    (leftWF : (Model.reduct model left).WF)
+    (rightWF : (Model.reduct model right).WF) :
+    (Model.reduct model (left.sum right compatible)).WF where
+  sortNonempty := by
+    intro sort present
+    exact model.sortNonempty sort
+  boolTyped := by
+    intro present value
+    exact model.boolTyped value
+  literalSort := (leftSigWF.sum rightSigWF compatible).literalSort
+  literalTyped := by
+    intro literal present
+    cases literal with
+    | bool value => exact model.boolTyped value
+    | num value => exact model.literalTyped (.num value)
+    | str value => exact model.literalTyped (.str value)
+    | bitvec width value => exact model.literalTyped (.bitvec width value)
+  appTyped := by
+    intro identifier present argumentSorts resultSort inferred values typed
+    change (match left.inferApp? identifier
+        (argumentSorts.map some).toArray with
+      | some result => some result
+      | none => right.inferApp? identifier
+          (argumentSorts.map some).toArray) =
+        some (.ok (some resultSort)) at inferred
+    split at inferred
+    next leftResult leftPresent =>
+      have resultEq : leftResult = .ok (some resultSort) :=
+        Option.some.inj inferred
+      subst leftResult
+      have closed := leftSigWF.appSorts identifier argumentSorts
+        resultSort leftPresent
+      have leftTyped := Struct.ValuesTyped.forSig model closed.1 typed
+      let leftIdent := left.inferApp_present identifier
+        (argumentSorts.map some).toArray (by rw [leftPresent]; rfl)
+      rcases leftWF.appTyped identifier leftIdent argumentSorts resultSort
+          leftPresent values leftTyped with
+        ⟨leftResultPresent, output, outputTyped, applied, unique⟩
+      refine ⟨((leftSigWF.sum rightSigWF compatible).appSorts identifier
+        argumentSorts resultSort (by
+          change (left.sum right compatible).inferApp? identifier
+            (argumentSorts.map some).toArray = _
+          simp [Sig.sum, leftPresent])).2, output, ?_, ?_, ?_⟩
+      · change model.inSort resultSort output at outputTyped ⊢
+        exact outputTyped
+      · change model.apply identifier values output at applied ⊢
+        exact applied
+      · intro other otherApplied
+        change model.apply identifier values other at otherApplied
+        exact unique other otherApplied
+    next leftAbsent =>
+      have closed := rightSigWF.appSorts identifier argumentSorts
+        resultSort inferred
+      have rightTyped := Struct.ValuesTyped.forSig model closed.1 typed
+      let rightIdent := right.inferApp_present identifier
+        (argumentSorts.map some).toArray (by rw [inferred]; rfl)
+      rcases rightWF.appTyped identifier rightIdent argumentSorts resultSort
+          inferred values rightTyped with
+        ⟨rightResultPresent, output, outputTyped, applied, unique⟩
+      refine ⟨((leftSigWF.sum rightSigWF compatible).appSorts identifier
+        argumentSorts resultSort (by
+          change (left.sum right compatible).inferApp? identifier
+            (argumentSorts.map some).toArray = _
+          simp [Sig.sum, leftAbsent, inferred])).2, output, ?_, ?_, ?_⟩
+      · change model.inSort resultSort output at outputTyped ⊢
+        exact outputTyped
+      · change model.apply identifier values output at applied ⊢
+        exact applied
+      · intro other otherApplied
+        change model.apply identifier values other at otherApplied
+        exact unique other otherApplied
 
 end Crush.Metatheory.SMT

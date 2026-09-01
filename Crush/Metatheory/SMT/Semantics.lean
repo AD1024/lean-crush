@@ -924,12 +924,17 @@ def CommandsInFragment (commands : Array Command) : Prop :=
   ∀ command ∈ commands.toList, command.InFragment
 
 /-- The concrete command sequence is accepted by the declaration-aware type
-checker for the modeled first-order SMT fragment. This judgment is
-order-sensitive, unlike `SameCommandSet`: it rejects unknown symbols,
-use-before-declaration, out-of-scope variables, ill-sorted terms, unsupported
-theory operators, and lambda syntax. -/
+checker for the modeled first-order fragment registered in `sigEnv`. This
+judgment is order-sensitive, unlike `SameCommandSet`: it rejects unknown
+symbols, use-before-declaration, out-of-scope variables, ill-sorted terms,
+syntax-only theory operators, and lambda syntax. -/
+def CommandsWellTypedIn (sigEnv : Theory.SigEnv)
+    (commands : Array Command) : Prop :=
+  Crush.SMT.modeledScriptWellTypedWith sigEnv commands = true
+
+/-- Default-registry specialization retained for the existing lowering API. -/
 def CommandsWellTyped (commands : Array Command) : Prop :=
-  Crush.SMT.modeledScriptWellTyped commands = true
+  CommandsWellTypedIn Theory.currentEnv commands
 
 /-- Two arrays impose exactly the same semantic command obligations. Command
 order and duplicate occurrences are intentionally irrelevant here; concrete

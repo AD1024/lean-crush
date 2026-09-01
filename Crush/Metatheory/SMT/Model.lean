@@ -13,6 +13,116 @@ namespace Crush.Metatheory.SMT
 
 variable {symbols : FO.SymbolFamily}
 
+/-! ## Fixed-carrier model extensions -/
+
+/-- A partial contribution to an SMT model over a fixed value carrier. -/
+structure ModelExt (Value : Type) where
+  literal? : Crush.SMT.Literal → Option Value
+  apply : Crush.SMT.Ident → List Value → Value → Prop
+
+namespace ModelExt
+
+/-- Extension contributing no literals or applications. -/
+def empty (Value : Type) : ModelExt Value where
+  literal? := fun _ => none
+  apply := fun _ _ _ => False
+
+/-- Left-biased literal union and logical union of application graphs. -/
+def union {Value : Type} (left right : ModelExt Value) : ModelExt Value where
+  literal? := fun literal =>
+    match left.literal? literal with
+    | some value => some value
+    | none => right.literal? literal
+  apply := fun identifier values output =>
+    left.apply identifier values output ∨
+      right.apply identifier values output
+
+@[simp] theorem union_literal {Value : Type} (left right : ModelExt Value)
+    (literal : Crush.SMT.Literal) :
+    (left.union right).literal? literal =
+      match left.literal? literal with
+      | some value => some value
+      | none => right.literal? literal := rfl
+
+@[simp] theorem union_apply {Value : Type} (left right : ModelExt Value)
+    (identifier : Crush.SMT.Ident) (values : List Value) (output : Value) :
+    (left.union right).apply identifier values output ↔
+      left.apply identifier values output ∨
+        right.apply identifier values output := Iff.rfl
+
+/-- Literal typing needed to form a raw relational model. -/
+structure LiteralWF (base : Crush.SMT.Model)
+    (ext : ModelExt base.Value) : Prop where
+  literal_typed : ∀ literal value,
+    ext.literal? literal = some value →
+      base.inSort literal.sort value
+
+end ModelExt
+
+end Crush.Metatheory.SMT
+
+namespace Crush.SMT.Model
+
+/-- Add a literal-typed fixed-carrier extension to a relational model. Graph
+functionality is imposed separately at semantic boundaries. -/
+def withExt (base : Model)
+    (ext : Crush.Metatheory.SMT.ModelExt base.Value)
+    (wf : Crush.Metatheory.SMT.ModelExt.LiteralWF base ext) : Model where
+  Value := base.Value
+  inSort := base.inSort
+  sortNonempty := base.sortNonempty
+  bool := base.bool
+  boolTyped := base.boolTyped
+  boolInjective := base.boolInjective
+  literal := fun literal =>
+    match ext.literal? literal with
+    | some value => value
+    | none => base.literal literal
+  literalTyped := by
+    intro literal
+    split
+    next value present => exact wf.literal_typed literal value present
+    next absent => exact base.literalTyped literal
+  apply := fun identifier values output =>
+    base.apply identifier values output ∨
+      ext.apply identifier values output
+
+@[simp] theorem withExt_inSort (base : Model)
+    (ext : Crush.Metatheory.SMT.ModelExt base.Value)
+    (wf : Crush.Metatheory.SMT.ModelExt.LiteralWF base ext)
+    (sort : Crush.SMT.SSort) (value : base.Value) :
+    (base.withExt ext wf).inSort sort value ↔ base.inSort sort value :=
+  Iff.rfl
+
+@[simp] theorem withExt_bool (base : Model)
+    (ext : Crush.Metatheory.SMT.ModelExt base.Value)
+    (wf : Crush.Metatheory.SMT.ModelExt.LiteralWF base ext) (value : Bool) :
+    (base.withExt ext wf).bool value = base.bool value := rfl
+
+@[simp] theorem withExt_literal (base : Model)
+    (ext : Crush.Metatheory.SMT.ModelExt base.Value)
+    (wf : Crush.Metatheory.SMT.ModelExt.LiteralWF base ext)
+    (literal : Crush.SMT.Literal) :
+    (base.withExt ext wf).literal literal =
+      match ext.literal? literal with
+      | some value => value
+      | none => base.literal literal := rfl
+
+@[simp] theorem withExt_apply (base : Model)
+    (ext : Crush.Metatheory.SMT.ModelExt base.Value)
+    (wf : Crush.Metatheory.SMT.ModelExt.LiteralWF base ext)
+    (identifier : Crush.SMT.Ident)
+    (values : List base.Value) (output : base.Value) :
+    (base.withExt ext wf).apply identifier values output ↔
+      base.apply identifier values output ∨
+        ext.apply identifier values output := Iff.rfl
+
+end Crush.SMT.Model
+
+namespace Crush.Metatheory.SMT
+
+variable {symbols : FO.SymbolFamily}
+
 /-- Values in the induced untyped SMT universe. -/
 inductive Value (target : FO.FamilyModel symbols) where
   | typed (sort : FO.FOSort) (value : sort.Denote target.carriers)
@@ -158,6 +268,14 @@ noncomputable def ExtraGraph.nil (encoding : Encoding symbols)
   literal := literalValue encoding target
   literal_typed := literalValue_typed encoding target
 
+/-- View the compatibility extension as a composable fixed-carrier
+extension. -/
+def ExtraGraph.toExt {encoding : Encoding symbols}
+    {target : FO.FamilyModel symbols} (extra : ExtraGraph encoding target) :
+    ModelExt (Value target) where
+  literal? := fun literal => some (extra.literal literal)
+  apply := extra.apply
+
 /-- Union of the ordinary encoded graph and a disjoint native extension. -/
 def AppliesWith (encoding : Encoding symbols) (target : FO.FamilyModel symbols)
     (extra : ExtraGraph encoding target) (identifier : Crush.SMT.Ident)
@@ -200,19 +318,28 @@ def AppliesWith (encoding : Encoding symbols) (target : FO.FamilyModel symbols)
   literalTyped
   apply := graph
 
-/-- Concrete SMT model induced by a typed FO family model and a disjoint
-graph for native derived symbols. -/
-noncomputable def modelWith (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target) :
-    Crush.SMT.Model :=
-  modelOfGraph encoding target (AppliesWith encoding target extra)
-    extra.literal extra.literal_typed
-
 /-- The ordinary induced model is the empty native-graph specialization. -/
 noncomputable def model (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) : Crush.SMT.Model :=
   modelOfGraph encoding target (Applies encoding target)
     (literalValue encoding target) (literalValue_typed encoding target)
+
+theorem ExtraGraph.toExt_literalWF {encoding : Encoding symbols}
+    {target : FO.FamilyModel symbols} (extra : ExtraGraph encoding target) :
+    (extra.toExt).LiteralWF (model encoding target) where
+  literal_typed := by
+    intro literal value present
+    have equal : extra.literal literal = value := Option.some.inj present
+    subst value
+    exact extra.literal_typed literal
+
+/-- Concrete SMT model induced by a typed FO family model and a disjoint
+graph for native derived symbols. This is the generic fixed-carrier extension
+constructor specialized to the compatibility `ExtraGraph` interface. -/
+noncomputable def modelWith (encoding : Encoding symbols)
+    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target) :
+    Crush.SMT.Model :=
+  (model encoding target).withExt extra.toExt extra.toExt_literalWF
 
 @[simp] theorem model_inSort (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) (sort : SSort) (value : Value target) :
@@ -286,8 +413,8 @@ theorem modelWith_nil_applyUnique (encoding : Encoding symbols)
       have symbolEq := encoding.ident_injective leftSymbol rightSymbol identEq
       subst rightSymbol
       exact leftOutput.trans rightOutput.symm
-    · simp [ExtraGraph.nil] at rightExtra
-  · simp [ExtraGraph.nil] at leftExtra
+    · simp [ExtraGraph.nil, ExtraGraph.toExt] at rightExtra
+  · simp [ExtraGraph.nil, ExtraGraph.toExt] at leftExtra
 
 /-- Every source symbol keeps its encoded type after adding a disjoint native
 graph. -/

@@ -1531,7 +1531,8 @@ private def twoConstantFormula : Sentence TwoConstantSignature :=
     (.eq (.var .here) (.const leftConstant))
     (.eq (.var .here) (.const rightConstant))
 
-private def twoConstantTheory : Theory TwoConstantSignature := [twoConstantFormula]
+private def twoConstantTheory : Crush.Metatheory.Theory TwoConstantSignature :=
+  [twoConstantFormula]
 
 private def twoConstantGuarding :=
   Crush.Metatheory.SMT.GuardedEncoding.none twoConstantEncoding
@@ -1623,9 +1624,8 @@ private def twoConstantGuardDefEncoding :
   sourceFresh := by simp
   linked := trivial
 
-/-- Every source model induces a standard model for this exact Boolean-only
-script. No integer carrier is requested because the retained commands contain
-no integer syntax. -/
+/-- Every source model induces a model of the exact command-selected theory
+combination. This Boolean-only script selects no optional interpreted theory. -/
 private noncomputable def twoConstantGuardDefInterp :
     translationRecord.GuardDefInterp twoConstantGuarding
       twoConstantRepr twoConstantGuardDefEncoding where
@@ -1675,17 +1675,32 @@ private noncomputable def twoConstantGuardDefInterp :
       baseUnique
       fresh
       semantics := guardSemantics
-      standard := ?_ }
-    refine {
+      models := ?_ }
+    have wf : (Crush.Metatheory.SMT.modelWith twoConstantEncoding lifted.target
+        (guards.over base)).WF := {
       bool_exhaustive := Crush.Metatheory.SMT.modelWith_bool_exhaustive
         twoConstantEncoding lifted.target (guards.over base)
-      integer := ?_
       apply_unique := guards.applyUnique_over base baseUnique fresh }
-    intro required
-    simp [translationRecord, twoConstantCommands,
-      Crush.SMT.CommandsUseInt,
-      Crush.SMT.Command.usesInt,
-      Crush.SMT.Term.usesInt] at required
+    have emptyComb : Crush.Metatheory.SMT.Theory.Comb.ofCommands
+        Crush.Metatheory.SMT.Int.env translationRecord.emittedCommands =
+        Crush.Metatheory.SMT.Theory.Comb.empty
+          Crush.Metatheory.SMT.Int.env := by
+      apply Crush.Metatheory.SMT.Theory.Comb.ext
+      intro theory
+      rcases theory with ⟨index, bound⟩
+      change index < 1 at bound
+      have indexEq : index = 0 := by omega
+      have theoryEq : (⟨index, bound⟩ : Fin
+          Crush.Metatheory.SMT.Int.env.sigEnv.modeled.length) =
+          Crush.SMT.Theory.intId := Fin.ext indexEq
+      rw [theoryEq]
+      rw [Crush.Metatheory.SMT.Int.comb_int]
+      simp [translationRecord, twoConstantCommands,
+        Crush.SMT.CommandsUseInt,
+        Crush.SMT.Command.usesInt,
+        Crush.SMT.Term.usesInt]
+    exact (Crush.Metatheory.SMT.Theory.Comb.models_empty_iff.mpr wf).congr
+      emptyComb.symm
 
 /-- The concrete Lean expression and the HO formula have the same reified
 constructor tree. This checks only syntactic reification, not denotation. -/
@@ -1793,12 +1808,13 @@ private theorem twoConstantSourceModel_valid :
   · right
     exact propext ⟨valid, False.elim⟩
 
-/-- The complete datatype/guard/SMT model construction produces a standard
-model satisfying the exact command array. Thus the final soundness link is not
-inhabited only through an impossible integer-side premise. -/
-private theorem twoConstantCommands_haveStandardModel :
+/-- The complete datatype/guard/SMT model construction produces a model of the
+command-selected theory combination satisfying the exact command array. -/
+private theorem twoConstantCommands_haveModel :
     ∃ model : Crush.SMT.Model,
-      model.StandardFor twoConstantCommands ∧
+      Crush.Metatheory.SMT.Theory.Comb.Models
+          (Crush.Metatheory.SMT.Theory.Comb.ofCommands
+            Crush.Metatheory.SMT.Int.env twoConstantCommands) model ∧
         model.SatisfiesCommands twoConstantCommands := by
   have encoding : Crush.Metatheory.SMT.GuardedTheoryRepr
       twoConstantGuarding #[]
@@ -1819,18 +1835,19 @@ private theorem twoConstantCommands_haveStandardModel :
       twoConstantSourceModel twoConstantTheory twoConstantSourceModel_valid)
 
 private theorem twoConstantCommands_notUnsatisfiable :
-    ¬Crush.SMT.CommandsUnsat twoConstantCommands := by
+    ¬Crush.Metatheory.SMT.CommandsUnsat twoConstantCommands := by
   intro unsat
-  obtain ⟨model, standard, valid⟩ := twoConstantCommands_haveStandardModel
-  exact unsat.noModel model standard valid
+  obtain ⟨model, models, valid⟩ := twoConstantCommands_haveModel
+  exact unsat.noModel model models valid
 
 /-- The exact evidence returned by `CommandEquiv.build?` composes with
 the final reflection theorem. For this satisfiable running example the premise
 is false, as proved above; the theorem checks the complete API connection from
 the retained command array back to its reified higher-order theory. -/
 private theorem twoConstantCommands_reflectUnsatisfiability
-    (unsat : Crush.SMT.CommandsUnsat twoConstantCommands) :
-    Crush.Metatheory.Datatype.Env.TheoryUnsatisfiable []
+    (unsat : Crush.Metatheory.SMT.CommandsUnsat twoConstantCommands) :
+    Crush.Metatheory.Datatype.Env.TheoryUnsatisfiable
+      translationRecord.datatypeSignaturePrefix.toModelEnv
       twoConstantTheory := by
   exact Crush.Metatheory.VCG.CommandEquiv.unsat_source
     twoConstantRepr twoConstantGuardDefEncoding

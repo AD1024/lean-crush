@@ -24,7 +24,7 @@ reification, and this final command-set comparison have all been constructed.
 namespace Crush.Metatheory.VCG
 
 open Defunctionalization.Flattened Reification
-open Crush.SMT (CommandsInFragment CommandsUnsat CommandsUseInt CommandsWellTyped
+open Crush.SMT (CommandsInFragment CommandsWellTyped CommandsWellTypedIn
   Eval Holds SameCommandSet commandsInFragment_append modeledScriptWellTyped)
 open Crush.SMT.Model (satisfiesCommands_append)
 
@@ -63,31 +63,47 @@ part of the modeled fragment. -/
       defFunsRec | declDatatypes | checkSat | getModel | getProof |
       getUnsatCore | echo | exit => rfl
 
-/-- Top-level assertion annotations do not affect which interpreted SMT
-theories a command uses. Attribute payloads are semantically transparent in
-the modeled fragment. -/
-@[simp] theorem usesInt_stripAssertionAnnotation
-    (command : Command) :
-    (stripAssertionAnnotation command).usesInt =
-      command.usesInt := by
+/-- Top-level assertion annotations do not affect which registered theory a
+command uses. Attribute payloads are semantically transparent. -/
+@[simp] theorem usesCommand_stripAssertionAnnotation
+    (sigEnv : Crush.SMT.Theory.SigEnv)
+    (theory : Fin sigEnv.modeled.length) (command : Command) :
+    sigEnv.usesCommand theory (stripAssertionAnnotation command) =
+      sigEnv.usesCommand theory command := by
   cases command with
   | assert formula =>
-      cases formula <;>
-        simp [stripAssertionAnnotation,
-          Crush.SMT.Command.usesInt,
-          Crush.SMT.Term.usesInt]
+      cases formula with
+      | annot body attributes =>
+          change sigEnv.usesTerm theory body =
+            sigEnv.usesTerm theory (.annot body attributes)
+          rw [Crush.SMT.Theory.SigEnv.usesTerm.eq_8]
+      | lit | bvar | app | letE | forallE | existsE | lam => rfl
   | setLogic | setOption | declSort | declFun | defFun |
       defFunsRec | declDatatypes | checkSat | getModel | getProof |
       getUnsatCore | echo | exit => rfl
 
-/-- Normalizing top-level assertion annotations preserves the interpreted
-theories required by the complete command array. -/
-theorem commandsUseInt_stripAssertionAnnotations
-    (commands : Array Command) :
-    CommandsUseInt
+/-- Normalizing top-level assertion annotations preserves every registered
+theory requirement of the complete command array. -/
+theorem usesCommands_stripAssertionAnnotations
+    (sigEnv : Crush.SMT.Theory.SigEnv) (commands : Array Command) :
+    sigEnv.usesCommands (commands.map stripAssertionAnnotation) =
+      sigEnv.usesCommands commands := by
+  funext theory
+  simp [Crush.SMT.Theory.SigEnv.usesCommands]
+
+/-- Normalizing top-level assertion annotations preserves the complete
+dependency-closed theory combination. -/
+theorem comb_stripAssertionAnnotations
+    (env : SMT.Theory.Env) (commands : Array Command) :
+    SMT.Theory.Comb.ofCommands env
         (commands.map stripAssertionAnnotation) =
-      CommandsUseInt commands := by
-  simp [CommandsUseInt]
+      SMT.Theory.Comb.ofCommands env commands := by
+  apply SMT.Theory.Comb.ext
+  intro theory
+  change env.closure.close
+      (env.sigEnv.usesCommands (commands.map stripAssertionAnnotation)) theory =
+    env.closure.close (env.sigEnv.usesCommands commands) theory
+  rw [usesCommands_stripAssertionAnnotations]
 
 /-- Removing top-level assertion names preserves the class of satisfying SMT
 models. -/
@@ -133,29 +149,28 @@ theorem commandsInFragment_stripAssertionAnnotations
 /-- Semantic unsatisfiability is unchanged by stripping top-level assertion
 attributes. -/
 theorem commandsUnsat_stripAssertionAnnotations
+    (env : SMT.Theory.Env)
     (commands : Array Command)
-    (normalizedWellTyped : CommandsWellTyped
+    (normalizedWellTyped : CommandsWellTypedIn env.sigEnv
       (commands.map stripAssertionAnnotation))
-    (originalWellTyped : CommandsWellTyped commands) :
-    CommandsUnsat
+    (originalWellTyped : CommandsWellTypedIn env.sigEnv commands) :
+    SMT.Theory.Comb.CommandsUnsat env
         (commands.map stripAssertionAnnotation) ↔
-      CommandsUnsat commands := by
+      SMT.Theory.Comb.CommandsUnsat env commands := by
   constructor
   · intro unsat
     refine ⟨(commandsInFragment_stripAssertionAnnotations commands).mp
       unsat.inFragment, originalWellTyped, ?_⟩
-    · intro model standard valid
+    · intro model models valid
       exact unsat.noModel model
-        (standard.congr
-          (commandsUseInt_stripAssertionAnnotations commands).symm)
+        (models.congr (comb_stripAssertionAnnotations env commands).symm)
         ((satisfiesCommands_stripAssertionAnnotations model commands).mpr valid)
   · intro unsat
     refine ⟨(commandsInFragment_stripAssertionAnnotations commands).mpr
       unsat.inFragment, normalizedWellTyped, ?_⟩
-    · intro model standard valid
+    · intro model models valid
       exact unsat.noModel model
-        (standard.congr
-          (commandsUseInt_stripAssertionAnnotations commands))
+        (models.congr (comb_stripAssertionAnnotations env commands))
         ((satisfiesCommands_stripAssertionAnnotations model commands).mp valid)
 
 /-- The logic-selection command imposes no requirement on an SMT model. -/
@@ -170,35 +185,48 @@ theorem satisfiesCommands_setLogic (model : SMTModel) (logic : String)
     subst command
     trivial)
 
-/-- A leading logic-selection command does not add an interpreted-theory
+/-- A leading logic-selection command does not add any registered theory
 requirement. -/
-theorem commandsUseInt_setLogic (logic : String)
+theorem usesCommands_setLogic (sigEnv : Crush.SMT.Theory.SigEnv)
+    (logic : String) (commands : Array Command) :
+    sigEnv.usesCommands (#[.setLogic logic] ++ commands) =
+      sigEnv.usesCommands commands := by
+  funext theory
+  simp [Crush.SMT.Theory.SigEnv.usesCommands,
+    Crush.SMT.Theory.SigEnv.usesCommand]
+
+/-- A leading logic-selection command preserves the complete dependency-closed
+theory combination. -/
+theorem comb_setLogic (env : SMT.Theory.Env) (logic : String)
     (commands : Array Command) :
-    CommandsUseInt
-        (#[.setLogic logic] ++ commands) =
-      CommandsUseInt commands := by
-  simp [CommandsUseInt,
-    Crush.SMT.Command.usesInt]
+    SMT.Theory.Comb.ofCommands env (#[.setLogic logic] ++ commands) =
+      SMT.Theory.Comb.ofCommands env commands := by
+  apply SMT.Theory.Comb.ext
+  intro theory
+  change env.closure.close
+      (env.sigEnv.usesCommands (#[.setLogic logic] ++ commands)) theory =
+    env.closure.close (env.sigEnv.usesCommands commands) theory
+  rw [usesCommands_setLogic]
 
 /-- Semantic unsatisfiability is unchanged when the emitted script adds its
 leading logic-selection command. -/
-theorem commandsUnsat_setLogic (logic : String)
+theorem commandsUnsat_setLogic (env : SMT.Theory.Env) (logic : String)
     (commands : Array Command)
-    (commandsWellTyped : CommandsWellTyped commands)
-    (scriptWellTyped : CommandsWellTyped
+    (commandsWellTyped : CommandsWellTypedIn env.sigEnv commands)
+    (scriptWellTyped : CommandsWellTypedIn env.sigEnv
       (#[.setLogic logic] ++ commands)) :
-    CommandsUnsat (#[.setLogic logic] ++ commands) ↔
-      CommandsUnsat commands := by
+    SMT.Theory.Comb.CommandsUnsat env
+        (#[.setLogic logic] ++ commands) ↔
+      SMT.Theory.Comb.CommandsUnsat env commands := by
   constructor
   · intro unsat
     have supportedParts :=
       (commandsInFragment_append #[.setLogic logic] commands).mp
         unsat.inFragment
     refine ⟨supportedParts.2, commandsWellTyped, ?_⟩
-    intro model standard valid
+    intro model models valid
     exact unsat.noModel model
-      (standard.congr
-        (commandsUseInt_setLogic logic commands).symm)
+      (models.congr (comb_setLogic env logic commands).symm)
       ((satisfiesCommands_setLogic model logic commands).mpr valid)
   · intro unsat
     have logicInFragment : CommandsInFragment #[.setLogic logic] := by
@@ -208,10 +236,9 @@ theorem commandsUnsat_setLogic (logic : String)
       trivial
     refine ⟨(commandsInFragment_append _ _).mpr
       ⟨logicInFragment, unsat.inFragment⟩, scriptWellTyped, ?_⟩
-    intro model standard valid
+    intro model models valid
     exact unsat.noModel model
-      (standard.congr
-        (commandsUseInt_setLogic logic commands))
+      (models.congr (comb_setLogic env logic commands))
       ((satisfiesCommands_setLogic model logic commands).mp valid)
 
 /-- Decide whether two arrays impose the same model requirements. The command
@@ -287,16 +314,16 @@ theorem unsat_source {translation : FactTranslation}
       expressions}
     (cert : CommandEquivCert (guarding := guarding) reified)
     (interp : translation.GuardDefInterp guarding represented guarded)
-    (unsat : CommandsUnsat translation.emittedCommands) :
+    (unsat : SMT.CommandsUnsat translation.emittedCommands) :
     Datatype.Env.TheoryUnsatisfiable translation.datatypeSignaturePrefix.toModelEnv
       reified.sources := by
   apply represented.theory_unsat guarded interp reified.sources
     cert.theory
-    (commandsUseInt_stripAssertionAnnotations
+    (comb_stripAssertionAnnotations SMT.Int.env
       translation.emittedCommands).symm
-  exact (commandsUnsat_stripAssertionAnnotations
+  exact (commandsUnsat_stripAssertionAnnotations SMT.Int.env
     translation.emittedCommands cert.normalizedWellTyped
-      cert.emittedWellTyped).mpr unsat
+    cert.emittedWellTyped).mpr unsat
 
 /-- Whole-theory reflection from the script returned by `buildScript`,
 including its leading logic-selection command. -/
@@ -311,13 +338,14 @@ theorem unsat_source_script {translation : FactTranslation}
     (cert : CommandEquivCert (guarding := guarding) reified)
     (interp : translation.GuardDefInterp guarding represented guarded)
     (logic : String)
-    (unsat : CommandsUnsat
+    (unsat : SMT.CommandsUnsat
       (#[.setLogic logic] ++ translation.emittedCommands)) :
     Datatype.Env.TheoryUnsatisfiable translation.datatypeSignaturePrefix.toModelEnv
       reified.sources :=
-  unsat_source represented guarded cert interp
-    ((commandsUnsat_setLogic logic translation.emittedCommands
-      cert.emittedWellTyped unsat.wellTyped).mp unsat)
+  unsat_source represented guarded cert interp (by
+    exact (commandsUnsat_setLogic SMT.Int.env logic
+      translation.emittedCommands cert.emittedWellTyped
+      unsat.wellTyped).mp unsat)
 
 end CommandEquiv
 
@@ -387,7 +415,7 @@ theorem unsat_source {translation : FactTranslation}
     (factRepr : FactCommandRepr translation guarding represented guarded
       reified)
     (interp : translation.GuardDefInterp guarding represented guarded)
-    (unsat : CommandsUnsat translation.emittedCommands) :
+    (unsat : SMT.CommandsUnsat translation.emittedCommands) :
     Datatype.Env.Unsatisfiable translation.datatypeSignaturePrefix.toModelEnv reified.source := by
   intro source freeDataModel sourceValid
   apply CommandEquiv.unsat_source represented guarded factRepr.theory
@@ -410,7 +438,7 @@ theorem unsat_source_script {translation : FactTranslation}
       reified)
     (interp : translation.GuardDefInterp guarding represented guarded)
     (logic : String)
-    (unsat : CommandsUnsat
+    (unsat : SMT.CommandsUnsat
       (#[.setLogic logic] ++ translation.emittedCommands)) :
     Datatype.Env.Unsatisfiable translation.datatypeSignaturePrefix.toModelEnv reified.source := by
   intro source freeDataModel sourceValid

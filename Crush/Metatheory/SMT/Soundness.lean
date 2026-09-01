@@ -412,39 +412,59 @@ theorem term_eval (encoding : Encoding symbols)
         (restIH valuation environment related))
     source
 
-/-- The typed FO encoder uses only Boolean literals. Other source
-constants are typed family symbols, so native components may give raw SMT
-numerals their interpreted meaning without changing encoded FO evaluations. -/
-theorem term_literalFree (encoding : Encoding symbols)
+/-- A native extension agrees with the base model on every observation used by
+an encoded typed FO term. Source-symbol agreement follows from the encoding
+freshness field; logical built-ins use dedicated evaluation rules. -/
+theorem term_agrees (encoding : Encoding symbols)
+    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
     {context : FO.Context} {sort : FO.FOSort}
     (source : FO.FamilyTerm symbols context sort) :
-    LiteralFree (𝒶⟦source⟧[encoding]) := by
+    ModelExt.AgreeOn (base := model encoding target)
+      (ModelExt.empty (Value target)) extra.toExt
+      (𝒶⟦source⟧[encoding]) := by
   exact FO.FamilyTerm.rec
-    (motive_1 := fun _ _ source => LiteralFree (term encoding source))
+    (motive_1 := fun _ _ source =>
+      ModelExt.AgreeOn (base := model encoding target)
+        (ModelExt.empty (Value target)) extra.toExt (term encoding source))
     (motive_2 := fun _ _ args =>
-      LiteralFreeList (arguments encoding args).toList)
+      ModelExt.AgreeList (base := model encoding target)
+        (ModelExt.empty (Value target)) extra.toExt
+        (arguments encoding args).toList)
     (var := fun ref => .bvar _)
-    (symbol := fun symbol args argsFree => .app argsFree)
+    (symbol := fun symbol args argsAgree => .app argsAgree (by
+      intro notBuiltin values output
+      change (Applies encoding target (encoding.ident symbol) values output ∨
+          False) ↔
+        (Applies encoding target (encoding.ident symbol) values output ∨
+          extra.apply (encoding.ident symbol) values output)
+      constructor
+      · rintro (ordinary | impossible)
+        · exact Or.inl ordinary
+        · contradiction
+      · rintro (ordinary | derived)
+        · exact Or.inl ordinary
+        · exact False.elim (extra.source_fresh symbol values output derived)))
     (boolLit := fun value => by
       cases value <;> simp only [term, encodeTerm] <;> exact .bool _)
-    (not := fun body bodyFree => .app (.cons bodyFree .nil))
-    (and := fun left right leftFree rightFree =>
-      .app (.cons leftFree (.cons rightFree .nil)))
-    (or := fun left right leftFree rightFree =>
-      .app (.cons leftFree (.cons rightFree .nil)))
-    (imp := fun left right leftFree rightFree =>
-      .app (.cons leftFree (.cons rightFree .nil)))
-    (iff := fun left right leftFree rightFree =>
-      .app (.cons leftFree (.cons rightFree .nil)))
-    (eq := fun left right leftFree rightFree =>
-      .app (.cons leftFree (.cons rightFree .nil)))
-    (forallE := fun body bodyFree => .forallE bodyFree)
-    (existsE := fun body bodyFree => .existsE bodyFree)
+    (not := fun body bodyAgree =>
+      .builtin (.cons bodyAgree .nil) (by decide))
+    (and := fun left right leftAgree rightAgree =>
+      .builtin (.cons leftAgree (.cons rightAgree .nil)) (by decide))
+    (or := fun left right leftAgree rightAgree =>
+      .builtin (.cons leftAgree (.cons rightAgree .nil)) (by decide))
+    (imp := fun left right leftAgree rightAgree =>
+      .builtin (.cons leftAgree (.cons rightAgree .nil)) (by decide))
+    (iff := fun left right leftAgree rightAgree =>
+      .builtin (.cons leftAgree (.cons rightAgree .nil)) (by decide))
+    (eq := fun left right leftAgree rightAgree =>
+      .builtin (.cons leftAgree (.cons rightAgree .nil)) (by decide))
+    (forallE := fun body bodyAgree => .forallE bodyAgree)
+    (existsE := fun body bodyAgree => .existsE bodyAgree)
     (nil := .nil)
-    (cons := fun argument rest argumentFree restFree => by
+    (cons := fun argument rest argumentAgree restAgree => by
       rw [arguments, encodeArguments, Array.toList_append,
         List.singleton_append]
-      exact .cons argumentFree restFree)
+      exact .cons argumentAgree restAgree)
     source
 
 /-- Every encoded assertion of a valid typed theory holds in the induced SMT
@@ -549,7 +569,7 @@ theorem assertions_valid_with (encoding : Encoding symbols)
       (FO.Valuation.empty target.carriers) [] (Env.empty target))
     (valid formula formulaMem)
   have extended := eval_with_extra encoding target extra
-    (term_literalFree encoding formula) baseEval
+    (term_agrees encoding target extra formula) baseEval
   change Crush.SMT.Eval (modelWith encoding target extra) [] _
     ((modelWith encoding target extra).bool true)
   rw [modelWith_bool, ← model_bool]
@@ -680,7 +700,8 @@ theorem commands_unsat_implies_source_theory_unsat {signature : Signature}
     (encoding : Encoding (Symbol signature))
     {env : Datatype.Env signature}
     (datatypes : Datatype.EnvRepr encoding env)
-    (sourceTheory : Theory signature) {commands : Array Command}
+    (sourceTheory : Crush.Metatheory.Theory signature)
+    {commands : Array Command}
     (repr : TheoryRepr encoding
       (translatedTheories sourceTheory) commands)
     (unsat : RawCommandsUnsat commands) :
