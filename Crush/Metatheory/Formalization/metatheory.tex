@@ -2195,6 +2195,33 @@ accepted, while a missing or extra semantically relevant command is rejected.
 \leanfile{VCG/CommandEquivalence.lean}
 \end{definition}
 
+\begin{example}[The executable comparison succeeds with ordinary symbols]
+Let the higher-order signature contain two Boolean constants $\ell$ and $r$, and
+let
+\[
+  \Phi_{\ell,r} = \{\,\forall x:\Bool.\;x=\ell\lor x=r\,\}.
+\]
+The executable regression in \texttt{Test/Metatheory.lean} constructs an
+\texttt{SMT.Encoding} for the complete flattened symbol family. It maps
+$\ell$ and $r$ to distinct ordinary SMT identifiers and gives every possible
+generated application or closure symbol a structurally injective identifier.
+The test writes the expected command array independently:
+\begin{verbatim}
+(declare-fun left  () Bool)
+(declare-fun right () Bool)
+(assert (forall ((x Bool)) (or (= x left) (= x right))))
+\end{verbatim}
+It then checks three facts at compile time: the formal guarded-theory generator
+produces exactly this array, the modeled-fragment SMT checker accepts the array,
+and \texttt{CommandEquivalence.build?} returns \texttt{some}. Thus the
+ordinary-symbol encoding and whole-array comparison hypotheses are jointly
+satisfiable in a nonempty signature and the executable comparison is exercised.
+This example does not claim that the implementation automatically assembles the
+proof objects for an arbitrary translator run; that separate integration task
+remains outside the theorem.
+\leanpaths{Test/Metatheory.lean}
+\end{example}
+
 \begin{example}[What final-array agreement checks]
 Suppose the Crush translator emits the running commands in a different legal order,
 reuses one declaration instead of repeating its occurrence, and attaches the

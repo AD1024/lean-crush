@@ -28,7 +28,7 @@ import Crush.Metatheory.Hooks
 import Crush.Metatheory.SMT.Soundness
 import Crush.Metatheory.SMT.Guarded
 import Crush.Metatheory.SMT.GuardedSoundness
-import Crush.Metatheory.VCG.Generate
+import Crush.Metatheory.VCG.CommandEquivalence
 
 open scoped Crush.Metatheory
 open scoped Crush.SMT
@@ -934,6 +934,610 @@ example : ∃ smtModel : Crush.SMT.Model,
   subst candidate
   simp [FO.FamilyModel.Satisfies, reflexiveFormula]
   exact Crush.SMT.Model.satisfiesCommands_empty _
+
+/-! ## Executable command-equivalence instance with ordinary symbols -/
+
+open Defunctionalization
+
+/-- A small injective tree serialization used only to give every possible
+flattened symbol a collision-free identifier. The two source constants below
+remain ordinary named SMT constants; generated application and closure symbols
+occupy separate indexed namespaces. -/
+private abbrev Token := String ⊕ Nat
+
+private inductive Code where
+  | text : String → Code
+  | number : Nat → Code
+  | node : Nat → List Code → Code
+
+namespace Code
+
+mutual
+  private def tokens : Code → List Token
+    | .text value => [.inr 0, .inl value]
+    | .number value => [.inr 1, .inr value]
+    | .node tag children =>
+        [.inr 2, .inr tag, .inr children.length] ++ childrenTokens children
+
+  private def childrenTokens : List Code → List Token
+    | [] => []
+    | child :: children =>
+        .inr (tokens child).length :: tokens child ++ childrenTokens children
+end
+
+private theorem append_parts {a b restA restB : List Token}
+    (lengthEq : a.length = b.length) (whole : a ++ restA = b ++ restB) :
+    a = b ∧ restA = restB := by
+  have heads := congrArg (List.take a.length) whole
+  have tails := congrArg (List.drop a.length) whole
+  have lengthLe : a.length ≤ b.length := Nat.le_of_eq lengthEq
+  rw [List.take_append_of_le_length (Nat.le_refl _),
+    List.take_append_of_le_length lengthLe] at heads
+  rw [List.drop_append_of_le_length (Nat.le_refl _),
+    List.drop_append_of_le_length lengthLe] at tails
+  have takeRight : List.take a.length b = b := by
+    rw [lengthEq]
+    exact List.take_length
+  have dropRight : List.drop a.length b = [] := by
+    rw [lengthEq]
+    exact List.drop_length
+  simp only [List.take_length, takeRight, List.drop_length, dropRight,
+    List.nil_append] at heads tails
+  exact ⟨heads, tails⟩
+
+mutual
+  private theorem tokens_injective : ∀ {left right : Code},
+      tokens left = tokens right → left = right
+    | .text left, .text right, equal => by
+        simp only [tokens, List.cons.injEq] at equal
+        simp_all
+    | .number left, .number right, equal => by
+        simp only [tokens, List.cons.injEq] at equal
+        simp_all
+    | .node leftTag leftChildren, .node rightTag rightChildren, equal => by
+        simp only [tokens] at equal
+        have tagEq : leftTag = rightTag := by simp_all
+        have lengthEq : leftChildren.length = rightChildren.length := by simp_all
+        have childrenEq : childrenTokens leftChildren = childrenTokens rightChildren := by
+          simpa [tagEq, lengthEq] using equal
+        rw [tagEq, childrenTokens_injective childrenEq]
+    | .text _, .number _, equal | .text _, .node _ _, equal |
+      .number _, .text _, equal | .number _, .node _ _, equal |
+      .node _ _, .text _, equal | .node _ _, .number _, equal => by
+        simp [tokens] at equal
+
+  private theorem childrenTokens_injective : ∀ {left right : List Code},
+      childrenTokens left = childrenTokens right → left = right
+    | [], [], _ => rfl
+    | [], _ :: _, equal | _ :: _, [], equal => by
+        simp [childrenTokens] at equal
+    | left :: lefts, right :: rights, equal => by
+        simp only [childrenTokens] at equal
+        injection equal with lengthEq framedEq
+        have tokenLengthEq : (tokens left).length = (tokens right).length := by
+          exact Sum.inr.inj lengthEq
+        have parts := append_parts tokenLengthEq framedEq
+        have headEq := tokens_injective parts.1
+        have tailEq := childrenTokens_injective parts.2
+        rw [headEq, tailEq]
+end
+
+end Code
+
+private def tyCode : Ty → Code
+  | .bool => .node 0 []
+  | .base sort => .node 1 [.text sort.name]
+  | .arrow domain codomain => .node 2 [tyCode domain, tyCode codomain]
+
+private theorem tyCode_injective : Function.Injective tyCode := by
+  intro left
+  induction left with
+  | bool => intro right equal; cases right <;> simp_all [tyCode]
+  | base leftSort =>
+      intro right equal
+      cases right with
+      | bool | arrow => simp_all [tyCode]
+      | base rightSort =>
+          cases leftSort
+          cases rightSort
+          simp_all [tyCode]
+  | arrow leftDomain leftCodomain domainIH codomainIH =>
+      intro right equal
+      cases right with
+      | bool | base => simp_all [tyCode]
+      | arrow rightDomain rightCodomain =>
+          injection equal with _ childrenEq
+          injection childrenEq with domainEq tailEq
+          injection tailEq with codomainEq
+          rw [domainIH domainEq, codomainIH codomainEq]
+
+private def contextCode (context : List Ty) : Code :=
+  .node 20 (context.map tyCode)
+
+private theorem contextCode_injective : Function.Injective contextCode := by
+  intro left
+  induction left with
+  | nil => intro right equal; cases right <;> simp_all [contextCode]
+  | cons left lefts ih =>
+      intro right equal
+      cases right with
+      | nil => simp_all [contextCode]
+      | cons right rights =>
+          simp only [contextCode, List.map_cons, Code.node.injEq,
+            List.cons.injEq] at equal
+          have tailCode : contextCode lefts = contextCode rights := by
+            exact congrArg (Code.node 20) equal.2.2
+          rw [tyCode_injective equal.2.1, ih tailCode]
+
+@[simp] private theorem tyCode_eq {left right : Ty} :
+    tyCode left = tyCode right ↔ left = right := tyCode_injective.eq_iff
+
+@[simp] private theorem contextCode_eq {left right : List Ty} :
+    contextCode left = contextCode right ↔ left = right := contextCode_injective.eq_iff
+
+private theorem refToNat_injective {types : List Ty} {ty : Ty} :
+    Function.Injective (refToNat (types := types) (ty := ty)) := by
+  intro left
+  induction left with
+  | here => intro right equal; cases right with
+    | here => rfl
+    | there right => simp [refToNat] at equal
+  | there left ih => intro right equal; cases right with
+    | here => simp [refToNat] at equal
+    | there right =>
+        have innerEqual : refToNat left = refToNat right :=
+          Nat.add_right_cancel equal
+        rw [ih innerEqual]
+
+private def termCode {signature : Signature} {context : Context} {ty : Ty}
+    (term : Term signature context ty) : Code :=
+  let indices := [contextCode context, tyCode ty]
+  match term with
+  | .var ref => .node 30 (indices ++ [.number (refToNat ref)])
+  | .const ref => .node 31 (indices ++ [.number (refToNat ref)])
+  | .boolLit value => .node 32 (indices ++ [.number value.toNat])
+  | .not body => .node 33 (indices ++ [termCode body])
+  | .and left right => .node 34 (indices ++ [termCode left, termCode right])
+  | .or left right => .node 35 (indices ++ [termCode left, termCode right])
+  | .imp left right => .node 36 (indices ++ [termCode left, termCode right])
+  | .iff left right => .node 37 (indices ++ [termCode left, termCode right])
+  | .eq left right => .node 38 (indices ++ [termCode left, termCode right])
+  | .lam body => .node 39 (indices ++ [termCode body])
+  | .app fn argument => .node 40 (indices ++ [termCode fn, termCode argument])
+  | .forallE body => .node 41 (indices ++ [termCode body])
+  | .existsE body => .node 42 (indices ++ [termCode body])
+
+private theorem termCode_indices {signature : Signature}
+    {leftContext rightContext : Context} {leftTy rightTy : Ty}
+    (left : Term signature leftContext leftTy)
+    (right : Term signature rightContext rightTy)
+    (equal : termCode left = termCode right) :
+    leftContext = rightContext ∧ leftTy = rightTy := by
+  cases left <;> cases right <;> simp_all [termCode]
+
+private theorem termCode_heq {signature : Signature} {context : Context} {ty : Ty}
+    (left : Term signature context ty) :
+    ∀ {rightContext rightTy} (right : Term signature rightContext rightTy),
+      termCode left = termCode right → HEq left right := by
+  induction left <;> intro rightContext rightTy right equal <;> cases right <;>
+    simp_all [termCode]
+  case var.var left right =>
+    rcases equal with ⟨contextEq, typeEq, indexEq⟩
+    subst rightContext
+    subst rightTy
+    exact heq_of_eq (congrArg Term.var (refToNat_injective indexEq))
+  case const.const left right =>
+    rcases equal with ⟨contextEq, typeEq, indexEq⟩
+    subst rightContext
+    subst rightTy
+    exact heq_of_eq (congrArg Term.const (refToNat_injective indexEq))
+  case boolLit.boolLit left right =>
+    rcases equal with ⟨contextEq, valueEq⟩
+    subst rightContext
+    cases left <;> cases right <;> simp_all
+  case not.not left right ih =>
+    rcases equal with ⟨contextEq, bodyEq⟩
+    subst rightContext
+    have bodyHEq := ih right rfl
+    cases bodyHEq
+    rfl
+  case and.and leftA leftB rightA rightB ihA ihB =>
+    rcases equal with ⟨contextEq, leftEq, rightEq⟩
+    subst rightContext
+    have leftHEq := ihA rightA rfl
+    cases leftHEq
+    have rightHEq := ihB rightB rfl
+    cases rightHEq
+    rfl
+  case or.or leftA leftB rightA rightB ihA ihB =>
+    rcases equal with ⟨contextEq, leftEq, rightEq⟩
+    subst rightContext
+    have leftHEq := ihA rightA rfl
+    cases leftHEq
+    have rightHEq := ihB rightB rfl
+    cases rightHEq
+    rfl
+  case imp.imp leftA leftB rightA rightB ihA ihB =>
+    rcases equal with ⟨contextEq, leftEq, rightEq⟩
+    subst rightContext
+    have leftHEq := ihA rightA rfl
+    cases leftHEq
+    have rightHEq := ihB rightB rfl
+    cases rightHEq
+    rfl
+  case iff.iff leftA leftB rightA rightB ihA ihB =>
+    rcases equal with ⟨contextEq, leftEq, rightEq⟩
+    subst rightContext
+    have leftHEq := ihA rightA rfl
+    cases leftHEq
+    have rightHEq := ihB rightB rfl
+    cases rightHEq
+    rfl
+  case eq.eq leftA leftB rightA rightB ihA ihB =>
+    rcases equal with ⟨contextEq, leftEq, rightEq⟩
+    subst rightContext
+    have typeEq := (termCode_indices _ _ leftEq).2
+    subst leftB
+    have leftTermEq := eq_of_heq (ihA rightA rfl)
+    have rightTermEq := eq_of_heq (ihB rightB rfl)
+    rw [leftTermEq, rightTermEq]
+  case lam.lam left right ih =>
+    rcases equal with ⟨contextEq, ⟨domainEq, codomainEq⟩, bodyEq⟩
+    subst rightContext
+    subst domainEq
+    subst codomainEq
+    have bodyHEq := ih right rfl
+    cases bodyHEq
+    rfl
+  case app.app leftFn leftArg rightFn rightArg fnIH argIH =>
+    rcases equal with ⟨contextEq, resultEq, fnEq, argEq⟩
+    subst rightContext
+    subst resultEq
+    have domainEq := (termCode_indices _ _ argEq).2
+    subst leftArg
+    have fnTermEq := eq_of_heq (fnIH rightArg rfl)
+    have argTermEq := eq_of_heq (argIH rightFn rfl)
+    rw [fnTermEq, argTermEq]
+  case forallE.forallE left right ih =>
+    rcases equal with ⟨contextEq, bodyEq⟩
+    subst rightContext
+    have bodyContextEq := (termCode_indices _ _ bodyEq).1
+    injection bodyContextEq with domainEq
+    subst left
+    have bodyTermEq := eq_of_heq (ih right rfl)
+    rw [bodyTermEq]
+  case existsE.existsE left right ih =>
+    rcases equal with ⟨contextEq, bodyEq⟩
+    subst rightContext
+    have bodyContextEq := (termCode_indices _ _ bodyEq).1
+    injection bodyContextEq with domainEq
+    subst left
+    have bodyTermEq := eq_of_heq (ih right rfl)
+    rw [bodyTermEq]
+
+private theorem termCode_injective {signature : Signature} {context : Context} {ty : Ty} :
+    Function.Injective (termCode (signature := signature) (context := context) (ty := ty)) := by
+  intro left right equal
+  exact eq_of_heq (termCode_heq left right equal)
+
+private def arrowCode (arrow : Arrow) : Code :=
+  .node 50 [tyCode arrow.domain, tyCode arrow.codomain]
+
+private theorem arrowCode_injective : Function.Injective arrowCode := by
+  intro left right equal
+  cases left
+  cases right
+  simp only [arrowCode, Code.node.injEq, List.cons.injEq] at equal
+  simp_all
+
+private def closureCode {signature : Signature} (closure : Closure signature) : Code :=
+  .node 51 [contextCode closure.context, tyCode closure.domain,
+    tyCode closure.codomain, termCode closure.body]
+
+private theorem closureCode_injective {signature : Signature} :
+    Function.Injective (closureCode (signature := signature)) := by
+  intro left right equal
+  cases left
+  cases right
+  simp only [closureCode, Code.node.injEq, List.cons.injEq] at equal
+  rcases equal with ⟨_, contextEq, domainEq, codomainEq, bodyEq⟩
+  have contextEq := contextCode_injective contextEq
+  have domainEq := tyCode_injective domainEq
+  have codomainEq := tyCode_injective codomainEq
+  subst contextEq
+  subst domainEq
+  subst codomainEq
+  rw [termCode_injective bodyEq.1]
+
+private abbrev TwoConstantSignature : Signature := [.bool, .bool]
+
+private def symbolCode {decl : FO.SymbolDecl} :
+    Flattened.Symbol TwoConstantSignature decl → Code
+  | .sourceConstant constant => .node 60 [.number (refToNat constant)]
+  | .application arrow => .node 61 [arrowCode arrow]
+  | .closure closure => .node 62 [closureCode closure]
+
+private theorem symbolCode_heq {leftDecl rightDecl : FO.SymbolDecl}
+    (left : Flattened.Symbol TwoConstantSignature leftDecl)
+    (right : Flattened.Symbol TwoConstantSignature rightDecl)
+    (equal : symbolCode left = symbolCode right) : HEq left right := by
+  cases left with
+  | sourceConstant left =>
+      cases right with
+      | sourceConstant right =>
+          simp only [symbolCode, Code.node.injEq, List.cons.injEq] at equal
+          have indexEq : refToNat left = refToNat right :=
+            Code.number.inj equal.2.1
+          cases left with
+          | here => cases right with
+            | here => rfl
+            | there right => simp [refToNat] at indexEq
+          | there left => cases right with
+            | here => simp [refToNat] at indexEq
+            | there right =>
+                cases left with
+                | here => cases right with
+                  | here => rfl
+                  | there right => nomatch right
+                | there left => nomatch left
+      | application | closure => simp [symbolCode] at equal
+  | application left =>
+      cases right with
+      | sourceConstant | closure => simp [symbolCode] at equal
+      | application right =>
+          simp only [symbolCode, Code.node.injEq, List.cons.injEq] at equal
+          have arrowEq := arrowCode_injective equal.2.1
+          subst right
+          rfl
+  | closure left =>
+      cases right with
+      | sourceConstant | application => simp [symbolCode] at equal
+      | closure right =>
+          simp only [symbolCode, Code.node.injEq, List.cons.injEq] at equal
+          have closureEq := closureCode_injective equal.2.1
+          subst right
+          rfl
+
+private theorem symbolCode_decl_injective {leftDecl rightDecl : FO.SymbolDecl}
+    (left : Flattened.Symbol TwoConstantSignature leftDecl)
+    (right : Flattened.Symbol TwoConstantSignature rightDecl)
+    (equal : symbolCode left = symbolCode right) : leftDecl = rightDecl := by
+  cases left with
+  | sourceConstant left =>
+      cases right with
+      | sourceConstant right =>
+          simp only [symbolCode, Code.node.injEq, List.cons.injEq] at equal
+          have indexEq : refToNat left = refToNat right :=
+            Code.number.inj equal.2.1
+          cases left with
+          | here => cases right with
+            | here => rfl
+            | there right => simp [refToNat] at indexEq
+          | there left => cases right with
+            | here => simp [refToNat] at indexEq
+            | there right =>
+                cases left with
+                | here => cases right with
+                  | here => rfl
+                  | there right => nomatch right
+                | there left => nomatch left
+      | application | closure => simp [symbolCode] at equal
+  | application left =>
+      cases right with
+      | sourceConstant | closure => simp [symbolCode] at equal
+      | application right =>
+          simp only [symbolCode, Code.node.injEq, List.cons.injEq] at equal
+          rw [arrowCode_injective equal.2.1]
+  | closure left =>
+      cases right with
+      | sourceConstant | application => simp [symbolCode] at equal
+      | closure right =>
+          simp only [symbolCode, Code.node.injEq, List.cons.injEq] at equal
+          rw [closureCode_injective equal.2.1]
+
+private theorem symbolCode_injective {decl : FO.SymbolDecl} :
+    Function.Injective (symbolCode (decl := decl)) := by
+  intro left right equal
+  exact eq_of_heq (symbolCode_heq left right equal)
+
+private def sourceName {ty : Ty} : Const TwoConstantSignature ty → String
+  | .here => "left"
+  | .there .here => "right"
+
+private def symbolName {decl : FO.SymbolDecl} :
+    Flattened.Symbol TwoConstantSignature decl → String
+  | .sourceConstant constant => sourceName constant
+  | .application _ => "unused_application"
+  | .closure _ => "unused_closure"
+
+private def symbolIdent {decl : FO.SymbolDecl} :
+    Flattened.Symbol TwoConstantSignature decl → Crush.SMT.Ident
+  | .sourceConstant constant => .symb (sourceName constant)
+  | .application arrow => .indexed "test_application" (Code.tokens (arrowCode arrow)).toArray
+  | .closure closure => .indexed "test_closure" (Code.tokens (closureCode closure)).toArray
+
+private theorem symbolIdent_implies_code {leftDecl rightDecl : FO.SymbolDecl}
+    (left : Flattened.Symbol TwoConstantSignature leftDecl)
+    (right : Flattened.Symbol TwoConstantSignature rightDecl)
+    (equal : symbolIdent left = symbolIdent right) : symbolCode left = symbolCode right := by
+  cases left with
+  | sourceConstant left =>
+      cases right with
+      | sourceConstant right =>
+          cases left with
+          | here => cases right with
+            | here => rfl
+            | there right =>
+                cases right with
+                | here => simp [symbolIdent, sourceName] at equal
+                | there right => nomatch right
+          | there left =>
+              cases left with
+              | here => cases right with
+                | here => simp [symbolIdent, sourceName] at equal
+                | there right => cases right with
+                  | here => rfl
+                  | there right => nomatch right
+              | there left => nomatch left
+      | application | closure => simp [symbolIdent] at equal
+  | application left =>
+      cases right with
+      | sourceConstant | closure => simp [symbolIdent] at equal
+      | application right =>
+          simp only [symbolIdent, Crush.SMT.Ident.indexed.injEq] at equal
+          have tokensEq : Code.tokens (arrowCode left) = Code.tokens (arrowCode right) :=
+            congrArg Array.toList equal.2
+          have codeEq := Code.tokens_injective tokensEq
+          simp [symbolCode, codeEq]
+  | closure left =>
+      cases right with
+      | sourceConstant | application => simp [symbolIdent] at equal
+      | closure right =>
+          simp only [symbolIdent, Crush.SMT.Ident.indexed.injEq] at equal
+          have tokensEq : Code.tokens (closureCode left) = Code.tokens (closureCode right) :=
+            congrArg Array.toList equal.2
+          have codeEq := Code.tokens_injective tokensEq
+          simp [symbolCode, codeEq]
+
+private def symbolNative {decl : FO.SymbolDecl} :
+    Flattened.Symbol TwoConstantSignature decl → Bool
+  | .sourceConstant _ => false
+  | .application _ | .closure _ => true
+
+/-- A total encoding of the flattened symbol family over two source constants.
+`left` and `right` are ordinary SMT constants. Symbols that cannot occur in the
+chosen first-order theory still receive distinct indexed identifiers, which is
+why the injectivity obligations below are substantive rather than `nomatch`
+proofs. -/
+private def twoConstantEncoding :
+    Crush.Metatheory.SMT.Encoding (Flattened.Symbol TwoConstantSignature) where
+  sort := foSort
+  sort_injective := foSort_injective
+  bool_eq := rfl
+  name := symbolName
+  ident := symbolIdent
+  ident_decl_injective := by
+    intro leftDecl rightDecl left right equal
+    exact symbolCode_decl_injective left right
+      (symbolIdent_implies_code left right equal)
+  ident_injective := by
+    intro decl left right equal
+    exact symbolCode_injective (symbolIdent_implies_code left right equal)
+  ident_fresh := by
+    intro decl symbol
+    cases symbol with
+    | sourceConstant constant =>
+        cases constant with
+        | here => exact .symb "left" (by decide) (by decide) (by decide) (by decide) (by decide)
+        | there constant => cases constant with
+          | here => exact .symb "right" (by decide) (by decide) (by decide) (by decide) (by decide)
+          | there constant => nomatch constant
+    | application arrow => exact .indexed _ _
+    | closure closure => exact .indexed _ _
+  nativeSort := fun _ => false
+  nativeSymbol := symbolNative
+  nativeCommands := #[]
+  ordinary_ident := by
+    intro decl symbol ordinary
+    cases symbol with
+    | sourceConstant constant => rfl
+    | application arrow | closure arrow => simp [symbolNative] at ordinary
+
+private def leftConstant : Const TwoConstantSignature .bool := .here
+private def rightConstant : Const TwoConstantSignature .bool := .there .here
+
+/-- `∀ x : Bool, x = left ∨ x = right`, so the checked theory uses both
+ordinary constants and an actual binder. -/
+private def twoConstantFormula : Sentence TwoConstantSignature :=
+  .forallE <| .or
+    (.eq (.var .here) (.const leftConstant))
+    (.eq (.var .here) (.const rightConstant))
+
+private def twoConstantTheory : Theory TwoConstantSignature := [twoConstantFormula]
+
+private def twoConstantGuarding :=
+  Crush.Metatheory.SMT.GuardedEncoding.none twoConstantEncoding
+
+private def generatedTwoConstantCommands : Array Crush.SMT.Command :=
+  Crush.Metatheory.VCG.guardedTheoryCommands twoConstantGuarding #[] twoConstantTheory
+
+private def twoConstantCommands : Array Crush.SMT.Command := #[
+  .declFun "left" #[] Crush.SMT.boolSort,
+  .declFun "right" #[] Crush.SMT.boolSort,
+  .assert (.forallE #[("x", Crush.SMT.boolSort)]
+    (.app (.symb "or") #[
+      .app (.symb "=") #[.bvar 0, .app (.symb "left") #[]],
+      .app (.symb "=") #[.bvar 0, .app (.symb "right") #[]]]))]
+
+private def emptyDatatypeEnv : Crush.Metatheory.Reification.DatatypeEnv where
+  blocks := #[]
+
+private def twoConstantLeftProposition : Prop := True
+private def twoConstantRightProposition : Prop := False
+
+private def leftExpression : Lean.Expr := .const ``twoConstantLeftProposition []
+private def rightExpression : Lean.Expr := .const ``twoConstantRightProposition []
+private def propositionType : Lean.Expr := .sort .zero
+
+private def reifiedConstants :
+    Crush.Metatheory.Reification.ReifiedSignature TwoConstantSignature :=
+  .cons leftExpression (.bool propositionType)
+    (.cons rightExpression (.bool propositionType) .nil)
+
+/-- A Lean expression with the same constructor tree as `twoConstantFormula`.
+The separate Lean-to-HO denotation theorem remains outside this test's scope. -/
+private def sourceExpression : Lean.Expr :=
+  let type := Lean.Expr.sort .zero
+  let leftEquality := Lean.mkApp3 (.const ``Eq []) type (.bvar 0) leftExpression
+  let rightEquality := Lean.mkApp3 (.const ``Eq []) type (.bvar 0) rightExpression
+  .forallE `x type (Lean.mkApp2 (.const ``Or []) leftEquality rightEquality) .default
+
+private def reifiedFormula :
+    Crush.Metatheory.Reification.ReifiedSentenceFor sourceExpression emptyDatatypeEnv
+      reifiedConstants where
+  typeExpr := propositionType
+  source := twoConstantFormula
+  witness := {
+    sourceShape := .forallE .unsupported
+      (.or (.eq .variable .constant) (.eq .variable .constant))
+    shapeCorrespondence := by rfl }
+
+private def translationRecord : Crush.Metatheory.VCG.FactTranslationRecord where
+  expression := sourceExpression
+  datatypes := emptyDatatypeEnv
+  ordinarySignature := TwoConstantSignature
+  constants := reifiedConstants
+  reifiedSentence := some reifiedFormula
+  emittedCommands := twoConstantCommands
+  datatypeDeclarationLocations := .nil
+  guardDefinitionLocations := .nil
+
+private def reifiedTheory :
+    Crush.Metatheory.Reification.ReifiedSentencesFor emptyDatatypeEnv reifiedConstants
+      [sourceExpression] :=
+  .cons reifiedFormula .nil
+
+/-- The executable link between the exact concrete command array and the
+mathematical guarded encoder. -/
+private def checkedCommandEquivalence :=
+  Crush.Metatheory.VCG.CommandEquivalence.build?
+    (translation := translationRecord) (guarding := twoConstantGuarding) reifiedTheory
+
+/- Compile-time end-to-end regression: the formal encoder must produce the
+literal script, the script must pass the modeled SMT checker, and the actual
+whole-theory comparison must return `some`. -/
+#eval show IO Unit from do
+  unless Crush.Metatheory.Reification.shapesMatch
+      (Crush.Metatheory.Reification.exprShape sourceExpression)
+      (Crush.Metatheory.Reification.termShape twoConstantFormula) do
+    throw <| IO.userError "the concrete Lean expression and HO formula have different shapes"
+  unless decide (generatedTwoConstantCommands = twoConstantCommands) do
+    throw <| IO.userError "the formal encoder disagrees with the concrete two-constant commands"
+  unless Crush.SMT.metatheoryScriptWellTyped twoConstantCommands do
+    throw <| IO.userError "the concrete two-constant commands failed SMT validation"
+  unless checkedCommandEquivalence.isSome do
+    throw <| IO.userError "CommandEquivalence.build? rejected the concrete two-constant translation"
+
 
 end Crush.Metatheory.SMT.Tests
 
