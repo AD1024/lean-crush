@@ -722,6 +722,49 @@ example :
     have impossible := evaluated.unique standard.applyUnique expected
     exact Bool.noConfusion (model.boolInjective impossible)
 
+private def satisfiableIntCommands : Array Command :=
+  #[.assert (smt| (>= 1 0))]
+
+private theorem satisfiableIntCommands_wellTyped :
+    modeledScriptWellTyped satisfiableIntCommands = true := by
+  unfold satisfiableIntCommands
+  prove_modeled_script_well_typed
+
+/-- A concrete command using numerals and `>=` has a standard satisfying
+model. Together with the preceding `0 = 1` theorem, this checks both sides of
+the integer semantic boundary without compiled decision procedures. -/
+private theorem satisfiableIntCommands_haveModel :
+    ∃ model : Model,
+      model.StandardFor satisfiableIntCommands ∧
+        model.SatisfiesCommands satisfiableIntCommands := by
+  rcases standardModel_exists with ⟨model, standard⟩
+  refine ⟨model, standard.forCommands satisfiableIntCommands, ?_⟩
+  intro command member
+  simp [satisfiableIntCommands] at member
+  subst command
+  change Eval model [] (smt| (>= 1 0)) (model.bool true)
+  rcases standard.integer with ⟨integers⟩
+  have oneEval : Eval model [] (smt| 1) (integers.int 1) := by
+    have evaluated := Eval.literal (model := model) (environment := [])
+      (.num 1) (by intro value impossible; cases impossible)
+    rw [integers.numeral 1] at evaluated
+    exact evaluated
+  have zeroEval : Eval model [] (smt| 0) (integers.int 0) := by
+    have evaluated := Eval.literal (model := model) (environment := [])
+      (.num 0) (by intro value impossible; cases impossible)
+    rw [integers.numeral 0] at evaluated
+    exact evaluated
+  apply Eval.symbol (by decide)
+  · exact .cons oneEval (.cons zeroEval .nil)
+  · exact (integers.ge 1 0 (model.bool true)).2
+      (Or.inl ⟨by omega, rfl⟩)
+
+private theorem satisfiableIntCommands_notUnsatisfiable :
+    ¬CommandsUnsat satisfiableIntCommands := by
+  intro unsat
+  obtain ⟨model, standard, valid⟩ := satisfiableIntCommands_haveModel
+  exact unsat.noModel model standard valid
+
 /- Sort names are checked against the preceding declaration environment. -/
 #eval show IO Unit from do
   if modeledScriptWellTyped
@@ -748,6 +791,36 @@ an invalid SMT script establish semantic unsatisfiability. -/
 #eval show IO Unit from do
   if modeledScriptWellTyped #[.assert (.bvar 0)] then
     throw <| IO.userError "unbound variable was accepted"
+
+private def indexedBvCommands : Array Command :=
+  let value := .app (.indexed "int2bv" #[.inr 8]) #[.lit (.num 0)]
+  #[.assert (.symbApp "=" #[value, value])]
+
+/-- Indexed bit-vector operators have checker typing but no semantics in the
+current metatheory, so the modeled checker rejects them through the syntax-only
+registry tier. -/
+private theorem indexedBvCommands_notModeled :
+    modeledScriptWellTyped indexedBvCommands = false := by
+  unfold indexedBvCommands
+  prove_modeled_script_well_typed
+
+private def stringSortCommands : Array Command := #[
+  .declFun "text" #[] stringSort,
+  .assert (.symbApp "=" #[.symbApp "text" #[], .symbApp "text" #[]])]
+
+/-- A syntax-only sort cannot enter the semantic theorem through an otherwise
+uninterpreted declaration. Its carrier has solver theory semantics that the
+current relational model does not yet provide. -/
+private theorem stringSortCommands_notModeled :
+    modeledScriptWellTyped stringSortCommands = false := by
+  unfold stringSortCommands
+  prove_modeled_script_well_typed
+
+#eval show IO Unit from do
+  unless closedScriptWellSorted indexedBvCommands do
+    throw <| IO.userError "the closed checker rejected registered bit-vector syntax"
+  unless closedScriptWellSorted stringSortCommands do
+    throw <| IO.userError "the closed checker rejected a registered String sort"
 
 end Crush.SMT.Tests
 

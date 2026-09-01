@@ -1,5 +1,4 @@
-import Crush.SMT.Syntax
-import Crush.SMT.Print
+import Crush.SMT.Theory
 
 /-!
 # SMT IR sort validation
@@ -24,6 +23,8 @@ binder, or a preceding declaration.
 
 namespace Crush.SMT
 
+open Theory (requireArity requireSort)
+
 /- The metatheory retains successful checker runs as proof data. Recursive
 sort and term checking is total, and the generated equation theorems let small
 concrete successes be proved by kernel-checked simplification. -/
@@ -31,7 +32,7 @@ concrete successes be proved by kernel-checked simplification. -/
 /-- Solver-defined operators recognized by the shared SMT checker. An
 identifier in this table cannot be redeclared as an uninterpreted function in
 the closed metatheory fragment. -/
-def isKnownTheoryOperator : Ident → Bool
+private def legacyKnownTheoryOperator : Ident → Bool
   | .symb name =>
       #["true", "false", "=", "not", "=>", "and", "or", "xor",
         "distinct", "ite", "+", "*", "-", "div", "mod", "<", "<=",
@@ -49,10 +50,40 @@ def isKnownTheoryOperator : Ident → Bool
 /-- Theory operators whose denotation is present in `Metatheory.SMT.Semantics`.
 Datatype constructors, selectors, and indexed testers are handled separately
 by datatype declarations rather than this fixed table. -/
-def isModeledTheoryOperator : Ident → Bool
+private def legacyModeledTheoryOperator : Ident → Bool
   | .symb name =>
       #["=", "not", "=>", "and", "or", ">="] |>.contains name
   | .indexed _ _ => false
+
+/-- Whether the current theory registry provides a checker rule. -/
+def isKnownTheoryOperator (identifier : Ident) : Bool :=
+  Theory.currentEnv.isKnownIdent identifier
+
+/-- Whether the current theory registry also supplies semantics in the
+metatheory. -/
+def isModeledTheoryOperator (identifier : Ident) : Bool :=
+  Theory.currentEnv.isModeledIdent identifier
+
+/-- The registry preserves the previous known-operator classification. -/
+theorem knownTheoryOperator_compat (identifier : Ident) :
+    legacyKnownTheoryOperator identifier = isKnownTheoryOperator identifier := by
+  rw [isKnownTheoryOperator, Theory.current_known_ident]
+  rfl
+
+/-- The registry preserves the previous modeled-operator classification. -/
+theorem modeledTheoryOperator_compat (identifier : Ident) :
+    legacyModeledTheoryOperator identifier =
+      isModeledTheoryOperator identifier := by
+  cases identifier with
+  | symb name =>
+      simp [legacyModeledTheoryOperator, isModeledTheoryOperator,
+        Theory.current_modeled_ident, Theory.coreContainsIdent,
+        Theory.intContainsIdent]
+      grind
+  | indexed name indices =>
+      simp [legacyModeledTheoryOperator, isModeledTheoryOperator,
+        Theory.current_modeled_ident, Theory.coreContainsIdent,
+        Theory.intContainsIdent]
 
 @[simp] private theorem builtinSortArity?_bool :
     Ident.builtinSortArity? (.symb "Bool") = some 0 := rfl
@@ -64,21 +95,18 @@ def isModeledTheoryOperator : Ident → Bool
     Ident.builtinSortArity? (.symb "String") = some 0 := rfl
 
 private structure CheckMode where
+  sigEnv : Theory.SigEnv
   rejectUnknown : Bool
   modeledTheoriesOnly : Bool
-  /-- Select the association-list mirror whose concrete evaluation can be
-  checked by the kernel. Ordinary frontend checks use the hash-map fields. -/
-  useAssoc : Bool
 
 private structure FunSig where
   args : Array SSort
   res  : SSort
 
-/-- Kernel-reducible alternative to the frontend hash maps. The checker rejects
-duplicate declarations before insertion, so association-list lookup has the
-same result as hash-map lookup. The mode selects one representation, keeping
-the frontend fast while allowing concrete metatheory certificates to reduce in
-the kernel without evaluating opaque `String.hash`. -/
+/-- Kernel-reducible declaration map. The checker rejects duplicate
+declarations before insertion, so the first matching entry is authoritative.
+Using one representation keeps executable checking and retained metatheory
+certificates on the same code path. -/
 private abbrev NameAssoc (α : Type) := List (String × α)
 
 @[simp]
@@ -95,35 +123,24 @@ private def NameAssoc.insert {α : Type} (entries : NameAssoc α) (name : String
   (name, value) :: entries
 
 private structure CheckEnv where
-  funs : Std.HashMap String FunSig := {}
-  assocFuns : NameAssoc FunSig := []
+  funs : NameAssoc FunSig := []
   /-- Result sort of each datatype constructor introduced so far. Keeping this
   separate from `funs` prevents `(_ is f)` from treating an ordinary function
   as a datatype constructor. -/
-  constructors : Std.HashMap String SSort := {}
-  assocConstructors : NameAssoc SSort := []
-  sorts : Std.HashMap String Nat := {}
-  assocSorts : NameAssoc Nat := []
+  constructors : NameAssoc SSort := []
+  sorts : NameAssoc Nat := []
 
-private def CheckEnv.fun? (mode : CheckMode) (env : CheckEnv)
-    (name : String) : Option FunSig :=
-  if mode.useAssoc then env.assocFuns.get? name
-  else env.funs.get? name
+private def CheckEnv.fun? (env : CheckEnv) (name : String) : Option FunSig :=
+  env.funs.get? name
 
-private def CheckEnv.constructor? (mode : CheckMode) (env : CheckEnv)
-    (name : String) : Option SSort :=
-  if mode.useAssoc then env.assocConstructors.get? name
-  else env.constructors.get? name
+private def CheckEnv.constructor? (env : CheckEnv) (name : String) : Option SSort :=
+  env.constructors.get? name
 
-private def CheckEnv.sortArity? (mode : CheckMode) (env : CheckEnv)
-    (name : String) : Option Nat :=
-  if mode.useAssoc then env.assocSorts.get? name
-  else env.sorts.get? name
+private def CheckEnv.sortArity? (env : CheckEnv) (name : String) : Option Nat :=
+  env.sorts.get? name
 
-private def CheckEnv.containsSort (mode : CheckMode) (env : CheckEnv)
-    (name : String) : Bool :=
-  if mode.useAssoc then env.assocSorts.contains name
-  else env.sorts.contains name
+private def CheckEnv.containsSort (env : CheckEnv) (name : String) : Bool :=
+  env.sorts.contains name
 
 /-- A malformed command found by `checkScript`. -/
 structure SortError where
@@ -140,13 +157,12 @@ private def arrowSig? : SSort → Option FunSig
     else some { args := parts.extract 0 (parts.size - 1), res := parts.back! }
   | _ => none
 
-private def bvWidth? : SSort → Option Nat
-  | .app (.indexed "BitVec" #[.inr width]) #[] => some width
+private def testerCtor? : Ident → Option String
+  | .indexed "is" indices =>
+      match indices.toList with
+      | [.inl constructor] => some constructor
+      | _ => none
   | _ => none
-
-private def requireArity (name : String) (actual expected : Nat) : Except String Unit :=
-  if actual == expected then pure ()
-  else throw s!"`{name}` expects {expected} argument(s), got {actual}"
 
 mutual
   @[simp]
@@ -163,12 +179,16 @@ mutual
           if arguments.size < 2 then
             throw "function sort expects at least one domain and one codomain"
           return
-        if let some arity := identifier.builtinSortArity? then
+        if mode.modeledTheoriesOnly &&
+            mode.sigEnv.isKnownSortCtor identifier &&
+            !mode.sigEnv.isModeledSortCtor identifier then
+          throw s!"sort `{identifier}` is outside the modeled SMT theory fragment"
+        if let some arity := mode.sigEnv.sortArity? identifier then
           requireArity s!"sort `{identifier}`" arguments.size arity
           return
         match identifier with
         | .symb name =>
-            if let some arity := env.sortArity? mode name then
+            if let some arity := env.sortArity? name then
               requireArity s!"sort `{name}`" arguments.size arity
             else if mode.rejectUnknown then
               throw s!"undeclared sort `{name}`"
@@ -194,66 +214,17 @@ attribute [simp] checkSort.eq_1 checkSort.eq_2
 
 private def insertSort (mode : CheckMode) (env : CheckEnv)
     (name : String) (arity : Nat) : Except String CheckEnv := do
-  if Ident.isBuiltinSort (.symb name) then
+  if mode.sigEnv.isKnownSortCtor (.symb name) || name == "->" then
     throw s!"built-in sort `{name}` cannot be redeclared"
-  if env.containsSort mode name then
+  if env.containsSort name then
     if mode.rejectUnknown then
       throw s!"sort `{name}` is declared more than once"
     else
       return env
-  if mode.useAssoc then
-    return { env with assocSorts := env.assocSorts.insert name arity }
-  else
-    return { env with sorts := env.sorts.insert name arity }
+  return { env with sorts := env.sorts.insert name arity }
 
 private def lookupLocal (locals : List (String × SSort)) (name : String) : Option SSort :=
   (locals.find? fun entry => entry.1 == name).map (·.2)
-
-@[reducible, simp]
-private def requireSort (where_ : String) (actual : Option SSort) (expected : SSort) :
-    Except String Unit :=
-  match actual with
-  | some actual =>
-    if actual = expected then pure ()
-    else throw s!"{where_} has sort `{actual}`, expected `{expected}`"
-  | none => pure ()
-
-private def requireSame (where_ : String) (a b : Option SSort) : Except String Unit :=
-  match a, b with
-  | some a, some b =>
-    if a = b then pure ()
-    else throw s!"{where_} combines incompatible sorts `{a}` and `{b}`"
-  | _, _ => pure ()
-
-@[simp]
-private def requireArgsOfSort (name : String) (expected : SSort) :
-    Nat → List (Option SSort) → Except String Unit
-  | _, [] => pure ()
-  | index, actual :: arguments => do
-      requireSort s!"argument {index + 1} of `{name}`" actual expected
-      requireArgsOfSort name expected (index + 1) arguments
-
-private def requireBoolArgs (name : String) (args : Array (Option SSort)) :
-    Except String Unit :=
-  requireArgsOfSort name boolSort 0 args.toList
-
-private def requireIntArgs (name : String) (args : Array (Option SSort)) :
-    Except String Unit :=
-  requireArgsOfSort name intSort 0 args.toList
-
-private def requireBvArgs (name : String) (args : Array (Option SSort)) :
-    Except String (Option Nat) := do
-  let mut width : Option Nat := none
-  for i in [0:args.size] do
-    if let some sort := args[i]! then
-      let some current := bvWidth? sort
-        | throw s!"argument {i + 1} of `{name}` has non-bit-vector sort `{sort}`"
-      match width with
-      | none => width := some current
-      | some expected =>
-        unless current == expected do
-          throw s!"`{name}` combines bit-vectors of widths {expected} and {current}"
-  return width
 
 private def validateStringLiteral (value : String) : Except String Unit := do
   for c in value.toList do
@@ -272,17 +243,15 @@ mutual
   private def inferTerm (mode : CheckMode) (env : CheckEnv)
       (locals : List (String × SSort)) (bvars : List SSort) :
       Term → Except String (Option SSort)
-  | .lit (.str value) => do
-    if mode.modeledTheoriesOnly then
-      throw "string literals are outside the modeled SMT fragment"
-    validateStringLiteral value
-    return some stringSort
-  | .lit (.num _) => do return some intSort
-  | .lit (.bitvec width _) => do
-    if mode.modeledTheoriesOnly then
-      throw "bit-vector literals are outside the modeled SMT fragment"
-    return some (.app (.indexed "BitVec" #[.inr width]) #[])
-  | .lit (.bool _) => do return some boolSort
+  | .lit literal => do
+    if mode.modeledTheoriesOnly &&
+        !mode.sigEnv.isModeledLiteral literal then
+      throw "literal is outside the modeled SMT theory fragment"
+    if let .str value := literal then
+      validateStringLiteral value
+    let some sort := mode.sigEnv.literalSort? literal
+      | throw "literal has no registered SMT sort"
+    return some sort
   | .bvar index => do
     match bvars[index]? with
     | some sort => return some sort
@@ -323,167 +292,36 @@ where
   inferApp (mode : CheckMode) (env : CheckEnv)
       (locals : List (String × SSort)) (ident : Ident)
       (args : Array (Option SSort)) : Except String (Option SSort) := do
-    match ident with
-    | .indexed "is" #[.inl ctor] =>
+    if let some ctor := testerCtor? ident then
       requireArity s!"(_ is {ctor})" args.size 1
-      if let some resultSort := env.constructor? mode ctor then
+      if let some resultSort := env.constructor? ctor then
         requireSort s!"argument of tester for `{ctor}`" args[0]! resultSort
       else if mode.rejectUnknown then
         throw s!"tester references undeclared constructor `{ctor}`"
       return some boolSort
-    | .indexed "int2bv" #[.inr width] =>
-      requireArity "int2bv" args.size 1
-      requireSort "argument of `int2bv`" args[0]! intSort
-      return some (.app (.indexed "BitVec" #[.inr width]) #[])
-    | .indexed "extract" #[.inr high, .inr low] =>
-      requireArity "extract" args.size 1
-      if high < low then throw s!"invalid bit-vector extraction [{high}:{low}]"
-      let _ ← requireBvArgs "extract" args
-      return some (.app (.indexed "BitVec" #[.inr (high - low + 1)]) #[])
-    | .indexed op #[.inr amount] =>
-      if op == "zero_extend" || op == "sign_extend" then
-        requireArity op args.size 1
-        return (← requireBvArgs op args).map fun width =>
-          .app (.indexed "BitVec" #[.inr (width + amount)]) #[]
-      if op == "rotate_left" || op == "rotate_right" then
-        requireArity op args.size 1
-        return (← requireBvArgs op args).map fun width =>
-          .app (.indexed "BitVec" #[.inr width]) #[]
-      if mode.modeledTheoriesOnly then
+    else
+      if mode.modeledTheoriesOnly && mode.sigEnv.isKnownIdent ident &&
+          !mode.sigEnv.isModeledIdent ident then
         throw s!"`{ident}` is outside the modeled SMT theory fragment"
-      if mode.rejectUnknown then throw s!"unknown indexed symbol `{ident}`"
-      return none
-    | .indexed _ _ =>
-      if mode.rejectUnknown then throw s!"unknown indexed symbol `{ident}`"
-      return none
-    | .symb name =>
-      if mode.modeledTheoriesOnly && isKnownTheoryOperator ident &&
-          !isModeledTheoryOperator ident then
-        throw s!"`{name}` is outside the modeled SMT theory fragment"
+      let .symb name := ident
+        | match mode.sigEnv.inferApp? ident args with
+          | some checked => checked
+          | none =>
+            if mode.rejectUnknown then
+              throw s!"unknown indexed symbol `{ident}`"
+            else pure none
       if let some localSort := lookupLocal locals name then
         if args.isEmpty then return some localSort
         let some sig := arrowSig? localSort
           | throw s!"local symbol `{name}` of sort `{localSort}` is not applicable"
         checkSignature name sig args
         return some sig.res
-      if let some sig := env.fun? mode name then
+      if let some sig := env.fun? name then
         checkSignature name sig args
         return some sig.res
-      match name with
-      | "true" | "false" =>
-        if mode.modeledTheoriesOnly then
-          throw s!"`{name}` is outside the modeled SMT term fragment; use a Boolean literal"
-        requireArity name args.size 0
-        return some boolSort
-      | "not" =>
-        requireArity name args.size 1
-        requireBoolArgs name args
-        return some boolSort
-      | "and" | "or" | "xor" =>
-        if args.isEmpty then throw s!"`{name}` expects at least one argument, got none"
-        requireBoolArgs name args
-        return some boolSort
-      | "=>" =>
-        requireArity name args.size 2
-        requireBoolArgs name args
-        return some boolSort
-      | "=" =>
-        requireArity name args.size 2
-        requireSame s!"arguments of `{name}`" args[0]! args[1]!
-        return some boolSort
-      | "distinct" =>
-        if args.size < 2 then
-          throw s!"`distinct` expects at least two arguments, got {args.size}"
-        for i in [1:args.size] do
-          requireSame "arguments of `distinct`" args[0]! args[i]!
-        return some boolSort
-      | "ite" =>
-        requireArity name args.size 3
-        requireSort "condition of `ite`" args[0]! boolSort
-        requireSame "branches of `ite`" args[1]! args[2]!
-        return match args[1]! with
-          | some sort => some sort
-          | none => args[2]!
-      | "+" | "*" =>
-        requireArity name args.size 2
-        requireIntArgs name args
-        return some intSort
-      | "-" =>
-        unless args.size == 1 || args.size == 2 do
-          throw s!"`-` expects one or two arguments, got {args.size}"
-        requireIntArgs name args
-        return some intSort
-      | "div" | "mod" =>
-        requireArity name args.size 2
-        requireIntArgs name args
-        return some intSort
-      | "<" | "<=" | ">" | ">=" =>
-        requireArity name args.size 2
-        requireIntArgs name args
-        return some boolSort
-      | "abs" =>
-        requireArity name args.size 1
-        requireIntArgs name args
-        return some intSort
-      | "bvnot" | "bvneg" =>
-        requireArity name args.size 1
-        return (← requireBvArgs name args).map fun width =>
-          .app (.indexed "BitVec" #[.inr width]) #[]
-      | "bvadd" | "bvsub" | "bvmul" | "bvand" | "bvor" | "bvxor"
-      | "bvudiv" | "bvurem" | "bvsdiv" | "bvsrem" | "bvsmod"
-      | "bvshl" | "bvlshr" | "bvashr" =>
-        requireArity name args.size 2
-        return (← requireBvArgs name args).map fun width =>
-          .app (.indexed "BitVec" #[.inr width]) #[]
-      | "bvult" | "bvule" | "bvugt" | "bvuge"
-      | "bvslt" | "bvsle" | "bvsgt" | "bvsge" =>
-        requireArity name args.size 2
-        let _ ← requireBvArgs name args
-        return some boolSort
-      | "concat" =>
-        requireArity name args.size 2
-        let left := args[0]!.bind bvWidth?
-        let right := args[1]!.bind bvWidth?
-        match left, right with
-        | some left, some right =>
-          return some (.app (.indexed "BitVec" #[.inr (left + right)]) #[])
-        | some _, none | none, some _ =>
-          throw "`concat` expects two bit-vector arguments"
-        | none, none => return none
-      | "bv2nat" | "sbv_to_int" =>
-        requireArity name args.size 1
-        let _ ← requireBvArgs name args
-        return some intSort
-      | "str.len" =>
-        requireArity name args.size 1
-        requireSort "argument of `str.len`" args[0]! stringSort
-        return some intSort
-      | "str.++" =>
-        requireArity name args.size 2
-        for arg in args do requireSort "argument of `str.++`" arg stringSort
-        return some stringSort
-      | "str.prefixof" | "str.suffixof" | "str.contains" =>
-        requireArity name args.size 2
-        for arg in args do requireSort s!"argument of `{name}`" arg stringSort
-        return some boolSort
-      | "select" =>
-        requireArity name args.size 2
-        match args[0]! with
-        | some (.app (.symb "Array") #[key, value]) =>
-          requireSort "index of `select`" args[1]! key
-          return some value
-        | some sort => throw s!"first argument of `select` has non-array sort `{sort}`"
-        | none => return none
-      | "store" =>
-        requireArity name args.size 3
-        match args[0]! with
-        | some array@(.app (.symb "Array") #[key, value]) =>
-          requireSort "index of `store`" args[1]! key
-          requireSort "value of `store`" args[2]! value
-          return some array
-        | some sort => throw s!"first argument of `store` has non-array sort `{sort}`"
-        | none => return none
-      | _ =>
+      match mode.sigEnv.inferApp? ident args with
+      | some checked => checked
+      | none =>
         if mode.rejectUnknown then throw s!"undeclared or unknown symbol `{name}`"
         return none
 
@@ -527,22 +365,19 @@ where
 end
 
 attribute [simp] inferTerm.eq_1 inferTerm.eq_2 inferTerm.eq_3 inferTerm.eq_4
-  inferTerm.eq_5 inferTerm.eq_6 inferTerm.eq_7 inferTerm.eq_8 inferTerm.eq_9
-  inferTerm.eq_10 inferTerm.eq_11 inferTermList.eq_1 inferTermList.eq_2
+  inferTerm.eq_5 inferTerm.eq_6 inferTerm.eq_7 inferTerm.eq_8
+  inferTermList.eq_1 inferTermList.eq_2
   inferBindingList.eq_1 inferBindingList.eq_2 inferAttrList.eq_1 inferAttrList.eq_2
 
 private def insertFun (mode : CheckMode) (env : CheckEnv) (name : String)
     (sig : FunSig) :
     Except String CheckEnv :=
-  if mode.modeledTheoriesOnly && isKnownTheoryOperator (.symb name) then
+  if mode.modeledTheoriesOnly && mode.sigEnv.isKnownIdent (.symb name) then
     throw s!"theory operator `{name}` cannot be redeclared"
   else
-  match env.fun? mode name with
+  match env.fun? name with
   | none =>
-      if mode.useAssoc then
-        pure { env with assocFuns := env.assocFuns.insert name sig }
-      else
-        pure { env with funs := env.funs.insert name sig }
+      pure { env with funs := env.funs.insert name sig }
   | some previous =>
     if mode.rejectUnknown then
       throw s!"symbol `{name}` is declared more than once"
@@ -723,11 +558,7 @@ private def checkCommand (mode : CheckMode) (env : CheckEnv)
       for ctor in datatype.ctors do
         for (_, fieldSort) in ctor.selDecls do checkSort mode env fieldSort
         env ← insertFun mode env ctor.name { args := ctor.selDecls.map (·.2), res := sort }
-        env := if mode.useAssoc then
-          { env with assocConstructors :=
-              env.assocConstructors.insert ctor.name sort }
-        else
-          { env with constructors := env.constructors.insert ctor.name sort }
+        env := { env with constructors := env.constructors.insert ctor.name sort }
     for (sortName, _, datatype) in datatypes do
       let sort := SSort.app (.symb sortName) #[]
       for ctor in datatype.ctors do
@@ -768,14 +599,14 @@ private def checkScriptWith (mode : CheckMode)
 symbols remain unclassified so registered translation extensions can introduce
 operators outside the built-in table. -/
 def checkScript (commands : Array Command) : Except SortError Unit :=
-  checkScriptWith ⟨false, false, false⟩ commands
+  checkScriptWith ⟨Theory.currentEnv, false, false⟩ commands
 
 /-- Validate a closed SMT script. Unlike `checkScript`, this rejects every
 unknown or use-before-declaration symbol. The metatheory uses this judgment so
 an invalid SMT script cannot establish unsatisfiability merely because its
 untyped terms have incompatible sorts. -/
 def checkClosedScript (commands : Array Command) : Except SortError Unit :=
-  checkScriptWith ⟨true, false, false⟩ commands
+  checkScriptWith ⟨Theory.currentEnv, true, false⟩ commands
 
 /-- Computable success flag for `checkClosedScript`, used when a checked
 translation must retain the validation result as proof data. -/
@@ -785,17 +616,30 @@ def closedScriptWellSorted (commands : Array Command) : Bool :=
 /-- Type-check a closed command sequence in exactly the first-order theory
 fragment whose denotation is mechanized by `Crush.Metatheory.SMT`. -/
 def checkModeledScript (commands : Array Command) : Except SortError Unit :=
-  checkScriptWith ⟨true, true, true⟩ commands
+  checkScriptWith ⟨Theory.currentEnv, true, true⟩ commands
+
+/-- Type-check a closed command sequence against a supplied registry of
+semantically modeled theories. This is the checker entry point used to test
+new theory combinations before making them part of the default registry. -/
+def checkModeledScriptWith (sigEnv : Theory.SigEnv)
+    (commands : Array Command) : Except SortError Unit :=
+  checkScriptWith ⟨sigEnv, true, true⟩ commands
 
 /-- Computable success flag for `checkModeledScript`. -/
 def modeledScriptWellTyped (commands : Array Command) : Bool :=
   (checkModeledScript commands).isOk
 
+/-- Computable success flag for `checkModeledScriptWith`. -/
+def modeledScriptWellTypedWith (sigEnv : Theory.SigEnv)
+    (commands : Array Command) : Bool :=
+  (checkModeledScriptWith sigEnv commands).isOk
+
 /-- Normalize a concrete modeled-fragment checker run into a kernel-checked
 equality proof. The tactic unfolds the total structural recursors above; it
 does not invoke compiled evaluation or add a native-decision axiom. -/
 macro "prove_modeled_script_well_typed" : tactic =>
-  `(tactic| simp [modeledScriptWellTyped, checkModeledScript,
+  `(tactic| simp [modeledScriptWellTyped, modeledScriptWellTypedWith,
+      checkModeledScript, checkModeledScriptWith,
       checkScriptWith, checkCommand, checkSort, checkSortList,
       checkCommandList, NameAssoc.get?, NameAssoc.contains, NameAssoc.insert,
       CheckEnv.fun?, CheckEnv.constructor?, CheckEnv.sortArity?,
@@ -803,17 +647,29 @@ macro "prove_modeled_script_well_typed" : tactic =>
       inferTerm, inferTermList, inferBindingList, inferAttrList,
       inferTerm.eq_1, inferTerm.eq_2, inferTerm.eq_3, inferTerm.eq_4,
       inferTerm.eq_5, inferTerm.eq_6, inferTerm.eq_7, inferTerm.eq_8,
-      inferTerm.eq_9, inferTerm.eq_10, inferTerm.eq_11,
       inferTermList.eq_1, inferTermList.eq_2,
       inferBindingList.eq_1, inferBindingList.eq_2,
       inferAttrList.eq_1, inferAttrList.eq_2,
-      inferTerm.inferApp, insertSort, insertFun, requireSort, requireSame,
-      requireArgsOfSort, requireBoolArgs, requireIntArgs, requireBvArgs, checkSignature,
-      arrowSig?, requireArity, lookupLocal,
+      inferTerm.inferApp, insertSort, insertFun, checkSignature,
+      arrowSig?, lookupLocal, testerCtor?,
       validateStringLiteral, isKnownTheoryOperator, isModeledTheoryOperator,
+      Theory.current_inferApp?, Theory.inferCoreApp, Theory.inferIntApp,
+      Theory.requireArity, Theory.requireSort,
+      Theory.requireSame, Theory.requireArgsOfSort, Theory.requireBoolArgs,
+      Theory.requireIntArgs,
+      Theory.knownContainsIdent, Theory.coreContainsIdent,
+      Theory.intContainsIdent, Theory.syntaxContainsIdent,
+      Theory.current_isKnownSortCtor, Theory.current_isModeledSortCtor,
+      Theory.current_sortArity_bool, Theory.current_sortArity_int,
+      Theory.current_sortArity_string, Theory.current_sortArity_array,
+      Theory.current_sortArity_bitvec,
+      Theory.coreSortArity?, Theory.intSortArity?,
+      Theory.coreSig, Theory.intSig, Theory.syntaxSig,
+      Theory.Sig.ofClassifiers, Theory.Sig.containsSortCtor,
       boolSort, intSort, stringSort, bitvecSort,
+      Literal.sort,
       Pure.pure, Bind.bind, Functor.map, Except.pure, Except.bind, Except.map,
-      Term.symbApp] <;> rfl)
+      Term.symbApp] <;> try rfl)
 
 /-- Kernel-checked regression for the smallest unsatisfiable script. -/
 theorem modeledScriptWellTyped_assertFalse :

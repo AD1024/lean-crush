@@ -151,6 +151,14 @@ inductive Literal where
   | bool   : Bool → Literal
   deriving BEq, Inhabited, Repr
 
+/-- SMT sort of a literal. Keeping this with the syntax makes the typing rule
+available to both the checker and semantic theory declarations. -/
+def Literal.sort : Literal → SSort
+  | .bool _ => boolSort
+  | .num _ => intSort
+  | .str _ => stringSort
+  | .bitvec width _ => bitvecSort width
+
 mutual
   /-- SMT terms. De Bruijn indices are used for `forall`/`exists`/`let`-bound
   variables (`bvar`). Free symbols are `app`s with an empty argument array. -/

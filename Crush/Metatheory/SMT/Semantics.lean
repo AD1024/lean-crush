@@ -17,13 +17,6 @@ equations. Lambda terms remain outside this first-order semantic fragment.
 
 namespace Crush.SMT
 
-/-- Sort assigned to a literal by the supported fragment. -/
-def Literal.sort : Literal → SSort
-  | .bool _ => boolSort
-  | .num _ => intSort
-  | .str _ => stringSort
-  | .bitvec width _ => bitvecSort width
-
 /-- A relational first-order SMT model.  `apply` is the graph of user symbols;
 the evaluation relation below interprets logical built-ins directly. -/
 structure Model where
