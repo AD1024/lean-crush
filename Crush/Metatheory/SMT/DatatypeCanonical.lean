@@ -1010,7 +1010,7 @@ theorem command_sound {source : Model signature}
     (SMT.model fo
       (canonicalModel source)).SatisfiesCommand
       (command block data) := by
-  exact ⟨supported represented.wf law.productive, data_hold law represented⟩
+  exact data_hold law represented
 
 /-- Every command described by a datatype environment is valid in the one
 shared raw model. -/

@@ -748,8 +748,6 @@ theorem wfDefs_valid_of_guard
     (functional : Crush.SMT.ApplyUnique
       (SMT.modelWith guarding.encoding target extra))
     (guardName binder : DataRef block → String)
-    (nameInj : Function.Injective guardName)
-    (notBuiltin : ∀ data, Crush.SMT.NotBuiltin (.symb (guardName data)))
     (hasType : ∀ data, Crush.SMT.SymbolHasType
       (SMT.modelWith guarding.encoding target extra) (.symb (guardName data))
       [guarding.encoding.sort (.base data.decl.sort)]
@@ -766,43 +764,27 @@ theorem wfDefs_valid_of_guard
   subst fo
   let definitions := wfDefs (native := symbols.datatypeSymbols) guarding
     encoding guardName binder
-  change Crush.SMT.FunsRecSupported definitions ∧
-    Crush.SMT.FunsRecHold (SMT.modelWith guarding.encoding target extra)
-      definitions
-  constructor
-  · refine ⟨?_, ?_, ?_⟩
-    · intro empty
-      dsimp [definitions, wfDefs] at empty
-      have zero : arity = 0 := by
-        simpa using congrArg List.length empty
-      exact (Nat.ne_of_gt represented.wf.blockWF.nonempty) zero
-    · dsimp [definitions, wfDefs]
-      simp only [List.map_map, Function.comp_def, wfDef]
-      exact nodup_map (finRange_nodup arity) nameInj
-    · intro definition member
-      dsimp [definitions, wfDefs] at member
-      rw [List.mem_map] at member
-      rcases member with ⟨data, _, rfl⟩
-      exact notBuiltin data
-  · intro definition member
-    dsimp [definitions, wfDefs] at member
-    rw [List.mem_map] at member
-    rcases member with ⟨data, _, rfl⟩
-    apply SMT.wfDef_holds_core extra functional (hasType data) (applies data)
-    intro value
-    let valueEval : Crush.SMT.Eval (SMT.modelWith guarding.encoding target extra)
-        [.typed (.base data.decl.sort) value] (.bvar 0)
-        (.typed (.base data.decl.sort) value) := .bvar rfl
-    have evaluated := represented.guardParts_eval rfl semantics data (.bvar 0)
-      value valueEval
-    have equal := propext (represented.guardParts_iff_guard rfl correct data
-      (.bvar 0) value valueEval)
-    rw [equal] at evaluated
-    have partsEq := dataParts_parts (native := symbols.datatypeSymbols) data
-      (fun ref => encoding.name (.ctor data ref.index))
-      (fun ref => represented.flattenedTester_ident ref)
-      (.bvar 0) value valueEval
-    simpa [Representation.guardParts, partsEq] using evaluated
+  change Crush.SMT.FunctionDefinitionsHold
+    (SMT.modelWith guarding.encoding target extra) definitions
+  intro definition member
+  dsimp [definitions, wfDefs] at member
+  rw [List.mem_map] at member
+  rcases member with ⟨data, _, rfl⟩
+  apply SMT.wfDef_holds_core extra functional (hasType data) (applies data)
+  intro value
+  let valueEval : Crush.SMT.Eval (SMT.modelWith guarding.encoding target extra)
+      [.typed (.base data.decl.sort) value] (.bvar 0)
+      (.typed (.base data.decl.sort) value) := .bvar rfl
+  have evaluated := represented.guardParts_eval rfl semantics data (.bvar 0)
+    value valueEval
+  have equal := propext (represented.guardParts_iff_guard rfl correct data
+    (.bvar 0) value valueEval)
+  rw [equal] at evaluated
+  have partsEq := dataParts_parts (native := symbols.datatypeSymbols) data
+    (fun ref => encoding.name (.ctor data ref.index))
+    (fun ref => represented.flattenedTester_ident ref)
+    (.bvar 0) value valueEval
+  simpa [Representation.guardParts, partsEq] using evaluated
 
 /-- The complete mutual `define-funs-rec` command for one represented block is
 valid in the same guarded model as its native datatype declaration. -/
@@ -828,8 +810,6 @@ theorem wfDefs_valid
     (functional : Crush.SMT.ApplyUnique
       (SMT.modelWith fo (law.extend wf productive prior priorRel priorModels) extra))
     (guardName binder : DataRef block → String)
-    (nameInj : Function.Injective guardName)
-    (notBuiltin : ∀ data, Crush.SMT.NotBuiltin (.symb (guardName data)))
     (hasType : ∀ data, Crush.SMT.SymbolHasType
       (SMT.modelWith fo (law.extend wf productive prior priorRel priorModels) extra)
       (.symb (guardName data)) [fo.sort (.base data.decl.sort)] (fo.sort .bool))
@@ -847,32 +827,16 @@ theorem wfDefs_valid
   subst fo
   let definitions := wfDefs (native := symbols.datatypeSymbols) guarding
     encoding guardName binder
-  change Crush.SMT.FunsRecSupported definitions ∧
-    Crush.SMT.FunsRecHold
-      (SMT.modelWith guarding.encoding
-        (law.extend wf productive prior priorRel priorModels) extra)
-      definitions
-  constructor
-  · refine ⟨?_, ?_, ?_⟩
-    · intro empty
-      dsimp [definitions, wfDefs] at empty
-      have zero : arity = 0 := by
-        simpa using congrArg List.length empty
-      exact (Nat.ne_of_gt wf.nonempty) zero
-    · dsimp [definitions, wfDefs]
-      simp only [List.map_map, Function.comp_def, wfDef]
-      exact nodup_map (finRange_nodup arity) nameInj
-    · intro definition member
-      dsimp [definitions, wfDefs] at member
-      rw [List.mem_map] at member
-      rcases member with ⟨data, _, rfl⟩
-      exact notBuiltin data
-  · intro definition member
-    dsimp [definitions, wfDefs] at member
-    rw [List.mem_map] at member
-    rcases member with ⟨data, _, rfl⟩
-    exact wfDef_valid represented law rolesUnique wf productive priorRel priorModels
-      rfl semantics functional data (guardName data) (binder data)
-      (hasType data) (applies data)
+  change Crush.SMT.FunctionDefinitionsHold
+    (SMT.modelWith guarding.encoding
+      (law.extend wf productive prior priorRel priorModels) extra)
+    definitions
+  intro definition member
+  dsimp [definitions, wfDefs] at member
+  rw [List.mem_map] at member
+  rcases member with ⟨data, _, rfl⟩
+  exact wfDef_valid represented law rolesUnique wf productive priorRel priorModels
+    rfl semantics functional data (guardName data) (binder data)
+    (hasType data) (applies data)
 
 end Crush.Metatheory.SMT.Datatype

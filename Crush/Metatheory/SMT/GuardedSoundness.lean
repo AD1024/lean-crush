@@ -1459,30 +1459,62 @@ theorem guardedAssertions_valid (guarding : GuardedEncoding symbols)
         Crush.SMT.Command.assert (guarding.term formula) := by
     simpa [GuardedEncoding.assertions] using arrayMembership
   rcases List.mem_map.mp listMembership with ⟨formula, formulaMem, rfl⟩
-  constructor
-  · trivial
-  · have emptyRel : Env target
-        (FO.FamilyValuation.lift relation
-          (FO.Valuation.empty source.carriers)) [] := by
-      intro sort ref
-      nomatch ref
-    have evaluated := guardTerm_rel_eval guarding source target relation models
-      extra semantics formula (FO.Valuation.empty source.carriers) [] emptyRel
-    have formulaValid :
-        formula.denote source (FO.Valuation.empty source.carriers) :=
-      valid formula formulaMem
-    have truthEq :
-        formula.denote source (FO.Valuation.empty source.carriers) = True :=
-      propext ⟨fun _ => trivial, fun _ => formulaValid⟩
-    simp only [FO.CarrierRel.get, Guarded.SubsetRepresentation.refl, id_eq] at evaluated
-    rw [truthEq] at evaluated
-    change Crush.SMT.Eval (modelWith guarding.encoding target extra) []
-      (guarding.term formula) (.typed .bool True)
-    exact evaluated
+  have emptyRel : Env target
+      (FO.FamilyValuation.lift relation
+        (FO.Valuation.empty source.carriers)) [] := by
+    intro sort ref
+    nomatch ref
+  have evaluated := guardTerm_rel_eval guarding source target relation models
+    extra semantics formula (FO.Valuation.empty source.carriers) [] emptyRel
+  have formulaValid :
+      formula.denote source (FO.Valuation.empty source.carriers) :=
+    valid formula formulaMem
+  have truthEq :
+      formula.denote source (FO.Valuation.empty source.carriers) = True :=
+    propext ⟨fun _ => trivial, fun _ => formulaValid⟩
+  simp only [FO.CarrierRel.get, Guarded.SubsetRepresentation.refl, id_eq] at evaluated
+  rw [truthEq] at evaluated
+  change Crush.SMT.Eval (modelWith guarding.encoding target extra) []
+    (guarding.term formula) (.typed .bool True)
+  exact evaluated
 
-/-- Complete guarded model lifting. Native datatype commands, exact certified
-derived definitions, ordinary declarations, and guarded assertions all hold in
-one raw SMT model. -/
+/-- Native datatype commands, exact certified derived definitions, ordinary
+declarations, and guarded assertions all hold in the one explicitly induced
+SMT model. Keeping the witness visible lets later layers attach additional
+properties, such as standard integer semantics, without reconstructing this
+proof. -/
+theorem guarded_valid (guarding : GuardedEncoding symbols)
+    {derived : Array Command} {theory : FO.FamilyTheory symbols}
+    {commands : Array Command}
+    (represented : GuardedTheoryRepresentation guarding derived theory commands)
+    (source target : FO.FamilyModel symbols)
+    (relation : FO.CarrierRel source.carriers target.carriers)
+    (models : FO.ModelRel source target relation)
+    (valid : source.SatisfiesTheory theory)
+    (extra : ExtraGraph guarding.encoding target)
+    (semantics : guarding.Semantics target extra
+      (fun sort => (relation sort).guard))
+    (nativeValid : (modelWith guarding.encoding target extra).SatisfiesCommands
+      guarding.encoding.nativeCommands)
+    (derivedValid : (modelWith guarding.encoding target extra).SatisfiesCommands
+      derived) :
+    (modelWith guarding.encoding target extra).SatisfiesCommands commands := by
+  rcases represented with ⟨declarations, same⟩
+  apply ((modelWith guarding.encoding target extra).satisfiesCommands_congr same).2
+  simp only [GuardedEncoding.theory]
+  rw [Crush.SMT.Model.satisfiesCommands_append,
+    Crush.SMT.Model.satisfiesCommands_append]
+  refine ⟨nativeValid, derivedValid, ?_⟩
+  simp only [GuardedEncoding.theoryBody]
+  rw [Crush.SMT.Model.satisfiesCommands_append,
+    Crush.SMT.Model.satisfiesCommands_append]
+  exact ⟨⟨sortDeclarations_valid_with guarding.encoding target extra _,
+    declarations_valid_with guarding.encoding target extra declarations⟩,
+    guardedAssertions_valid guarding source target relation models extra
+      semantics theory valid⟩
+
+/-- Existential packaging of `guarded_valid` for callers that need only a
+countermodel and not its concrete construction. -/
 theorem guarded_lift (guarding : GuardedEncoding symbols)
     {derived : Array Command} {theory : FO.FamilyTheory symbols}
     {commands : Array Command}
@@ -1498,20 +1530,9 @@ theorem guarded_lift (guarding : GuardedEncoding symbols)
       guarding.encoding.nativeCommands)
     (derivedValid : (modelWith guarding.encoding target extra).SatisfiesCommands
       derived) :
-    ∃ smtModel : Crush.SMT.Model, smtModel.SatisfiesCommands commands := by
-  rcases represented with ⟨declarations, same⟩
-  refine ⟨modelWith guarding.encoding target extra,
-    ((modelWith guarding.encoding target extra).satisfiesCommands_congr same).2 ?_⟩
-  simp only [GuardedEncoding.theory]
-  rw [Crush.SMT.Model.satisfiesCommands_append,
-    Crush.SMT.Model.satisfiesCommands_append]
-  refine ⟨nativeValid, derivedValid, ?_⟩
-  simp only [GuardedEncoding.theoryBody]
-  rw [Crush.SMT.Model.satisfiesCommands_append,
-    Crush.SMT.Model.satisfiesCommands_append]
-  exact ⟨⟨sortDeclarations_valid_with guarding.encoding target extra _,
-    declarations_valid_with guarding.encoding target extra declarations⟩,
-    guardedAssertions_valid guarding source target relation models extra
-      semantics theory valid⟩
+    ∃ smtModel : Crush.SMT.Model, smtModel.SatisfiesCommands commands :=
+  ⟨modelWith guarding.encoding target extra,
+    guarded_valid guarding represented source target relation models valid extra
+      semantics nativeValid derivedValid⟩
 
 end Crush.Metatheory.SMT

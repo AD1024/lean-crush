@@ -1157,8 +1157,12 @@ mutual
       let body := (smt| (and $lengthWF
         $(SMT.Term.forallE #[(iName, intSort)] pointwise)))
       let wf ← reserveWfSymbol sortName
-      TranslateM.emitCommand (.defFun false wf #[(xName, sort)]
-        SMT.boolSort body)
+      let definition : SMT.FunDef := {
+        name := wf
+        args := #[(xName, sort)]
+        resSort := SMT.boolSort
+        body }
+      TranslateM.emitCommand (.defFun definition)
     return enc
 
   /-- Declare a supported inductive as an SMT datatype (idempotent); return its

@@ -607,9 +607,153 @@ example : boolModel ⊨ₛᶜ #[.setLogic "ALL", .checkSat] := by
     (commands := #[.setLogic "ALL"]) (command := .checkSat)
     logicValid (by trivial)
 
-example : ¬Command.Supported
-    (.defFun false "f" #[] boolSort (.lit (.bool true))) := by
-  simp [Command.Supported]
+private def trueDefinition : FunDef := {
+  name := "f"
+  args := #[]
+  resSort := boolSort
+  body := .lit (.bool true) }
+
+example : Command.Supported (.defFun trueDefinition) := by
+  trivial
+
+/-- Regression: a nonrecursive function definition has an ordinary satisfying
+model; it is not declared unsatisfiable by absence of a command semantics. -/
+private def definedBoolModel : Model :=
+  { boolModel with
+    apply := fun symbol arguments output =>
+      symbol = .symb "f" ∧ arguments = [] ∧ output = true }
+
+private theorem definedBoolModel_applyUnique : ApplyUnique definedBoolModel := by
+  intro symbol arguments left right leftApplied rightApplied
+  exact leftApplied.2.2.trans rightApplied.2.2.symm
+
+example : definedBoolModel.SatisfiesCommand (.defFun trueDefinition) := by
+  change trueDefinition.Holds definedBoolModel
+  constructor
+  · intro values typed
+    have valuesEq := ValuesTyped.eq_nil typed
+    subst values
+    refine ⟨true, trivial, ⟨rfl, rfl, rfl⟩, ?_⟩
+    intro other applied
+    exact applied.2.2
+  · intro values typed output
+    change ValuesTyped definedBoolModel [] values at typed
+    have valuesEq := ValuesTyped.eq_nil typed
+    subst values
+    change definedBoolModel.apply (.symb "f") [] output ↔
+      Eval definedBoolModel [] (.lit (.bool true)) output
+    rw [Eval.iff_eq definedBoolModel_applyUnique (Eval.boolLit true)]
+    simp [definedBoolModel, boolModel]
+
+example : ¬CommandsWellTyped #[.defFunsRec #[]] := by
+  change metatheoryScriptWellTyped #[.defFunsRec #[]] ≠ true
+  native_decide
+
+example : ¬CommandsUnsatisfiable #[.defFunsRec #[]] := by
+  intro unsat
+  exact (show ¬CommandsWellTyped #[.defFunsRec #[]] by
+    change metatheoryScriptWellTyped #[.defFunsRec #[]] ≠ true
+    native_decide) unsat.wellTyped
+
+example : CommandsUnsatisfiable #[.assert (.lit (.bool false))] := by
+  refine ⟨?_, ?_, ?_⟩
+  · intro command member
+    simp at member
+    subst command
+    trivial
+  · change metatheoryScriptWellTyped #[.assert (.lit (.bool false))] = true
+    native_decide
+  · intro model standard valid
+    have evaluated := valid (.assert (.lit (.bool false))) (by simp)
+    change Eval model [] (.lit (.bool false)) (model.bool true) at evaluated
+    have impossible : true = false :=
+      model.boolInjective (Eval.boolLit_iff.mp evaluated)
+    contradiction
+
+/-- The standard-model side condition is inhabited, so an empty script is not
+unsatisfiable by an empty-domain-of-models accident. -/
+example : ¬CommandsUnsatisfiable #[] := by
+  intro unsat
+  rcases standardModel_exists with ⟨model, standard⟩
+  exact unsat.noModel model standard model.satisfiesCommands_empty
+
+/-- Standard integer semantics prevents distinct numerals from collapsing in
+the relational model. -/
+example : CommandsUnsatisfiable #[.assert (smt| (= 0 1))] := by
+  refine ⟨?_, ?_, ?_⟩
+  · intro command member
+    simp at member
+    subst command
+    trivial
+  · change metatheoryScriptWellTyped #[.assert (smt| (= 0 1))] = true
+    native_decide
+  · intro model standard valid
+    have evaluated := valid (.assert (smt| (= 0 1))) (by simp)
+    change Eval model [] (smt| (= 0 1)) (model.bool true) at evaluated
+    rcases standard.integer with ⟨integers⟩
+    have different : model.literal (.num 0) ≠ model.literal (.num 1) := by
+      intro equal
+      apply (show (0 : Int) ≠ 1 by decide)
+      apply integers.int_injective
+      exact (integers.numeral 0).symm.trans (equal.trans (integers.numeral 1))
+    have expected : Eval model [] (smt| (= 0 1)) (model.bool false) :=
+      Eval.eqFalse
+        (Eval.literal (.num 0) (by intro boolean impossible; cases impossible))
+        (Eval.literal (.num 1) (by intro boolean impossible; cases impossible))
+        different
+    have impossible := evaluated.unique standard.applyUnique expected
+    exact Bool.noConfusion (model.boolInjective impossible)
+
+/-- Sort names are checked against the preceding declaration environment. -/
+example : ¬CommandsWellTyped
+    #[.declFun "x" #[] (.app (.symb "Undeclared") #[])] := by
+  change metatheoryScriptWellTyped
+    #[.declFun "x" #[] (.app (.symb "Undeclared") #[])] ≠ true
+  native_decide
+
+/-- The modeled fragment uses literal syntax for Boolean constants; otherwise
+the generic symbol graph could assign `true` or `false` an arbitrary value. -/
+example : ¬CommandsWellTyped #[.assert (.app (.symb "true") #[])] := by
+  change metatheoryScriptWellTyped
+    #[.assert (.app (.symb "true") #[])] ≠ true
+  native_decide
+
+/-- Regression: syntax coverage alone must not let contradictory sort uses in
+an invalid SMT script establish semantic unsatisfiability. -/
+example : ¬CommandsUnsatisfiable
+    #[.assert (.lit (.num 0)), .assert (smt| (not 0))] := by
+  intro unsat
+  have rejected :
+      metatheoryScriptWellTyped
+        #[.assert (.lit (.num 0)), .assert (smt| (not 0))] = false := by
+    native_decide
+  have accepted := unsat.wellTyped
+  change metatheoryScriptWellTyped
+    #[.assert (.lit (.num 0)), .assert (smt| (not 0))] = true at accepted
+  rw [rejected] at accepted
+  contradiction
+
+example : ¬AbstractCommandsUnsatisfiable
+    #[.assert (.lit (.num 0)), .assert (smt| (not 0))] := by
+  intro unsat
+  have rejected :
+      metatheoryScriptWellTyped
+        #[.assert (.lit (.num 0)), .assert (smt| (not 0))] = false := by
+    native_decide
+  have accepted := unsat.wellTyped
+  change metatheoryScriptWellTyped
+    #[.assert (.lit (.num 0)), .assert (smt| (not 0))] = true at accepted
+  rw [rejected] at accepted
+  contradiction
+
+example : ¬CommandsWellTyped #[.assert (.lam #[] (.lit (.bool true)))] := by
+  change metatheoryScriptWellTyped
+    #[.assert (.lam #[] (.lit (.bool true)))] ≠ true
+  native_decide
+
+example : ¬CommandsWellTyped #[.assert (.bvar 0)] := by
+  change metatheoryScriptWellTyped #[.assert (.bvar 0)] ≠ true
+  native_decide
 
 end Crush.SMT.Tests
 

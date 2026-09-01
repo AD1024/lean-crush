@@ -13,9 +13,10 @@ Design notes:
   additionally derive `Repr` everywhere so failures print structurally.
 * `Term` carries an optional annotation slot (`.annot`) used for `:named`
   bindings so we can recover unsat-core provenance without string surgery.
-* Higher-order function *values* never appear here — they are eliminated upstream
-  by the encoding layer (see `Crush/Translation/HOEncoding.lean`). This module is
-  deliberately first-order so that it maps 1:1 onto what solvers accept.
+* The default defunctionalizing pipeline removes higher-order function values
+  upstream (see `Crush/Translation/HOEncoding.lean`). Direct higher-order mode
+  may instead emit `Term.lam` for a capable backend. The proved lowering
+  metatheory selects the first-order subset explicitly.
 * The SMT sort type is named `SSort` (not `Sort`) to avoid clashing with Lean's
   universe keyword.
 -/
@@ -28,8 +29,9 @@ inductive Ident where
   | indexed : String → Array (String ⊕ Nat) → Ident
   deriving BEq, DecidableEq, Inhabited, Repr
 
-/-- An SMT sort: a bound variable (only inside `define-sort`) or an applied sort
-constructor `(S s₀ … sₙ)`. Nullary constructors render as bare symbols. -/
+/-- An SMT sort: a bound parameter in a parametric sort declaration or an
+applied sort constructor `(S s₀ … sₙ)`. Nullary constructors render as bare
+symbols. The proved monomorphic fragment never uses `bvar`. -/
 inductive SSort where
   | bvar : Nat → SSort
   | app  : Ident → Array SSort → SSort
@@ -166,7 +168,8 @@ structure DatatypeDecl where
   ctors  : Array CtorDecl
   deriving DecidableEq, Inhabited, Repr
 
-/-- One function in an SMT-LIB `define-funs-rec` command. -/
+/-- One SMT function definition, used either alone by `define-fun` or in a
+mutually recursive `define-funs-rec` group. -/
 structure FunDef where
   name    : String
   args    : Array (String × SSort)
@@ -179,10 +182,10 @@ inductive Command where
   | setLogic   : String → Command
   | setOption  : String → String → Command
   | declSort   : (name : String) → (arity : Nat) → Command
-  | defSort    : (name : String) → (params : Array String) → (body : SSort) → Command
   | declFun    : (name : String) → (argSorts : Array SSort) → (resSort : SSort) → Command
-  | defFun     : (rec_ : Bool) → (name : String) → (args : Array (String × SSort)) →
-                   (resSort : SSort) → (body : Term) → Command
+  /-- A nonrecursive SMT-LIB `define-fun`. Recursive definitions use
+      `defFunsRec`, including singleton recursive groups. -/
+  | defFun     : FunDef → Command
   | defFunsRec : Array FunDef → Command
   | declDatatypes : Array (String × Nat × DatatypeDecl) → Command
   | assert     : Term → Command

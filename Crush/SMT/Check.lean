@@ -14,61 +14,62 @@ the backend, where they surfaced as solver-specific parser errors. This pass che
 * the core Bool, Int, BitVec, String, and Array theory operators emitted by crush;
 * binder, `let`, lambda, assertion, and definition result sorts.
 
-Unknown undeclared symbols are left unclassified rather than rejected. Translation
-extensions may target additional SMT theories, so treating every symbol outside the
-core table as an error would make the public lowering API artificially closed.
+The ordinary `checkScript` entry point leaves unknown undeclared symbols
+unclassified. Translation extensions may target additional SMT theories, so treating
+every symbol outside the core table as an error would make the public lowering API
+artificially closed. `checkClosedScript` selects the stricter mode used by the
+metatheory: every referenced symbol must instead be a known theory operator, a local
+binder, or a preceding declaration.
 -/
 
 namespace Crush.SMT
+
+/-- Solver-defined operators recognized by the shared SMT checker. An
+identifier in this table cannot be redeclared as an uninterpreted function in
+the closed metatheory fragment. -/
+def isKnownTheoryOperator : Ident → Bool
+  | .symb name =>
+      #["true", "false", "=", "not", "=>", "and", "or", "xor",
+        "distinct", "ite", "+", "*", "-", "div", "mod", "<", "<=",
+        ">", ">=", "abs", "bvnot", "bvneg", "bvadd", "bvsub", "bvmul",
+        "bvand", "bvor", "bvxor", "bvudiv", "bvurem", "bvsdiv",
+        "bvsrem", "bvsmod", "bvshl", "bvlshr", "bvashr", "bvult",
+        "bvule", "bvugt", "bvuge", "bvslt", "bvsle", "bvsgt",
+        "bvsge", "concat", "bv2nat", "sbv_to_int", "str.len", "str.++",
+        "str.prefixof", "str.suffixof", "str.contains", "select", "store"]
+        |>.contains name
+  | .indexed name _ =>
+      #["int2bv", "extract", "zero_extend", "sign_extend", "rotate_left",
+        "rotate_right"] |>.contains name
+
+/-- Theory operators whose denotation is present in `Metatheory.SMT.Semantics`.
+Datatype constructors, selectors, and indexed testers are handled separately
+by datatype declarations rather than this fixed table. -/
+def isModeledTheoryOperator : Ident → Bool
+  | .symb name =>
+      #["=", "not", "=>", "and", "or", ">="] |>.contains name
+  | .indexed _ _ => false
+
+private structure CheckMode where
+  rejectUnknown : Bool
+  modeledTheoriesOnly : Bool
 
 private structure FunSig where
   args : Array SSort
   res  : SSort
 
-private structure SortAlias where
-  arity : Nat
-  body  : SSort
-
 private structure CheckEnv where
   funs : Std.HashMap String FunSig := {}
-  /-- `define-sort` aliases, expanded before sorts are compared. -/
-  sorts : Std.HashMap String SortAlias := {}
+  sorts : Std.HashMap String Nat := {}
 
 /-- A malformed command found by `checkScript`. -/
 structure SortError where
   commandIndex : Nat
   message      : String
-  deriving Inhabited, Repr
+  deriving DecidableEq, Inhabited, Repr
 
 instance : ToString SortError where
   toString e := s!"command {e.commandIndex}: {e.message}"
-
-/-- Expand `define-sort` aliases so a sort and its expansion compare equal.
-
-`fuel` bounds the walk; a script that defines a cyclic alias stops rather than looping. -/
-private partial def expandSort (env : CheckEnv) (fuel : Nat) : SSort → SSort
-  | .app id args =>
-    let args := args.map (expandSort env fuel)
-    match fuel, id with
-    | fuel + 1, .symb name =>
-      match env.sorts.get? name with
-      | some alias =>
-        if args.size == alias.arity then
-          expandSort env fuel (instantiateSort alias.body args)
-        else
-          .app id args
-      | none => .app id args
-    | _, _ => .app id args
-  | s => s
-where
-  instantiateSort (body : SSort) (args : Array SSort) : SSort :=
-    match body with
-    | .bvar i => args[i]?.getD body
-    | .app id nested => .app id (nested.map (instantiateSort · args))
-
-/-- Alias-expanding entry point for the fixed alias depth the checker allows. -/
-private def resolveSort (env : CheckEnv) (s : SSort) : SSort :=
-  expandSort env 32 s
 
 private def arrowSig? : SSort → Option FunSig
   | .app (.symb "->") parts =>
@@ -80,12 +81,58 @@ private def bvWidth? : SSort → Option Nat
   | .app (.indexed "BitVec" #[.inr width]) #[] => some width
   | _ => none
 
-private def lookupLocal (locals : List (String × SSort)) (name : String) : Option SSort :=
-  (locals.find? fun entry => entry.1 == name).map (·.2)
-
 private def requireArity (name : String) (actual expected : Nat) : Except String Unit :=
   if actual == expected then pure ()
   else throw s!"`{name}` expects {expected} argument(s), got {actual}"
+
+private def builtinSortArity? : Ident → Option Nat
+  | .symb "Bool" | .symb "Int" | .symb "String" => some 0
+  | .symb "Array" => some 2
+  | .symb "->" => none
+  | .indexed "BitVec" #[.inr _] => some 0
+  | _ => none
+
+private partial def checkSort (mode : CheckMode) (env : CheckEnv)
+    (sort : SSort) : Except String Unit := do
+  match sort with
+  | .bvar _ =>
+      if mode.modeledTheoriesOnly then
+        throw "sort variables are outside the modeled monomorphic SMT fragment"
+  | .app identifier arguments =>
+      for argument in arguments do
+        checkSort mode env argument
+      if identifier == .symb "->" then
+        if mode.modeledTheoriesOnly then
+          throw "function sorts are outside the modeled first-order SMT fragment"
+        if arguments.size < 2 then
+          throw "function sort expects at least one domain and one codomain"
+        return
+      if let some arity := builtinSortArity? identifier then
+        requireArity s!"sort `{identifier}`" arguments.size arity
+        return
+      match identifier with
+      | .symb name =>
+          if let some arity := env.sorts.get? name then
+            requireArity s!"sort `{name}`" arguments.size arity
+          else if mode.rejectUnknown then
+            throw s!"undeclared sort `{name}`"
+      | .indexed _ _ =>
+          if mode.rejectUnknown then
+            throw s!"unknown indexed sort `{identifier}`"
+
+private def insertSort (mode : CheckMode) (env : CheckEnv)
+    (name : String) (arity : Nat) : Except String CheckEnv := do
+  if (builtinSortArity? (.symb name)).isSome || name == "->" then
+    throw s!"built-in sort `{name}` cannot be redeclared"
+  if env.sorts.contains name then
+    if mode.rejectUnknown then
+      throw s!"sort `{name}` is declared more than once"
+    else
+      return env
+  return { env with sorts := env.sorts.insert name arity }
+
+private def lookupLocal (locals : List (String × SSort)) (name : String) : Option SSort :=
+  (locals.find? fun entry => entry.1 == name).map (·.2)
 
 private def requireSort (where_ : String) (actual : Option SSort) (expected : SSort) :
     Except String Unit :=
@@ -138,61 +185,72 @@ private def checkSignature (name : String) (sig : FunSig)
   for i in [0:args.size] do
     requireSort s!"argument {i + 1} of `{name}`" args[i]! sig.args[i]!
 
-private partial def inferTerm (env : CheckEnv) (locals : List (String × SSort))
+private partial def inferTerm (mode : CheckMode) (env : CheckEnv)
+    (locals : List (String × SSort))
     (bvars : List SSort) (term : Term) : Except String (Option SSort) := do
   match term with
   | .lit (.str value) =>
+    if mode.modeledTheoriesOnly then
+      throw "string literals are outside the modeled SMT fragment"
     validateStringLiteral value
     return some stringSort
   | .lit (.num _) => return some intSort
-  | .lit (.bitvec width _) => return some (.app (.indexed "BitVec" #[.inr width]) #[])
+  | .lit (.bitvec width _) =>
+    if mode.modeledTheoriesOnly then
+      throw "bit-vector literals are outside the modeled SMT fragment"
+    return some (.app (.indexed "BitVec" #[.inr width]) #[])
   | .lit (.bool _) => return some boolSort
   | .bvar index =>
     match bvars[index]? with
     | some sort => return some sort
     | none => throw s!"unbound SMT de Bruijn variable `{index}`"
   | .app ident args =>
-    let argSorts ← args.mapM (inferTerm env locals bvars)
-    inferApp env locals ident argSorts
+    let argSorts ← args.mapM (inferTerm mode env locals bvars)
+    inferApp mode env locals ident argSorts
   | .letE bindings body =>
     let mut bindingSorts : Array (String × SSort) := #[]
     for (name, value) in bindings do
-      if let some sort ← inferTerm env locals bvars value then
+      if let some sort ← inferTerm mode env locals bvars value then
         bindingSorts := bindingSorts.push (name, sort)
-    inferTerm env (bindingSorts.toList.reverse ++ locals) bvars body
+    inferTerm mode env (bindingSorts.toList.reverse ++ locals) bvars body
   | .forallE binders body =>
-    let binders := binders.map fun (n, s) => (n, resolveSort env s)
-    let bodySort ← inferTerm env (binders.toList.reverse ++ locals)
+    for (_, sort) in binders do checkSort mode env sort
+    let bodySort ← inferTerm mode env (binders.toList.reverse ++ locals)
       (binders.toList.reverse.map (·.2) ++ bvars) body
     requireSort "body of `forall`" bodySort boolSort
     return some boolSort
   | .existsE binders body =>
-    let binders := binders.map fun (n, s) => (n, resolveSort env s)
-    let bodySort ← inferTerm env (binders.toList.reverse ++ locals)
+    for (_, sort) in binders do checkSort mode env sort
+    let bodySort ← inferTerm mode env (binders.toList.reverse ++ locals)
       (binders.toList.reverse.map (·.2) ++ bvars) body
     requireSort "body of `exists`" bodySort boolSort
     return some boolSort
   | .lam binders body =>
-    let binders := binders.map fun (n, s) => (n, resolveSort env s)
-    let bodySort ← inferTerm env (binders.toList.reverse ++ locals)
+    if mode.modeledTheoriesOnly then
+      throw "lambda terms are outside the modeled first-order SMT fragment"
+    for (_, sort) in binders do checkSort mode env sort
+    let bodySort ← inferTerm mode env (binders.toList.reverse ++ locals)
       (binders.toList.reverse.map (·.2) ++ bvars) body
     return bodySort.map fun result =>
       .app (.symb "->") (binders.map (·.2) |>.push result)
   | .annot body attrs =>
-    let sort ← inferTerm env locals bvars body
+    let sort ← inferTerm mode env locals bvars body
     for attr in attrs do
       if let .pattern terms := attr then
         for pattern in terms do
-          let _ ← inferTerm env locals bvars pattern
+          let _ ← inferTerm mode env locals bvars pattern
     return sort
 where
-  inferApp (env : CheckEnv) (locals : List (String × SSort)) (ident : Ident)
+  inferApp (mode : CheckMode) (env : CheckEnv)
+      (locals : List (String × SSort)) (ident : Ident)
       (args : Array (Option SSort)) : Except String (Option SSort) := do
     match ident with
     | .indexed "is" #[.inl ctor] =>
       requireArity s!"(_ is {ctor})" args.size 1
       if let some sig := env.funs.get? ctor then
         requireSort s!"argument of tester for `{ctor}`" args[0]! sig.res
+      else if mode.rejectUnknown then
+        throw s!"tester references undeclared constructor `{ctor}`"
       return some boolSort
     | .indexed "int2bv" #[.inr width] =>
       requireArity "int2bv" args.size 1
@@ -212,9 +270,17 @@ where
         requireArity op args.size 1
         return (← requireBvArgs op args).map fun width =>
           .app (.indexed "BitVec" #[.inr width]) #[]
+      if mode.modeledTheoriesOnly then
+        throw s!"`{ident}` is outside the modeled SMT theory fragment"
+      if mode.rejectUnknown then throw s!"unknown indexed symbol `{ident}`"
       return none
-    | .indexed _ _ => return none
+    | .indexed _ _ =>
+      if mode.rejectUnknown then throw s!"unknown indexed symbol `{ident}`"
+      return none
     | .symb name =>
+      if mode.modeledTheoriesOnly && isKnownTheoryOperator ident &&
+          !isModeledTheoryOperator ident then
+        throw s!"`{name}` is outside the modeled SMT theory fragment"
       if let some localSort := lookupLocal locals name then
         if args.isEmpty then return some localSort
         let some sig := arrowSig? localSort
@@ -226,6 +292,8 @@ where
         return some sig.res
       match name with
       | "true" | "false" =>
+        if mode.modeledTheoriesOnly then
+          throw s!"`{name}` is outside the modeled SMT term fragment; use a Boolean literal"
         requireArity name args.size 0
         return some boolSort
       | "not" =>
@@ -336,73 +404,121 @@ where
           return some array
         | some sort => throw s!"first argument of `store` has non-array sort `{sort}`"
         | none => return none
-      | _ => return none
+      | _ =>
+        if mode.rejectUnknown then throw s!"undeclared or unknown symbol `{name}`"
+        return none
 
-private def insertFun (env : CheckEnv) (name : String) (sig : FunSig) :
+private def insertFun (mode : CheckMode) (env : CheckEnv) (name : String)
+    (sig : FunSig) :
     Except String CheckEnv :=
-  let sig : FunSig := { args := sig.args.map (resolveSort env), res := resolveSort env sig.res }
+  if mode.modeledTheoriesOnly && isKnownTheoryOperator (.symb name) then
+    throw s!"theory operator `{name}` cannot be redeclared"
+  else
   match env.funs.get? name with
   | none => pure { env with funs := env.funs.insert name sig }
   | some previous =>
-    if previous.args == sig.args && previous.res == sig.res then pure env
+    if mode.rejectUnknown then
+      throw s!"symbol `{name}` is declared more than once"
+    else if previous.args == sig.args && previous.res == sig.res then pure env
     else throw s!"symbol `{name}` is redeclared at incompatible signatures"
 
-private def checkCommand (env : CheckEnv) (command : Command) : Except String CheckEnv := do
+private def checkCommand (mode : CheckMode) (env : CheckEnv)
+    (command : Command) : Except String CheckEnv := do
   match command with
+  | .declSort name arity =>
+    insertSort mode env name arity
   | .declFun name args res =>
-    insertFun env name { args, res }
-  | .defFun recursive name args res body =>
-    let env ← if recursive then insertFun env name { args := args.map (·.2), res } else pure env
-    let args := args.map fun (n, s) => (n, resolveSort env s)
-    let res := resolveSort env res
-    let bodySort ← inferTerm env args.toList.reverse (args.toList.reverse.map (·.2)) body
-    requireSort s!"body of definition `{name}`" bodySort res
-    if recursive then pure env else insertFun env name { args := args.map (·.2), res }
+    for sort in args do checkSort mode env sort
+    checkSort mode env res
+    insertFun mode env name { args, res }
+  | .defFun definition =>
+    for (_, sort) in definition.args do checkSort mode env sort
+    checkSort mode env definition.resSort
+    let bodySort ← inferTerm mode env definition.args.toList.reverse
+      (definition.args.toList.reverse.map (·.2)) definition.body
+    requireSort s!"body of definition `{definition.name}`" bodySort
+      definition.resSort
+    insertFun mode env definition.name {
+      args := definition.args.map (·.2)
+      res := definition.resSort }
   | .defFunsRec defs =>
+    if mode.modeledTheoriesOnly && defs.isEmpty then
+      throw "`define-funs-rec` requires at least one definition"
     let mut env := env
     for d in defs do
-      env ← insertFun env d.name { args := d.args.map (·.2), res := d.resSort }
+      for (_, sort) in d.args do checkSort mode env sort
+      checkSort mode env d.resSort
+      env ← insertFun mode env d.name { args := d.args.map (·.2), res := d.resSort }
     for d in defs do
-      let args := d.args.map fun (n, s) => (n, resolveSort env s)
-      let res := resolveSort env d.resSort
       let bodySort ←
-        inferTerm env args.toList.reverse (args.toList.reverse.map (·.2)) d.body
-      requireSort s!"body of recursive definition `{d.name}`" bodySort res
+        inferTerm mode env d.args.toList.reverse
+          (d.args.toList.reverse.map (·.2)) d.body
+      requireSort s!"body of recursive definition `{d.name}`" bodySort d.resSort
     return env
   | .declDatatypes datatypes =>
     let mut env := env
+    -- Mutually recursive datatype sorts enter scope together.
+    for (sortName, arity, _) in datatypes do
+      env ← insertSort mode env sortName arity
     -- Constructors must all be in scope before selectors of recursive datatypes
     -- are checked.
     for (sortName, _, datatype) in datatypes do
       let sort := SSort.app (.symb sortName) #[]
       for ctor in datatype.ctors do
-        env ← insertFun env ctor.name { args := ctor.selDecls.map (·.2), res := sort }
+        for (_, fieldSort) in ctor.selDecls do checkSort mode env fieldSort
+        env ← insertFun mode env ctor.name { args := ctor.selDecls.map (·.2), res := sort }
     for (sortName, _, datatype) in datatypes do
       let sort := SSort.app (.symb sortName) #[]
       for ctor in datatype.ctors do
         for (selector, result) in ctor.selDecls do
-          env ← insertFun env selector { args := #[sort], res := result }
+          env ← insertFun mode env selector { args := #[sort], res := result }
     return env
   | .assert term =>
-    let sort ← inferTerm env [] [] term
+    let sort ← inferTerm mode env [] [] term
     requireSort "asserted term" sort boolSort
     return env
   | .echo value =>
     validateStringLiteral value
     return env
-  | .defSort name params body =>
-    return { env with sorts := env.sorts.insert name { arity := params.size, body } }
-  | .setLogic _ | .setOption _ _ | .declSort _ _
+  | .setLogic _ | .setOption _ _
   | .checkSat | .getModel | .getProof | .getUnsatCore | .exit =>
     return env
 
 /-- Validate declaration applications and core-theory sorts in an SMT command
 sequence. The returned command index points into the supplied array. -/
-def checkScript (commands : Array Command) : Except SortError Unit := do
+private def checkScriptWith (mode : CheckMode)
+    (commands : Array Command) : Except SortError Unit := do
   let mut env : CheckEnv := {}
   for i in [0:commands.size] do
-    match checkCommand env commands[i]! with
+    match checkCommand mode env commands[i]! with
     | .ok next => env := next
     | .error message => throw { commandIndex := i, message }
+
+/-- Validate the open, extensible SMT IR used by the translator. Unknown theory
+symbols remain unclassified so registered translation extensions can introduce
+operators outside the built-in table. -/
+def checkScript (commands : Array Command) : Except SortError Unit :=
+  checkScriptWith { rejectUnknown := false, modeledTheoriesOnly := false } commands
+
+/-- Validate a closed SMT script. Unlike `checkScript`, this rejects every
+unknown or use-before-declaration symbol. The metatheory uses this judgment so
+an invalid SMT script cannot establish unsatisfiability merely because its
+untyped terms have incompatible sorts. -/
+def checkClosedScript (commands : Array Command) : Except SortError Unit :=
+  checkScriptWith { rejectUnknown := true, modeledTheoriesOnly := false } commands
+
+/-- Computable success flag for `checkClosedScript`, used when a checked
+translation must retain the validation result as proof data. -/
+def closedScriptWellSorted (commands : Array Command) : Bool :=
+  (checkClosedScript commands).isOk
+
+/-- Type-check a closed command sequence in exactly the first-order theory
+fragment whose denotation is mechanized by `Crush.Metatheory.SMT`. -/
+def checkMetatheoryScript (commands : Array Command) : Except SortError Unit :=
+  checkScriptWith { rejectUnknown := true, modeledTheoriesOnly := true } commands
+
+/-- Computable success flag for `checkMetatheoryScript`. -/
+def metatheoryScriptWellTyped (commands : Array Command) : Bool :=
+  (checkMetatheoryScript commands).isOk
 
 end Crush.SMT

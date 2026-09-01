@@ -1,4 +1,4 @@
-import Crush.SMT.Syntax
+import Crush.SMT.Check
 
 /-!
 # Semantics of the verified SMT fragment
@@ -10,10 +10,9 @@ the built-in Boolean connectives, equality, quantifiers, and simultaneous lets
 their standard meaning.
 
 Only the command forms needed by the proved representation path are classified
-as supported. Native datatypes have their free-algebra semantics, and
-`define-funs-rec` has a simultaneous typed graph-equation semantics for the
-emitted datatype guards. Nonrecursive definitions and lambdas remain outside
-the command fragment instead of receiving a vacuous semantics.
+as supported. Native datatypes have their free-algebra semantics, and both
+singleton and mutually recursive function definitions use typed graph
+equations. Lambda terms remain outside this first-order semantic fragment.
 -/
 
 namespace Crush.SMT
@@ -37,6 +36,39 @@ structure Model where
   literal : Literal → Value
   literalTyped : ∀ lit, inSort (Literal.sort lit) (literal lit)
   apply : Ident → List Value → Value → Prop
+
+/-- The standard interpretations needed by the modeled SMT fragment.
+
+The raw `Model` structure is intentionally useful for intermediate
+countermodel constructions, but by itself it is not an SMT-LIB model: its
+Boolean carrier may contain extra values, numerals may collapse, and `>=` may
+be an arbitrary graph. `Standard` closes exactly those degrees of freedom used
+by the SMT subset covered by the soundness theorem. Other SMT theories remain outside
+`Command.Supported` until an analogous interpretation is added here. -/
+structure Model.IntegerInterpretation (model : Model) where
+  int : Int → model.Value
+  int_typed : ∀ value, model.inSort intSort (int value)
+  int_injective : Function.Injective int
+  int_exhaustive : ∀ value, model.inSort intSort value →
+    ∃ integer, value = int integer
+  numeral : ∀ value : Nat, model.literal (.num value) = int value
+  ge : ∀ left right output,
+    model.apply (.symb ">=") [int left, int right] output ↔
+      (right ≤ left ∧ output = model.bool true) ∨
+        (¬right ≤ left ∧ output = model.bool false)
+
+/-- A raw model is standard for the currently certified SMT theories when its
+Boolean carrier is exactly two-valued, it carries a standard integer
+interpretation, and every identifier graph is single-valued. `Nonempty` keeps
+this predicate proof-valued while retaining the integer embedding needed to
+state the laws. -/
+structure Model.Standard (model : Model) : Prop where
+  bool_exhaustive : ∀ value, model.inSort boolSort value →
+    ∃ boolean, value = model.bool boolean
+  integer : Nonempty model.IntegerInterpretation
+  apply_unique : ∀ symbol values left right,
+    model.apply symbol values left → model.apply symbol values right →
+      left = right
 
 /-- A list of semantic values has the listed SMT sorts in the same order. -/
 inductive ValuesTyped (model : Model) : List SSort → List model.Value → Prop where
@@ -84,6 +116,136 @@ def ApplyUnique (model : Model) : Prop :=
   ∀ symbol values left right,
     model.apply symbol values left → model.apply symbol values right →
       left = right
+
+/-- A standard SMT model interprets each function symbol as a function. -/
+theorem Model.Standard.applyUnique {model : Model} (standard : model.Standard) :
+    ApplyUnique model := standard.apply_unique
+
+/-! ## A concrete standard-model witness -/
+
+/-- Values used only to show that the standard-model class is inhabited.
+Uninterpreted sorts receive one sort-indexed value. -/
+private inductive StandardWitnessValue where
+  | boolean : Bool → StandardWitnessValue
+  | integer : Int → StandardWitnessValue
+  | uninterpreted : SSort → StandardWitnessValue
+
+private def StandardWitnessValue.InSort (sort : SSort) :
+    StandardWitnessValue → Prop
+  | .boolean _ => sort = boolSort
+  | .integer _ => sort = intSort
+  | .uninterpreted declared =>
+      sort = declared ∧ sort ≠ boolSort ∧ sort ≠ intSort
+
+private def standardWitnessLiteral : Literal → StandardWitnessValue
+  | .bool value => .boolean value
+  | .num value => .integer value
+  | .str _ => .uninterpreted stringSort
+  | .bitvec width _ => .uninterpreted (bitvecSort width)
+
+private def standardWitnessApply (identifier : Ident)
+    (arguments : List StandardWitnessValue) (output : StandardWitnessValue) : Prop :=
+  ∃ left right : Int,
+    identifier = .symb ">=" ∧
+    arguments = [.integer left, .integer right] ∧
+    output = .boolean (decide (right ≤ left))
+
+/-- A concrete model of the standard Boolean and integer laws. Its only
+interpreted application symbol is integer `>=`: logical connectives and
+equality are handled directly by `Eval`, while arithmetic operators such as
+`+` and bit-vector operators are outside the SMT subset currently covered by
+the soundness theorem.
+Declarations add their own typed graphs in the model constructions used by the
+lowering proof. -/
+private def standardWitnessModel : Model where
+  Value := StandardWitnessValue
+  inSort := StandardWitnessValue.InSort
+  sortNonempty := by
+    intro sort
+    by_cases boolEq : sort = boolSort
+    · exact ⟨.boolean false, boolEq⟩
+    by_cases intEq : sort = intSort
+    · exact ⟨.integer 0, intEq⟩
+    · exact ⟨.uninterpreted sort, rfl, boolEq, intEq⟩
+  bool := .boolean
+  boolTyped := by intro value; rfl
+  boolInjective := by intro left right equal; injection equal
+  literal := standardWitnessLiteral
+  literalTyped := by
+    intro literal
+    cases literal <;>
+      simp [standardWitnessLiteral, StandardWitnessValue.InSort,
+        Literal.sort, stringSort, boolSort, intSort, bitvecSort]
+  apply := standardWitnessApply
+
+private theorem boolSort_ne_intSort : boolSort ≠ intSort := by
+  native_decide
+
+/-- Standard SMT models exist independently of any command sequence. This
+rules out vacuity caused by an empty model class. -/
+theorem standardModel_exists : ∃ model : Model, model.Standard := by
+  refine ⟨standardWitnessModel, ?_⟩
+  refine {
+    bool_exhaustive := ?_
+    integer := ?_
+    apply_unique := ?_ }
+  · intro value typed
+    cases value with
+    | boolean value => exact ⟨value, rfl⟩
+    | integer value => exact False.elim (boolSort_ne_intSort typed)
+    | uninterpreted sort => simp [standardWitnessModel,
+        StandardWitnessValue.InSort] at typed
+  · refine ⟨{
+      int := .integer
+      int_typed := by intro value; rfl
+      int_injective := by intro left right equal; injection equal
+      int_exhaustive := ?_
+      numeral := by intro value; rfl
+      ge := ?_ }⟩
+    · intro value typed
+      cases value with
+      | boolean value => exact False.elim (boolSort_ne_intSort typed.symm)
+      | integer value => exact ⟨value, rfl⟩
+      | uninterpreted sort => simp [standardWitnessModel,
+          StandardWitnessValue.InSort] at typed
+    · intro left right output
+      constructor
+      · intro applied
+        change standardWitnessApply (.symb ">=")
+          [.integer left, .integer right] output at applied
+        rcases applied with
+          ⟨actualLeft, actualRight, identifierEq, argumentsEq, outputEq⟩
+        injection argumentsEq with leftEq restEq
+        injection restEq with rightEq tailEq
+        injection leftEq with leftIntEq
+        injection rightEq with rightIntEq
+        subst actualLeft
+        subst actualRight
+        by_cases ordered : right ≤ left
+        · exact Or.inl ⟨ordered,
+            by simpa [standardWitnessModel, ordered] using outputEq⟩
+        · exact Or.inr ⟨ordered,
+            by simpa [standardWitnessModel, ordered] using outputEq⟩
+      · intro standardOutput
+        change standardWitnessApply (.symb ">=")
+          [.integer left, .integer right] output
+        refine ⟨left, right, rfl, rfl, ?_⟩
+        rcases standardOutput with ⟨ordered, rfl⟩ | ⟨notOrdered, rfl⟩
+        · simp [standardWitnessModel, ordered]
+        · simp [standardWitnessModel, notOrdered]
+  · intro identifier arguments left right leftApplied rightApplied
+    rcases leftApplied with
+      ⟨leftArg, rightArg, identifierEq, argumentsEq, leftEq⟩
+    rcases rightApplied with
+      ⟨otherLeft, otherRight, otherIdentifierEq, otherArgumentsEq, rightEq⟩
+    rw [argumentsEq] at otherArgumentsEq
+    injection otherArgumentsEq with leftArgEq restEq
+    injection restEq with rightArgEq tailEq
+    injection leftArgEq with leftIntEq
+    injection rightArgEq with rightIntEq
+    subst otherLeft
+    subst otherRight
+    exact leftEq.trans rightEq.symm
 
 /-- Semantic values are the images of the listed Boolean values. -/
 inductive BoolValues (model : Model) : List model.Value → List Bool → Prop where
@@ -276,6 +438,32 @@ mutual
         Eval model environment term value → EvalList model environment terms values →
           EvalList model environment (term :: terms) (value :: values)
 end
+
+/-- Term attributes do not change evaluation. -/
+theorem Eval.annot_iff {model : Model} {environment : List model.Value}
+    {term : Term} {attributes : Array Attr} {value : model.Value} :
+    Eval model environment (.annot term attributes) value ↔
+      Eval model environment term value := by
+  constructor
+  · intro evaluated
+    exact match evaluated with
+      | .annot bodyEval => bodyEval
+  · exact Eval.annot
+
+/-- Evaluation of a Boolean literal has its unique distinguished value without
+requiring any assumption about the user-symbol graph. -/
+theorem Eval.boolLit_iff {model : Model} {environment : List model.Value}
+    {boolean : Bool} {value : model.Value} :
+    Eval model environment (.lit (.bool boolean)) value ↔
+      value = model.bool boolean := by
+  constructor
+  · intro evaluated
+    exact match evaluated with
+      | .boolLit _ => rfl
+      | .literal _ notBool => False.elim (notBool boolean rfl)
+  · intro equal
+    subst value
+    exact Eval.boolLit boolean
 
 /-- Raw evaluation is deterministic whenever the model's user-symbol graph is
 single-valued. The proof covers the complete supported term semantics,
@@ -493,22 +681,12 @@ def DatatypesHold (model : Model)
       fieldSort ∈ datatypeSorts datatypes →
       rank fieldValue < rank result
 
-/-! ## Recursive function definitions -/
+/-! ## Function definitions -/
 
-/-- Syntactic boundary for the recursive definitions used by the verified
-fragment. Definitions must form a nonempty, duplicate-free set of ordinary
-user symbols. Body typing is retained by the component-specific certificate
-that constructs the exact command. -/
-def FunsRecSupported (definitions : Array FunDef) : Prop :=
-  definitions.toList ≠ [] ∧
-  (definitions.toList.map fun definition => definition.name).Nodup ∧
-  ∀ definition ∈ definitions.toList,
-    NotBuiltin (.symb definition.name)
-
-/-- A raw recursive definition denotes a total typed graph satisfying its body
+/-- A raw function definition denotes a total typed graph satisfying its body
 equation. Arguments enter `Eval` nearest binder first, hence the reversal of
-their declaration-order values. Mutual recursion is interpreted through the
-same global `model.apply` graph used while evaluating every body. -/
+their declaration-order values. Recursive definitions are interpreted through
+the same global `model.apply` graph used while evaluating every body. -/
 def FunDef.Holds (model : Model) (definition : FunDef) : Prop :=
   SymbolHasType model (.symb definition.name)
     (definition.args.toList.map (·.2)) definition.resSort ∧
@@ -516,36 +694,50 @@ def FunDef.Holds (model : Model) (definition : FunDef) : Prop :=
     ∀ output, model.apply (.symb definition.name) values output ↔
       Eval model values.reverse definition.body output
 
-/-- Every member of one simultaneous recursive-definition command satisfies
-its equation in the shared model. -/
-def FunsRecHold (model : Model) (definitions : Array FunDef) : Prop :=
+/-- Every member of a function-definition group satisfies its equation in the
+shared model. A nonrecursive `define-fun` uses the singleton specialization. -/
+def FunctionDefinitionsHold (model : Model) (definitions : Array FunDef) : Prop :=
   ∀ definition ∈ definitions.toList, definition.Holds model
 
-/-- Commands admitted by the verified SMT fragment. -/
+/-- Semantic side conditions not expressible as ordinary SMT typing. The
+declaration-aware type checker handles terms, scopes, symbol signatures, and
+the distinction between recursive and nonrecursive definitions. Native
+datatypes additionally require the free-algebra side conditions below. -/
 def Command.Supported : Command → Prop
-  | .setLogic _ | .setOption _ _ | .declSort _ _ | .declFun _ _ _ |
-      .assert _ | .checkSat | .getModel | .getProof | .getUnsatCore |
-      .echo _ | .exit => True
-  | .defSort _ _ _ | .defFun _ _ _ _ _ => False
-  | .defFunsRec definitions => FunsRecSupported definitions
   | .declDatatypes datatypes => DatatypesSupported datatypes
+  | _ => True
 
-/-- Semantic condition imposed by one supported command.  Administrative and
-solver-query commands do not constrain a model. -/
+/-- Semantic condition imposed by one command. Static membership in the modeled
+fragment is tracked separately by `Command.Supported`; it is a required field of
+`CommandsUnsatisfiable`, not a way to make command satisfaction false. -/
 def Model.SatisfiesCommand (model : Model) : Command → Prop
-  | command@(.declFun name arguments result) =>
-      command.Supported ∧ SymbolHasType model (.symb name) arguments.toList result
-  | command@(.assert formula) => command.Supported ∧ Holds model [] formula
-  | command@(.declDatatypes datatypes) =>
-      command.Supported ∧ DatatypesHold model datatypes
-  | command@(.defFunsRec definitions) =>
-      command.Supported ∧ FunsRecHold model definitions
-  | command => command.Supported
+  | .declFun name arguments result =>
+      SymbolHasType model (.symb name) arguments.toList result
+  | .assert formula => Holds model [] formula
+  | .declDatatypes datatypes => DatatypesHold model datatypes
+  | .defFun definition => definition.Holds model
+  | .defFunsRec definitions => FunctionDefinitionsHold model definitions
+  | _ => True
 
 /-- Satisfaction of every command in an array by one global SMT model. The raw
 semantics is deliberately insensitive to order and repeated occurrences. -/
 def Model.SatisfiesCommands (model : Model) (commands : Array Command) : Prop :=
   ∀ command ∈ commands.toList, model.SatisfiesCommand command
+
+/-- Every command belongs to the explicitly modeled SMT fragment. Keeping this
+condition separate from model satisfaction prevents an unmodeled command from
+making a script appear unsatisfiable merely because its satisfaction predicate
+is false. -/
+def CommandsSupported (commands : Array Command) : Prop :=
+  ∀ command ∈ commands.toList, command.Supported
+
+/-- The concrete command sequence is accepted by the declaration-aware type
+checker for the modeled first-order SMT fragment. This judgment is
+order-sensitive, unlike `SameCommandSet`: it rejects unknown symbols,
+use-before-declaration, out-of-scope variables, ill-sorted terms, unsupported
+theory operators, and lambda syntax. -/
+def CommandsWellTyped (commands : Array Command) : Prop :=
+  Crush.SMT.metatheoryScriptWellTyped commands = true
 
 /-- Two arrays impose exactly the same semantic command obligations. Command
 order and duplicate occurrences are intentionally irrelevant here; concrete
@@ -579,12 +771,35 @@ scoped notation:50 model:51 " ⊨ₛ " formula:51 => Holds model [] formula
 scoped notation:50 model:51 " ⊨ₛᶜ " commands:51 =>
   Model.SatisfiesCommands model commands
 
-/-- Semantic unsatisfiability of the concrete command sequence. -/
-def CommandsUnsatisfiable (commands : Array Command) : Prop :=
-  ∀ model : Model, ¬model.SatisfiesCommands commands
+/-- A well-typed command sequence with no model in the unconstrained relational
+semantics. This internal notion is useful for component-level countermodel
+lemmas, but it is deliberately not identified with SMT-LIB unsatisfiability:
+`Model` alone does not fix interpreted theories. Requiring the same static
+checks as the external notion prevents an ill-formed script from establishing
+this stronger no-raw-model premise vacuously. -/
+structure AbstractCommandsUnsatisfiable (commands : Array Command) : Prop where
+  supported : CommandsSupported commands
+  wellTyped : CommandsWellTyped commands
+  noModel : ∀ model : Model, ¬model.SatisfiesCommands commands
+
+/-- A well-typed command sequence with no standard model.
+
+Both static fields are logically important. `supported` records the additional
+free-datatype conditions; `wellTyped` rejects malformed or semantically
+unmodeled syntax. `noModel` quantifies only over models satisfying the standard
+Boolean and integer theory laws, matching the fragment sent to an SMT solver. -/
+structure CommandsUnsatisfiable (commands : Array Command) : Prop where
+  supported : CommandsSupported commands
+  wellTyped : CommandsWellTyped commands
+  noModel : ∀ model : Model, model.Standard →
+    ¬model.SatisfiesCommands commands
 
 theorem Model.satisfiesCommands_empty (model : Model) :
     model.SatisfiesCommands #[] := by
+  intro command membership
+  contradiction
+
+theorem commandsSupported_empty : CommandsSupported #[] := by
   intro command membership
   contradiction
 
@@ -593,6 +808,13 @@ theorem Model.satisfiesCommands_append (model : Model)
     model.SatisfiesCommands (left ++ right) ↔
       model.SatisfiesCommands left ∧ model.SatisfiesCommands right := by
   unfold Model.SatisfiesCommands
+  simp only [Array.toList_append, List.mem_append]
+  grind
+
+theorem commandsSupported_append (left right : Array Command) :
+    CommandsSupported (left ++ right) ↔
+      CommandsSupported left ∧ CommandsSupported right := by
+  unfold CommandsSupported
   simp only [Array.toList_append, List.mem_append]
   grind
 
@@ -605,6 +827,16 @@ theorem Model.satisfiesCommands_congr (model : Model)
     exact valid command (same.2 command member)
   · intro valid command member
     exact valid command (same.1 command member)
+
+/-- Fragment membership, like satisfaction, depends only on the command set. -/
+theorem commandsSupported_congr {left right : Array Command}
+    (same : SameCommandSet left right) :
+    CommandsSupported left ↔ CommandsSupported right := by
+  constructor
+  · intro supported command member
+    exact supported command (same.2 command member)
+  · intro supported command member
+    exact supported command (same.1 command member)
 
 /-- A model of an extended command sequence is a model of its prefix. -/
 theorem Model.satisfiesCommands_weaken (model : Model)

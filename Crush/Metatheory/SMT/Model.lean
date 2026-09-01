@@ -234,6 +234,37 @@ noncomputable def model (encoding : Encoding symbols)
     (value : Bool) :
     (modelWith encoding target extra).bool value = boolValue target value := rfl
 
+/-- The Boolean carrier of every induced model contains exactly the two
+distinguished SMT Boolean values. Although the typed carrier is represented by
+Lean propositions, classical propositional extensionality identifies each
+proposition with either `True` or `False`. -/
+theorem modelWith_bool_exhaustive (encoding : Encoding symbols)
+    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target) :
+    ∀ value, (modelWith encoding target extra).inSort Crush.SMT.boolSort value →
+      ∃ boolean, value = (modelWith encoding target extra).bool boolean := by
+  classical
+  intro value typed
+  cases value with
+  | typed sort proposition =>
+      simp only [modelWith_inSort, Value.InSort] at typed
+      have sortEq : sort = .bool := by
+        apply encoding.sort_injective
+        exact typed.trans encoding.bool_eq.symm
+      subst sort
+      by_cases valid : proposition
+      · refine ⟨true, ?_⟩
+        have equal : proposition = True :=
+          propext ⟨fun _ => trivial, fun _ => valid⟩
+        cases equal
+        rfl
+      · refine ⟨false, ?_⟩
+        have equal : proposition = False := propext ⟨valid, False.elim⟩
+        cases equal
+        rfl
+  | raw rawSort =>
+      simp only [modelWith_inSort, Value.InSort] at typed
+      exact False.elim (typed.2 .bool (encoding.bool_eq.trans typed.1.symm))
+
 /-- Every source symbol keeps its encoded type after adding a disjoint native
 graph. -/
 theorem symbol_has_type_with (encoding : Encoding symbols)

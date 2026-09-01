@@ -55,10 +55,18 @@ boundary.
 
 3. `SMT.encode_theories` proves that the generated command sequence and the
    combined flattened theory have exactly the same satisfying SMT models.
-   `SMT.representation_sound` constructs one untyped
+   `SMT.representation_sound` constructs one raw-syntax
    SMT model satisfying SMT datatype declarations, ordinary declarations, and
    assertions; `commands_unsat_implies_source_theory_unsat` is the corresponding
-   reflection theorem. See [`SMT/Representation.lean`](SMT/Representation.lean)
+   reflection theorem. `SMT.CommandsUnsatisfiable` requires an order-sensitive,
+   declaration-aware type-checking certificate, the additional free-datatype
+   conditions, and absence of a model with standard Boolean and integer
+   interpretations. `SMT.standardModel_exists` shows that this standard-model
+   class is inhabited. The fixed-theory operators covered by the soundness
+   theorem are Boolean logic, equality, integer numerals, and integer `>=`;
+   other arithmetic and bit-vector, array, and string operators are rejected by
+   the metatheory checker. See
+   [`SMT/Representation.lean`](SMT/Representation.lean)
    and [`SMT/Soundness.lean`](SMT/Soundness.lean).
 
 4. `Datatype.ctor_inj`, `ctor_ne`, `ctor_cases`, `sel_ctor`, `test_ctor`, and

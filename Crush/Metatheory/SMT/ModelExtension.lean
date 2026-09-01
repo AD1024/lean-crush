@@ -289,8 +289,7 @@ theorem datatypeCommand_with_extra (encoding : Encoding symbols)
     (valid : (model encoding target).SatisfiesCommand (.declDatatypes datatypes)) :
     (modelWith encoding target extra).SatisfiesCommand
       (.declDatatypes datatypes) :=
-  ⟨valid.1, datatypesHold_with_extra encoding target extra datatypes
-    inactive valid.2⟩
+  datatypesHold_with_extra encoding target extra datatypes inactive valid
 
 /-- Boolean-list witnesses are likewise independent of the symbol graph. -/
 theorem boolValues_with_extra (encoding : Encoding symbols)

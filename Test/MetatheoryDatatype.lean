@@ -157,18 +157,23 @@ example : SMT.Datatype.wfBody
     #[("none", #[]), ("some", #[rawGuard])] rawValue =
       (smt| (=> $rawTester $rawGuard)) := rfl
 
-example : Crush.SMT.FunsRecSupported #[rawWFDef] := by
-  refine ⟨by simp, by simp [rawWFDef], ?_⟩
-  intro definition member
-  have equal : definition = rawWFDef := by simpa using member
-  subst definition
-  exact .symb _ (by decide) (by decide) (by decide) (by decide) (by decide)
+/-- A scoped body is not enough: the command type system also checks its
+result sort. -/
+example : ¬Crush.SMT.CommandsWellTyped
+    #[.declSort "Tree" 0, .defFun rawWFDef] := by
+  change Crush.SMT.metatheoryScriptWellTyped
+    #[.declSort "Tree" 0, .defFun rawWFDef] ≠ true
+  native_decide
 
-example : ¬Crush.SMT.FunsRecSupported #[] := by
-  simp [Crush.SMT.FunsRecSupported]
+example : ¬Crush.SMT.CommandsWellTyped #[.defFunsRec #[]] := by
+  change Crush.SMT.metatheoryScriptWellTyped #[.defFunsRec #[]] ≠ true
+  native_decide
 
-example : ¬Crush.SMT.FunsRecSupported #[rawWFDef, rawWFDef] := by
-  simp [Crush.SMT.FunsRecSupported, rawWFDef]
+example : ¬Crush.SMT.CommandsWellTyped
+    #[.declSort "Tree" 0, .defFunsRec #[rawWFDef, rawWFDef]] := by
+  change Crush.SMT.metatheoryScriptWellTyped
+    #[.declSort "Tree" 0, .defFunsRec #[rawWFDef, rawWFDef]] ≠ true
+  native_decide
 
 private def none : Val optionBlock IntBase optionData :=
   mk noneRef .nil
@@ -484,7 +489,7 @@ example (empty : fo.nativeCommands = #[]) (formula : Sentence signature)
 example {env : Datatype.Env signature} (represented : EnvRepresentation fo env)
     (formula : Sentence signature) {commands : Array Crush.SMT.Command}
     (encoded : SMT.TheoryRepresentation fo (translatedTheory formula) commands)
-    (unsat : Crush.SMT.CommandsUnsatisfiable commands) :
+    (unsat : Crush.SMT.AbstractCommandsUnsatisfiable commands) :
     Datatype.Env.Unsatisfiable env formula :=
   SMT.commands_unsat_implies_source_unsat fo represented formula encoded unsat
 
@@ -587,9 +592,7 @@ example (translation : FactTranslationRecord)
     {expressions : List Lean.Expr}
     (reified : Reification.ReifiedSentencesFor translation.datatypes
       translation.constants expressions) :
-    Option (PLift (SMT.GuardedTheoryRepresentation guarding
-      translation.guardDefinitionCommands (translatedTheories reified.sources)
-      (translation.emittedCommands.map stripAssertionAnnotation))) :=
+    Option (PLift (ValidatedCommandEquivalence (guarding := guarding) reified)) :=
   CommandEquivalence.build? reified
 
 example (translation : FactTranslationRecord)

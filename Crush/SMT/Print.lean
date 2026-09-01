@@ -229,18 +229,16 @@ def commandToString : Command → String
   | .setLogic l => s!"(set-logic {l})"
   | .setOption k v => s!"(set-option :{k} {v})"
   | .declSort n arity => s!"(declare-sort {quoteSymbol n} {arity})"
-  | .defSort n params body =>
-    s!"(define-sort {quoteSymbol n} (" ++ String.intercalate " " params.toList ++ ") " ++
-      sortToString params.toList body ++ ")"
   | .declFun n args res =>
     s!"(declare-fun {quoteSymbol n} (" ++ String.intercalate " " (args.toList.map toString) ++
       s!") {res})"
-  | .defFun rec_ n args res body =>
-    let kw := if rec_ then "define-fun-rec" else "define-fun"
-    let argStr := args.toList.map (fun (nm, s) => s!"({quoteSymbol nm} {s})")
-    let names := args.toList.map (·.1)
-    s!"({kw} {quoteSymbol n} (" ++ String.intercalate " " argStr ++ s!") {res} " ++
-      termToString names.reverse body ++ ")"
+  | .defFun definition =>
+    let argStr := definition.args.toList.map
+      (fun (name, sort) => s!"({quoteSymbol name} {sort})")
+    let names := definition.args.toList.map (·.1)
+    s!"(define-fun {quoteSymbol definition.name} (" ++
+      String.intercalate " " argStr ++ s!") {definition.resSort} " ++
+      termToString names.reverse definition.body ++ ")"
   | .defFunsRec defs =>
     let signatures := defs.toList.map fun d =>
       let args := d.args.toList.map fun (nm, s) => s!"({quoteSymbol nm} {s})"

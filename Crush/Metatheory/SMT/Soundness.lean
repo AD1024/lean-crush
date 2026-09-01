@@ -27,10 +27,12 @@ theorem declaration_valid (encoding : Encoding symbols)
     (ordinary : encoding.nativeSymbol declared.symbol = false) :
     (model encoding target).SatisfiesCommand (declaration encoding declared) := by
   rw [declaration]
-  constructor
-  · trivial
-  · rw [← encoding.ordinary_ident declared.symbol ordinary]
-    exact symbol_has_type encoding target declared.symbol
+  change Crush.SMT.SymbolHasType (model encoding target)
+    (.symb (encoding.name declared.symbol))
+    (declared.declaration.args.map encoding.sort)
+    (encoding.sort declared.declaration.result)
+  rw [← encoding.ordinary_ident declared.symbol ordinary]
+  exact symbol_has_type encoding target declared.symbol
 
 /-- Semantic argument values, tagged in the same order as their SMT terms. -/
 def argumentValues (target : FO.FamilyModel symbols)
@@ -460,12 +462,10 @@ theorem assertions_valid (encoding : Encoding symbols)
         (𝒶⟦formula⟧[encoding]) := by
     simpa using arrayMembership
   rcases List.mem_map.mp listMembership with ⟨formula, formulaMem, rfl⟩
-  constructor
-  · trivial
-  · exact eval_true encoding target
-      (term_eval encoding target formula
-        (FO.Valuation.empty target.carriers) [] (Env.empty target))
-      (valid formula formulaMem)
+  exact eval_true encoding target
+    (term_eval encoding target formula
+      (FO.Valuation.empty target.carriers) [] (Env.empty target))
+    (valid formula formulaMem)
 
 /-- Every emitted symbol declaration is valid in the induced relational
 symbol graph. -/
@@ -518,10 +518,12 @@ theorem declaration_valid_with (encoding : Encoding symbols)
     (modelWith encoding target extra).SatisfiesCommand
       (declaration encoding declared) := by
   rw [declaration]
-  constructor
-  · trivial
-  · rw [← encoding.ordinary_ident declared.symbol ordinary]
-    exact symbol_has_type_with encoding target extra declared.symbol
+  change Crush.SMT.SymbolHasType (modelWith encoding target extra)
+    (.symb (encoding.name declared.symbol))
+    (declared.declaration.args.map encoding.sort)
+    (encoding.sort declared.declaration.result)
+  rw [← encoding.ordinary_ident declared.symbol ordinary]
+  exact symbol_has_type_with encoding target extra declared.symbol
 
 /-- Valid encoded assertions stay valid after installing a disjoint native
 graph. -/
@@ -540,18 +542,16 @@ theorem assertions_valid_with (encoding : Encoding symbols)
         (𝒶⟦formula⟧[encoding]) := by
     simpa using arrayMembership
   rcases List.mem_map.mp listMembership with ⟨formula, formulaMem, rfl⟩
-  constructor
-  · trivial
-  · have baseEval := eval_true encoding target
-        (term_eval encoding target formula
-          (FO.Valuation.empty target.carriers) [] (Env.empty target))
-        (valid formula formulaMem)
-    have extended := eval_with_extra encoding target extra
-      (term_literalFree encoding formula) baseEval
-    change Crush.SMT.Eval (modelWith encoding target extra) [] _
-      ((modelWith encoding target extra).bool true)
-    rw [modelWith_bool, ← model_bool]
-    exact extended
+  have baseEval := eval_true encoding target
+    (term_eval encoding target formula
+      (FO.Valuation.empty target.carriers) [] (Env.empty target))
+    (valid formula formulaMem)
+  have extended := eval_with_extra encoding target extra
+    (term_literalFree encoding formula) baseEval
+  change Crush.SMT.Eval (modelWith encoding target extra) [] _
+    ((modelWith encoding target extra).bool true)
+  rw [modelWith_bool, ← model_bool]
+  exact extended
 
 /-- Every ordinary declaration in the represented list is valid in the extended
 model. -/
@@ -663,13 +663,13 @@ theorem commands_unsat_implies_source_unsat {signature : Signature}
     (formula : Sentence signature) {commands : Array Command}
     (representation : TheoryRepresentation encoding
       (translatedTheory formula) commands)
-    (unsat : Crush.SMT.CommandsUnsatisfiable commands) :
+    (unsat : Crush.SMT.AbstractCommandsUnsatisfiable commands) :
     Datatype.Env.Unsatisfiable env formula := by
   intro source freeDataModel sourceValid
   obtain ⟨smtModel, commandsValid⟩ :=
     representation_sound encoding datatypes representation source freeDataModel
       (model_extension source formula sourceValid)
-  exact unsat smtModel commandsValid
+  exact unsat.noModel smtModel commandsValid
 
 /-- Unsatisfiability of one represented command array reflects through
 flattening and SMT encoding to the complete source theory under the
@@ -681,13 +681,13 @@ theorem commands_unsat_implies_source_theory_unsat {signature : Signature}
     (sourceTheory : Theory signature) {commands : Array Command}
     (representation : TheoryRepresentation encoding
       (translatedTheories sourceTheory) commands)
-    (unsat : Crush.SMT.CommandsUnsatisfiable commands) :
+    (unsat : Crush.SMT.AbstractCommandsUnsatisfiable commands) :
     Datatype.Env.TheoryUnsatisfiable env sourceTheory := by
   intro source freeDataModel sourceValid
   obtain ⟨smtModel, commandsValid⟩ :=
     representation_sound encoding datatypes representation source freeDataModel
       (model_extension_theory source sourceTheory sourceValid)
-  exact unsat smtModel commandsValid
+  exact unsat.noModel smtModel commandsValid
 
 
 end Crush.Metatheory.SMT

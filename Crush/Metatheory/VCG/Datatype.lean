@@ -628,6 +628,13 @@ structure GuardedModelExtension (translation : FactTranslationRecord)
         sort).guard)).over base)
     (fun sort => ((represented.datatypeRepresentation.liftedFrom source freeDataModel prior).relation
       sort).guard)
+  standard : Crush.SMT.Model.Standard
+    (SMT.modelWith guarding.encoding
+      (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target
+      ((guarded.toUnaryGuards
+        (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target
+        (fun sort => ((represented.datatypeRepresentation.liftedFrom source freeDataModel prior).relation
+          sort).guard)).over base))
 
 namespace GuardedModelExtension
 
@@ -719,7 +726,8 @@ noncomputable def ofIntView {translation : FactTranslationRecord}
     base := view.extra
     baseUnique := view.applyUnique
     fresh := view.guardsFresh guards separate
-    semantics := termSemantics }
+    semantics := termSemantics
+    standard := view.standard_withGuards guards separate }
 
 end GuardedModelExtension
 
@@ -851,14 +859,18 @@ theorem sound {translation : FactTranslationRecord}
     (encoding : SMT.GuardedTheoryRepresentation guarding
       translation.guardDefinitionCommands theory commands)
     (valid : (canonicalModel source).SatisfiesTheory theory) :
-    ∃ model : Crush.SMT.Model, model.SatisfiesCommands commands := by
-  apply SMT.guarded_lift guarding encoding (canonicalModel source)
-    (represented.datatypeRepresentation.liftedFrom source freeDataModel guardModel.prior).target
+    ∃ model : Crush.SMT.Model,
+      model.Standard ∧ model.SatisfiesCommands commands := by
+  let target :=
+    (represented.datatypeRepresentation.liftedFrom source freeDataModel
+      guardModel.prior).target
+  let extra := guardModel.guards.over guardModel.base
+  refine ⟨SMT.modelWith guarding.encoding target extra, guardModel.standard, ?_⟩
+  apply SMT.guarded_valid guarding encoding (canonicalModel source) target
     (represented.datatypeRepresentation.liftedFrom source freeDataModel guardModel.prior).relation
     (represented.datatypeRepresentation.liftedFrom source freeDataModel guardModel.prior).models valid
-    (guardModel.guards.over guardModel.base) guardModel.semantics.toSemantics
-  · exact represented.liftedFrom_valid_with source freeDataModel guardModel.prior
-      (guardModel.guards.over guardModel.base)
+    extra guardModel.semantics.toSemantics
+  · exact represented.liftedFrom_valid_with source freeDataModel guardModel.prior extra
   · exact represented.guards_valid guarded source freeDataModel guardModel.prior
       guardModel.guards guardModel.base guardModel.baseUnique guardModel.fresh
       guardModel.semantics guarded.linked
@@ -885,9 +897,9 @@ theorem unsat_under {translation : FactTranslationRecord}
       formula := by
   intro source model sourceValid
   rcases model with ⟨freeDataModel, guardModel⟩
-  obtain ⟨target, valid⟩ := represented.sound guarded source freeDataModel
+  obtain ⟨target, standard, valid⟩ := represented.sound guarded source freeDataModel
     guardModel encoding (model_extension source formula sourceValid)
-  exact unsat target valid
+  exact unsat.noModel target standard valid
 
 /-- Reflection over every source model satisfying the free-datatype condition once the
 guard interpretation is known uniformly. Unlike `unsat_under`, the quantified
@@ -927,10 +939,10 @@ theorem theory_unsat {translation : FactTranslationRecord}
     Datatype.Env.TheoryUnsatisfiable translation.datatypeSignaturePrefix.toModelEnv
       sourceTheory := by
   intro source freeDataModel sourceValid
-  obtain ⟨target, valid⟩ := represented.sound guarded source freeDataModel
+  obtain ⟨target, standard, valid⟩ := represented.sound guarded source freeDataModel
     (interpretation.realize source freeDataModel) encoding
     (model_extension_theory source sourceTheory sourceValid)
-  exact unsat target valid
+  exact unsat.noModel target standard valid
 
 end Representation
 

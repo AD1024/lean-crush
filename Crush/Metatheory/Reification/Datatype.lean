@@ -76,7 +76,7 @@ inductive DatatypeReject where
   data-carrying first-order datatype semantics. -/
   | proofField (ctor : Name) (index : Nat)
   /-- This constructor field contains a function. Native datatype fields in the
-  certified fragment must be first order. -/
+  source types accepted by the current soundness theorem must be first order. -/
   | functionField (ctor : Name) (index : Nat)
   /-- The term invokes a datatype recursor or auxiliary eliminator. Correctness
   of recursive elimination requires a separate theorem beyond declaration

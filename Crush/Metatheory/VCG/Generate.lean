@@ -50,14 +50,15 @@ theorem guardedTheoryCommands_represents {signature : Signature}
       (guardedTheoryCommands guarding derived source) :=
   ⟨SMT.translatedDeclarations source, Crush.SMT.SameCommandSet.refl _⟩
 
-/-- Unsatisfiability of the finite-theory VCG reflects to the complete
-reified higher-order theory. -/
+/-- Absence of a model in the internal relational semantics reflects through
+the pure finite-theory encoder. The translator-facing theorem in
+`CommandEquivalence` additionally requires standard SMT semantics. -/
 theorem theoryCommands_unsat_implies_source_unsat {signature : Signature}
     (encoding : SMT.Encoding (Symbol signature))
     (source : Theory signature)
     (data : Reification.DatatypeSignaturePrefix signature)
     (native : EnvRepresentation encoding data.toModelEnv)
-    (unsat : Crush.SMT.CommandsUnsatisfiable
+    (unsat : Crush.SMT.AbstractCommandsUnsatisfiable
       (theoryCommands encoding source)) :
     Datatype.Env.TheoryUnsatisfiable data.toModelEnv source := by
   exact SMT.commands_unsat_implies_source_theory_unsat encoding native source

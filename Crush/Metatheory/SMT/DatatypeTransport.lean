@@ -1041,7 +1041,7 @@ theorem command_sound_transport (step : ModelExtension source)
       (command oldBlock data)) :
     (SMT.model fo step.target).SatisfiesCommand
       (command oldBlock data) := by
-  exact ⟨valid.1, step.data_hold_transport represented preserved valid.2⟩
+  exact step.data_hold_transport represented preserved valid
 
 /-- Exact interpretation of a preserved unary symbol. The later model unwraps its
 external argument, applies the preceding interpretation, then wraps the external
@@ -1515,8 +1515,6 @@ theorem DisjointFromSuffix.wfDefs_valid
           (prior.extend headLaw.flattened headWF headLaw.productive)).target
         extra))
     (guardName binder : DataRef entry.block → String)
-    (nameInj : Function.Injective guardName)
-    (notBuiltin : ∀ child, Crush.SMT.NotBuiltin (.symb (guardName child)))
     (hasType : ∀ child, Crush.SMT.SymbolHasType
       (SMT.modelWith guarding.encoding
         (liftFrom sourceModel env tailLaw tailWF
@@ -1554,7 +1552,7 @@ theorem DisjointFromSuffix.wfDefs_valid
   exact wfDefs_valid_of_guard head guarding encodingEq extra
     (fun sort => ((liftFrom sourceModel env tailLaw tailWF next).relation
       sort).guard)
-    semantics functional guardName binder nameInj notBuiltin hasType applies
+    semantics functional guardName binder hasType applies
     (by simpa [next] using finalLaw)
 
 /-- Every dependency-ordered recursive guard command is valid in one final
@@ -1613,10 +1611,6 @@ theorem DependencyOrdered.guards_valid
                   semantics
                   (guards.applyUnique_over base baseUnique fresh)
                   command.name command.binder
-                  (command.name_injective guards.ident guards.ident_injective
-                    headLinked)
-                · intro child
-                  exact guards.notBuiltin _ _ (headLinked child)
                 · intro child
                   exact guards.hasType_over base baseUnique fresh
                     (headLinked child)
@@ -1799,8 +1793,7 @@ theorem Native.block_valid_with_guards
     (fresh : guards.Fresh base)
     (guardName binder : DataRef block → String)
     (guardIdent : ∀ child, guards.ident (.base child.decl.sort) =
-      some (.symb (guardName child)))
-    (nameInj : Function.Injective guardName) :
+      some (.symb (guardName child))) :
     (SMT.modelWith fo
       (law.extend wf productive prior priorRel priorModels)
       (guards.over base)).SatisfiesCommand (command block data) ∧
@@ -1824,9 +1817,7 @@ theorem Native.block_valid_with_guards
   apply wfDefs_valid represented law represented.rolesUnique wf productive
     priorRel priorModels guards.guarding rfl (guards.over base)
     (guards.termSemantics_over base omitted)
-    (guards.applyUnique_over base baseUnique fresh) guardName binder nameInj
-  · intro child
-    exact guards.notBuiltin _ _ (guardIdent child)
+    (guards.applyUnique_over base baseUnique fresh) guardName binder
   · intro child
     exact guards.hasType_over base baseUnique fresh (guardIdent child)
   · intro child value output
@@ -1857,8 +1848,7 @@ theorem Native.block_valid_with_int
       identifier ≠ .symb ">=")
     (guardName binder : DataRef block → String)
     (guardIdent : ∀ child, guards.ident (.base child.decl.sort) =
-      some (.symb (guardName child)))
-    (nameInj : Function.Injective guardName) :
+      some (.symb (guardName child))) :
     (SMT.modelWith fo
       (law.extend wf productive prior priorRel priorModels)
       (guards.over view.extra)).SatisfiesCommand (command block data) ∧
@@ -1869,7 +1859,7 @@ theorem Native.block_valid_with_int
         data guardName binder)) :=
   Native.block_valid_with_guards represented law wf productive priorRel
     priorModels guards omitted view.extra view.applyUnique
-    (view.guardsFresh guards separate) guardName binder guardIdent nameInj
+    (view.guardsFresh guards separate) guardName binder guardIdent
 
 /-- The exact native command prefix is valid after installing every datatype
 block over an arbitrary already-guarded base model. -/

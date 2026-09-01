@@ -141,7 +141,7 @@ The argument is organized into seven stages:
         sorts are opaque, then give total flattened defunctionalization.
   \item Interpret every translated sentence in one canonical model and prove
         simultaneous validity of the aggregate target theory.
-  \item Give semantics to the admitted untyped SMT command fragment and prove
+  \item Give semantics to the modeled untyped SMT command fragment and prove
         that the generated command sequence has exactly the intended models.
   \item Represent source values inside target types using predicates, validate
         SMT datatype and recursive guard commands, and combine all
@@ -1251,25 +1251,22 @@ same canonical denotation. Thus the unary proof is an independent semantic
 reference, not the endpoint of the current VCG
 theorem.\leanfiles{Defunctionalization/Fundamental.lean, Defunctionalization/ModelExtension.lean, and Defunctionalization/Flattened/Currying.lean}
 
-\section{Untyped (``raw'') SMT semantics}
-\sectioncontents{Relational term evaluation; admitted commands; SMT datatype laws; semantic command-set equality.}
+\section{Raw SMT syntax, typing, and semantics}
+\sectioncontents{A declaration-aware type checker; relational term evaluation; standard theory interpretations; SMT datatype laws; semantic command-set equality.}
 
 The SMT syntax emitted by the Crush translator is intentionally not intrinsically
-typed. From this point onward, \emph{raw} means this untyped syntax, in contrast to the typed
-HO and FO syntax above. The proof does not claim that every raw term is well
-sorted; instead it gives an
-inductive evaluation relation to exactly the fragment used by the modeled
-lowering pipeline.
+typed. From this point onward, \emph{raw} means that a syntax node does not carry
+a proof of its sort, in contrast to the typed HO and FO syntax above. Before raw
+commands enter the semantic soundness theorem, an executable, declaration-aware
+type system checks them. This keeps the syntax shared with the implementation
+without allowing an ill-sorted script to become ``unsatisfiable'' merely because
+no evaluation rule applies.
 
 \begin{definition}[Raw SMT model and evaluation]
 A raw model $M_q$ contains one universe of values, a membership predicate
 $\mathsf{inSort}(s,v)$, a nonemptiness witness for every concrete sort,
 distinguished Boolean values, literal interpretations, and a graph
-$\mathsf{apply}(p,\bar v,w)$ for identifiers. The structure itself does not
-assume that this graph is functional. Global single-valuedness is the separate
-property \texttt{ApplyUnique}, established for the induced models used by the
-soundness proof; each admitted symbol declaration independently requires a
-total, single-valued, sort-correct graph at its declared type. The relation
+$\mathsf{apply}(p,\bar v,w)$ for identifiers. The relation
 \[
  \mathsf{Eval}(M_q,\eta,q,v)
 \]
@@ -1278,16 +1275,71 @@ It covers bound variables, literals, logical connectives, equality,
 quantifiers, annotations, and user-symbol applications. A closed raw formula
 $q$ holds when it evaluates to semantic truth; only now do we write
 $M_q\models_{\mathsf{SMT}}q$.
+
+The solver-facing predicate $\mathsf{Standard}(M_q)$ additionally requires:
+the Boolean sort contains exactly the two distinguished Boolean values; the
+integer sort is in bijection with $\mathbb Z$; numeral literals and
+\texttt{>=} have their usual integer meanings; and every identifier graph is
+single-valued. These are semantic laws, not typing rules. In particular, a type
+system alone cannot prevent the literals $0$ and $1$ from collapsing in an
+arbitrary raw model. The Lean development includes a concrete standard-model
+witness, so this class of models is not empty.
 \leanfile{SMT/Semantics.lean}
 \end{definition}
 
-\begin{definition}[Supported commands]
-The admitted command fragment contains sort and function declarations,
-assertions, administrative/query commands, monomorphic
-\texttt{declare-datatypes}, and simultaneous \texttt{define-funs-rec} blocks.
-Nonrecursive function and sort definitions remain outside this semantic
-fragment. A function declaration requires a total, single-valued,
-sort-correct graph. An assertion requires its formula to hold.
+\begin{definition}[Declaration-aware SMT type checking]
+Let $\Sigma_q=(\Sigma_{\mathsf{sort}},\Sigma_{\mathsf{fun}})$ record the arity
+of each preceding sort declaration and the argument/result sorts of each
+preceding symbol declaration. Let $\Gamma_q$ record named local binders and
+$\Delta_q$ record the sorts of de Bruijn variables. The partial function
+\[
+ \mathsf{infer}(\Sigma_q,\Gamma_q,\Delta_q,q)=\tau
+\]
+computes the sort of $q$ or reports an error. It checks literal and variable
+sorts, declared applications, the modeled logical and integer operators,
+quantifier bodies, simultaneous \texttt{let} bindings, and annotations. The
+modeled fragment rejects unknown symbols and sorts, use before declaration,
+lambda terms, and theory constructs for which this document has no semantics.
+
+The command checker $\mathsf{check}(C)$ processes the array from left to right.
+An assertion must infer as \texttt{Bool}. A nonrecursive \texttt{define-fun}
+body is checked before its new symbol enters $\Sigma_q$. For a
+\texttt{define-funs-rec} group, all signatures enter $\Sigma_q$ together before
+any body is checked. For mutually recursive datatypes, all datatype sorts enter
+scope before field sorts are checked, followed by constructors and selectors.
+Duplicate declarations and empty recursive-definition groups are rejected.
+We define
+\[
+ \mathsf{CommandsWellTyped}(C)
+ \quad\Longleftrightarrow\quad
+ \mathsf{check}(C)=\mathsf{ok}.
+\]
+This is an extrinsic type system over the existing command syntax, not a second
+typed SMT abstract syntax tree.
+
+The SMT subset covered by the current soundness theorem is deliberately small:
+Boolean literals and connectives, equality, integer numerals, and integer
+\texttt{>=}. Quantifiers,
+\texttt{let}, declared uninterpreted functions, and the operations introduced
+by datatype declarations proved to satisfy the modeled datatype laws are also
+covered. Integer addition,
+subtraction, multiplication, division, and the bit-vector, array, and string
+theories are present in Crush's general SMT syntax but are rejected by
+$\mathsf{check}$ in metatheory mode. Consequently, the theorem below does not
+yet apply to an emitted command array containing those constructs.
+\footnote{Lean implementation: \texttt{Crush/SMT/Check.lean}.}
+\end{definition}
+
+\begin{definition}[Additional datatype conditions]
+The checker handles the static conditions shared by ordinary declarations,
+assertions, function definitions, and datatype declarations. A monomorphic
+\texttt{declare-datatypes} block also carries semantic conditions needed by the
+free-datatype model construction: a nonempty declaration block, distinct sort
+and operation names, arity zero, no type parameters, and at least one
+constructor per datatype. In Lean these additional conditions are named
+\texttt{Command.Supported} and lifted pointwise to
+\texttt{CommandsSupported}; for every non-datatype command they are simply
+true. They are separate from both type checking and model satisfaction.
 \leanfile{SMT/Semantics.lean}
 \end{definition}
 
@@ -1303,22 +1355,22 @@ $\mathsf{DatatypesHold}(M_q,B_q)$ requires:
 \end{enumerate}
 The rank excludes cyclic or infinite raw values. Selectors are unconstrained on
 nonmatching constructors, exactly as in SMT-LIB.
-\leanfile{SMT/Semantics.lean}
 \end{definition}
 
-\begin{definition}[Raw simultaneous recursive definitions]
-A supported \texttt{define-funs-rec} block has a nonempty, duplicate-free list
-of fresh ordinary identifiers. Each function graph is total at its declared
-type, and for typed arguments $\bar v$,
+\begin{definition}[Raw function definitions]
+After the command checker has validated the relevant scope and signatures, each
+function graph is total at its declared type, and for
+typed arguments $\bar v$,
 \[
  \mathsf{apply}(f,\bar v,w)
  \quad\Longleftrightarrow\quad
  \mathsf{Eval}(M_q,\mathsf{reverse}(\bar v),q_f,w),
 \]
 where $q_f$ is the retained body. Every body is evaluated against the same
-global graph, giving simultaneous mutual-recursion semantics rather than a
-vacuous support marker.
-\leanfile{SMT/Semantics.lean}
+global graph. This gives \texttt{define-funs-rec} simultaneous
+mutual-recursion semantics. A nonrecursive \texttt{define-fun} reuses the same
+single-definition equation; its nonrecursive scope follows from checking the
+body before adding $f$ to the declaration environment.
 \end{definition}
 
 \begin{definition}[Command satisfaction and command-set equality]
@@ -1334,17 +1386,24 @@ occurrences. Define
 Then $C_1\SameCmd C_2$ implies
 $M_q\smtsat C_1\leftrightarrow M_q\smtsat C_2$. Concrete declaration-before-use
 ordering is checked separately by the Crush script validator.
-\leanfile{SMT/Semantics.lean}
 \end{definition}
 
 \begin{definition}[Semantic command unsatisfiability]
 \[
- \unsat_{\mathsf{SMT}}(C)
- \quad\Longleftrightarrow\quad
- \forall M_q.\;\neg(M_q\smtsat C).
+\begin{aligned}
+ \unsat_{\mathsf{SMT}}(C)\quad\Longleftrightarrow\quad
+ {}&\mathsf{CommandsSupported}(C)\\
+ &{}\land \mathsf{CommandsWellTyped}(C)\\
+ &{}\land \forall M_q.\;
+   \mathsf{Standard}(M_q)\Rightarrow\neg(M_q\smtsat C).
+\end{aligned}
 \]
-This is a mathematical premise about commands, not a claim about an external
-solver process or its reported verdict.
+The first conjunct supplies the additional free-datatype conditions. The second
+rejects malformed or semantically unmodeled syntax instead of allowing a
+missing evaluation to prove unsatisfiability. The last conjunct uses the
+standard meanings of the modeled SMT theories. It is a mathematical premise
+about commands, not by itself a theorem connecting an external solver process
+to this predicate.
 \leanfile{SMT/Semantics.lean}
 \end{definition}
 
@@ -2193,7 +2252,8 @@ membership-based untyped command semantics.}
 \begin{itemize}[leftmargin=*]
  \item No denotational semantics is postulated for arbitrary \texttt{Lean.Expr};
        the final proposition concerns the reified higher-order theory.
- \item Semantic command unsatisfiability is a premise. Correctness of an
+ \item Semantic command unsatisfiability, including explicit evidence that
+       every command is in the modeled fragment, is a premise. Correctness of an
        external solver's reported \texttt{unsat} answer requires replaying a
        checked solver proof or another independently checked argument.
  \item The extensible Crush translator does not automatically construct the
@@ -2215,10 +2275,17 @@ membership-based untyped command semantics.}
        may still use the ordinary higher-order encoding. This fallback supplies
        none of the free-datatype laws and does not produce the represented SMT
        datatype block required by the command-equivalence theorem.
+ \item The finite-array lowering emits a nonrecursive well-formedness
+       \texttt{define-fun}. That command now has a nonvacuous graph-equation
+       semantics. The current whole-pipeline representation does not yet prove
+       the SMT array/select model construction or include this definition in
+       its certified derived-command segment. Consequently the final exact
+       command-set comparison rejects an array-bearing script rather than
+       applying the reflection theorem to it.
  \item Unsupported dependent syntax, indexed or nonproductive inductives,
        dependent datatype fields, unsafe indirect recursion,
-       unrestricted translation handlers, nonrecursive raw definitions, and
-       direct higher-order commands remain outside the modeled theorem.
+       unrestricted translation handlers, and direct higher-order commands
+       remain outside the modeled theorem.
 \end{itemize}
 
 \section{Machine-checked theorem inventory}

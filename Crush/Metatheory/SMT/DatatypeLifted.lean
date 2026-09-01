@@ -1102,9 +1102,8 @@ theorem command_sound {symbols : Symbols signature block}
     (represented : Representation block symbols fo data) :
     (SMT.model fo (law.extend wf productive prior priorRel priorModels)).SatisfiesCommand
       (command block data) :=
-  ⟨supported represented.wf productive,
-    data_hold law represented.rolesUnique wf productive priorRel priorModels
-      represented⟩
+  data_hold law represented.rolesUnique wf productive priorRel priorModels
+    represented
 
 /-- The command theorem stated at the actual dependency-fold step. -/
 theorem extend_sound {symbols : Symbols signature block}

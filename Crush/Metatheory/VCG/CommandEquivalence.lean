@@ -32,6 +32,16 @@ def stripAssertionAnnotation : Crush.SMT.Command → Crush.SMT.Command
   | .assert (.annot body _) => .assert body
   | command => command
 
+/-- Removing a top-level assertion name does not change whether the command is
+part of the modeled fragment. -/
+@[simp] theorem supported_stripAssertionAnnotation
+    (command : Crush.SMT.Command) :
+    (stripAssertionAnnotation command).Supported ↔ command.Supported := by
+  cases command with
+  | assert formula => cases formula <;> rfl
+  | setLogic | setOption | declSort | declFun | defFun | defFunsRec |
+      declDatatypes | checkSat | getModel | getProof | getUnsatCore | echo | exit => rfl
+
 /-- Top-level assertion attributes are semantically transparent. -/
 @[simp] theorem satisfiesCommand_stripAssertionAnnotation
     (model : Crush.SMT.Model) (command : Crush.SMT.Command) :
@@ -41,14 +51,11 @@ def stripAssertionAnnotation : Crush.SMT.Command → Crush.SMT.Command
   | assert formula =>
       cases formula with
       | annot body attributes =>
-          constructor
-          · rintro ⟨_, evaluated⟩
-            exact ⟨trivial, .annot evaluated⟩
-          · rintro ⟨_, evaluated⟩
-            cases evaluated with
-            | annot bodyEval => exact ⟨trivial, bodyEval⟩
+          change Crush.SMT.Holds model [] body ↔
+            Crush.SMT.Holds model [] (.annot body attributes)
+          exact Crush.SMT.Eval.annot_iff.symm
       | lit | bvar | app | letE | forallE | existsE | lam => rfl
-  | setLogic | setOption | declSort | defSort | declFun | defFun |
+  | setLogic | setOption | declSort | declFun | defFun |
       defFunsRec | declDatatypes | checkSat | getModel | getProof |
       getUnsatCore | echo | exit => rfl
 
@@ -72,20 +79,52 @@ theorem satisfiesCommands_stripAssertionAnnotations
     exact (satisfiesCommand_stripAssertionAnnotation model original).mpr
       (valid original originalMember)
 
+/-- Removing top-level assertion names also preserves membership in the modeled
+command fragment. -/
+theorem commandsSupported_stripAssertionAnnotations
+    (commands : Array Crush.SMT.Command) :
+    Crush.SMT.CommandsSupported
+        (commands.map stripAssertionAnnotation) ↔
+      Crush.SMT.CommandsSupported commands := by
+  constructor
+  · intro supported command member
+    have mappedMember : stripAssertionAnnotation command ∈
+        (commands.map stripAssertionAnnotation).toList := by
+      simp only [Array.toList_map, List.mem_map]
+      exact ⟨command, member, rfl⟩
+    exact (supported_stripAssertionAnnotation command).mp
+      (supported _ mappedMember)
+  · intro supported command member
+    simp only [Array.toList_map, List.mem_map] at member
+    rcases member with ⟨original, originalMember, rfl⟩
+    exact (supported_stripAssertionAnnotation original).mpr
+      (supported original originalMember)
+
 /-- Semantic unsatisfiability is unchanged by stripping top-level assertion
 attributes. -/
 theorem commandsUnsatisfiable_stripAssertionAnnotations
-    (commands : Array Crush.SMT.Command) :
+    (commands : Array Crush.SMT.Command)
+    (normalizedWellTyped : Crush.SMT.CommandsWellTyped
+      (commands.map stripAssertionAnnotation))
+    (originalWellTyped : Crush.SMT.CommandsWellTyped commands) :
     Crush.SMT.CommandsUnsatisfiable
         (commands.map stripAssertionAnnotation) ↔
       Crush.SMT.CommandsUnsatisfiable commands := by
   constructor
-  · intro unsat model valid
-    exact unsat model
-      ((satisfiesCommands_stripAssertionAnnotations model commands).mpr valid)
-  · intro unsat model valid
-    exact unsat model
-      ((satisfiesCommands_stripAssertionAnnotations model commands).mp valid)
+  · intro unsat
+    refine ⟨(commandsSupported_stripAssertionAnnotations commands).mp
+      unsat.supported, originalWellTyped, ?_⟩
+    · intro model standard valid
+      exact unsat.noModel model
+        standard
+        ((satisfiesCommands_stripAssertionAnnotations model commands).mpr valid)
+  · intro unsat
+    refine ⟨(commandsSupported_stripAssertionAnnotations commands).mpr
+      unsat.supported, normalizedWellTyped, ?_⟩
+    · intro model standard valid
+      exact unsat.noModel model
+        standard
+        ((satisfiesCommands_stripAssertionAnnotations model commands).mp valid)
 
 /-- The logic-selection command imposes no requirement on an SMT model. -/
 theorem satisfiesCommands_setLogic (model : Crush.SMT.Model) (logic : String)
@@ -102,14 +141,34 @@ theorem satisfiesCommands_setLogic (model : Crush.SMT.Model) (logic : String)
 /-- Semantic unsatisfiability is unchanged when the emitted script adds its
 leading logic-selection command. -/
 theorem commandsUnsatisfiable_setLogic (logic : String)
-    (commands : Array Crush.SMT.Command) :
+    (commands : Array Crush.SMT.Command)
+    (commandsWellTyped : Crush.SMT.CommandsWellTyped commands)
+    (scriptWellTyped : Crush.SMT.CommandsWellTyped
+      (#[.setLogic logic] ++ commands)) :
     Crush.SMT.CommandsUnsatisfiable (#[.setLogic logic] ++ commands) ↔
       Crush.SMT.CommandsUnsatisfiable commands := by
   constructor
-  · intro unsat model valid
-    exact unsat model ((satisfiesCommands_setLogic model logic commands).mpr valid)
-  · intro unsat model valid
-    exact unsat model ((satisfiesCommands_setLogic model logic commands).mp valid)
+  · intro unsat
+    have supportedParts :=
+      (Crush.SMT.commandsSupported_append #[.setLogic logic] commands).mp
+        unsat.supported
+    refine ⟨supportedParts.2, commandsWellTyped, ?_⟩
+    intro model standard valid
+    exact unsat.noModel model
+      standard
+      ((satisfiesCommands_setLogic model logic commands).mpr valid)
+  · intro unsat
+    have logicSupported : Crush.SMT.CommandsSupported #[.setLogic logic] := by
+      intro command member
+      simp at member
+      subst command
+      trivial
+    refine ⟨(Crush.SMT.commandsSupported_append _ _).mpr
+      ⟨logicSupported, unsat.supported⟩, scriptWellTyped, ?_⟩
+    intro model standard valid
+    exact unsat.noModel model
+      standard
+      ((satisfiesCommands_setLogic model logic commands).mp valid)
 
 /-- Decide whether two arrays impose the same model requirements. The command
 semantics depends on membership, so order and duplicate occurrences do not
@@ -126,6 +185,23 @@ def sameCommandSet? (left right : Array Crush.SMT.Command) : Bool :=
 
 /-! ## Whole-theory command equivalence -/
 
+/-- Exact command-set agreement together with declaration-aware sort checking
+of both the emitted commands and their annotation-normalized form. The latter
+is the array related to the mathematical encoder; retaining both checks avoids
+having to trust a generic theorem about the executable checker. -/
+structure ValidatedCommandEquivalence {translation : FactTranslationRecord}
+    {guarding : SMT.GuardedEncoding
+      (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
+    {expressions : List Lean.Expr}
+    (reified : ReifiedSentencesFor translation.datatypes translation.constants
+      expressions) where
+  theory : SMT.GuardedTheoryRepresentation guarding translation.guardDefinitionCommands
+    (translatedTheories reified.sources)
+    (translation.emittedCommands.map stripAssertionAnnotation)
+  emittedWellTyped : Crush.SMT.CommandsWellTyped translation.emittedCommands
+  normalizedWellTyped : Crush.SMT.CommandsWellTyped
+    (translation.emittedCommands.map stripAssertionAnnotation)
+
 namespace CommandEquivalence
 
 /-- Compare the emitted commands with the guarded encoding of all facts
@@ -136,16 +212,22 @@ def build? {translation : FactTranslationRecord}
     {expressions : List Lean.Expr}
     (reified : ReifiedSentencesFor translation.datatypes translation.constants
       expressions) :
-    Option (PLift
-      (SMT.GuardedTheoryRepresentation guarding translation.guardDefinitionCommands
-        (translatedTheories reified.sources)
-        (translation.emittedCommands.map stripAssertionAnnotation))) := by
+    Option (PLift (ValidatedCommandEquivalence (guarding := guarding) reified)) := by
   let encodedCommands := guardedTheoryCommands guarding translation.guardDefinitionCommands
     reified.sources
   let emittedCommands := translation.emittedCommands.map stripAssertionAnnotation
-  if same : sameCommandSet? emittedCommands encodedCommands = true then
-    exact some ⟨⟨SMT.translatedDeclarations reified.sources,
-      (sameCommandSet?_eq_true emittedCommands encodedCommands).mp same⟩⟩
+  if emittedTyped : Crush.SMT.metatheoryScriptWellTyped translation.emittedCommands then
+    if normalizedTyped : Crush.SMT.metatheoryScriptWellTyped emittedCommands then
+      if same : sameCommandSet? emittedCommands encodedCommands = true then
+        exact some ⟨{
+          theory := ⟨SMT.translatedDeclarations reified.sources,
+            (sameCommandSet?_eq_true emittedCommands encodedCommands).mp same⟩
+          emittedWellTyped := emittedTyped
+          normalizedWellTyped := normalizedTyped }⟩
+      else
+        exact none
+    else
+      exact none
   else
     exact none
 
@@ -159,17 +241,16 @@ theorem unsat_source {translation : FactTranslationRecord}
     {expressions : List Lean.Expr}
     {reified : ReifiedSentencesFor translation.datatypes translation.constants
       expressions}
-    (representation : SMT.GuardedTheoryRepresentation guarding
-      translation.guardDefinitionCommands (translatedTheories reified.sources)
-      (translation.emittedCommands.map stripAssertionAnnotation))
+    (representation : ValidatedCommandEquivalence (guarding := guarding) reified)
     (interpretation : translation.GuardDefinitionSemantics guarding represented guarded)
     (unsat : Crush.SMT.CommandsUnsatisfiable translation.emittedCommands) :
     Datatype.Env.TheoryUnsatisfiable translation.datatypeSignaturePrefix.toModelEnv
       reified.sources := by
   apply represented.theory_unsat guarded interpretation reified.sources
-    representation
+    representation.theory
   exact (commandsUnsatisfiable_stripAssertionAnnotations
-    translation.emittedCommands).mpr unsat
+    translation.emittedCommands representation.normalizedWellTyped
+      representation.emittedWellTyped).mpr unsat
 
 /-- Whole-theory reflection from the script returned by `buildScript`,
 including its leading logic-selection command. -/
@@ -181,9 +262,7 @@ theorem unsat_source_script {translation : FactTranslationRecord}
     {expressions : List Lean.Expr}
     {reified : ReifiedSentencesFor translation.datatypes translation.constants
       expressions}
-    (representation : SMT.GuardedTheoryRepresentation guarding
-      translation.guardDefinitionCommands (translatedTheories reified.sources)
-      (translation.emittedCommands.map stripAssertionAnnotation))
+    (representation : ValidatedCommandEquivalence (guarding := guarding) reified)
     (interpretation : translation.GuardDefinitionSemantics guarding represented guarded)
     (logic : String)
     (unsat : Crush.SMT.CommandsUnsatisfiable
@@ -191,7 +270,8 @@ theorem unsat_source_script {translation : FactTranslationRecord}
     Datatype.Env.TheoryUnsatisfiable translation.datatypeSignaturePrefix.toModelEnv
       reified.sources :=
   unsat_source represented guarded representation interpretation
-    ((commandsUnsatisfiable_setLogic logic translation.emittedCommands).mp unsat)
+    ((commandsUnsatisfiable_setLogic logic translation.emittedCommands
+      representation.emittedWellTyped unsat.wellTyped).mp unsat)
 
 end CommandEquivalence
 
@@ -208,9 +288,8 @@ structure FactCommandRepresentation (translation : FactTranslationRecord)
     (reified : ReifiedSentenceFor translation.expression translation.datatypes
       translation.constants) where
   retained : translation.reifiedSentence = some reified
-  theory : SMT.GuardedTheoryRepresentation guarding translation.guardDefinitionCommands
-    (translatedTheories (ReifiedSentencesFor.cons reified .nil).sources)
-    (translation.emittedCommands.map stripAssertionAnnotation)
+  theory : ValidatedCommandEquivalence (guarding := guarding)
+    (ReifiedSentencesFor.cons reified .nil)
 
 /-- A reified sentence existentially packaged with its command representation. -/
 structure SomeFactCommandRepresentation (translation : FactTranslationRecord)
@@ -287,9 +366,14 @@ theorem unsat_source_script {translation : FactTranslationRecord}
     (logic : String)
     (unsat : Crush.SMT.CommandsUnsatisfiable
       (#[.setLogic logic] ++ translation.emittedCommands)) :
-    Datatype.Env.Unsatisfiable translation.datatypeSignaturePrefix.toModelEnv reified.source :=
-  representation.unsat_source interpretation
-    ((commandsUnsatisfiable_setLogic logic translation.emittedCommands).mp unsat)
+    Datatype.Env.Unsatisfiable translation.datatypeSignaturePrefix.toModelEnv reified.source := by
+  intro source freeDataModel sourceValid
+  apply CommandEquivalence.unsat_source_script represented guarded
+    representation.theory interpretation logic unsat source freeDataModel
+  intro formula membership
+  simp only [ReifiedSentencesFor.sources, List.mem_singleton] at membership
+  subst formula
+  exact sourceValid
 
 end FactCommandRepresentation
 

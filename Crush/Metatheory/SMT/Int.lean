@@ -166,6 +166,86 @@ theorem applyUnique (view : IntView encoding target) :
     subst rightZero
     exact leftEq.trans rightEq.symm
 
+private theorem propositionValue_eq_true (target : FO.FamilyModel symbols)
+    {proposition : Prop} (valid : proposition) :
+    Value.typed .bool proposition = boolValue target true := by
+  have equal : proposition = True :=
+    propext ⟨fun _ => trivial, fun _ => valid⟩
+  subst proposition
+  rfl
+
+private theorem propositionValue_eq_false (target : FO.FamilyModel symbols)
+    {proposition : Prop} (invalid : ¬proposition) :
+    Value.typed .bool proposition = boolValue target false := by
+  have equal : proposition = False := propext ⟨invalid, False.elim⟩
+  subst proposition
+  rfl
+
+/-- The standard integer structure induced by an `IntView`. -/
+noncomputable def integerInterpretation (view : IntView encoding target) :
+    Crush.SMT.Model.IntegerInterpretation
+      (modelWith encoding target view.extra) where
+  int := fun value => .typed view.sort (view.«from» value)
+  int_typed := by
+    intro value
+    simpa only [modelWith_inSort, Value.InSort] using view.sort_eq
+  int_injective := by
+    intro left right equal
+    have valuesEqual : view.«from» left = view.«from» right :=
+      eq_of_heq (Value.typed.inj equal).2
+    have := congrArg view.toInt valuesEqual
+    simpa only [view.to_from] using this
+  int_exhaustive := by
+    intro value typed
+    simp only [modelWith_inSort] at typed
+    cases value with
+    | typed sort input =>
+        simp only [Value.InSort] at typed
+        have sortEq : sort = view.sort := by
+          apply encoding.sort_injective
+          exact typed.trans view.sort_eq.symm
+        subst sort
+        refine ⟨view.toInt input, ?_⟩
+        exact congrArg (Value.typed view.sort) (view.from_to input).symm
+    | raw sort =>
+        simp only [Value.InSort] at typed
+        exact False.elim (typed.2 view.sort (view.sort_eq.trans typed.1.symm))
+  numeral := by
+    intro value
+    rfl
+  ge := by
+    intro left right output
+    constructor
+    · intro applied
+      rcases applied with ordinary | integer
+      · rcases ordinary with ⟨decl, symbol, identifierEq, outputEq⟩
+        exact False.elim (view.ge_fresh symbol identifierEq.symm)
+      · rcases integer with
+          ⟨leftValue, rightValue, identifierEq, valuesEq, outputEq⟩
+        cases valuesEq
+        simp only [value_typed, view.to_from] at outputEq
+        by_cases valid : right ≤ left
+        · exact Or.inl ⟨valid,
+            outputEq.trans (propositionValue_eq_true target valid)⟩
+        · exact Or.inr ⟨valid,
+            outputEq.trans (propositionValue_eq_false target valid)⟩
+    · intro standardOutput
+      apply Or.inr
+      refine ⟨.typed view.sort (view.«from» left),
+        .typed view.sort (view.«from» right), rfl, rfl, ?_⟩
+      simp only [value_typed, view.to_from]
+      rcases standardOutput with ⟨valid, outputEq⟩ | ⟨invalid, outputEq⟩
+      · exact outputEq.trans (propositionValue_eq_true target valid).symm
+      · exact outputEq.trans (propositionValue_eq_false target invalid).symm
+
+/-- `IntView` upgrades the induced relational model to the standard Boolean
+and integer model required at the external SMT boundary. -/
+theorem standard (view : IntView encoding target) :
+    Crush.SMT.Model.Standard (modelWith encoding target view.extra) where
+  bool_exhaustive := modelWith_bool_exhaustive encoding target view.extra
+  integer := ⟨view.integerInterpretation⟩
+  apply_unique := view.applyUnique
+
 /-- A family of allocated unary predicates is disjoint from interpreted `>=`
 when none of its identifiers is `>=`. -/
 theorem guardsFresh (view : IntView encoding target)
@@ -252,6 +332,86 @@ theorem applyUnique_withGuards (view : IntView encoding target)
       (modelWith encoding target (guards.over view.extra)) :=
   guards.applyUnique_over view.extra view.applyUnique
     (view.guardsFresh guards separate)
+
+/-- The integer structure remains standard after installing fresh unary
+datatype guards. -/
+noncomputable def integerInterpretation_withGuards (view : IntView encoding target)
+    {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
+    (guards : UnaryGuards encoding target guard)
+    (separate : ∀ sort identifier, guards.ident sort = some identifier →
+      identifier ≠ .symb ">=") :
+    Crush.SMT.Model.IntegerInterpretation
+      (modelWith encoding target (guards.over view.extra)) where
+  int := fun value => .typed view.sort (view.«from» value)
+  int_typed := by
+    intro value
+    simpa only [modelWith_inSort, Value.InSort] using view.sort_eq
+  int_injective := by
+    intro left right equal
+    have valuesEqual : view.«from» left = view.«from» right :=
+      eq_of_heq (Value.typed.inj equal).2
+    have := congrArg view.toInt valuesEqual
+    simpa only [view.to_from] using this
+  int_exhaustive := by
+    intro value typed
+    simp only [modelWith_inSort] at typed
+    cases value with
+    | typed sort input =>
+        simp only [Value.InSort] at typed
+        have sortEq : sort = view.sort := by
+          apply encoding.sort_injective
+          exact typed.trans view.sort_eq.symm
+        subst sort
+        refine ⟨view.toInt input, ?_⟩
+        exact congrArg (Value.typed view.sort) (view.from_to input).symm
+    | raw sort =>
+        simp only [Value.InSort] at typed
+        exact False.elim (typed.2 view.sort (view.sort_eq.trans typed.1.symm))
+  numeral := by
+    intro value
+    rfl
+  ge := by
+    intro left right output
+    constructor
+    · intro applied
+      rcases applied with ordinary | native
+      · rcases ordinary with ⟨decl, symbol, identifierEq, outputEq⟩
+        exact False.elim (view.ge_fresh symbol identifierEq.symm)
+      · rcases native with integer | unary
+        · rcases integer with
+            ⟨leftValue, rightValue, identifierEq, valuesEq, outputEq⟩
+          cases valuesEq
+          simp only [value_typed, view.to_from] at outputEq
+          by_cases valid : right ≤ left
+          · exact Or.inl ⟨valid,
+              outputEq.trans (propositionValue_eq_true target valid)⟩
+          · exact Or.inr ⟨valid,
+              outputEq.trans (propositionValue_eq_false target valid)⟩
+        · rcases unary with ⟨sort, value, identEq, valuesEq, outputEq⟩
+          exact False.elim (separate sort _ identEq rfl)
+    · intro standardOutput
+      apply Or.inr
+      apply Or.inl
+      refine ⟨.typed view.sort (view.«from» left),
+        .typed view.sort (view.«from» right), rfl, rfl, ?_⟩
+      simp only [value_typed, view.to_from]
+      rcases standardOutput with ⟨valid, outputEq⟩ | ⟨invalid, outputEq⟩
+      · exact outputEq.trans (propositionValue_eq_true target valid).symm
+      · exact outputEq.trans (propositionValue_eq_false target invalid).symm
+
+/-- Adding fresh unary datatype guards preserves the standard integer
+interpretation supplied by `IntView`. -/
+theorem standard_withGuards (view : IntView encoding target)
+    {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
+    (guards : UnaryGuards encoding target guard)
+    (separate : ∀ sort identifier, guards.ident sort = some identifier →
+      identifier ≠ .symb ">=") :
+    Crush.SMT.Model.Standard
+      (modelWith encoding target (guards.over view.extra)) where
+  bool_exhaustive :=
+    modelWith_bool_exhaustive encoding target (guards.over view.extra)
+  integer := ⟨view.integerInterpretation_withGuards guards separate⟩
+  apply_unique := view.applyUnique_withGuards guards separate
 
 end IntView
 
