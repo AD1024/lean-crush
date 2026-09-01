@@ -543,9 +543,10 @@ structure Representation (translation : FactTranslationRecord)
   declarations : translation.datatypeDeclarationLocations.Representation fo
   datatypeDeclarations_eq : fo.nativeCommands = translation.datatypeDeclarations
 
-/-- Evidence that the located recursive guard commands use fresh, injective SMT
-identifiers and match the datatype blocks fixed by the SMT datatype representation.
-These fields describe command syntax only; they do not depend on a model. -/
+/-- Evidence that the located recursive guard commands use injective identifiers
+that are distinct from source and interpreted symbols, and match the datatype
+blocks fixed by the SMT datatype representation. These fields describe command
+syntax only; they do not depend on a model. -/
 structure GuardDefinitionEncoding (translation : FactTranslationRecord)
     (guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature)))
@@ -556,8 +557,8 @@ structure GuardDefinitionEncoding (translation : FactTranslationRecord)
   ident : FO.FOSort → Option Crush.SMT.Ident
   ident_injective : ∀ {left right identifier},
     ident left = some identifier → ident right = some identifier → left = right
-  notBuiltin : ∀ sort identifier, ident sort = some identifier →
-    Crush.SMT.NotBuiltin identifier
+  notInterpreted : ∀ sort identifier, ident sort = some identifier →
+    Crush.SMT.NotInterpreted identifier
   sourceFresh : ∀ sort identifier, ident sort = some identifier →
     ∀ {decl : FO.SymbolDecl}
       (symbol : Symbol (translation.datatypes.signature ++ translation.ordinarySignature) decl),
@@ -579,7 +580,8 @@ def toUnaryGuards {translation : FactTranslationRecord}
     SMT.UnaryGuards guarding.encoding target guard where
   ident := guarded.ident
   ident_injective := guarded.ident_injective
-  notBuiltin := guarded.notBuiltin
+  notBuiltin := fun sort identifier present =>
+    (guarded.notInterpreted sort identifier present).notLogicalBuiltin
   sourceFresh := guarded.sourceFresh
 
 end GuardDefinitionEncoding
@@ -628,17 +630,18 @@ structure GuardedModelExtension (translation : FactTranslationRecord)
         sort).guard)).over base)
     (fun sort => ((represented.datatypeRepresentation.liftedFrom source freeDataModel prior).relation
       sort).guard)
-  /-- Standard Boolean and integer semantics for the completed raw model.
-  `ofIntView` constructs this field from an explicit FO sort mapped to SMT
-  `Int` whose target carrier is isomorphic to `Int`; `Encoding` alone does not
-  provide that model-dependent fact. -/
-  standard : Crush.SMT.Model.Standard
+  /-- The induced model has the interpreted-theory laws required by the exact
+  command array retained in this translation record. Boolean two-valuedness
+  and functional application are always required; an integer carrier is
+  required only when that array contains integer syntax. `ofIntView` supplies
+  the stronger global integer interpretation. -/
+  standard : Crush.SMT.Model.StandardFor
     (SMT.modelWith guarding.encoding
       (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target
       ((guarded.toUnaryGuards
         (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target
         (fun sort => ((represented.datatypeRepresentation.liftedFrom source freeDataModel prior).relation
-          sort).guard)).over base))
+          sort).guard)).over base)) translation.emittedCommands
 
 namespace GuardedModelExtension
 
@@ -682,8 +685,6 @@ noncomputable def ofIntView {translation : FactTranslationRecord}
         (represented.datatypeRepresentation.liftedFrom source freeDataModel prior).target
         (fun sort => ((represented.datatypeRepresentation.liftedFrom source freeDataModel prior).relation
           sort).guard))).guard)
-    (separate : ∀ sort identifier,
-      guarded.ident sort = some identifier → identifier ≠ .symb ">=")
     (omitted : ∀ sort, sort ≠ view.sort → guarded.ident sort = none →
       ∀ value,
         ((represented.datatypeRepresentation.liftedFrom source freeDataModel prior).relation sort).guard
@@ -696,6 +697,10 @@ noncomputable def ofIntView {translation : FactTranslationRecord}
   let lifted := represented.datatypeRepresentation.liftedFrom source freeDataModel prior
   let guards := guarded.toUnaryGuards lifted.target
     (fun sort => (lifted.relation sort).guard)
+  have separate : ∀ sort identifier,
+      guarded.ident sort = some identifier → identifier ≠ .symb ">=" := by
+    intro sort identifier present
+    exact (guarded.notInterpreted sort identifier present).ne_integerComparison
   have total : ∀ sort, sort ≠ view.sort → guards.ident sort = none →
       ∀ value, (lifted.relation sort).guard value := by
     intro sort unequal absent value
@@ -731,7 +736,9 @@ noncomputable def ofIntView {translation : FactTranslationRecord}
     baseUnique := view.applyUnique
     fresh := view.guardsFresh guards separate
     semantics := termSemantics
-    standard := view.standard_withGuards guards separate }
+    standard :=
+      (view.standard_withGuards guards separate).forCommands
+        translation.emittedCommands }
 
 end GuardedModelExtension
 
@@ -862,14 +869,18 @@ theorem sound {translation : FactTranslationRecord}
     {commands : Array Crush.SMT.Command}
     (encoding : SMT.GuardedTheoryRepresentation guarding
       translation.guardDefinitionCommands theory commands)
+    (requirements : Crush.SMT.CommandsRequireIntegerSemantics
+      translation.emittedCommands =
+        Crush.SMT.CommandsRequireIntegerSemantics commands)
     (valid : (canonicalModel source).SatisfiesTheory theory) :
     ∃ model : Crush.SMT.Model,
-      model.Standard ∧ model.SatisfiesCommands commands := by
+      model.StandardFor commands ∧ model.SatisfiesCommands commands := by
   let target :=
     (represented.datatypeRepresentation.liftedFrom source freeDataModel
       guardModel.prior).target
   let extra := guardModel.guards.over guardModel.base
-  refine ⟨SMT.modelWith guarding.encoding target extra, guardModel.standard, ?_⟩
+  refine ⟨SMT.modelWith guarding.encoding target extra,
+    guardModel.standard.of_requirements_eq requirements, ?_⟩
   apply SMT.guarded_valid guarding encoding (canonicalModel source) target
     (represented.datatypeRepresentation.liftedFrom source freeDataModel guardModel.prior).relation
     (represented.datatypeRepresentation.liftedFrom source freeDataModel guardModel.prior).models valid
@@ -893,6 +904,9 @@ theorem unsat_under {translation : FactTranslationRecord}
     {commands : Array Crush.SMT.Command}
     (encoding : SMT.GuardedTheoryRepresentation guarding
       translation.guardDefinitionCommands (translatedTheory formula) commands)
+    (requirements : Crush.SMT.CommandsRequireIntegerSemantics
+      translation.emittedCommands =
+        Crush.SMT.CommandsRequireIntegerSemantics commands)
     (unsat : Crush.SMT.CommandsUnsatisfiable commands) :
     UnsatisfiableUnder
       (fun source =>
@@ -902,7 +916,7 @@ theorem unsat_under {translation : FactTranslationRecord}
   intro source model sourceValid
   rcases model with ⟨freeDataModel, guardModel⟩
   obtain ⟨target, standard, valid⟩ := represented.sound guarded source freeDataModel
-    guardModel encoding (model_extension source formula sourceValid)
+    guardModel encoding requirements (model_extension source formula sourceValid)
   exact unsat.noModel target standard valid
 
 /-- Reflection over every source model satisfying the free-datatype condition once the
@@ -920,10 +934,13 @@ theorem unsat {translation : FactTranslationRecord}
     {commands : Array Crush.SMT.Command}
     (encoding : SMT.GuardedTheoryRepresentation guarding
       translation.guardDefinitionCommands (translatedTheory formula) commands)
+    (requirements : Crush.SMT.CommandsRequireIntegerSemantics
+      translation.emittedCommands =
+        Crush.SMT.CommandsRequireIntegerSemantics commands)
     (unsat : Crush.SMT.CommandsUnsatisfiable commands) :
     Datatype.Env.Unsatisfiable translation.datatypeSignaturePrefix.toModelEnv formula := by
   intro source freeDataModel sourceValid
-  exact represented.unsat_under guarded formula encoding unsat source
+  exact represented.unsat_under guarded formula encoding requirements unsat source
     ⟨freeDataModel, interpretation.realize source freeDataModel⟩ sourceValid
 
 /-- Reflection for a complete finite source theory translated against the
@@ -939,12 +956,15 @@ theorem theory_unsat {translation : FactTranslationRecord}
     {commands : Array Crush.SMT.Command}
     (encoding : SMT.GuardedTheoryRepresentation guarding
       translation.guardDefinitionCommands (translatedTheories sourceTheory) commands)
+    (requirements : Crush.SMT.CommandsRequireIntegerSemantics
+      translation.emittedCommands =
+        Crush.SMT.CommandsRequireIntegerSemantics commands)
     (unsat : Crush.SMT.CommandsUnsatisfiable commands) :
     Datatype.Env.TheoryUnsatisfiable translation.datatypeSignaturePrefix.toModelEnv
       sourceTheory := by
   intro source freeDataModel sourceValid
   obtain ⟨target, standard, valid⟩ := represented.sound guarded source freeDataModel
-    (interpretation.realize source freeDataModel) encoding
+    (interpretation.realize source freeDataModel) encoding requirements
     (model_extension_theory source sourceTheory sourceValid)
   exact unsat.noModel target standard valid
 

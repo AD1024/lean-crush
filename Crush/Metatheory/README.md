@@ -60,13 +60,16 @@ boundary.
    assertions; `commands_unsat_implies_source_theory_unsat` is the corresponding
    reflection theorem. `SMT.CommandsUnsatisfiable` requires an order-sensitive,
    declaration-aware type-checking certificate, the additional free-datatype
-   conditions, and absence of a model with standard Boolean and integer
-   interpretations. `SMT.standardModel_exists` shows that this standard-model
-   class is inhabited. Constructing such a model from a typed FO model uses an
-   explicit `SMT.IntView`: one FO sort must map to SMT `Int`, and its target
-   carrier must be isomorphic to Lean `Int`. This model-dependent obligation is
-   not implied by the syntax-only `SMT.Encoding`. Built-in SMT sorts are used
-   directly and are never emitted as ordinary sort declarations. The
+   conditions, and absence of a model satisfying the standard laws required by
+   that exact command array. Boolean semantics and functional symbol graphs are
+   always required; integer semantics is required exactly when the commands
+   contain the SMT integer sort, numerals, or integer `>=`. Consequently, a
+   Boolean-only encoding need not map an FO sort to SMT `Int`. Constructing a
+   model for commands that do use integers requires an explicit `SMT.IntView`:
+   one FO sort must map to SMT `Int`, and its target carrier must be isomorphic
+   to Lean `Int`. This model-dependent obligation is not implied by the
+   syntax-only `SMT.Encoding`. Built-in SMT sorts are used directly and are
+   never emitted as ordinary sort declarations. The
    fixed-theory operators covered by the soundness theorem are Boolean logic,
    equality, integer numerals, and integer `>=`;
    other arithmetic and bit-vector, array, and string operators are rejected by

@@ -301,6 +301,14 @@ def refl {symbols : FO.SymbolFamily.{u}} (source : FO.FamilyModel symbols) :
   relation := FO.CarrierRel.refl source.carriers
   models := FO.ModelRel.refl source
 
+/-- Every value belongs to the image of the identity carrier
+representation. -/
+theorem refl_guard {symbols : FO.SymbolFamily.{u}}
+    (source : FO.FamilyModel symbols) (sort : FO.FOSort)
+    (value : sort.Denote source.carriers) :
+    ((refl source).relation sort).guard value := by
+  cases sort <;> trivial
+
 /-- Canonically enlarge only the opaque base carriers of a family model. The
 defunctionalized function-value carriers stay unchanged; every source symbol is
 totalized through the supplied guarded base relations. This is the initial

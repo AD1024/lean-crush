@@ -228,4 +228,18 @@ noncomputable def EnvRepresentation.liftedFrom {signature : Signature}
     Lifted (canonicalModel source) :=
   Env.liftFrom source env freeDataModel represented.blocks.blocksWF prior
 
+/-- Installing an empty datatype environment leaves an existing carrier
+representation unchanged. -/
+@[simp] theorem EnvRepresentation.liftedFrom_nil {signature : Signature}
+    {fo : SMT.Encoding (Symbol signature)}
+    (represented : EnvRepresentation fo []) (source : Model signature)
+    (freeDataModel : Env.IsFreeDatatypeModel source [])
+    (prior : Lifted (canonicalModel source)) :
+    represented.liftedFrom source freeDataModel prior = prior := by
+  cases represented with
+  | mk blocks commandsEq =>
+      cases blocks
+      cases freeDataModel
+      rfl
+
 end Crush.Metatheory.SMT.Datatype

@@ -32,7 +32,7 @@ inductive FOSort where
   | bool : FOSort
   | base : BaseSort → FOSort
   | fn : Ty → Ty → FOSort
-  deriving BEq, DecidableEq, Hashable, Repr
+  deriving BEq, ReflBEq, LawfulBEq, DecidableEq, Hashable, Repr
 
 namespace FOSort
 

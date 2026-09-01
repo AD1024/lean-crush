@@ -129,7 +129,8 @@ def ofUnary {guarding : GuardedEncoding symbols}
   raw := .app (guarding.encoding.ident symbol) #[raw]
   value := target.symbol symbol value
   evaluated := by
-    apply Crush.SMT.Eval.symbol (guarding.encoding.ident_fresh symbol)
+    apply Crush.SMT.Eval.symbol
+      (guarding.encoding.ident_fresh symbol).notLogicalBuiltin
     · exact Crush.SMT.EvalList.cons evaluated .nil
     · apply Or.inl
       refine ⟨{ args := [domain], result := result }, symbol, rfl, ?_⟩
@@ -1231,7 +1232,8 @@ theorem guardTerm_eval (guarding : GuardedEncoding symbols)
         FO.FamilyTerm.guardDenote.eq_1] using
         Crush.SMT.Eval.bvar (related.lookup target ref))
     (symbol := fun symbol args argsIH valuation environment related => by
-      apply Crush.SMT.Eval.symbol (guarding.encoding.ident_fresh symbol)
+      apply Crush.SMT.Eval.symbol
+        (guarding.encoding.ident_fresh symbol).notLogicalBuiltin
         (argsIH valuation environment related)
       apply Or.inl
       refine ⟨_, symbol, rfl, ?_⟩

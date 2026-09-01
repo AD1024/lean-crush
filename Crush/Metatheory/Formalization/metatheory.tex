@@ -1288,14 +1288,22 @@ quantifiers, annotations, and user-symbol applications. A closed raw formula
 $q$ holds when it evaluates to semantic truth; only now do we write
 $M_q\models_{\mathsf{SMT}}q$.
 
-The solver-facing predicate $\mathsf{Standard}(M_q)$ additionally requires:
-the Boolean sort contains exactly the two distinguished Boolean values; the
-integer sort is in bijection with $\mathbb Z$; numeral literals and
-\texttt{>=} have their usual integer meanings; and every identifier graph is
-single-valued. These are semantic laws, not typing rules. In particular, a type
-system alone cannot prevent the literals $0$ and $1$ from collapsing in an
-arbitrary raw model. The Lean development includes a concrete standard-model
-witness, so this class of models is not empty.
+The command-indexed predicate $\mathsf{StandardFor}(M_q,C)$ requires that the
+Boolean sort contain exactly the two distinguished Boolean values and that
+every identifier graph be single-valued. If the concrete syntax of $C$ uses
+the SMT integer sort, an integer numeral, or \texttt{>=}, it additionally
+requires the integer sort to be in bijection with $\mathbb Z$ and gives those
+integer constructs their usual meanings. The occurrence test is a structural
+Boolean function over the exact command array; it is not an informal notion of
+whether the theory ``intends'' to use integers. The stronger
+$\mathsf{Standard}(M_q)$ supplies the integer laws unconditionally and implies
+$\mathsf{StandardFor}(M_q,C)$ for every $C$.
+
+These are semantic laws, not typing rules. In particular, a type system alone
+cannot prevent the literals $0$ and $1$ from collapsing in an arbitrary raw
+model. The Lean development constructs witnesses for both the unconditional
+and command-indexed predicates, so neither class of models is empty merely by
+definition.
 \leanfile{SMT/Semantics.lean}
 \end{definition}
 
@@ -1334,6 +1342,14 @@ We define
 \]
 This is an extrinsic type system over the existing command syntax, not a second
 typed SMT abstract syntax tree.
+
+The ordinary translator-facing checker stores declarations in hash maps. Its
+kernel-reducible certificate mode selects association lists through the same
+insertion and lookup interface. This avoids
+depending on the opaque implementation of string hashing in a proof by
+reduction, while normal translation and benchmark runs neither consult nor
+maintain the association lists. The command traversal and argument checks are structural in both modes;
+there is no proof-only fuel bound that can reject a larger valid script.
 
 The SMT subset covered by the current soundness theorem is deliberately small:
 Boolean literals and connectives, equality, integer numerals, and integer
@@ -1460,29 +1476,32 @@ ordering is checked separately by the Crush script validator.
  {}&\mathsf{CommandsSupported}(C)\\
  &{}\land \mathsf{CommandsWellTyped}(C)\\
  &{}\land \forall M_q.\;
-   \mathsf{Standard}(M_q)\Rightarrow\neg(M_q\smtsat C).
+   \mathsf{StandardFor}(M_q,C)\Rightarrow\neg(M_q\smtsat C).
 \end{aligned}
 \]
 The first conjunct supplies the additional free-datatype conditions. The second
 rejects malformed or semantically unmodeled syntax instead of allowing a
 missing evaluation to prove unsatisfiability. The last conjunct uses the
-standard meanings of the modeled SMT theories. It is a mathematical premise
-about commands, not by itself a theorem connecting an external solver process
-to this predicate.
+standard meanings required by the exact syntax of $C$. A Boolean-only script
+therefore does not acquire an unrelated obligation to exhibit an integer
+carrier, whereas a script containing integer syntax does. It is a mathematical
+premise about commands, not by itself a theorem connecting an external solver
+process to this predicate.
 \leanfile{SMT/Semantics.lean}
 \end{definition}
 
 \section{Exact FO-to-SMT representation}
 \sectioncontents{One shared encoding; semantic command-set representation; SMT datatype representation proofs; model lifting.}
 
-\begin{definition}[Encoding choice]
+\begin{definition}[Encoding choice]\label{def:encoding-choice}
 For a typed symbol family $S$, an encoding $\mathcal E$ chooses:
 \begin{itemize}[leftmargin=*]
  \item an injective concrete SMT sort $\mathcal E_s(\kappa)$ for every FO sort,
        with $\Bool$ mapped to SMT \texttt{Bool};
  \item an identifier $\mathcal E_i(p)$ for every typed symbol, injective both
        across declaration indices and within each symbol-family fiber, and
-       fresh from logical built-ins;
+       fresh from logical built-ins and from the interpreted integer comparison
+       identifier \texttt{>=};
  \item predicates identifying sorts and symbols declared by SMT datatype commands;
  \item the exact SMT datatype command prefix $C_{\mathsf{data}}$; and
  \item ordinary printable names for every other symbol.
@@ -1507,16 +1526,21 @@ $(\mathcal E,M_t)$, an \emph{integer view} therefore supplies:
        $\mathcal E_s(\kappa_{\mathbb Z})=\mathtt{Int}$;
  \item mutually inverse maps
        $M_t(\kappa_{\mathbb Z})\to\mathbb Z$ and
-       $\mathbb Z\to M_t(\kappa_{\mathbb Z})$; and
- \item freshness of the interpreted SMT identifier \texttt{>=} from every
-       source-symbol identifier selected by $\mathcal E$.
+       $\mathbb Z\to M_t(\kappa_{\mathbb Z})$.
 \end{itemize}
+Freshness of \texttt{>=} from source-symbol identifiers is already part of
+the encoding choice in Definition~\ref{def:encoding-choice}, so the integer
+view does not repeat it.
 This is the Lean structure \texttt{SMT.IntView}. It is an explicit
 model-construction premise, not a consequence of \texttt{SMT.Encoding}, because
-the carrier and its isomorphism vary with $M_t$. It is also different from a
-sort-declaration condition: SMT \texttt{Int} is a built-in sort, and the theory
-encoder never emits \texttt{(declare-sort Int 0)}, whether or not the selected
-FO sort is marked as belonging to the native datatype prefix.
+the carrier and its isomorphism vary with $M_t$. It is needed when the commands
+actually use integer syntax or when a theorem asks for unconditional
+$\mathsf{Standard}$ semantics. A Boolean-only command array can instead use its
+command-indexed $\mathsf{StandardFor}$ witness and need not map any FO sort to
+SMT \texttt{Int}. An integer view is also different from a sort-declaration
+condition: SMT \texttt{Int} is a built-in sort, and the theory encoder never
+emits \texttt{(declare-sort Int 0)}, whether or not the selected FO sort is
+marked as belonging to the native datatype prefix.
 \leanfiles{SMT/Int.lean and SMT/Representation.lean}
 \end{definition}
 
@@ -2184,8 +2208,9 @@ For a fact translation record $P$:
        command to one shared encoding and proves that the encoding's datatype
        prefix is exactly the retained command list;
  \item $P.\mathsf{GuardDefinitionEncoding}(\mathcal G)$ links the recursive guard
-       definitions to fresh, injective SMT identifiers independently of any
-       model; and
+       definitions to injective SMT identifiers that are distinct from source
+       symbols, logical built-ins, and interpreted integer comparison,
+       independently of any model; and
  \item $P.\mathsf{GuardDefinitionSemantics}(\mathcal G)$ realizes that static guard
        representation for every source model satisfying the free-datatype condition.
 \end{itemize}
@@ -2239,11 +2264,21 @@ The test writes the expected command array independently:
 (declare-fun right () Bool)
 (assert (forall ((x Bool)) (or (= x left) (= x right))))
 \end{verbatim}
-It then checks three facts at compile time: the formal guarded-theory generator
-produces exactly this array, the modeled-fragment SMT checker accepts the array,
-and \texttt{CommandEquivalence.build?} returns \texttt{some}. Thus the
-ordinary-symbol encoding and whole-array comparison hypotheses are jointly
-satisfiable in a nonempty signature and the executable comparison is exercised.
+It then proves in the Lean kernel that the formal guarded-theory generator
+produces exactly this array, that the modeled-fragment SMT checker accepts the
+declarations and assertion, and that \texttt{CommandEquivalence.build?} returns
+\texttt{some}. The regression also constructs a source model with
+$\ell=\mathsf{true}$ and $r=\mathsf{false}$, lifts it to a
+$\mathsf{StandardFor}$ raw model satisfying all three commands, and invokes the
+final reflection theorem. Hence the example exercises the complete represented
+path from a nonempty signature through executable command comparison and model
+construction to the final theorem. The satisfying target model separately
+proves that command unsatisfiability is not true vacuously. No integer view is
+needed because this exact command array is Boolean-only.
+
+Thus the ordinary-symbol encoding and whole-array comparison hypotheses are
+jointly satisfiable in a nonempty signature, the executable comparison is
+exercised, and the result composes with the final semantic link.
 This example does not claim that the implementation automatically assembles the
 proof objects for an arbitrary translator run; that separate integration task
 remains outside the theorem.
@@ -2276,7 +2311,10 @@ $W$. If the emitted command sequence is semantically unsatisfiable, then
 The theorem \texttt{CommandEquivalence.unsat\_source\_script} also admits the
 leading logic-selection command returned by \texttt{buildScript}.
 \texttt{FactCommandRepresentation} is the single-fact specialization
-of this aggregate path.
+of this aggregate path. The proof also establishes that its transparent
+normalizations preserve the structural integer-requirement test, so a
+$\mathsf{StandardFor}$ witness cannot silently lose or gain integer obligations
+when moving between the compared command arrays.
 \leanfile{VCG/CommandEquivalence.lean}
 \end{theorem}
 
@@ -2369,6 +2407,9 @@ membership-based untyped command semantics.}
        represent well-formed source datatype values.
  \item One induced untyped SMT model validates SMT datatype commands, simultaneous
        guard definitions, ordinary declarations, and every guarded assertion.
+       Its semantic theory obligations are indexed by the exact emitted command
+       sequence; integer laws are required precisely when that sequence contains
+       integer syntax.
  \item Exact representation is semantic command-set equivalence. It therefore
        admits translator interleaving and duplicate elimination without
        weakening or strengthening the model obligations.

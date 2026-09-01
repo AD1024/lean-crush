@@ -687,7 +687,8 @@ unsatisfiable by an empty-domain-of-models accident. -/
 example : ¬CommandsUnsatisfiable #[] := by
   intro unsat
   rcases standardModel_exists with ⟨model, standard⟩
-  exact unsat.noModel model standard model.satisfiesCommands_empty
+  exact unsat.noModel model (standard.forCommands #[])
+    model.satisfiesCommands_empty
 
 /- Standard integer semantics prevents distinct numerals from collapsing in
 the relational model. -/
@@ -707,7 +708,7 @@ example :
   · intro model standard valid
     have evaluated := valid (.assert (smt| (= 0 1))) (by simp)
     change Eval model [] (smt| (= 0 1)) (model.bool true) at evaluated
-    rcases standard.integer with ⟨integers⟩
+    rcases standard.integer (by rfl) with ⟨integers⟩
     have different : model.literal (.num 0) ≠ model.literal (.num 1) := by
       intro equal
       apply (show (0 : Int) ≠ 1 by decide)
@@ -1430,12 +1431,14 @@ private def twoConstantEncoding :
     cases symbol with
     | sourceConstant constant =>
         cases constant with
-        | here => exact .symb "left" (by decide) (by decide) (by decide) (by decide) (by decide)
+        | here => exact by decide
         | there constant => cases constant with
-          | here => exact .symb "right" (by decide) (by decide) (by decide) (by decide) (by decide)
+          | here => exact by decide
           | there constant => nomatch constant
-    | application arrow => exact .indexed _ _
-    | closure closure => exact .indexed _ _
+    | application arrow =>
+        exact ⟨Crush.SMT.NotBuiltin.indexed _ _, by simp [symbolIdent]⟩
+    | closure closure =>
+        exact ⟨Crush.SMT.NotBuiltin.indexed _ _, by simp [symbolIdent]⟩
   nativeSort := fun _ => false
   nativeSymbol := symbolNative
   nativeCommands := #[]
@@ -1525,20 +1528,240 @@ private def checkedCommandEquivalence :=
   Crush.Metatheory.VCG.CommandEquivalence.build?
     (translation := translationRecord) (guarding := twoConstantGuarding) reifiedTheory
 
-/- Compile-time end-to-end regression: the formal encoder must produce the
-literal script, the script must pass the modeled SMT checker, and the actual
-whole-theory comparison must return `some`. -/
-#eval show IO Unit from do
-  unless Crush.Metatheory.Reification.shapesMatch
+/-- The empty datatype prefix is represented by the same nontrivial symbol
+encoding used by the command-equivalence check. -/
+private def twoConstantRepresentation :
+    translationRecord.Representation twoConstantEncoding where
+  declarations :=
+    Crush.Metatheory.VCG.DatatypeDeclarationLocations.Representation.nil
+      twoConstantEncoding
+  datatypeDeclarations_eq := rfl
+
+/-- With no custom datatypes, there are no recursive datatype-guard commands
+or guard identifiers to allocate. -/
+private def twoConstantGuardDefinitionEncoding :
+    translationRecord.GuardDefinitionEncoding twoConstantGuarding
+      twoConstantRepresentation where
+  definitions := .nil
+  commands_eq := rfl
+  ident := fun _ => none
+  ident_injective := by simp
+  notInterpreted := by simp
+  sourceFresh := by simp
+  linked := trivial
+
+/-- Every source model induces a standard model for this exact Boolean-only
+script. No integer carrier is requested because the retained commands contain
+no integer syntax. -/
+private noncomputable def twoConstantGuardDefinitionSemantics :
+    translationRecord.GuardDefinitionSemantics twoConstantGuarding
+      twoConstantRepresentation twoConstantGuardDefinitionEncoding where
+  realize := by
+    intro source freeDataModel
+    let prior := Crush.Metatheory.Datatype.Lifted.refl
+      (Defunctionalization.Flattened.canonicalModel source)
+    let lifted := twoConstantRepresentation.datatypeRepresentation.liftedFrom
+      source freeDataModel prior
+    let base := Crush.Metatheory.SMT.ExtraGraph.nil twoConstantEncoding
+      lifted.target
+    let guards := twoConstantGuardDefinitionEncoding.toUnaryGuards
+      lifted.target (fun sort => (lifted.relation sort).guard)
+    have liftedEq : lifted = prior := by
+      exact Crush.Metatheory.SMT.Datatype.EnvRepresentation.liftedFrom_nil
+        twoConstantRepresentation.datatypeRepresentation source freeDataModel prior
+    let TotalGuard := fun current : Crush.Metatheory.Datatype.Lifted
+        (Defunctionalization.Flattened.canonicalModel source) =>
+      ∀ sort (value : sort.Denote current.target.carriers),
+        (current.relation sort).guard value
+    have priorTotal : TotalGuard prior := by
+      intro sort value
+      exact Crush.Metatheory.Datatype.Lifted.refl_guard
+        (Defunctionalization.Flattened.canonicalModel source) sort value
+    have liftedTotal : TotalGuard lifted := liftedEq.symm ▸ priorTotal
+    have baseUnique : Crush.SMT.ApplyUnique
+        (Crush.Metatheory.SMT.modelWith twoConstantEncoding lifted.target base) := by
+      exact Crush.Metatheory.SMT.modelWith_nil_applyUnique
+        twoConstantEncoding lifted.target
+    have fresh : guards.Fresh base := by
+      intro sort identifier present values output
+      change (none : Option Crush.SMT.Ident) = some identifier at present
+      contradiction
+    have guardSemantics : twoConstantGuarding.TermSemantics lifted.target
+        (guards.over base) (fun sort => (lifted.relation sort).guard) := by
+      apply (Crush.Metatheory.SMT.GuardedEncoding.none_termSemantics
+        twoConstantEncoding lifted.target (guards.over base)).congr
+      intro sort value
+      constructor
+      · intro
+        exact liftedTotal sort value
+      · intro
+        trivial
+    refine {
+      prior
+      base
+      baseUnique
+      fresh
+      semantics := guardSemantics
+      standard := ?_ }
+    refine {
+      bool_exhaustive := Crush.Metatheory.SMT.modelWith_bool_exhaustive
+        twoConstantEncoding lifted.target (guards.over base)
+      integer := ?_
+      apply_unique := guards.applyUnique_over base baseUnique fresh }
+    intro required
+    simp [translationRecord, twoConstantCommands,
+      Crush.SMT.CommandsRequireIntegerSemantics,
+      Crush.SMT.Command.requiresIntegerSemantics,
+      Crush.SMT.Term.requiresIntegerSemantics] at required
+
+/-- The concrete Lean expression and the HO formula have the same reified
+constructor tree. This checks only syntactic reification, not denotation. -/
+private theorem twoConstantShapesMatch :
+    Crush.Metatheory.Reification.shapesMatch
       (Crush.Metatheory.Reification.exprShape sourceExpression)
-      (Crush.Metatheory.Reification.termShape twoConstantFormula) do
-    throw <| IO.userError "the concrete Lean expression and HO formula have different shapes"
-  unless decide (generatedTwoConstantCommands = twoConstantCommands) do
-    throw <| IO.userError "the formal encoder disagrees with the concrete two-constant commands"
-  unless Crush.SMT.metatheoryScriptWellTyped twoConstantCommands do
-    throw <| IO.userError "the concrete two-constant commands are not well typed"
-  unless checkedCommandEquivalence.isSome do
-    throw <| IO.userError "CommandEquivalence.build? rejected the concrete two-constant translation"
+      (Crush.Metatheory.Reification.termShape twoConstantFormula) = true := by
+  rfl
+
+/-- The declaration-aware checker accepts the exact nonempty environment used
+by the command-equivalence regression, with a kernel-checked certificate. -/
+private theorem twoConstantCommands_wellTyped :
+    Crush.SMT.metatheoryScriptWellTyped twoConstantCommands = true := by
+  unfold twoConstantCommands
+  prove_metatheory_script_well_typed
+
+private theorem generatedTwoConstantCommands_eq :
+    generatedTwoConstantCommands = twoConstantCommands := by
+  unfold generatedTwoConstantCommands twoConstantCommands
+  unfold Crush.Metatheory.VCG.guardedTheoryCommands
+  unfold Crush.Metatheory.SMT.GuardedEncoding.theory
+  simp [twoConstantGuarding, twoConstantEncoding,
+    Crush.Metatheory.SMT.GuardedEncoding.theoryBody,
+    Crush.Metatheory.SMT.GuardedEncoding.assertions,
+    Crush.Metatheory.SMT.GuardedEncoding.none,
+    Crush.Metatheory.SMT.translatedDeclarations,
+    Crush.Metatheory.SMT.ofDeclared,
+    Crush.Metatheory.SMT.ordinarySorts,
+    Crush.Metatheory.SMT.ordinaryDecls,
+    Crush.Metatheory.SMT.usedSorts,
+    Crush.Metatheory.SMT.termSorts,
+    Crush.Metatheory.SMT.argumentSorts,
+    Crush.Metatheory.SMT.sortDeclaration?,
+    Crush.Metatheory.SMT.declaration,
+    Crush.Metatheory.SMT.varIndex,
+    Crush.SMT.Term.symbApp,
+    Defunctionalization.Flattened.translatedTheories,
+    Defunctionalization.Flattened.translatedTheory,
+    Defunctionalization.Flattened.translatedSentence,
+    Defunctionalization.Flattened.translate,
+    Defunctionalization.Flattened.translateWith,
+    Defunctionalization.Flattened.TermTranslation.ofGenerated,
+    Defunctionalization.Flattened.TermTranslation.combine,
+    Defunctionalization.Flattened.TermTranslation.generated,
+    Defunctionalization.Flattened.TermTranslation.theory,
+    Defunctionalization.Flattened.AuxiliaryTheory.empty,
+    Defunctionalization.Flattened.AuxiliaryTheory.declare,
+    Defunctionalization.Flattened.AuxiliaryTheory.theory,
+    Defunctionalization.Flattened.DeclaredSymbol.of,
+    Defunctionalization.targetVar, Renaming.lift,
+    twoConstantTheory, twoConstantFormula, leftConstant, rightConstant,
+    FO.FOSort.ofTy,
+    symbolNative, symbolName, symbolIdent, sourceName, foSort]
+
+private theorem checkedCommandEquivalence_succeeds :
+    checkedCommandEquivalence.isSome = true := by
+  have generated : Crush.Metatheory.VCG.guardedTheoryCommands
+      twoConstantGuarding #[] twoConstantTheory = twoConstantCommands := by
+    simpa [generatedTwoConstantCommands] using generatedTwoConstantCommands_eq
+  have stripped : twoConstantCommands.map
+      Crush.Metatheory.VCG.stripAssertionAnnotation = twoConstantCommands := by
+    apply Array.toList_inj.mp
+    simp [twoConstantCommands,
+      Crush.Metatheory.VCG.stripAssertionAnnotation]
+  unfold checkedCommandEquivalence
+  simp [Crush.Metatheory.VCG.CommandEquivalence.build?,
+    translationRecord, reifiedTheory, stripped,
+    twoConstantCommands_wellTyped]
+  change Crush.SMT.SameCommandSet twoConstantCommands
+    (Crush.Metatheory.VCG.guardedTheoryCommands
+      twoConstantGuarding #[] twoConstantTheory)
+  rw [generated]
+  exact Crush.SMT.SameCommandSet.refl _
+
+/-- Extract the kernel-checked evidence returned by the executable comparison.
+The preceding theorem proves that this option is present. -/
+private theorem validatedTwoConstantCommands :
+    Crush.Metatheory.VCG.ValidatedCommandEquivalence
+      (translation := translationRecord)
+      (guarding := twoConstantGuarding) reifiedTheory :=
+  (checkedCommandEquivalence.get (by
+    simpa using checkedCommandEquivalence_succeeds)).down
+
+/-- A concrete source model used to show that the complete target-model
+construction is inhabited for the nontrivial symbol encoding. -/
+private def twoConstantSourceModel :
+    Crush.Metatheory.Model TwoConstantSignature where
+  Base := fun _ => Unit
+  baseNonempty := fun _ => ⟨()⟩
+  const := fun constant =>
+    match constant with
+    | .here => True
+    | .there .here => False
+
+private theorem twoConstantSourceModel_valid :
+    twoConstantSourceModel.SatisfiesTheory twoConstantTheory := by
+  intro formula member
+  simp only [twoConstantTheory, List.mem_singleton] at member
+  subst formula
+  change ∀ proposition : Prop, proposition = True ∨ proposition = False
+  intro proposition
+  by_cases valid : proposition
+  · left
+    exact propext ⟨fun _ => trivial, fun _ => valid⟩
+  · right
+    exact propext ⟨valid, False.elim⟩
+
+/-- The complete datatype/guard/SMT model construction produces a standard
+model satisfying the exact command array. Thus the final soundness link is not
+inhabited only through an impossible integer-side premise. -/
+private theorem twoConstantCommands_haveStandardModel :
+    ∃ model : Crush.SMT.Model,
+      model.StandardFor twoConstantCommands ∧
+        model.SatisfiesCommands twoConstantCommands := by
+  have encoding : Crush.Metatheory.SMT.GuardedTheoryRepresentation
+      twoConstantGuarding #[]
+        (Defunctionalization.Flattened.translatedTheories twoConstantTheory)
+        twoConstantCommands := by
+    refine ⟨Crush.Metatheory.SMT.translatedDeclarations twoConstantTheory, ?_⟩
+    change Crush.SMT.SameCommandSet twoConstantCommands
+      generatedTwoConstantCommands
+    rw [generatedTwoConstantCommands_eq]
+    exact Crush.SMT.SameCommandSet.refl _
+  exact Crush.Metatheory.VCG.FactTranslationRecord.Representation.sound
+    (translation := translationRecord) (guarding := twoConstantGuarding)
+    twoConstantRepresentation twoConstantGuardDefinitionEncoding
+    twoConstantSourceModel .nil
+    (twoConstantGuardDefinitionSemantics.realize twoConstantSourceModel .nil)
+    encoding rfl
+    (Defunctionalization.Flattened.model_extension_theory
+      twoConstantSourceModel twoConstantTheory twoConstantSourceModel_valid)
+
+private theorem twoConstantCommands_notUnsatisfiable :
+    ¬Crush.SMT.CommandsUnsatisfiable twoConstantCommands := by
+  intro unsat
+  obtain ⟨model, standard, valid⟩ := twoConstantCommands_haveStandardModel
+  exact unsat.noModel model standard valid
+
+/-- The exact evidence returned by `CommandEquivalence.build?` composes with
+the final reflection theorem. For this satisfiable running example the premise
+is false, as proved above; the theorem checks the complete API connection from
+the retained command array back to its reified higher-order theory. -/
+private theorem twoConstantCommands_reflectUnsatisfiability
+    (unsat : Crush.SMT.CommandsUnsatisfiable twoConstantCommands) :
+    Crush.Metatheory.Datatype.Env.TheoryUnsatisfiable []
+      twoConstantTheory := by
+  exact Crush.Metatheory.VCG.CommandEquivalence.unsat_source
+    twoConstantRepresentation twoConstantGuardDefinitionEncoding
+    validatedTwoConstantCommands twoConstantGuardDefinitionSemantics unsat
 
 
 end Crush.Metatheory.SMT.Tests

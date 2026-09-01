@@ -210,7 +210,8 @@ theorem term_eval (encoding : Encoding symbols)
       have result : Crush.SMT.Eval (model encoding target) environment
           (.app (encoding.ident symbol) (arguments encoding args))
           (.typed _ (args.apply target valuation (target.symbol symbol))) := by
-        apply Crush.SMT.Eval.symbol (encoding.ident_fresh symbol)
+        apply Crush.SMT.Eval.symbol
+          (encoding.ident_fresh symbol).notLogicalBuiltin
           (argsIH valuation environment related)
         refine ⟨_, symbol, rfl, ?_⟩
         rw [applyValues_argumentValues]

@@ -54,21 +54,76 @@ def isModeledTheoryOperator : Ident → Bool
       #["=", "not", "=>", "and", "or", ">="] |>.contains name
   | .indexed _ _ => false
 
+@[simp] private theorem builtinSortArity?_bool :
+    Ident.builtinSortArity? (.symb "Bool") = some 0 := rfl
+
+@[simp] private theorem builtinSortArity?_int :
+    Ident.builtinSortArity? (.symb "Int") = some 0 := rfl
+
+@[simp] private theorem builtinSortArity?_string :
+    Ident.builtinSortArity? (.symb "String") = some 0 := rfl
+
 private structure CheckMode where
   rejectUnknown : Bool
   modeledTheoriesOnly : Bool
+  /-- Select the association-list mirror whose concrete evaluation can be
+  checked by the kernel. Ordinary frontend checks use the hash-map fields. -/
+  kernelReducible : Bool
 
 private structure FunSig where
   args : Array SSort
   res  : SSort
 
+/-- Kernel-reducible alternative to the frontend hash maps. The checker rejects
+duplicate declarations before insertion, so association-list lookup has the
+same result as hash-map lookup. The mode selects one representation, keeping
+the frontend fast while allowing concrete metatheory certificates to reduce in
+the kernel without evaluating opaque `String.hash`. -/
+private abbrev NameMap (α : Type) := List (String × α)
+
+@[simp]
+private def NameMap.get? {α : Type} (entries : NameMap α) (name : String) : Option α :=
+  (entries.find? fun entry => entry.1 == name).map (·.2)
+
+@[simp]
+private def NameMap.contains {α : Type} (entries : NameMap α) (name : String) : Bool :=
+  (entries.get? name).isSome
+
+@[simp]
+private def NameMap.insert {α : Type} (entries : NameMap α) (name : String) (value : α) :
+    NameMap α :=
+  (name, value) :: entries
+
 private structure CheckEnv where
   funs : Std.HashMap String FunSig := {}
+  reducibleFuns : NameMap FunSig := []
   /-- Result sort of each datatype constructor introduced so far. Keeping this
   separate from `funs` prevents `(_ is f)` from treating an ordinary function
   as a datatype constructor. -/
   constructors : Std.HashMap String SSort := {}
+  reducibleConstructors : NameMap SSort := []
   sorts : Std.HashMap String Nat := {}
+  reducibleSorts : NameMap Nat := []
+
+private def CheckEnv.fun? (mode : CheckMode) (env : CheckEnv)
+    (name : String) : Option FunSig :=
+  if mode.kernelReducible then env.reducibleFuns.get? name
+  else env.funs.get? name
+
+private def CheckEnv.constructor? (mode : CheckMode) (env : CheckEnv)
+    (name : String) : Option SSort :=
+  if mode.kernelReducible then env.reducibleConstructors.get? name
+  else env.constructors.get? name
+
+private def CheckEnv.sortArity? (mode : CheckMode) (env : CheckEnv)
+    (name : String) : Option Nat :=
+  if mode.kernelReducible then env.reducibleSorts.get? name
+  else env.sorts.get? name
+
+private def CheckEnv.containsSort (mode : CheckMode) (env : CheckEnv)
+    (name : String) : Bool :=
+  if mode.kernelReducible then env.reducibleSorts.contains name
+  else env.sorts.contains name
 
 /-- A malformed command found by `checkScript`. -/
 structure SortError where
@@ -113,7 +168,7 @@ mutual
           return
         match identifier with
         | .symb name =>
-            if let some arity := env.sorts.get? name then
+            if let some arity := env.sortArity? mode name then
               requireArity s!"sort `{name}`" arguments.size arity
             else if mode.rejectUnknown then
               throw s!"undeclared sort `{name}`"
@@ -141,12 +196,15 @@ private def insertSort (mode : CheckMode) (env : CheckEnv)
     (name : String) (arity : Nat) : Except String CheckEnv := do
   if Ident.isBuiltinSort (.symb name) then
     throw s!"built-in sort `{name}` cannot be redeclared"
-  if env.sorts.contains name then
+  if env.containsSort mode name then
     if mode.rejectUnknown then
       throw s!"sort `{name}` is declared more than once"
     else
       return env
-  return { env with sorts := env.sorts.insert name arity }
+  if mode.kernelReducible then
+    return { env with reducibleSorts := env.reducibleSorts.insert name arity }
+  else
+    return { env with sorts := env.sorts.insert name arity }
 
 private def lookupLocal (locals : List (String × SSort)) (name : String) : Option SSort :=
   (locals.find? fun entry => entry.1 == name).map (·.2)
@@ -167,15 +225,21 @@ private def requireSame (where_ : String) (a b : Option SSort) : Except String U
     else throw s!"{where_} combines incompatible sorts `{a}` and `{b}`"
   | _, _ => pure ()
 
+@[simp]
+private def requireArgsOfSort (name : String) (expected : SSort) :
+    Nat → List (Option SSort) → Except String Unit
+  | _, [] => pure ()
+  | index, actual :: arguments => do
+      requireSort s!"argument {index + 1} of `{name}`" actual expected
+      requireArgsOfSort name expected (index + 1) arguments
+
 private def requireBoolArgs (name : String) (args : Array (Option SSort)) :
-    Except String Unit := do
-  for i in [0:args.size] do
-    requireSort s!"argument {i + 1} of `{name}`" args[i]! boolSort
+    Except String Unit :=
+  requireArgsOfSort name boolSort 0 args.toList
 
 private def requireIntArgs (name : String) (args : Array (Option SSort)) :
-    Except String Unit := do
-  for i in [0:args.size] do
-    requireSort s!"argument {i + 1} of `{name}`" args[i]! intSort
+    Except String Unit :=
+  requireArgsOfSort name intSort 0 args.toList
 
 private def requireBvArgs (name : String) (args : Array (Option SSort)) :
     Except String (Option Nat) := do
@@ -262,7 +326,7 @@ where
     match ident with
     | .indexed "is" #[.inl ctor] =>
       requireArity s!"(_ is {ctor})" args.size 1
-      if let some resultSort := env.constructors.get? ctor then
+      if let some resultSort := env.constructor? mode ctor then
         requireSort s!"argument of tester for `{ctor}`" args[0]! resultSort
       else if mode.rejectUnknown then
         throw s!"tester references undeclared constructor `{ctor}`"
@@ -302,7 +366,7 @@ where
           | throw s!"local symbol `{name}` of sort `{localSort}` is not applicable"
         checkSignature name sig args
         return some sig.res
-      if let some sig := env.funs.get? name then
+      if let some sig := env.fun? mode name then
         checkSignature name sig args
         return some sig.res
       match name with
@@ -473,8 +537,12 @@ private def insertFun (mode : CheckMode) (env : CheckEnv) (name : String)
   if mode.modeledTheoriesOnly && isKnownTheoryOperator (.symb name) then
     throw s!"theory operator `{name}` cannot be redeclared"
   else
-  match env.funs.get? name with
-  | none => pure { env with funs := env.funs.insert name sig }
+  match env.fun? mode name with
+  | none =>
+      if mode.kernelReducible then
+        pure { env with reducibleFuns := env.reducibleFuns.insert name sig }
+      else
+        pure { env with funs := env.funs.insert name sig }
   | some previous =>
     if mode.rejectUnknown then
       throw s!"symbol `{name}` is declared more than once"
@@ -655,7 +723,11 @@ private def checkCommand (mode : CheckMode) (env : CheckEnv)
       for ctor in datatype.ctors do
         for (_, fieldSort) in ctor.selDecls do checkSort mode env fieldSort
         env ← insertFun mode env ctor.name { args := ctor.selDecls.map (·.2), res := sort }
-        env := { env with constructors := env.constructors.insert ctor.name sort }
+        env := if mode.kernelReducible then
+          { env with reducibleConstructors :=
+              env.reducibleConstructors.insert ctor.name sort }
+        else
+          { env with constructors := env.constructors.insert ctor.name sort }
     for (sortName, _, datatype) in datatypes do
       let sort := SSort.app (.symb sortName) #[]
       for ctor in datatype.ctors do
@@ -673,28 +745,37 @@ private def checkCommand (mode : CheckMode) (env : CheckEnv)
   | .checkSat | .getModel | .getProof | .getUnsatCore | .exit =>
     return env
 
+/-- Structurally validate commands in order while retaining their array index
+for diagnostics. This recursor is exact: unlike a fuel-bounded evaluator, it
+visits every command once and cannot reject a large script because a bound was
+chosen too small. -/
+@[simp]
+private def checkCommandList (mode : CheckMode) (index : Nat) (env : CheckEnv) :
+    List Command → Except SortError Unit
+  | [] => pure ()
+  | command :: commands =>
+      match checkCommand mode env command with
+      | .ok next => checkCommandList mode (index + 1) next commands
+      | .error message => throw { commandIndex := index, message }
+
 /-- Validate declaration applications and core-theory sorts in an SMT command
 sequence. The returned command index points into the supplied array. -/
 private def checkScriptWith (mode : CheckMode)
-    (commands : Array Command) : Except SortError Unit := do
-  let mut env : CheckEnv := {}
-  for i in [0:commands.size] do
-    match checkCommand mode env commands[i]! with
-    | .ok next => env := next
-    | .error message => throw { commandIndex := i, message }
+    (commands : Array Command) : Except SortError Unit :=
+  checkCommandList mode 0 {} commands.toList
 
 /-- Validate the open, extensible SMT IR used by the translator. Unknown theory
 symbols remain unclassified so registered translation extensions can introduce
 operators outside the built-in table. -/
 def checkScript (commands : Array Command) : Except SortError Unit :=
-  checkScriptWith { rejectUnknown := false, modeledTheoriesOnly := false } commands
+  checkScriptWith ⟨false, false, false⟩ commands
 
 /-- Validate a closed SMT script. Unlike `checkScript`, this rejects every
 unknown or use-before-declaration symbol. The metatheory uses this judgment so
 an invalid SMT script cannot establish unsatisfiability merely because its
 untyped terms have incompatible sorts. -/
 def checkClosedScript (commands : Array Command) : Except SortError Unit :=
-  checkScriptWith { rejectUnknown := true, modeledTheoriesOnly := false } commands
+  checkScriptWith ⟨true, false, false⟩ commands
 
 /-- Computable success flag for `checkClosedScript`, used when a checked
 translation must retain the validation result as proof data. -/
@@ -704,7 +785,7 @@ def closedScriptWellSorted (commands : Array Command) : Bool :=
 /-- Type-check a closed command sequence in exactly the first-order theory
 fragment whose denotation is mechanized by `Crush.Metatheory.SMT`. -/
 def checkMetatheoryScript (commands : Array Command) : Except SortError Unit :=
-  checkScriptWith { rejectUnknown := true, modeledTheoriesOnly := true } commands
+  checkScriptWith ⟨true, true, true⟩ commands
 
 /-- Computable success flag for `checkMetatheoryScript`. -/
 def metatheoryScriptWellTyped (commands : Array Command) : Bool :=
@@ -716,6 +797,9 @@ does not invoke compiled evaluation or add a native-decision axiom. -/
 macro "prove_metatheory_script_well_typed" : tactic =>
   `(tactic| simp [metatheoryScriptWellTyped, checkMetatheoryScript,
       checkScriptWith, checkCommand, checkSort, checkSortList,
+      checkCommandList, NameMap.get?, NameMap.contains, NameMap.insert,
+      CheckEnv.fun?, CheckEnv.constructor?, CheckEnv.sortArity?,
+      CheckEnv.containsSort,
       inferTerm, inferTermList, inferBindingList, inferAttrList,
       inferTerm.eq_1, inferTerm.eq_2, inferTerm.eq_3, inferTerm.eq_4,
       inferTerm.eq_5, inferTerm.eq_6, inferTerm.eq_7, inferTerm.eq_8,
@@ -724,9 +808,11 @@ macro "prove_metatheory_script_well_typed" : tactic =>
       inferBindingList.eq_1, inferBindingList.eq_2,
       inferAttrList.eq_1, inferAttrList.eq_2,
       inferTerm.inferApp, insertSort, insertFun, requireSort, requireSame,
-      requireBoolArgs, requireIntArgs, requireBvArgs, checkSignature,
+      requireArgsOfSort, requireBoolArgs, requireIntArgs, requireBvArgs, checkSignature,
       arrowSig?, requireArity, lookupLocal,
       validateStringLiteral, isKnownTheoryOperator, isModeledTheoryOperator,
+      boolSort, intSort, stringSort, bitvecSort,
+      Pure.pure, Bind.bind, Functor.map, Except.pure, Except.bind, Except.map,
       Term.symbApp] <;> rfl)
 
 /-- Kernel-checked regression for the smallest unsatisfiable script. -/
@@ -737,6 +823,14 @@ theorem metatheoryScriptWellTyped_assertFalse :
 /-- Kernel-checked regression for a well-typed integer equality. -/
 theorem metatheoryScriptWellTyped_distinctNumerals : metatheoryScriptWellTyped
     #[.assert (.symbApp "=" #[.lit (.num 0), .lit (.num 1)])] = true := by
+  prove_metatheory_script_well_typed
+
+/-- Kernel-checked regression that exercises declaration insertion and a
+subsequent lookup in nonempty checker state. -/
+theorem metatheoryScriptWellTyped_declaredBooleanConstant :
+    metatheoryScriptWellTyped #[
+      .declFun "p" #[] boolSort,
+      .assert (.symbApp "p" #[])] = true := by
   prove_metatheory_script_well_typed
 
 end Crush.SMT

@@ -73,6 +73,202 @@ structure Model.Standard (model : Model) : Prop where
     model.apply symbol values left → model.apply symbol values right →
       left = right
 
+/-! ## Command-indexed interpreted-theory requirements -/
+
+mutual
+  /-- Whether a concrete SMT sort contains the built-in integer sort. Compound
+  sorts are traversed because an integer carrier can occur beneath another sort
+  constructor, for example as an array index or datatype field. -/
+  @[reducible] def SSort.requiresIntegerSemantics : SSort → Bool
+    | .bvar _ => false
+    | .app (.symb "Int") arguments =>
+        true || SSort.listRequiresIntegerSemantics arguments.toList
+    | .app _ arguments =>
+        SSort.listRequiresIntegerSemantics arguments.toList
+  termination_by sort => sort.structuralSize
+  decreasing_by all_goals simp [SSort.structuralSize] <;> omega
+
+  @[reducible] def SSort.listRequiresIntegerSemantics : List SSort → Bool
+    | [] => false
+    | sort :: sorts =>
+        sort.requiresIntegerSemantics ||
+          SSort.listRequiresIntegerSemantics sorts
+  termination_by sorts => SSort.listStructuralSize sorts
+  decreasing_by all_goals simp [SSort.listStructuralSize] <;> omega
+end
+
+@[simp] theorem SSort.requiresIntegerSemantics_boolSort :
+    boolSort.requiresIntegerSemantics = false := by
+  rw [SSort.requiresIntegerSemantics.eq_def]
+  simp [boolSort, SSort.listRequiresIntegerSemantics.eq_def]
+
+@[simp] theorem SSort.listRequiresIntegerSemantics_nil :
+    SSort.listRequiresIntegerSemantics [] = false := by
+  rw [SSort.listRequiresIntegerSemantics.eq_def]
+
+@[simp] theorem SSort.listRequiresIntegerSemantics_cons
+    (sort : SSort) (sorts : List SSort) :
+    SSort.listRequiresIntegerSemantics (sort :: sorts) =
+      (sort.requiresIntegerSemantics ||
+        SSort.listRequiresIntegerSemantics sorts) := by
+  rw [SSort.listRequiresIntegerSemantics.eq_def]
+
+mutual
+  /-- Whether a concrete term uses syntax whose SMT-LIB meaning depends on the
+  standard integer carrier. Explicit sorts are inspected at binders; numerals
+  and the currently modeled integer comparison are inspected at term nodes. -/
+  @[reducible] def Term.requiresIntegerSemantics : Term → Bool
+    | .lit (.num _) => true
+    | .lit _ | .bvar _ => false
+    | .app (.symb ">=") arguments =>
+        true || Term.listRequiresIntegerSemantics arguments.toList
+    | .app _ arguments =>
+        Term.listRequiresIntegerSemantics arguments.toList
+    | .letE bindings body =>
+        Term.bindingListRequiresIntegerSemantics bindings.toList ||
+          body.requiresIntegerSemantics
+    | .forallE binders body | .existsE binders body | .lam binders body =>
+        SSort.listRequiresIntegerSemantics (binders.toList.map (·.2)) ||
+          body.requiresIntegerSemantics
+    | .annot body _ => body.requiresIntegerSemantics
+  termination_by term => term.structuralSize
+  decreasing_by all_goals simp [Term.structuralSize] <;> omega
+
+  @[reducible] def Term.listRequiresIntegerSemantics : List Term → Bool
+    | [] => false
+    | term :: terms =>
+        term.requiresIntegerSemantics ||
+          Term.listRequiresIntegerSemantics terms
+  termination_by terms => Term.listStructuralSize terms
+  decreasing_by all_goals simp [Term.listStructuralSize] <;> omega
+
+  @[reducible] def Term.bindingListRequiresIntegerSemantics :
+      List (String × Term) → Bool
+    | [] => false
+    | (_, term) :: bindings =>
+        term.requiresIntegerSemantics ||
+          Term.bindingListRequiresIntegerSemantics bindings
+  termination_by bindings => Term.bindingListStructuralSize bindings
+  decreasing_by all_goals simp [Term.bindingListStructuralSize] <;> omega
+
+end
+
+@[simp] theorem Term.requiresIntegerSemantics_bvar (index : Nat) :
+    (Term.bvar index).requiresIntegerSemantics = false := by
+  rw [Term.requiresIntegerSemantics.eq_def]
+
+@[simp] theorem Term.requiresIntegerSemantics_app_integerComparison
+    (arguments : Array Term) :
+    (Term.app (.symb ">=") arguments).requiresIntegerSemantics = true := by
+  rw [Term.requiresIntegerSemantics.eq_def]
+  simp
+
+@[simp] theorem Term.requiresIntegerSemantics_app_of_ne
+    (identifier : Ident) (arguments : Array Term)
+    (notIntegerComparison : identifier ≠ .symb ">=") :
+    (Term.app identifier arguments).requiresIntegerSemantics =
+      Term.listRequiresIntegerSemantics arguments.toList := by
+  simp only [Term.requiresIntegerSemantics.eq_def]
+
+@[simp] theorem Term.requiresIntegerSemantics_forallE
+    (binders : Array (String × SSort)) (body : Term) :
+    (Term.forallE binders body).requiresIntegerSemantics =
+      (SSort.listRequiresIntegerSemantics (binders.toList.map (·.2)) ||
+        body.requiresIntegerSemantics) := by
+  rw [Term.requiresIntegerSemantics.eq_def]
+
+@[simp] theorem Term.requiresIntegerSemantics_existsE
+    (binders : Array (String × SSort)) (body : Term) :
+    (Term.existsE binders body).requiresIntegerSemantics =
+      (SSort.listRequiresIntegerSemantics (binders.toList.map (·.2)) ||
+        body.requiresIntegerSemantics) := by
+  rw [Term.requiresIntegerSemantics.eq_def]
+
+@[simp] theorem Term.listRequiresIntegerSemantics_nil :
+    Term.listRequiresIntegerSemantics [] = false := by
+  rw [Term.listRequiresIntegerSemantics.eq_def]
+
+@[simp] theorem Term.listRequiresIntegerSemantics_cons
+    (term : Term) (terms : List Term) :
+    Term.listRequiresIntegerSemantics (term :: terms) =
+      (term.requiresIntegerSemantics ||
+        Term.listRequiresIntegerSemantics terms) := by
+  rw [Term.listRequiresIntegerSemantics.eq_def]
+
+@[simp] theorem Term.requiresIntegerSemantics_annot
+    (body : Term) (attributes : Array Attr) :
+    (Term.annot body attributes).requiresIntegerSemantics =
+      body.requiresIntegerSemantics := by
+  rw [Term.requiresIntegerSemantics.eq_def]
+
+@[reducible] def FunDef.requiresIntegerSemantics (definition : FunDef) : Bool :=
+  SSort.listRequiresIntegerSemantics (definition.args.toList.map (·.2)) ||
+    definition.resSort.requiresIntegerSemantics ||
+      definition.body.requiresIntegerSemantics
+
+@[reducible] def CtorDecl.requiresIntegerSemantics (constructor : CtorDecl) : Bool :=
+  SSort.listRequiresIntegerSemantics (constructor.selDecls.toList.map (·.2))
+
+@[reducible] def DatatypeDecl.requiresIntegerSemantics
+    (datatype : DatatypeDecl) : Bool :=
+  datatype.ctors.toList.any CtorDecl.requiresIntegerSemantics
+
+/-- Whether one command requires the standard integer carrier. The test is
+conservative on malformed syntax; `CommandsWellTyped` separately establishes
+that accepted commands use only the modeled integer operations. -/
+@[reducible] def Command.requiresIntegerSemantics : Command → Bool
+  | .declFun _ arguments result =>
+      SSort.listRequiresIntegerSemantics arguments.toList ||
+        result.requiresIntegerSemantics
+  | .defFun definition => definition.requiresIntegerSemantics
+  | .defFunsRec definitions =>
+      definitions.toList.any FunDef.requiresIntegerSemantics
+  | .declDatatypes datatypes =>
+      datatypes.toList.any fun (_, _, datatype) =>
+        datatype.requiresIntegerSemantics
+  | .assert term => term.requiresIntegerSemantics
+  | .setLogic _ | .setOption _ _ | .declSort _ _ | .checkSat |
+      .getModel | .getProof | .getUnsatCore | .echo _ | .exit => false
+
+/-- Whether any command requires standard integer semantics. -/
+@[reducible] def CommandsRequireIntegerSemantics
+    (commands : Array Command) : Bool :=
+  commands.toList.any Command.requiresIntegerSemantics
+
+/-- The standard laws needed for one concrete command array. Boolean
+two-valuedness and functional application are always required. The integer
+carrier is required exactly when integer syntax or an explicit `Int` sort
+occurs in that array. -/
+structure Model.StandardFor (model : Model) (commands : Array Command) : Prop where
+  bool_exhaustive : ∀ value, model.inSort boolSort value →
+    ∃ boolean, value = model.bool boolean
+  integer : CommandsRequireIntegerSemantics commands = true →
+    Nonempty model.IntegerInterpretation
+  apply_unique : ∀ symbol values left right,
+    model.apply symbol values left → model.apply symbol values right →
+      left = right
+
+/-- A globally standard model is standard for every concrete command array. -/
+theorem Model.Standard.forCommands {model : Model} (standard : model.Standard)
+    (commands : Array Command) : model.StandardFor commands where
+  bool_exhaustive := standard.bool_exhaustive
+  integer := fun _ => standard.integer
+  apply_unique := standard.apply_unique
+
+/-- Transfer command-indexed standardness when two arrays require the same
+interpreted theories. -/
+theorem Model.StandardFor.of_requirements_eq {model : Model}
+    {left right : Array Command} (standard : model.StandardFor left)
+    (equal : CommandsRequireIntegerSemantics left =
+      CommandsRequireIntegerSemantics right) : model.StandardFor right where
+  bool_exhaustive := standard.bool_exhaustive
+  integer := by
+    intro required
+    apply standard.integer
+    rw [equal]
+    exact required
+  apply_unique := standard.apply_unique
+
 /-- A list of semantic values has the listed SMT sorts in the same order. -/
 inductive ValuesTyped (model : Model) : List SSort → List model.Value → Prop where
   | nil : ValuesTyped model [] []
@@ -123,6 +319,11 @@ def ApplyUnique (model : Model) : Prop :=
 /-- A standard SMT model interprets each function symbol as a function. -/
 theorem Model.Standard.applyUnique {model : Model} (standard : model.Standard) :
     ApplyUnique model := standard.apply_unique
+
+/-- Command-indexed standard models retain globally functional application. -/
+theorem Model.StandardFor.applyUnique {model : Model} {commands : Array Command}
+    (standard : model.StandardFor commands) : ApplyUnique model :=
+  standard.apply_unique
 
 /-! ## A concrete standard-model witness -/
 
@@ -358,6 +559,20 @@ private theorem NotBuiltin.ne_or {symbol : Ident} (fresh : NotBuiltin symbol) :
   subst symbol
   cases fresh with
   | symb _ _ _ _ _ different => exact different rfl
+
+/-- An identifier available to encoded source symbols: it is neither a
+logical built-in handled by dedicated evaluation rules nor the interpreted
+integer comparison constrained by `IntegerInterpretation`. -/
+structure NotInterpreted (identifier : Ident) : Prop where
+  notLogicalBuiltin : NotBuiltin identifier
+  ne_integerComparison : identifier ≠ .symb ">="
+
+instance (identifier : Ident) : Decidable (NotInterpreted identifier) :=
+  decidable_of_iff
+    (NotBuiltin identifier ∧ identifier ≠ .symb ">=")
+    ⟨fun properties => ⟨properties.1, properties.2⟩,
+      fun available => ⟨available.notLogicalBuiltin,
+        available.ne_integerComparison⟩⟩
 
 mutual
   /-- Relational evaluation of a concrete SMT term under a de Bruijn
@@ -771,11 +986,13 @@ structure AbstractCommandsUnsatisfiable (commands : Array Command) : Prop where
 Both static fields are logically important. `supported` records the additional
 free-datatype conditions; `wellTyped` rejects malformed or semantically
 unmodeled syntax. `noModel` quantifies only over models satisfying the standard
-Boolean and integer theory laws, matching the fragment sent to an SMT solver. -/
+laws for the theories used by this command array. In particular, integer laws
+are mandatory for arrays containing integer syntax, but not for Boolean-only
+arrays. -/
 structure CommandsUnsatisfiable (commands : Array Command) : Prop where
   supported : CommandsSupported commands
   wellTyped : CommandsWellTyped commands
-  noModel : ∀ model : Model, model.Standard →
+  noModel : ∀ model : Model, model.StandardFor commands →
     ¬model.SatisfiesCommands commands
 
 theorem Model.satisfiesCommands_empty (model : Model) :

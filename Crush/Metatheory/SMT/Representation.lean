@@ -30,10 +30,10 @@ Keeping this policy here gives ordinary and datatype symbols one term encoder,
 one identifier namespace, and one semantic model.
 
 `Encoding` chooses concrete syntax; it does not assert that a target carrier
-has the standard meaning of an SMT theory sort. In particular, constructing a
-standard induced model for integer guards separately requires an `IntView` of
-the target model: some FO sort must map to SMT `Int`, and that sort's carrier
-must be isomorphic to `Int`. This obligation depends on the target model and
+has the standard meaning of an SMT theory sort. In particular, constructing an
+induced model for commands that use integers requires an `IntView` of the
+target model: some FO sort must map to SMT `Int`, and that sort's carrier must
+be isomorphic to `Int`. This obligation depends on the target model and
 therefore cannot be a field of this syntax-only structure. -/
 structure Encoding (symbols : FO.SymbolFamily) where
   sort : FO.FOSort → SSort
@@ -47,7 +47,7 @@ structure Encoding (symbols : FO.SymbolFamily) where
   ident_injective : ∀ {decl : FO.SymbolDecl} (left right : symbols decl),
     ident left = ident right → left = right
   ident_fresh : ∀ {decl : FO.SymbolDecl} (symbol : symbols decl),
-    Crush.SMT.NotBuiltin (ident symbol)
+    Crush.SMT.NotInterpreted (ident symbol)
   nativeSort : FO.FOSort → Bool
   nativeSymbol : {decl : FO.SymbolDecl} → symbols decl → Bool
   nativeCommands : Array Command

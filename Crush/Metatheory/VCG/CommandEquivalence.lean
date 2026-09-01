@@ -59,6 +59,32 @@ part of the modeled fragment. -/
       defFunsRec | declDatatypes | checkSat | getModel | getProof |
       getUnsatCore | echo | exit => rfl
 
+/-- Top-level assertion annotations do not affect which interpreted SMT
+theories a command uses. Attribute payloads are semantically transparent in
+the modeled fragment. -/
+@[simp] theorem requiresIntegerSemantics_stripAssertionAnnotation
+    (command : Crush.SMT.Command) :
+    (stripAssertionAnnotation command).requiresIntegerSemantics =
+      command.requiresIntegerSemantics := by
+  cases command with
+  | assert formula =>
+      cases formula <;>
+        simp [stripAssertionAnnotation,
+          Crush.SMT.Command.requiresIntegerSemantics,
+          Crush.SMT.Term.requiresIntegerSemantics]
+  | setLogic | setOption | declSort | declFun | defFun |
+      defFunsRec | declDatatypes | checkSat | getModel | getProof |
+      getUnsatCore | echo | exit => rfl
+
+/-- Normalizing top-level assertion annotations preserves the interpreted
+theories required by the complete command array. -/
+theorem commandsRequireIntegerSemantics_stripAssertionAnnotations
+    (commands : Array Crush.SMT.Command) :
+    Crush.SMT.CommandsRequireIntegerSemantics
+        (commands.map stripAssertionAnnotation) =
+      Crush.SMT.CommandsRequireIntegerSemantics commands := by
+  simp [Crush.SMT.CommandsRequireIntegerSemantics]
+
 /-- Removing top-level assertion names preserves the class of satisfying SMT
 models. -/
 theorem satisfiesCommands_stripAssertionAnnotations
@@ -116,14 +142,16 @@ theorem commandsUnsatisfiable_stripAssertionAnnotations
       unsat.supported, originalWellTyped, ?_⟩
     · intro model standard valid
       exact unsat.noModel model
-        standard
+        (standard.of_requirements_eq
+          (commandsRequireIntegerSemantics_stripAssertionAnnotations commands).symm)
         ((satisfiesCommands_stripAssertionAnnotations model commands).mpr valid)
   · intro unsat
     refine ⟨(commandsSupported_stripAssertionAnnotations commands).mpr
       unsat.supported, normalizedWellTyped, ?_⟩
     · intro model standard valid
       exact unsat.noModel model
-        standard
+        (standard.of_requirements_eq
+          (commandsRequireIntegerSemantics_stripAssertionAnnotations commands))
         ((satisfiesCommands_stripAssertionAnnotations model commands).mp valid)
 
 /-- The logic-selection command imposes no requirement on an SMT model. -/
@@ -137,6 +165,16 @@ theorem satisfiesCommands_setLogic (model : Crush.SMT.Model) (logic : String)
     simp at member
     subst command
     trivial)
+
+/-- A leading logic-selection command does not add an interpreted-theory
+requirement. -/
+theorem commandsRequireIntegerSemantics_setLogic (logic : String)
+    (commands : Array Crush.SMT.Command) :
+    Crush.SMT.CommandsRequireIntegerSemantics
+        (#[.setLogic logic] ++ commands) =
+      Crush.SMT.CommandsRequireIntegerSemantics commands := by
+  simp [Crush.SMT.CommandsRequireIntegerSemantics,
+    Crush.SMT.Command.requiresIntegerSemantics]
 
 /-- Semantic unsatisfiability is unchanged when the emitted script adds its
 leading logic-selection command. -/
@@ -155,7 +193,8 @@ theorem commandsUnsatisfiable_setLogic (logic : String)
     refine ⟨supportedParts.2, commandsWellTyped, ?_⟩
     intro model standard valid
     exact unsat.noModel model
-      standard
+      (standard.of_requirements_eq
+        (commandsRequireIntegerSemantics_setLogic logic commands).symm)
       ((satisfiesCommands_setLogic model logic commands).mpr valid)
   · intro unsat
     have logicSupported : Crush.SMT.CommandsSupported #[.setLogic logic] := by
@@ -167,7 +206,8 @@ theorem commandsUnsatisfiable_setLogic (logic : String)
       ⟨logicSupported, unsat.supported⟩, scriptWellTyped, ?_⟩
     intro model standard valid
     exact unsat.noModel model
-      standard
+      (standard.of_requirements_eq
+        (commandsRequireIntegerSemantics_setLogic logic commands))
       ((satisfiesCommands_setLogic model logic commands).mp valid)
 
 /-- Decide whether two arrays impose the same model requirements. The command
@@ -248,6 +288,8 @@ theorem unsat_source {translation : FactTranslationRecord}
       reified.sources := by
   apply represented.theory_unsat guarded interpretation reified.sources
     representation.theory
+    (commandsRequireIntegerSemantics_stripAssertionAnnotations
+      translation.emittedCommands).symm
   exact (commandsUnsatisfiable_stripAssertionAnnotations
     translation.emittedCommands representation.normalizedWellTyped
       representation.emittedWellTyped).mpr unsat

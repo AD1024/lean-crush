@@ -17,9 +17,10 @@ open scoped Crush.SMT
 variable {symbols : FO.SymbolFamily}
 
 /-- Evidence needed to give an induced raw model the standard SMT integer
-interpretation. It selects one FO sort whose concrete encoding is SMT `Int`,
-proves that the corresponding target carrier is isomorphic to Lean `Int`, and
-keeps the source-symbol namespace disjoint from the interpreted `>=` operator.
+interpretation. It selects one FO sort whose concrete encoding is SMT `Int`
+and proves that the corresponding target carrier is isomorphic to Lean `Int`.
+The shared `Encoding` already keeps source-symbol identifiers distinct from
+the interpreted `>=` operator.
 
 This is an explicit model-construction premise. It is not implied by
 `Encoding`: an encoding fixes sort syntax, whereas the carrier and its
@@ -32,8 +33,6 @@ structure IntView (encoding : Encoding symbols)
   «from» : Int → sort.Denote target.carriers
   to_from : ∀ value, toInt («from» value) = value
   from_to : ∀ value, «from» (toInt value) = value
-  ge_fresh : ∀ {decl : FO.SymbolDecl} (symbol : symbols decl),
-    encoding.ident symbol ≠ .symb ">="
 
 namespace IntView
 
@@ -85,7 +84,7 @@ noncomputable def extra (view : IntView encoding target) :
   source_fresh := by
     intro decl symbol values output applied
     rcases applied with ⟨left, right, identEq, valuesEq, outputEq⟩
-    exact view.ge_fresh symbol identEq
+    exact (encoding.ident_fresh symbol).ne_integerComparison identEq
   literal := view.literal
   literal_typed := view.literal_typed
 
@@ -225,7 +224,8 @@ noncomputable def integerInterpretation (view : IntView encoding target) :
     · intro applied
       rcases applied with ordinary | integer
       · rcases ordinary with ⟨decl, symbol, identifierEq, outputEq⟩
-        exact False.elim (view.ge_fresh symbol identifierEq.symm)
+        exact False.elim
+          ((encoding.ident_fresh symbol).ne_integerComparison identifierEq.symm)
       · rcases integer with
           ⟨leftValue, rightValue, identifierEq, valuesEq, outputEq⟩
         cases valuesEq
@@ -382,7 +382,8 @@ noncomputable def integerInterpretation_withGuards (view : IntView encoding targ
     · intro applied
       rcases applied with ordinary | native
       · rcases ordinary with ⟨decl, symbol, identifierEq, outputEq⟩
-        exact False.elim (view.ge_fresh symbol identifierEq.symm)
+        exact False.elim
+          ((encoding.ident_fresh symbol).ne_integerComparison identifierEq.symm)
       · rcases native with integer | unary
         · rcases integer with
             ⟨leftValue, rightValue, identifierEq, valuesEq, outputEq⟩

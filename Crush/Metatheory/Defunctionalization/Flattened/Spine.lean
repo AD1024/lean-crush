@@ -182,6 +182,15 @@ def sourceApplication {start result : Ty}
   exact application.castSort
     (congrArg FO.FOSort.ofTy resultType.symm)
 
+@[simp] theorem sourceApplication_nil_bool {context : Context}
+    (constant : Const signature .bool) :
+    (TargetArguments.nil (context := context) .bool).sourceApplication constant .bool =
+      (FO.FamilyTerm.symbol (Symbol.sourceConstant constant) .nil :
+        TargetTerm signature context .bool) := by
+  unfold sourceApplication
+  rw [completeFamilyArgs]
+  rfl
+
 /-- Emit the single flattened application selected by a complete target spine.
 The ground-result evidence rules out under-applying the n-ary symbol. -/
 def completeApplication {domain codomain result : Ty}

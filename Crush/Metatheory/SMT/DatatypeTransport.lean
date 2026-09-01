@@ -1770,7 +1770,7 @@ theorem Representation.not_commandsUnsatisfiable
   intro unsat
   obtain ⟨model, standard, commandValid⟩ :=
     represented.standardModel_exists freeDataModel integer
-  apply unsat.noModel model standard
+  apply unsat.noModel model (standard.forCommands #[command block data])
   intro command member
   simp only [List.mem_singleton] at member
   subst command
@@ -1998,7 +1998,7 @@ theorem EnvRepresentation.not_commandsUnsatisfiable
   intro unsat
   obtain ⟨model, standard, commandsValid⟩ :=
     represented.standardModel_exists ordered source freeDataModel integer
-  exact unsat.noModel model standard commandsValid
+  exact unsat.noModel model (standard.forCommands fo.nativeCommands) commandsValid
 
 /-- Whole-theory model lifting over a caller-supplied interpreted or guarded
 base model. Native datatypes, derived graphs, ordinary declarations, and

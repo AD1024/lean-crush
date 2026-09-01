@@ -51,7 +51,7 @@ inductive Ty where
   | bool : Ty
   | base : BaseSort → Ty
   | arrow : Ty → Ty → Ty
-  deriving BEq, DecidableEq, Hashable, Repr
+  deriving BEq, ReflBEq, LawfulBEq, DecidableEq, Hashable, Repr
 
 /-- A local typing context, with the most recently introduced binder at its head. -/
 abbrev Context := List Ty

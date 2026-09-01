@@ -265,6 +265,30 @@ theorem modelWith_bool_exhaustive (encoding : Encoding symbols)
       simp only [modelWith_inSort, Value.InSort] at typed
       exact False.elim (typed.2 .bool (encoding.bool_eq.trans typed.1.symm))
 
+/-- With no derived-symbol graph, the induced source-symbol graph is globally
+single-valued. This is the base case reused by translations that need neither
+integer operations nor datatype guard predicates. -/
+theorem modelWith_nil_applyUnique (encoding : Encoding symbols)
+    (target : FO.FamilyModel symbols) :
+    Crush.SMT.ApplyUnique
+      (modelWith encoding target (ExtraGraph.nil encoding target)) := by
+  intro identifier values left right leftApply rightApply
+  rcases leftApply with leftOrdinary | leftExtra
+  · rcases rightApply with rightOrdinary | rightExtra
+    · rcases leftOrdinary with
+        ⟨leftDecl, leftSymbol, leftIdent, leftOutput⟩
+      rcases rightOrdinary with
+        ⟨rightDecl, rightSymbol, rightIdent, rightOutput⟩
+      have identEq : encoding.ident leftSymbol = encoding.ident rightSymbol :=
+        leftIdent.symm.trans rightIdent
+      have declEq := encoding.ident_decl_injective leftSymbol rightSymbol identEq
+      subst rightDecl
+      have symbolEq := encoding.ident_injective leftSymbol rightSymbol identEq
+      subst rightSymbol
+      exact leftOutput.trans rightOutput.symm
+    · simp [ExtraGraph.nil] at rightExtra
+  · simp [ExtraGraph.nil] at leftExtra
+
 /-- Every source symbol keeps its encoded type after adding a disjoint native
 graph. -/
 theorem symbol_has_type_with (encoding : Encoding symbols)
