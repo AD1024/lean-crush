@@ -984,7 +984,7 @@ theorem data_hold {source : Model signature}
       (SMT.model fo
       (canonicalModel source))
       (entries block data) := by
-  refine ⟨supported represented.wf law.productive, ?_, ?_, ?_, ?_, rank law, ?_⟩
+  refine ⟨wellFormed represented.wf, ?_, ?_, ?_, ?_, rank law, ?_⟩
   · intro sort ctor member
     exact ctor_laws law represented member
   · intro leftSort leftCtor rightSort rightCtor leftMem rightMem different

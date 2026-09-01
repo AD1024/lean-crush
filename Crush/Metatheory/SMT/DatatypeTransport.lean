@@ -1736,6 +1736,46 @@ theorem Representation.extra_inactive
     exact extra.source_fresh (symbols.datatypeSymbols.sel ctorRef fieldRef)
       values output applied
 
+/-- A represented datatype declaration has a standard SMT model whenever the
+source datatype has its free-algebra interpretation and the shared target
+supplies the standard integer view used by the proved SMT fragment.  This is
+the non-vacuity counterpart of `command_sound`: it installs the integer graph
+in the same model without disturbing constructors, selectors, or testers. -/
+theorem Representation.standardModel_exists
+    {signature : Signature} {arity : Nat} {block : Block arity}
+    {symbols : Symbols signature block} {source : Model signature}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
+    (represented : Representation block symbols fo data)
+    (freeDataModel : Datatype.IsFreeDatatypeModel symbols source)
+    (integer : SMT.IntView fo (canonicalModel source)) :
+    ∃ model : Crush.SMT.Model,
+      model.Standard ∧
+        model.SatisfiesCommand (command block data) := by
+  let target := canonicalModel source
+  refine ⟨SMT.modelWith fo target integer.extra, integer.standard, ?_⟩
+  exact SMT.datatypeCommand_with_extra fo target integer.extra
+    (entries block data) (represented.extra_inactive target integer.extra)
+    (command_sound freeDataModel represented)
+
+/-- Under the same explicit source and integer interpretations, a represented
+datatype declaration alone cannot satisfy the semantic UNSAT premise. -/
+theorem Representation.not_commandsUnsatisfiable
+    {signature : Signature} {arity : Nat} {block : Block arity}
+    {symbols : Symbols signature block} {source : Model signature}
+    {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
+    (represented : Representation block symbols fo data)
+    (freeDataModel : Datatype.IsFreeDatatypeModel symbols source)
+    (integer : SMT.IntView fo (canonicalModel source)) :
+    ¬Crush.SMT.CommandsUnsatisfiable #[command block data] := by
+  intro unsat
+  obtain ⟨model, standard, commandValid⟩ :=
+    represented.standardModel_exists freeDataModel integer
+  apply unsat.noModel model standard
+  intro command member
+  simp only [List.mem_singleton] at member
+  subst command
+  exact commandValid
+
 /-- A represented native command sequence remains valid after installing any
 derived graph fresh for encoded source symbols. -/
 theorem Represented.commands_with_extra
@@ -1927,6 +1967,38 @@ theorem EnvRepresentation.lifted_valid_with
   simpa [EnvRepresentation.lifted, EnvRepresentation.liftedFrom, Env.lift] using
     represented.liftedFrom_valid_with ordered source freeDataModel
       (Lifted.refl (canonicalModel source)) extra
+
+/-- A dependency-ordered native datatype prefix has one standard SMT model.
+All blocks use the existing dependency fold, and the integer interpretation is
+added only after that fold, so this theorem introduces no parallel datatype
+model construction. -/
+theorem EnvRepresentation.standardModel_exists
+    {signature : Signature} {fo : SMT.Encoding (Symbol signature)}
+    {env : List (Entry signature)} (represented : EnvRepresentation fo env)
+    (ordered : Native.ModelExtension.DependencyOrdered represented.blocks)
+    (source : Model signature) (freeDataModel : IsFreeDatatypeModel source env)
+    (integer : SMT.IntView fo
+      (represented.lifted source freeDataModel).target) :
+    ∃ model : Crush.SMT.Model,
+      model.Standard ∧ model.SatisfiesCommands fo.nativeCommands := by
+  let target := (represented.lifted source freeDataModel).target
+  refine ⟨SMT.modelWith fo target integer.extra, integer.standard, ?_⟩
+  exact represented.lifted_valid_with ordered source freeDataModel integer.extra
+
+/-- A represented datatype prefix cannot be UNSAT merely because datatype
+declarations were installed. -/
+theorem EnvRepresentation.not_commandsUnsatisfiable
+    {signature : Signature} {fo : SMT.Encoding (Symbol signature)}
+    {env : List (Entry signature)} (represented : EnvRepresentation fo env)
+    (ordered : Native.ModelExtension.DependencyOrdered represented.blocks)
+    (source : Model signature) (freeDataModel : IsFreeDatatypeModel source env)
+    (integer : SMT.IntView fo
+      (represented.lifted source freeDataModel).target) :
+    ¬Crush.SMT.CommandsUnsatisfiable fo.nativeCommands := by
+  intro unsat
+  obtain ⟨model, standard, commandsValid⟩ :=
+    represented.standardModel_exists ordered source freeDataModel integer
+  exact unsat.noModel model standard commandsValid
 
 /-- Whole-theory model lifting over a caller-supplied interpreted or guarded
 base model. Native datatypes, derived graphs, ordinary declarations, and

@@ -72,10 +72,16 @@ boundary.
 4. `Datatype.ctor_inj`, `ctor_ne`, `ctor_cases`, `sel_ctor`, `test_ctor`, and
    the strict-height theorem give productive monomorphic datatype blocks finite
    free-datatype semantics. `SMT.Datatype.EnvRepresentation.datatypeCommands_valid` proves
-   the exact dependency-ordered SMT datatype command prefix. See
+   the exact dependency-ordered SMT datatype command prefix.
+   `SMT.Datatype.Representation.standardModel_exists` and its environment
+   counterpart show that represented declarations and prefixes have standard
+   SMT models under the explicit free-datatype and integer interpretations.
+   The modeled checker and `Command.Supported` share the same executable
+   structural and finite-value checks, so nonproductive declarations are
+   rejected rather than treated as unsatisfiable. See
    [`Datatype/Semantics.lean`](Datatype/Semantics.lean),
    [`SMT/DatatypeCanonical.lean`](SMT/DatatypeCanonical.lean), and
-   [`SMT/DatatypeRepresentation.lean`](SMT/DatatypeRepresentation.lean).
+   [`SMT/DatatypeTransport.lean`](SMT/DatatypeTransport.lean).
 
 5. `FO.FamilyTerm.guardDenote_rel` preserves terms across a common carrier and
    symbol relation. `SMT.guardTerm_rel_eval` connects that semantics to the

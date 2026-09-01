@@ -12,6 +12,15 @@ open Crush.Metatheory.Datatype
 structure CommandWF {arity : Nat} (block : Block arity)
     (encoding : BlockEncoding arity) : Prop where
   blockWF : block.WF
+  /-- The exact raw declaration passes the structural check used by the
+  modeled script validator and `Command.Supported`. -/
+  structureCheck : Crush.SMT.datatypesStructurallyWellFormed
+    (entries block encoding) = true
+  /-- The exact raw declaration passes the same finite-constructor check used
+  by the modeled SMT script validator. Keeping this evidence on the canonical
+  command certificate prevents the raw and typed admission paths from
+  drifting apart. -/
+  finiteValueCheck : Crush.SMT.datatypesProductive (entries block encoding) = true
   names : encoding.WF
   sorts_fresh : ∀ data : DataRef block,
     dataSort encoding data ≠ Crush.SMT.boolSort ∧
@@ -138,33 +147,11 @@ theorem raw_sort_ref {arity : Nat} (block : Block arity)
   cases entryEq
   exact ⟨data, sortEq.symm⟩
 
-/-- Structural and allocated-name well-formedness discharges the raw command's
-supported-fragment predicate. -/
-theorem supported {arity : Nat} {block : Block arity}
-    {encoding : BlockEncoding arity} (wf : CommandWF block encoding)
-    (productive : Productive block) :
-    Crush.SMT.DatatypesSupported (entries block encoding) := by
-  refine ⟨?_, ?_, wf.symbols, ?_⟩
-  · intro empty
-    have zero : arity = 0 := by
-      have := congrArg List.length empty
-      simpa [entries] using this
-    have positive := wf.blockWF.nonempty
-    omega
-  · have dataNodup : (List.ofFn fun data : Fin arity => data).Nodup :=
-      finRange_nodup arity
-    have nameNodup := nodup_map dataNodup fun left right equal =>
-      wf.names equal
-    simpa [entries, Function.comp_def] using nameNodup
-  · intro name count decl member
-    obtain ⟨data, nameEq, countEq, declEq⟩ :=
-      raw_entry_ref block encoding member
-    subst name
-    subst count
-    subst decl
-    refine ⟨rfl, rfl, ?_⟩
-    change ((block.decl data).ctors.mapIdx fun index ctor =>
-      ctorDecl (block := block) encoding data index ctor) ≠ []
-    exact List.mapIdx_ne_nil_iff.mpr (ctors_nonempty productive data)
+/-- Structural, name-freshness, and finite-constructor evidence discharges the
+raw command's datatype well-formedness predicate. -/
+theorem wellFormed {arity : Nat} {block : Block arity}
+    {encoding : BlockEncoding arity} (wf : CommandWF block encoding) :
+    Crush.SMT.DatatypesWellFormed (entries block encoding) := by
+  exact ⟨wf.structureCheck, wf.finiteValueCheck⟩
 
 end Crush.Metatheory.SMT.Datatype

@@ -64,6 +64,34 @@ private def fnB : SSort := .app (.symb "FnB") #[]
   | .ok () => pure ()
   | .error error => throw <| IO.userError s!"valid uninterpreted relation failed: {error}"
 
+/- An indexed datatype tester may name only a constructor. An ordinary
+function with the same result sort does not acquire constructor status. -/
+#eval show IO Unit from do
+  let datatypeSort : SSort := .app (.symb "D") #[]
+  let script : Array Command := #[
+    .declSort "D" 0,
+    .declFun "ordinary" #[] datatypeSort,
+    .assert (.app (.indexed "is" #[.inl "ordinary"])
+      #[.app (.symb "ordinary") #[]])]
+  match checkClosedScript script with
+  | .error error =>
+    unless error.commandIndex == 2 &&
+        error.message.contains "undeclared constructor" do
+      throw <| IO.userError s!"unexpected tester validation error: {error}"
+  | .ok () =>
+      throw <| IO.userError "ordinary function was accepted as a datatype constructor"
+
+#eval show IO Unit from do
+  let script : Array Command := #[
+    .declDatatypes #[("D", 0, {
+      ctors := #[{ name := "mkD", selDecls := #[] }] })],
+    .assert (.app (.indexed "is" #[.inl "mkD"])
+      #[.app (.symb "mkD") #[]])]
+  match checkClosedScript script with
+  | .ok () => pure ()
+  | .error error =>
+      throw <| IO.userError s!"valid datatype tester failed: {error}"
+
 #eval show IO Unit from do
   let tooHigh := String.singleton (Char.ofNat 0x30000)
   for command in [Command.assert (.lit (.str tooHigh)), .echo tooHigh] do

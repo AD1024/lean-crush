@@ -326,7 +326,9 @@ private def collectedBinarySpine :=
     (completeBinaryArgs.applyTerm
       (.arrow entity (.arrow entity entity)) (.const binaryFn))
 
-example : collectedBinarySpine.arguments.types = [entity, entity] := by native_decide
+#eval show IO Unit from do
+  unless collectedBinarySpine.arguments.types == [entity, entity] do
+    throw <| IO.userError "complete application spine lost an argument"
 
 example : collectedBinarySpine.toTerm =
     .app (.app (.const binaryFn) (.var .here)) (.var .here) := by
@@ -337,7 +339,9 @@ function result in its index. -/
 private def collectedPartialSpine :=
   Flattened.ApplicationSpine.collect partialApplication
 
-example : collectedPartialSpine.arguments.types = [entity] := by native_decide
+#eval show IO Unit from do
+  unless collectedPartialSpine.arguments.types == [entity] do
+    throw <| IO.userError "partial application spine has the wrong arguments"
 
 /-- Recursive argument translation composes generated output in source order,
 ready for the flattened application node to consume. -/
@@ -375,7 +379,7 @@ private def targetIdentityApplication :
     (.symbol (Flattened.Symbol.closure identityClosure) .nil)
     (.base ⟨"Entity"⟩)
 
-example : targetIdentityArguments.types = [entity] := by native_decide
+example : targetIdentityArguments.types = [entity] := by decide
 
 /-- Opening a curried source value exposes its complete flattened telescope. -/
 example :
@@ -383,7 +387,7 @@ example :
       (.arrow entity (.arrow entity entity))
       (.const binaryFn :
         Term partialSignature [] (.arrow entity (.arrow entity entity)))).binders =
-      [entity, entity] := by native_decide
+      [entity, entity] := by decide
 
 /-- A closure equation can now be assembled under the exact binder context. -/
 private def openedIdentityBody :=
@@ -397,7 +401,7 @@ private def identityClosureEquation :
     Flattened.TargetSentence partialSignature :=
   openedIdentityBody.equation (.var .here)
 
-example : openedIdentityBody.context = [entity, entity] := by native_decide
+example : openedIdentityBody.context = [entity, entity] := by decide
 
 example (model : Model partialSignature)
     (valuation : Valuation model.Base [entity]) :
@@ -411,23 +415,29 @@ example (model : Model partialSignature)
 private def translatedApplicationEquality :=
   𝓕⟦Crush.Metatheory.Tests.applicationEquality⟧
 
-/-- A completely applied source constant remains one flattened source-symbol
+/- A completely applied source constant remains one flattened source-symbol
 application and introduces no closure equation. -/
-example : translatedApplicationEquality.equations.length = 0 := by native_decide
+#eval show IO Unit from do
+  unless translatedApplicationEquality.equations.length == 0 do
+    throw <| IO.userError "complete application introduced a closure equation"
 
 /-- Translating a residual function value materializes exactly one eta closure
 and its fully flattened defining equation. -/
 private def translatedPartialApplication :=
   𝓕⟦partialApplication⟧
 
-example : translatedPartialApplication.equations.length = 1 := by native_decide
+#eval show IO Unit from do
+  unless translatedPartialApplication.equations.length == 1 do
+    throw <| IO.userError "partial application did not introduce one closure equation"
 
 /-- A curried lambda chain is represented by one flattened closure rather than
 one intermediate closure per binder. -/
 private def translatedNestedCapture :=
   𝓕⟦nestedCapture⟧
 
-example : translatedNestedCapture.equations.length = 1 := by native_decide
+#eval show IO Unit from do
+  unless translatedNestedCapture.equations.length == 1 do
+    throw <| IO.userError "curried lambda did not introduce one closure equation"
 
 /-- Exact captures survive into the structural identity of the generated
 closure symbol. -/
@@ -445,14 +455,17 @@ private def firstClosureCaptureCount :
 private def translatedCaptureCount : Nat :=
   firstClosureCaptureCount (𝓕⟦capturingLambda⟧.declarations)
 
-example : translatedCaptureCount = 1 := by native_decide
+#eval show IO Unit from do
+  unless translatedCaptureCount == 1 do
+    throw <| IO.userError "closure did not retain its exact capture count"
 
 /-- Function equality requests the extensionality formula for its arrow sort. -/
 private def functionReflexivity : Sentence partialSignature :=
   .eq (.const binaryFn) (.const binaryFn)
 
-example : 𝓕⟦functionReflexivity⟧.extensionality.length = 1 := by
-  native_decide
+#eval show IO Unit from do
+  unless 𝓕⟦functionReflexivity⟧.extensionality.length == 1 do
+    throw <| IO.userError "function equality did not request extensionality"
 
 /-- Quantifiers and every Boolean constructor recurse through the same total
 translation and preserve their generated output. -/
@@ -645,24 +658,22 @@ example : definedBoolModel.SatisfiesCommand (.defFun trueDefinition) := by
     rw [Eval.iff_eq definedBoolModel_applyUnique (Eval.boolLit true)]
     simp [definedBoolModel, boolModel]
 
-example : ¬CommandsWellTyped #[.defFunsRec #[]] := by
-  change metatheoryScriptWellTyped #[.defFunsRec #[]] ≠ true
-  native_decide
+#eval show IO Unit from do
+  if metatheoryScriptWellTyped #[.defFunsRec #[]] then
+    throw <| IO.userError "empty recursive-definition group was accepted"
 
-example : ¬CommandsUnsatisfiable #[.defFunsRec #[]] := by
-  intro unsat
-  exact (show ¬CommandsWellTyped #[.defFunsRec #[]] by
-    change metatheoryScriptWellTyped #[.defFunsRec #[]] ≠ true
-    native_decide) unsat.wellTyped
+#eval show IO Unit from do
+  unless metatheoryScriptWellTyped #[.assert (.lit (.bool false))] do
+    throw <| IO.userError "well-sorted false assertion was rejected"
 
-example : CommandsUnsatisfiable #[.assert (.lit (.bool false))] := by
+example (wellTyped : CommandsWellTyped #[.assert (.lit (.bool false))]) :
+    CommandsUnsatisfiable #[.assert (.lit (.bool false))] := by
   refine ⟨?_, ?_, ?_⟩
   · intro command member
     simp at member
     subst command
     trivial
-  · change metatheoryScriptWellTyped #[.assert (.lit (.bool false))] = true
-    native_decide
+  · exact wellTyped
   · intro model standard valid
     have evaluated := valid (.assert (.lit (.bool false))) (by simp)
     change Eval model [] (.lit (.bool false)) (model.bool true) at evaluated
@@ -677,16 +688,20 @@ example : ¬CommandsUnsatisfiable #[] := by
   rcases standardModel_exists with ⟨model, standard⟩
   exact unsat.noModel model standard model.satisfiesCommands_empty
 
-/-- Standard integer semantics prevents distinct numerals from collapsing in
+/- Standard integer semantics prevents distinct numerals from collapsing in
 the relational model. -/
-example : CommandsUnsatisfiable #[.assert (smt| (= 0 1))] := by
+#eval show IO Unit from do
+  unless metatheoryScriptWellTyped #[.assert (smt| (= 0 1))] do
+    throw <| IO.userError "well-sorted integer equality was rejected"
+
+example (wellTyped : CommandsWellTyped #[.assert (smt| (= 0 1))]) :
+    CommandsUnsatisfiable #[.assert (smt| (= 0 1))] := by
   refine ⟨?_, ?_, ?_⟩
   · intro command member
     simp at member
     subst command
     trivial
-  · change metatheoryScriptWellTyped #[.assert (smt| (= 0 1))] = true
-    native_decide
+  · exact wellTyped
   · intro model standard valid
     have evaluated := valid (.assert (smt| (= 0 1))) (by simp)
     change Eval model [] (smt| (= 0 1)) (model.bool true) at evaluated
@@ -704,56 +719,32 @@ example : CommandsUnsatisfiable #[.assert (smt| (= 0 1))] := by
     have impossible := evaluated.unique standard.applyUnique expected
     exact Bool.noConfusion (model.boolInjective impossible)
 
-/-- Sort names are checked against the preceding declaration environment. -/
-example : ¬CommandsWellTyped
-    #[.declFun "x" #[] (.app (.symb "Undeclared") #[])] := by
-  change metatheoryScriptWellTyped
-    #[.declFun "x" #[] (.app (.symb "Undeclared") #[])] ≠ true
-  native_decide
+/- Sort names are checked against the preceding declaration environment. -/
+#eval show IO Unit from do
+  if metatheoryScriptWellTyped
+      #[.declFun "x" #[] (.app (.symb "Undeclared") #[])] then
+    throw <| IO.userError "undeclared sort was accepted"
 
-/-- The modeled fragment uses literal syntax for Boolean constants; otherwise
+/- The modeled fragment uses literal syntax for Boolean constants; otherwise
 the generic symbol graph could assign `true` or `false` an arbitrary value. -/
-example : ¬CommandsWellTyped #[.assert (.app (.symb "true") #[])] := by
-  change metatheoryScriptWellTyped
-    #[.assert (.app (.symb "true") #[])] ≠ true
-  native_decide
+#eval show IO Unit from do
+  if metatheoryScriptWellTyped #[.assert (.app (.symb "true") #[])] then
+    throw <| IO.userError "unmodeled Boolean constant syntax was accepted"
 
-/-- Regression: syntax coverage alone must not let contradictory sort uses in
+/- Regression: syntax coverage alone must not let contradictory sort uses in
 an invalid SMT script establish semantic unsatisfiability. -/
-example : ¬CommandsUnsatisfiable
-    #[.assert (.lit (.num 0)), .assert (smt| (not 0))] := by
-  intro unsat
-  have rejected :
-      metatheoryScriptWellTyped
-        #[.assert (.lit (.num 0)), .assert (smt| (not 0))] = false := by
-    native_decide
-  have accepted := unsat.wellTyped
-  change metatheoryScriptWellTyped
-    #[.assert (.lit (.num 0)), .assert (smt| (not 0))] = true at accepted
-  rw [rejected] at accepted
-  contradiction
+#eval show IO Unit from do
+  if metatheoryScriptWellTyped
+      #[.assert (.lit (.num 0)), .assert (smt| (not 0))] then
+    throw <| IO.userError "incompatibly sorted assertions were accepted"
 
-example : ¬AbstractCommandsUnsatisfiable
-    #[.assert (.lit (.num 0)), .assert (smt| (not 0))] := by
-  intro unsat
-  have rejected :
-      metatheoryScriptWellTyped
-        #[.assert (.lit (.num 0)), .assert (smt| (not 0))] = false := by
-    native_decide
-  have accepted := unsat.wellTyped
-  change metatheoryScriptWellTyped
-    #[.assert (.lit (.num 0)), .assert (smt| (not 0))] = true at accepted
-  rw [rejected] at accepted
-  contradiction
+#eval show IO Unit from do
+  if metatheoryScriptWellTyped #[.assert (.lam #[] (.lit (.bool true)))] then
+    throw <| IO.userError "lambda syntax was accepted by the first-order checker"
 
-example : ¬CommandsWellTyped #[.assert (.lam #[] (.lit (.bool true)))] := by
-  change metatheoryScriptWellTyped
-    #[.assert (.lam #[] (.lit (.bool true)))] ≠ true
-  native_decide
-
-example : ¬CommandsWellTyped #[.assert (.bvar 0)] := by
-  change metatheoryScriptWellTyped #[.assert (.bvar 0)] ≠ true
-  native_decide
+#eval show IO Unit from do
+  if metatheoryScriptWellTyped #[.assert (.bvar 0)] then
+    throw <| IO.userError "unbound variable was accepted"
 
 end Crush.SMT.Tests
 

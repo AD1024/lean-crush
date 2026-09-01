@@ -60,13 +60,16 @@ def bitvecSort (width : Nat) : SSort :=
 namespace SSort
 
 mutual
-  private def size : SSort → Nat
+  /-- Structural size of one SMT sort, used to justify recursion through
+  compound sort arguments. -/
+  def structuralSize : SSort → Nat
     | .bvar _ => 1
-    | .app _ arguments => listSize arguments.toList + 1
+    | .app _ arguments => listStructuralSize arguments.toList + 1
 
-  private def listSize : List SSort → Nat
+  /-- Structural size of a list of SMT sorts. -/
+  def listStructuralSize : List SSort → Nat
     | [] => 0
-    | sort :: sorts => size sort + listSize sorts + 1
+    | sort :: sorts => structuralSize sort + listStructuralSize sorts + 1
 end
 
 /- Executable equality for the nested recursive sort syntax. Lean's standard
@@ -97,8 +100,8 @@ mutual
         isFalse fun equal => by
           injection equal with equalNames
           exact namesEqual equalNames
-  termination_by left right => size left + size right
-  decreasing_by all_goals simp [size] <;> omega
+  termination_by left right => structuralSize left + structuralSize right
+  decreasing_by all_goals simp [structuralSize] <;> omega
 
   def listDecEq : (left right : List SSort) → Decidable (left = right)
     | [], [] => isTrue rfl
@@ -114,8 +117,8 @@ mutual
             injection equal with _ tailEqual
             exact different tailEqual
         | isTrue tailEqual => isTrue (by cases headEqual; cases tailEqual; rfl)
-  termination_by left right => listSize left + listSize right
-  decreasing_by all_goals simp [listSize] <;> omega
+  termination_by left right => listStructuralSize left + listStructuralSize right
+  decreasing_by all_goals simp [listStructuralSize] <;> omega
 end
 
 end SSort

@@ -18,8 +18,9 @@ import Crush.Frontend.Tactic
 /-!
 # Datatype metatheory tests
 
-These examples exercise canonical datatype structure without using Lean
-declaration metadata, raw SMT syntax, or a solver.
+These examples cover the canonical datatype structure, raw SMT admission,
+source-model non-vacuity, and executable reification. They do not call an SMT
+solver.
 -/
 
 namespace Crush.Metatheory.Datatype.Tests
@@ -48,6 +49,166 @@ private def optionData : DataRef optionBlock := 0
 private def noneRef : CtorRef optionBlock optionData noneCtor := .here
 private def someRef : CtorRef optionBlock optionData someCtor := .there .here
 private def valueRef : FieldRef someCtor valueField := .here
+
+/-! ### A concrete source model
+
+This model is intentionally small, but it closes an important logical loop:
+the source-side free-datatype restriction is inhabited for a datatype with an
+external field.  It does not assume the `IsFreeDatatypeModel` witness that it
+constructs. -/
+
+private abbrev optionSignature : Signature := optionBlock.symbolTypes
+
+private def optionSymbols : Symbols optionSignature optionBlock :=
+  optionBlock.symbols
+
+private def OptionCarrier (sort : BaseSort) : Type :=
+  if sort = int then Int
+  else if sort = optionDecl.sort then Option Int
+  else Unit
+
+private def optionTo : OptionCarrier optionDecl.sort →
+    Val optionBlock OptionCarrier optionData := by
+  intro value
+  change Option Int at value
+  cases value with
+  | none => exact mk noneRef .nil
+  | some value => exact mk someRef (.base value .nil)
+
+private def optionFrom : Val optionBlock OptionCarrier optionData →
+    OptionCarrier optionDecl.sort := by
+  intro value
+  change Option Int
+  cases value with
+  | ctor ref args =>
+      cases ref with
+      | here => exact none
+      | there ref =>
+          cases ref with
+          | here =>
+              cases args with
+              | base value rest => exact some value
+          | there ref => nomatch ref
+
+private def optionCarrierIso :
+    Iso (OptionCarrier optionDecl.sort)
+      (Val optionBlock OptionCarrier optionData) where
+  to := optionTo
+  «from» := optionFrom
+  left_inv := by intro value; change Option Int at value; cases value <;> rfl
+  right_inv := by
+    intro value
+    cases value with
+    | ctor ref args =>
+        cases ref with
+        | here => cases args; rfl
+        | there ref =>
+            cases ref with
+            | here => cases args with | base value rest => cases rest; rfl
+            | there ref => nomatch ref
+
+private noncomputable def optionSourceModel : Model optionSignature where
+  Base := OptionCarrier
+  baseNonempty := by
+    intro sort
+    unfold OptionCarrier
+    split
+    · infer_instance
+    · split <;> infer_instance
+  const := by
+    intro ty constant
+    cases constant with
+    | here =>
+        change OptionCarrier optionDecl.sort
+        exact none
+    | there constant =>
+        cases constant with
+        | here =>
+            change OptionCarrier optionDecl.sort → Prop
+            exact fun value => value = none
+        | there constant =>
+            cases constant with
+            | here =>
+                change OptionCarrier int → OptionCarrier optionDecl.sort
+                exact fun value => some value
+            | there constant =>
+                cases constant with
+                | here =>
+                    change OptionCarrier optionDecl.sort → OptionCarrier int
+                    exact fun value => value.getD 0
+                | there constant =>
+                    cases constant with
+                    | here =>
+                        change OptionCarrier optionDecl.sort → Prop
+                        exact fun value => value.isSome
+                    | there constant => nomatch constant
+
+private noncomputable def optionSourceModel_free :
+    IsFreeDatatypeModel optionSymbols optionSourceModel where
+  carrier := by
+    intro data
+    have dataEq : data = optionData := Subsingleton.elim _ _
+    subst data
+    exact optionCarrierIso
+  ctor_denote := by
+    intro data ctor ref
+    have dataEq : data = optionData := Subsingleton.elim _ _
+    subst data
+    cases ref with
+    | here => rfl
+    | there ref =>
+        cases ref with
+        | here => rfl
+        | there ref => nomatch ref
+  sel_ctor := by
+    intro data ctor ctorRef field fieldRef args
+    have dataEq : data = optionData := Subsingleton.elim _ _
+    subst data
+    cases ctorRef with
+    | here => nomatch fieldRef
+    | there ctorRef =>
+        cases ctorRef with
+        | here =>
+            cases fieldRef with
+            | here => cases args with | base value rest => cases rest; rfl
+            | there ref => nomatch ref
+        | there ref => nomatch ref
+  test_denote := by
+    intro data ctor ref value
+    have dataEq : data = optionData := Subsingleton.elim _ _
+    subst data
+    cases ref with
+    | here =>
+        change (value = none) ↔ IsCtor noneRef (optionTo value)
+        cases value with
+        | none => exact ⟨fun _ => test_ctor noneRef .nil, fun _ => rfl⟩
+        | some payload =>
+            constructor
+            · intro impossible
+              contradiction
+            · intro tested
+              exact False.elim <| (test_ne noneRef someRef (by decide)
+                (.base payload .nil)) (by simpa [optionTo] using tested)
+    | there ref =>
+        cases ref with
+        | here =>
+            change value.isSome ↔ IsCtor someRef (optionTo value)
+            cases value with
+            | none =>
+                constructor
+                · intro impossible
+                  contradiction
+                · intro tested
+                  exact False.elim <| (test_ne someRef noneRef (by decide) .nil)
+                    (by simpa [optionTo] using tested)
+            | some payload =>
+                exact ⟨fun _ => by
+                    simp [optionTo],
+                  fun _ => by simp⟩
+        | there ref => nomatch ref
+
+example : Nonempty (IsFreeDatatypeModel optionSymbols optionSourceModel) :=
+  ⟨optionSourceModel_free⟩
 
 example : optionBlock.wellFormed = true := by decide
 example : optionBlock.productive = true := by decide
@@ -84,22 +245,46 @@ example : Crush.Metatheory.SMT.Datatype.command optionBlock optionEncoding =
       })
     ] := rfl
 
-example : Crush.SMT.DatatypesSupported
+example : Crush.SMT.DatatypesWellFormed
     (Crush.Metatheory.SMT.Datatype.entries optionBlock optionEncoding) := by
-  simp [Crush.SMT.DatatypesSupported, Crush.SMT.datatypeSymbols,
-    Crush.SMT.datatypeCtors, Crush.SMT.CtorDecl.tester,
-    Crush.Metatheory.SMT.Datatype.entries,
-    Crush.Metatheory.SMT.Datatype.dataDecl,
-    Crush.Metatheory.SMT.Datatype.ctorDecl, optionBlock, optionDecl,
-    noneCtor, someCtor, valueField, optionEncoding,
-    Crush.Metatheory.SMT.Datatype.fieldSort] <;> grind
+  constructor
+  · simp [Crush.SMT.DatatypesStructurallyWellFormed,
+      Crush.SMT.datatypesStructurallyWellFormed,
+      Crush.SMT.datatypeSymbols, Crush.SMT.datatypeCtors,
+      Crush.SMT.CtorDecl.tester, Crush.Metatheory.SMT.Datatype.entries,
+      Crush.Metatheory.SMT.Datatype.dataDecl,
+      Crush.Metatheory.SMT.Datatype.ctorDecl, optionBlock, optionDecl,
+      noneCtor, someCtor, valueField, optionEncoding,
+      Crush.Metatheory.SMT.Datatype.fieldSort] <;> grind
+  · simp [Crush.SMT.datatypesProductive, Crush.SMT.datatypeHasFiniteValue,
+      Crush.Metatheory.SMT.Datatype.entries,
+      Crush.Metatheory.SMT.Datatype.dataDecl,
+      Crush.Metatheory.SMT.Datatype.ctorDecl, optionBlock, optionDecl,
+      noneCtor, someCtor, valueField, optionEncoding,
+      Crush.Metatheory.SMT.Datatype.fieldSort]
 
-example : ¬Crush.SMT.DatatypesSupported #[] := by
-  simp [Crush.SMT.DatatypesSupported]
+example : ¬Crush.SMT.DatatypesWellFormed #[] := by
+  intro valid
+  exact (show ¬Crush.SMT.DatatypesStructurallyWellFormed #[] by
+    simp [Crush.SMT.DatatypesStructurallyWellFormed,
+      Crush.SMT.datatypesStructurallyWellFormed]) valid.1
 
-example : ¬Crush.SMT.DatatypesSupported #[
+#eval show IO Unit from do
+  if Crush.SMT.metatheoryScriptWellTyped #[.declDatatypes #[]] then
+    throw <| IO.userError "empty datatype block was accepted"
+
+example : ¬Crush.SMT.DatatypesWellFormed #[
     ("Bad", 0, { params := #[], ctors := #[] })] := by
-  simp [Crush.SMT.DatatypesSupported]
+  intro valid
+  exact (show ¬Crush.SMT.DatatypesStructurallyWellFormed #[
+      ("Bad", 0, { params := #[], ctors := #[] })] by
+    simp [Crush.SMT.DatatypesStructurallyWellFormed,
+      Crush.SMT.datatypesStructurallyWellFormed]) valid.1
+
+#eval show IO Unit from do
+  if Crush.SMT.metatheoryScriptWellTyped #[.declDatatypes #[
+      ("Bad", 0, { params := #[], ctors := #[] })]] then
+    throw <| IO.userError "constructor-free datatype was accepted"
 
 private def rawTree : Array (String × Nat × Crush.SMT.DatatypeDecl) := #[
   ("Tree", 0, { ctors := #[
@@ -108,9 +293,14 @@ private def rawTree : Array (String × Nat × Crush.SMT.DatatypeDecl) := #[
       ("left", .app (.symb "Tree") #[]),
       ("right", .app (.symb "Tree") #[])] }] })]
 
-example : Crush.SMT.DatatypesSupported rawTree := by
-  simp [Crush.SMT.DatatypesSupported, Crush.SMT.datatypeSymbols,
-    Crush.SMT.datatypeCtors, Crush.SMT.CtorDecl.tester, rawTree] <;> grind
+example : Crush.SMT.DatatypesWellFormed rawTree := by
+  constructor
+  · simp [Crush.SMT.DatatypesStructurallyWellFormed,
+      Crush.SMT.datatypesStructurallyWellFormed,
+      Crush.SMT.datatypeSymbols, Crush.SMT.datatypeCtors,
+      Crush.SMT.CtorDecl.tester, rawTree] <;> grind
+  · simp [Crush.SMT.datatypesProductive, Crush.SMT.datatypeHasFiniteValue,
+      rawTree]
 
 private def rawMutual : Array (String × Nat × Crush.SMT.DatatypeDecl) := #[
   ("Tree", 0, { ctors := #[
@@ -123,23 +313,125 @@ private def rawMutual : Array (String × Nat × Crush.SMT.DatatypeDecl) := #[
       ("head", .app (.symb "Tree") #[]),
       ("tail", .app (.symb "Trees") #[])] }] })]
 
-example : Crush.SMT.DatatypesSupported rawMutual := by
-  simp [Crush.SMT.DatatypesSupported, Crush.SMT.datatypeSymbols,
-    Crush.SMT.datatypeCtors, Crush.SMT.CtorDecl.tester, rawMutual] <;> grind
+example : Crush.SMT.DatatypesWellFormed rawMutual := by
+  constructor
+  · simp [Crush.SMT.DatatypesStructurallyWellFormed,
+      Crush.SMT.datatypesStructurallyWellFormed,
+      Crush.SMT.datatypeSymbols, Crush.SMT.datatypeCtors,
+      Crush.SMT.CtorDecl.tester, rawMutual] <;> grind
+  · simp [Crush.SMT.datatypesProductive, Crush.SMT.datatypeHasFiniteValue,
+      rawMutual]
+
+private def rawLoop : Array (String × Nat × Crush.SMT.DatatypeDecl) := #[
+  ("Loop", 0, { ctors := #[
+    { name := "mkLoop", selDecls := #[
+      ("next", .app (.symb "Loop") #[])] }] })]
+
+/-- Regression: a datatype with no finite constructor value is an invalid
+declaration, not an unsatisfiable theory. -/
+private theorem rawLoop_not_wellFormed :
+    ¬Crush.SMT.DatatypesWellFormed rawLoop := by
+  intro valid
+  have rejected : Crush.SMT.datatypesProductive rawLoop = false := by
+    simp [Crush.SMT.datatypesProductive, Crush.SMT.datatypeHasFiniteValue,
+      Crush.SMT.directDatatypeReference?,
+      Crush.SMT.admissibleExternalDatatypeFieldSort, rawLoop]
+  have productive := valid.2
+  rw [rejected] at productive
+  contradiction
+
+#eval show IO Unit from do
+  if Crush.SMT.metatheoryScriptWellTyped #[.declDatatypes rawLoop] then
+    throw <| IO.userError "nonproductive self-recursive datatype was accepted"
+
+example : ¬Crush.SMT.CommandsUnsatisfiable
+    #[.declDatatypes rawLoop] := by
+  intro unsat
+  exact rawLoop_not_wellFormed
+    (unsat.supported (.declDatatypes rawLoop) (by simp))
+
+example : ¬Crush.SMT.AbstractCommandsUnsatisfiable
+    #[.declDatatypes rawLoop] := by
+  intro unsat
+  exact rawLoop_not_wellFormed
+    (unsat.supported (.declDatatypes rawLoop) (by simp))
+
+private def rawCycle : Array (String × Nat × Crush.SMT.DatatypeDecl) := #[
+  ("Left", 0, { ctors := #[
+    { name := "mkLeft", selDecls := #[
+      ("right", .app (.symb "Right") #[])] }] }),
+  ("Right", 0, { ctors := #[
+    { name := "mkRight", selDecls := #[
+      ("left", .app (.symb "Left") #[])] }] })]
+
+example : ¬Crush.SMT.DatatypesWellFormed rawCycle := by
+  intro valid
+  have rejected : Crush.SMT.datatypesProductive rawCycle = false := by
+    simp [Crush.SMT.datatypesProductive, Crush.SMT.datatypeHasFiniteValue,
+      Crush.SMT.directDatatypeReference?,
+      Crush.SMT.admissibleExternalDatatypeFieldSort, rawCycle]
+  have productive := valid.2
+  rw [rejected] at productive
+  contradiction
+
+#eval show IO Unit from do
+  if Crush.SMT.metatheoryScriptWellTyped #[.declDatatypes rawCycle] then
+    throw <| IO.userError "nonproductive mutual datatype cycle was accepted"
+
+/- A productive mutual cycle remains valid because each datatype also has a
+finite base constructor. -/
+#eval show IO Unit from do
+  unless Crush.SMT.metatheoryScriptWellTyped #[.declDatatypes rawMutual] do
+    throw <| IO.userError "productive mutual datatype block was rejected"
+
+private def nestedRecursiveField :
+    Array (String × Nat × Crush.SMT.DatatypeDecl) := #[
+  ("Nested", 0, { ctors := #[
+    { name := "mkNested", selDecls := #[
+      ("values", .app (.symb "Array") #[Crush.SMT.intSort,
+        .app (.symb "Nested") #[]])] }] })]
+
+/- The current modeled subset has no positivity/nonemptiness semantics for a
+same-block datatype nested under another sort constructor. -/
+#eval show IO Unit from do
+  if Crush.SMT.metatheoryScriptWellTyped
+      #[.declDatatypes nestedRecursiveField] then
+    throw <| IO.userError "nested same-block datatype field was accepted"
 
 private def duplicateCtor : Array (String × Nat × Crush.SMT.DatatypeDecl) := #[
   ("Left", 0, { ctors := #[{ name := "mk", selDecls := #[] }] }),
   ("Right", 0, { ctors := #[{ name := "mk", selDecls := #[] }] })]
 
-example : ¬Crush.SMT.DatatypesSupported duplicateCtor := by
-  simp [Crush.SMT.DatatypesSupported, Crush.SMT.datatypeSymbols,
-    Crush.SMT.datatypeCtors, Crush.SMT.CtorDecl.tester, duplicateCtor]
+example : ¬Crush.SMT.DatatypesWellFormed duplicateCtor := by
+  intro valid
+  exact (show ¬Crush.SMT.DatatypesStructurallyWellFormed duplicateCtor by
+    simp [Crush.SMT.DatatypesStructurallyWellFormed,
+      Crush.SMT.datatypesStructurallyWellFormed,
+      Crush.SMT.datatypeSymbols, Crush.SMT.datatypeCtors,
+      Crush.SMT.CtorDecl.tester, duplicateCtor]) valid.1
 
-example : ¬Crush.SMT.DatatypesSupported #[
+#eval show IO Unit from do
+  if Crush.SMT.metatheoryScriptWellTyped #[.declDatatypes duplicateCtor] then
+    throw <| IO.userError "duplicate datatype symbol was accepted"
+
+example : ¬Crush.SMT.DatatypesWellFormed #[
     ("Parametric", 1, {
       params := #["α"]
       ctors := #[{ name := "mk", selDecls := #[] }] })] := by
-  simp [Crush.SMT.DatatypesSupported]
+  intro valid
+  exact (show ¬Crush.SMT.DatatypesStructurallyWellFormed #[
+      ("Parametric", 1, {
+        params := #["α"]
+        ctors := #[{ name := "mk", selDecls := #[] }] })] by
+    simp [Crush.SMT.DatatypesStructurallyWellFormed,
+      Crush.SMT.datatypesStructurallyWellFormed]) valid.1
+
+#eval show IO Unit from do
+  if Crush.SMT.metatheoryScriptWellTyped #[.declDatatypes #[
+      ("Parametric", 1, {
+        params := #["α"]
+        ctors := #[{ name := "mk", selDecls := #[] }] })]] then
+    throw <| IO.userError "parametric datatype was accepted by monomorphic checker"
 
 private def rawWFDef : Crush.SMT.FunDef := {
   name := "wf_Tree"
@@ -157,23 +449,21 @@ example : SMT.Datatype.wfBody
     #[("none", #[]), ("some", #[rawGuard])] rawValue =
       (smt| (=> $rawTester $rawGuard)) := rfl
 
-/-- A scoped body is not enough: the command type system also checks its
+/- A scoped body is not enough: the command type system also checks its
 result sort. -/
-example : ¬Crush.SMT.CommandsWellTyped
-    #[.declSort "Tree" 0, .defFun rawWFDef] := by
-  change Crush.SMT.metatheoryScriptWellTyped
-    #[.declSort "Tree" 0, .defFun rawWFDef] ≠ true
-  native_decide
+#eval show IO Unit from do
+  if Crush.SMT.metatheoryScriptWellTyped
+      #[.declSort "Tree" 0, .defFun rawWFDef] then
+    throw <| IO.userError "ill-sorted nonrecursive definition was accepted"
 
-example : ¬Crush.SMT.CommandsWellTyped #[.defFunsRec #[]] := by
-  change Crush.SMT.metatheoryScriptWellTyped #[.defFunsRec #[]] ≠ true
-  native_decide
+#eval show IO Unit from do
+  if Crush.SMT.metatheoryScriptWellTyped #[.defFunsRec #[]] then
+    throw <| IO.userError "empty recursive-definition group was accepted"
 
-example : ¬Crush.SMT.CommandsWellTyped
-    #[.declSort "Tree" 0, .defFunsRec #[rawWFDef, rawWFDef]] := by
-  change Crush.SMT.metatheoryScriptWellTyped
-    #[.declSort "Tree" 0, .defFunsRec #[rawWFDef, rawWFDef]] ≠ true
-  native_decide
+#eval show IO Unit from do
+  if Crush.SMT.metatheoryScriptWellTyped
+      #[.declSort "Tree" 0, .defFunsRec #[rawWFDef, rawWFDef]] then
+    throw <| IO.userError "duplicate recursive definitions were accepted"
 
 private def none : Val optionBlock IntBase optionData :=
   mk noneRef .nil
@@ -467,6 +757,22 @@ example (freeDataModel : IsFreeDatatypeModel symbols source)
       (command block data) :=
   command_sound freeDataModel represented
 
+/-- The datatype declaration is satisfiable in a standard SMT model, not just
+the internal relational model, when the represented integer carrier is
+available. -/
+example (freeDataModel : IsFreeDatatypeModel symbols source)
+    (represented : Representation block symbols fo data)
+    (integer : SMT.IntView fo (canonicalModel source)) :
+    ∃ model : Crush.SMT.Model,
+      model.Standard ∧ model.SatisfiesCommand (command block data) :=
+  represented.standardModel_exists freeDataModel integer
+
+example (freeDataModel : IsFreeDatatypeModel symbols source)
+    (represented : Representation block symbols fo data)
+    (integer : SMT.IntView fo (canonicalModel source)) :
+    ¬Crush.SMT.CommandsUnsatisfiable #[command block data] :=
+  represented.not_commandsUnsatisfiable freeDataModel integer
+
 /-- Additional derived graphs compose with the same FO representation: ordinary
 symbols and assertions remain valid by disjointness. -/
 example (extra : SMT.ExtraGraph fo (canonicalModel source))
@@ -567,11 +873,12 @@ untyped SMT models satisfy the commands. -/
 private def commandA : Crush.SMT.Command := .declSort "A" 0
 private def commandB : Crush.SMT.Command := .assert (smt| true)
 
-example : sameCommandSet? #[commandA, commandB]
-    #[commandB, commandA, commandB] = true := by native_decide
-
-example : sameCommandSet? #[commandA] #[commandA, commandB] = false := by
-  native_decide
+#eval show IO Unit from do
+  unless sameCommandSet? #[commandA, commandB]
+      #[commandB, commandA, commandB] do
+    throw <| IO.userError "equivalent command sets were distinguished"
+  if sameCommandSet? #[commandA] #[commandA, commandB] then
+    throw <| IO.userError "different command sets were identified"
 
 /-- The single-fact theorem is indexed by the retained source fact and final
 command array. Root-level `:named` annotations are removed only through the

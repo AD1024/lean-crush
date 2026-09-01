@@ -1070,7 +1070,7 @@ theorem data_hold {symbols : Symbols signature block}
     Crush.SMT.DatatypesHold
       (SMT.model fo (law.extend wf productive prior priorRel priorModels))
       (entries block data) := by
-  refine ⟨supported represented.wf productive, ?_, ?_, ?_, ?_,
+  refine ⟨wellFormed represented.wf, ?_, ?_, ?_, ?_,
     rank law wf productive priorRel priorModels, ?_⟩
   · intro sort ctor member
     exact ctor_laws law rolesUnique wf productive priorRel priorModels represented member

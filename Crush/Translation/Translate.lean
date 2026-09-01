@@ -341,50 +341,56 @@ def buildDatatypeDeclaration? (block : Metatheory.Reification.DatatypeBlock)
   let command := Metatheory.SMT.Datatype.command block.block encoding
   let sortNames := List.ofFn fun data : Fin block.arity =>
     encoding.name (.sort data)
-  let rawSymbols := SMT.datatypeSymbols
-    (Metatheory.SMT.Datatype.entries block.block encoding)
+  let rawEntries := Metatheory.SMT.Datatype.entries block.block encoding
+  let rawSymbols := SMT.datatypeSymbols rawEntries
   if nameNodup : sortNames.Nodup then
     if sortsFresh : sortNames.all fun name =>
         name != "Bool" && name != "Int" && name != "String" then
       if symbolsNodup : rawSymbols.Nodup then
         if symbolsFresh : rawSymbols.all fun symbol =>
             decide (SMT.NotBuiltin symbol) then
-          some {
-            reifiedBlock := block
-            typed := {
-              blockEncoding := encoding
-              command
-              command_eq := rfl
-              wf := {
-                blockWF := block.wf
-                names := Metatheory.SMT.Datatype.BlockEncoding.wf_of_names
-                  encoding nameNodup
-                sorts_fresh := by
-                  intro data
-                  have member : encoding.name (.sort data) ∈ sortNames := by
-                    exact List.mem_ofFn.mpr ⟨data, rfl⟩
-                  have checked := List.all_eq_true.mp sortsFresh _ member
-                  simp only [bne_iff_ne, Bool.and_eq_true] at checked
-                  rcases checked with ⟨⟨notBool, notInt⟩, notString⟩
-                  constructor
-                  · intro equal
-                    injection equal with identEqual
-                    injection identEqual with nameEqual
-                    exact notBool nameEqual
-                  · constructor
-                    · intro equal
-                      injection equal with identEqual
-                      injection identEqual with nameEqual
-                      exact notInt nameEqual
-                    · intro equal
-                      injection equal with identEqual
-                      injection identEqual with nameEqual
-                      exact notString nameEqual
-                symbols := symbolsNodup
-                symbols_fresh := by
-                  intro symbol member
-                  have checked := List.all_eq_true.mp symbolsFresh symbol member
-                  exact of_decide_eq_true checked } } }
+          if structureCheck : SMT.datatypesStructurallyWellFormed rawEntries = true then
+            if finiteValueCheck : SMT.datatypesProductive rawEntries = true then
+              some {
+                reifiedBlock := block
+                typed := {
+                  blockEncoding := encoding
+                  command
+                  command_eq := rfl
+                  wf := {
+                    blockWF := block.wf
+                    structureCheck
+                    finiteValueCheck
+                    names := Metatheory.SMT.Datatype.BlockEncoding.wf_of_names
+                      encoding nameNodup
+                    sorts_fresh := by
+                      intro data
+                      have member : encoding.name (.sort data) ∈ sortNames := by
+                        exact List.mem_ofFn.mpr ⟨data, rfl⟩
+                      have checked := List.all_eq_true.mp sortsFresh _ member
+                      simp only [bne_iff_ne, Bool.and_eq_true] at checked
+                      rcases checked with ⟨⟨notBool, notInt⟩, notString⟩
+                      constructor
+                      · intro equal
+                        injection equal with identEqual
+                        injection identEqual with nameEqual
+                        exact notBool nameEqual
+                      · constructor
+                        · intro equal
+                          injection equal with identEqual
+                          injection identEqual with nameEqual
+                          exact notInt nameEqual
+                        · intro equal
+                          injection equal with identEqual
+                          injection identEqual with nameEqual
+                          exact notString nameEqual
+                    symbols := symbolsNodup
+                    symbols_fresh := by
+                      intro symbol member
+                      have checked := List.all_eq_true.mp symbolsFresh symbol member
+                      exact of_decide_eq_true checked } } }
+            else none
+          else none
         else none
       else none
     else none

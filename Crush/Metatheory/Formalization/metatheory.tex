@@ -584,6 +584,18 @@ Such a witness implies productivity of $B$.
 \leanfile{Datatype/Model.lean}
 \end{definition}
 
+This is a semantic restriction on source interpretations, not a consequence of
+structural block well-formedness alone. In particular, the current lowering
+theorem assumes such a witness for each selected custom datatype; it does not
+claim that an arbitrary Lean declaration has already been proved isomorphic to
+the free algebra. The machine-checked tests construct the complete witness for
+a monomorphic option type with an external integer field, including its carrier
+isomorphism and constructor, selector, and tester equations. Thus the condition
+is inhabited at a nontrivial instance, while the general connection from Lean
+datatype declarations remains outside the theorem stated here.
+\footnote{Machine-checked example:
+\texttt{Test/MetatheoryDatatype.lean}.}
+
 \begin{definition}[Datatype environment]
 An environment $\mathcal D=[(B_1,S_1),\ldots,(B_k,S_k)]$ is an ordered list
 of blocks and their symbol maps in one shared signature. The judgment
@@ -1307,7 +1319,10 @@ body is checked before its new symbol enters $\Sigma_q$. For a
 \texttt{define-funs-rec} group, all signatures enter $\Sigma_q$ together before
 any body is checked. For mutually recursive datatypes, all datatype sorts enter
 scope before field sorts are checked, followed by constructors and selectors.
-Duplicate declarations and empty recursive-definition groups are rejected.
+An indexed tester such as \texttt{(\_ is leaf)} is accepted only when its index
+names a constructor introduced by a datatype declaration; an ordinary function
+returning the same sort is not a constructor. Duplicate declarations and empty
+recursive-definition groups are rejected.
 We define
 \[
  \mathsf{CommandsWellTyped}(C)
@@ -1330,18 +1345,65 @@ yet apply to an emitted command array containing those constructs.
 \footnote{Lean implementation: \texttt{Crush/SMT/Check.lean}.}
 \end{definition}
 
-\begin{definition}[Additional datatype conditions]
-The checker handles the static conditions shared by ordinary declarations,
-assertions, function definitions, and datatype declarations. A monomorphic
-\texttt{declare-datatypes} block also carries semantic conditions needed by the
-free-datatype model construction: a nonempty declaration block, distinct sort
-and operation names, arity zero, no type parameters, and at least one
-constructor per datatype. In Lean these additional conditions are named
-\texttt{Command.Supported} and lifted pointwise to
-\texttt{CommandsSupported}; for every non-datatype command they are simply
-true. They are separate from both type checking and model satisfaction.
-\leanfile{SMT/Semantics.lean}
+\begin{definition}[Raw datatype validity]
+Let $B_q$ be one raw monomorphic \texttt{declare-datatypes} block. Its
+\emph{structural check} requires that the block is nonempty, sort and operation
+identifiers are distinct, every sort has arity zero, type-parameter lists are
+empty, and every datatype has at least one constructor.
+
+The same block must also pass a finite-value check. For a datatype name $d$ and
+fuel $k$, let $\mathsf{finite}(B_q,k,d)$ hold when some constructor of $d$ has
+only the following fields:
+\begin{itemize}[leftmargin=*]
+ \item an external complete sort that contains no sort declared by $B_q$; or
+ \item a direct reference to a datatype $d'$ in $B_q$ for which
+       $\mathsf{finite}(B_q,k-1,d')$ holds.
+\end{itemize}
+The zero-fuel case is false. The executable productivity check requires
+$\mathsf{finite}(B_q,|B_q|,d)$ for every declared $d$. The size bound is enough:
+if a finite dependency witness exists, a shortest one does not repeat a
+datatype name. A current-block occurrence hidden inside another sort
+constructor, such as \texttt{(Array Int Tree)}, is rejected because the modeled
+fragment has no positivity or nonemptiness proof for that enclosing theory.
+
+We write
+\[
+ \mathsf{DatatypesWellFormed}(B_q)\quad\Longleftrightarrow\quad
+ \mathsf{structural}(B_q)\land\mathsf{productive}(B_q).
+\]
+Both conjuncts are executable Boolean checks shared literally by the modeled
+script validator, the canonical datatype-command certificate, and
+\texttt{Command.Supported}. Thus a failed datatype condition rejects the
+command statically; it is not encoded by making command satisfaction false.
+For every non-datatype command, \texttt{Command.Supported} is true, while the
+ordinary modeled-fragment restrictions remain in
+\texttt{CommandsWellTyped}.
+\footnote{Lean implementations: \texttt{Crush/SMT/Check.lean},
+\texttt{Crush/Metatheory/SMT/Semantics.lean}, and
+\texttt{Crush/Metatheory/SMT/DatatypeWF.lean}.}
 \end{definition}
+
+\begin{example}[Productive and nonproductive declarations]
+The running tree is accepted because \texttt{leaf} is already a finite value;
+\texttt{node} may then refer directly to \texttt{Tree}:
+\begin{verbatim}
+(declare-datatypes ((Tree 0))
+  (((leaf)
+    (node (left Tree) (right Tree)))))
+\end{verbatim}
+The declaration
+\begin{verbatim}
+(declare-datatypes ((Loop 0))
+  (((mkLoop (next Loop)))))
+\end{verbatim}
+is rejected. With one datatype, the only attempted constructor asks for a
+smaller-fuel \texttt{Loop} value and reaches the false zero-fuel case. Likewise,
+a mutual cycle with no base constructor is rejected, whereas a mutual
+tree/list block is accepted when \texttt{leaf} and \texttt{nil} provide finite
+base values. These cases are executable checker regressions.
+\footnote{Machine-checked examples:
+\texttt{Test/MetatheoryDatatype.lean}.}
+\end{example}
 
 \begin{definition}[Raw SMT datatype semantics]
 For one monomorphic \texttt{declare-datatypes} command, the predicate
@@ -1590,6 +1652,21 @@ exhaustiveness, disjointness, and rank decrease in the shared raw universe.
 The dependency-extension and transport modules prove that each earlier block
 remains valid after every later disjoint block is installed.
 \leanfiles{SMT/DatatypeCanonical.lean, SMT/DatatypeLifted.lean, and SMT/DatatypeTransport.lean}
+\end{theorem}
+
+\begin{theorem}[Non-vacuity of represented datatype commands]
+Assume the same free-datatype source model and an integer view giving the
+shared target the standard interpretation required by the modeled SMT
+fragment. Then there exists one \emph{standard} raw SMT model satisfying the
+represented datatype declaration. For a dependency-ordered datatype
+environment, one standard model satisfies the complete native datatype prefix.
+Consequently neither the single declaration nor that prefix can satisfy
+$\unsat_{\mathsf{SMT}}$ merely because datatype commands were installed.
+
+The proof reuses the canonical datatype model, the existing transport theorem
+for fresh graph extensions, and the standard integer model. It does not define
+a second datatype interpretation.
+\leanfile{SMT/DatatypeTransport.lean}
 \end{theorem}
 
 \subsection{One induced raw model}
@@ -2229,6 +2306,9 @@ membership-based untyped command semantics.}
        theory whenever one source model satisfies the whole source theory.
  \item Productive monomorphic datatype blocks have finite constructor-tree source
        semantics and exact SMT datatype command semantics in the untyped model.
+       Nonproductive raw declarations are rejected by the same executable check
+       used at the semantic boundary, and represented datatype prefixes have a
+       standard-model witness.
  \item Guarded-subset representations preserve typed terms, equality, and both
        quantifiers; recursive datatype guards select exactly the values that
        represent well-formed source datatype values.
@@ -2317,6 +2397,10 @@ The principal declarations, in proof order, are:
  \item \path{SMT.Datatype.command_sound} and
        \path{SMT.Datatype.EnvRepresentation.datatypeCommands_valid}: one block and the
        complete dependency-ordered SMT datatype prefix satisfy the raw datatype laws.
+ \item \path{SMT.Datatype.Representation.standardModel_exists} and
+       \path{SMT.Datatype.EnvRepresentation.standardModel_exists}: represented
+       datatype declarations and dependency-ordered prefixes have standard SMT
+       models under the explicit source and integer interpretations.
  \item \path{FO.FamilyTerm.guardDenote_rel}: related FO models preserve every
        term under guard-restricted quantifier semantics.
  \item \path{Datatype.Val.wf_iff_selWF}: the structural datatype image equals
