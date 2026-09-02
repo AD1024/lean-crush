@@ -423,6 +423,8 @@ theorem append {left right : AuxiliaryTheory signature}
   · exact (FO.FamilyModel.satisfiesTheory_append _ _ _).2
       ⟨leftValid.extensionality, rightValid.extensionality⟩
 
+/-- Declaring a symbol preserves validity for the trivial reason: neither field
+mentions `declarations`, so the list is unconstrained by every theorem here. -/
 theorem declare {generated : AuxiliaryTheory signature}
     (valid : AuxiliaryTheoryValid M generated)
     (declaration : DeclaredSymbol signature) :

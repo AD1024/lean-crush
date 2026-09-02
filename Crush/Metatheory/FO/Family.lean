@@ -3,14 +3,17 @@ import Crush.Metatheory.FO.Core
 /-!
 # First-order syntax over an abstract typed symbol family
 
-The finite-list FO syntax is the final SMT-facing representation.  Recursive
-verified passes are cleaner over a symbol family indexed directly by declaration:
+Verified passes are cleaner over a symbol family indexed directly by declaration:
 constructing a generated symbol immediately proves its type, independently of
-where a later finite allocator places it.
+where a later finite allocator places it, so the recursion carries no
+"the signature still contains this declaration" invariant and needs no weakening
+lemmas as the signature grows.
 
-`FamilyTerm.reify` is the total conversion back to finite `FO.Term`, parameterized by
-a typed resolver. The translator-correspondence proof instantiates that resolver with
-the collected signature and stable symbol allocation.
+Reifying a family term into a concrete finite signature is *not* part of this
+development.  It needs a resolver defined on the symbols a theory actually uses,
+together with a proof that the allocation is injective on them; a resolver total
+over the whole family cannot exist, since the family is inhabited at infinitely
+many declarations (one `appDecl` per source arrow) while a signature is a list.
 -/
 
 namespace Crush.Metatheory.FO
@@ -83,33 +86,5 @@ def FamilyFormula.closeForall {symbols : SymbolFamily} :
     {context : Context} → FamilyFormula symbols context → FamilySentence symbols
   | [], formula => formula
   | _ :: _, formula => closeForall (.forallE formula)
-
-mutual
-  /-- Replace abstract typed symbols with references into a finite signature. -/
-  def FamilyTerm.reify {symbols : SymbolFamily} {signature : Signature}
-      (resolve : {decl : SymbolDecl} → symbols decl → Symbol signature decl) :
-      {context : Context} → {sort : FOSort} →
-        FamilyTerm symbols context sort → Term signature context sort
-    | _, _, .var ref => .var ref
-    | _, _, .symbol symbol arguments =>
-        .symbol (resolve symbol) (arguments.reify resolve)
-    | _, _, .boolLit value => .boolLit value
-    | _, _, .not body => .not (body.reify resolve)
-    | _, _, .and left right => .and (left.reify resolve) (right.reify resolve)
-    | _, _, .or left right => .or (left.reify resolve) (right.reify resolve)
-    | _, _, .imp left right => .imp (left.reify resolve) (right.reify resolve)
-    | _, _, .iff left right => .iff (left.reify resolve) (right.reify resolve)
-    | _, _, .eq left right => .eq (left.reify resolve) (right.reify resolve)
-    | _, _, .forallE body => .forallE (body.reify resolve)
-    | _, _, .existsE body => .existsE (body.reify resolve)
-
-  def FamilyArgs.reify {symbols : SymbolFamily} {signature : Signature}
-      (resolve : {decl : SymbolDecl} → symbols decl → Symbol signature decl) :
-      {context : Context} → {sorts : List FOSort} →
-        FamilyArgs symbols context sorts → Args signature context sorts
-    | _, _, .nil => .nil
-    | _, _, .cons argument rest =>
-        .cons (argument.reify resolve) (rest.reify resolve)
-end
 
 end Crush.Metatheory.FO

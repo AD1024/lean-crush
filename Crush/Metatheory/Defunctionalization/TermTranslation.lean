@@ -24,17 +24,19 @@ def of {signature : Signature} {declaration : FO.SymbolDecl}
     (symbol : Symbol signature declaration) : DeclaredSymbol signature :=
   ⟨declaration, symbol⟩
 
-/-- Exact capture count when this occurrence declares a closure. -/
-def closureCaptureCount? {signature : Signature}
-    (declared : DeclaredSymbol signature) : Option Nat :=
-  match declared with
-  | ⟨_, Symbol.closure closure⟩ => some closure.captureRefs.length
-  | _ => none
-
 end DeclaredSymbol
 
 /-- Generated declarations and formulas, separated from the translated term so
-heterogeneous collections of recursive results can accumulate them uniformly. -/
+heterogeneous collections of recursive results can accumulate them uniformly.
+
+`declarations` records every symbol the translation forms, in source traversal
+order and with repeats.  Nothing here relates it to `equations` or
+`extensionality`: the semantic theorems quantify over `FO.FamilyModel`, which
+interprets the entire symbol family at once, so validity never consults the
+list — see `AuxiliaryTheoryValid`.  It is the data a finite-signature bridge
+would need, and that bridge needs two lemmas this development does not have:
+that every symbol occurring in the generated theory is listed here, and that the
+allocation of this list to signature positions is injective. -/
 structure AuxiliaryTheory (signature : Signature) where
   declarations : List (DeclaredSymbol signature) := []
   equations : TargetTheory signature := []
@@ -47,8 +49,8 @@ variable {signature : Signature}
 /-- Empty generated output. -/
 def empty : AuxiliaryTheory signature := {}
 
-/-- Record one structural symbol use. Repeated uses remain in this list; the
-later finite allocator proves which uses share one concrete declaration. -/
+/-- Record one structural symbol use.  Repeated uses stay in the list; collapsing
+them is the job of a finite allocator, which this development does not contain. -/
 def declare (generated : AuxiliaryTheory signature)
     (declaration : DeclaredSymbol signature) : AuxiliaryTheory signature :=
   { generated with

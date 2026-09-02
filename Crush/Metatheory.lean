@@ -1,7 +1,6 @@
 import Crush.Metatheory.HO
 import Crush.Metatheory.FO.Core
 import Crush.Metatheory.FO.Semantics
-import Crush.Metatheory.FO.Symbols
 import Crush.Metatheory.FO.Family
 import Crush.Metatheory.FO.FamilySemantics
 import Crush.Metatheory.FO.Renaming

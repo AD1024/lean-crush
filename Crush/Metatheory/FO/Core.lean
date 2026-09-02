@@ -1,14 +1,15 @@
 import Crush.Metatheory.HO.Core
 
 /-!
-# Intrinsically typed first-order target language
+# First-order target sorts and symbol declarations
 
 This is the proof-facing target of Crush's defunctionalization pass.  Unlike the
-higher-order source language, target terms contain neither arrows, lambdas, nor a
+higher-order source language, the target has neither arrows, lambdas, nor a
 distinguished application constructor.  Function values inhabit an opaque `.fn`
-sort and application and closure construction are ordinary first-order symbols.
+sort, and application and closure construction are ordinary first-order symbol
+declarations.
 
-The representation deliberately follows the emitted SMT encoding in
+The declarations deliberately follow the emitted SMT encoding in
 `Crush.Translation.HOEncoding` and `Crush.Translation.Translate`:
 
 * every complete source arrow type has its own function-value sort;
@@ -17,10 +18,10 @@ The representation deliberately follows the emitted SMT encoding in
 * a closure constructor takes its captured values and returns the function-value
   sort for the lambda's complete arrow type.
 
-Keeping these generated declarations as total definitions establishes the first
-correspondence between the verified language and the Crush translator. Symbol names and Lean
-expression reification remain outside this core; their eventual refinement proof
-must show that the emitted declarations have exactly these types.
+Target *terms* over these declarations are `FO.FamilyTerm` (`FO/Family.lean`),
+indexed by an abstract symbol family rather than by positions in a finite
+signature.  Symbol names, the finite allocation, and Lean expression reification
+remain outside this development.
 -/
 
 namespace Crush.Metatheory.FO
@@ -59,14 +60,6 @@ structure SymbolDecl where
   result : FOSort
   deriving BEq, DecidableEq, Repr
 
-/-- A typed de Bruijn reference to a declaration in an FO signature. -/
-inductive Symbol : (signature : List SymbolDecl) → SymbolDecl → Type where
-  | here {decl : SymbolDecl} {signature : List SymbolDecl} :
-      Symbol (decl :: signature) decl
-  | there {decl head : SymbolDecl} {signature : List SymbolDecl} :
-      Symbol signature decl → Symbol (head :: signature) decl
-  deriving Repr
-
 /-- A typed de Bruijn reference to a target variable. -/
 inductive Var : (context : List FOSort) → FOSort → Type where
   | here {sort : FOSort} {context : List FOSort} : Var (sort :: context) sort
@@ -74,70 +67,7 @@ inductive Var : (context : List FOSort) → FOSort → Type where
       Var context sort → Var (head :: context) sort
   deriving Repr
 
-mutual
-  /-- Intrinsically typed first-order terms.  Symbol application is the only
-  general term former; in particular, there is no lambda or higher-order app. -/
-  inductive Term (signature : List SymbolDecl) : List FOSort → FOSort → Type where
-    | var {context : List FOSort} {sort : FOSort} :
-        Var context sort → Term signature context sort
-    | symbol {context : List FOSort} {decl : SymbolDecl} :
-        Symbol signature decl → Args signature context decl.args →
-        Term signature context decl.result
-    | boolLit {context : List FOSort} : Bool → Term signature context .bool
-    | not {context : List FOSort} :
-        Term signature context .bool → Term signature context .bool
-    | and {context : List FOSort} :
-        Term signature context .bool → Term signature context .bool →
-        Term signature context .bool
-    | or {context : List FOSort} :
-        Term signature context .bool → Term signature context .bool →
-        Term signature context .bool
-    | imp {context : List FOSort} :
-        Term signature context .bool → Term signature context .bool →
-        Term signature context .bool
-    | iff {context : List FOSort} :
-        Term signature context .bool → Term signature context .bool →
-        Term signature context .bool
-    | eq {context : List FOSort} {sort : FOSort} :
-        Term signature context sort → Term signature context sort →
-        Term signature context .bool
-    | forallE {context : List FOSort} {domain : FOSort} :
-        Term signature (domain :: context) .bool → Term signature context .bool
-    | existsE {context : List FOSort} {domain : FOSort} :
-        Term signature (domain :: context) .bool → Term signature context .bool
-
-  /-- A heterogeneous vector of symbol arguments indexed by the declaration's
-  argument sorts. -/
-  inductive Args (signature : List SymbolDecl) :
-      List FOSort → List FOSort → Type where
-    | nil {context : List FOSort} : Args signature context []
-    | cons {context : List FOSort} {sort : FOSort} {sorts : List FOSort} :
-        Term signature context sort → Args signature context sorts →
-        Args signature context (sort :: sorts)
-end
-
-abbrev Signature := List SymbolDecl
 abbrev Context := List FOSort
-abbrev Formula (signature : Signature) (context : Context) :=
-  Term signature context .bool
-abbrev ClosedTerm (signature : Signature) (sort : FOSort) :=
-  Term signature [] sort
-abbrev Sentence (signature : Signature) := Formula signature []
-abbrev Theory (signature : Signature) := List (Sentence signature)
-
-namespace Term
-
-def trueE {signature : Signature} {context : Context} : Formula signature context :=
-  .boolLit true
-
-def falseE {signature : Signature} {context : Context} : Formula signature context :=
-  .boolLit false
-
-def ne {signature : Signature} {context : Context} {sort : FOSort}
-    (left right : Term signature context sort) : Formula signature context :=
-  .not (.eq left right)
-
-end Term
 
 /-! ## Declarations generated by the translator's defunctionalization scheme -/
 
