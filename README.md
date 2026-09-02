@@ -418,16 +418,43 @@ Complete downstream integrations are available in the
 They show lean-crush wired into verification-condition generation and used on
 real array, arithmetic, and quantified proof obligations.
 
-To compare trusted Crush with lean-auto, Duper, and `grind` on LeanHammer,
-Loom, Cashmere, and Velvet, run `scripts/benchmark-corpora.sh`. It clones and
-builds pinned source revisions, checks them out in temporary worktrees,
-overlays the local lean-crush build, and writes fixed-workload coverage plus
-pairwise matched-VC timing under `BenchmarkResults/`. Set
-`Z3_BIN`/`CVC5_BIN` when the solvers are not on `PATH`;
-`RUN_AUTO=false`, `RUN_DUPER=false`, or `RUN_CRUSH=false` selects backends for
-focused profiling. `scripts/benchmark-plean.sh` provisions the pinned PLean
-revisions. Exact self-contained commands and output definitions are in the
-[benchmark script guide](scripts/README.md). See
+Run a headline benchmark for one backend and case study with:
+
+```sh
+bash benchmark.sh \
+  --case_study <all|LeanHammer|Velvet|Cashmere|PLean> \
+  --with <crush|auto|duper|grind>
+```
+
+For example, run trusted Crush across all four case studies:
+
+```sh
+bash benchmark.sh --case_study all --with crush
+```
+
+Run the trusted verification, Core reconstruction, Alethe reconstruction, and
+portfolio comparison together with:
+
+```sh
+bash benchmark-crush-modes.sh --case_study all
+```
+
+Both entry points fetch cached Lake artifacts when available and write their
+normalized reports and figures under `BenchmarkResults/`. Regenerate only the
+figures and tables from an existing result directory with:
+
+```sh
+bash benchmark.sh \
+  --plot_only BenchmarkResults/reproduction-<timestamp>-<backend>
+
+bash benchmark-crush-modes.sh \
+  --plot_only BenchmarkResults/crush-modes-<timestamp>
+```
+
+The harnesses clone and build pinned source revisions, check them out in
+temporary worktrees, and overlay the local lean-crush build. Set
+`Z3_BIN`/`CVC5_BIN` when the solvers are not on `PATH`. Exact settings and
+output definitions are in the [benchmark script guide](scripts/README.md). See
 [`BENCHMARKS.md`](BENCHMARKS.md) for the latest recorded comparison.
 The user manual also presents the
 [coverage, outcome, and reconstruction figures](https://ad1024.github.io/lean-crush/Benchmarks/).
