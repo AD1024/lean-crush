@@ -356,40 +356,47 @@ private def corpusBenchCategory (msg : String) : String :=
       corpusBenchContains msg "alethe" then "reconstruction"
   else "tactic"
 
-private def runCorpusBench : TacticM Unit := Lean.withCurrHeartbeats do
-  withTheReader Core.Context
-      (fun ctx => { ctx with maxHeartbeats := corpusBenchMaxHeartbeats }) do
-    withMainContext do
+private def runCorpusBench : TacticM Unit := do
+  withMainContext do
+    let goal <- getMainGoal
+    let goalText := (toString (← ppExpr (← goal.getType)))
+      |>.replace "\t" " "
+      |>.replace "\n" " "
+    let goalHash := hash goalText
+    let proofName := (← Term.getDeclName?).getD `anonymous
+    let saved <- saveState
+    let start <- IO.monoMsNow
+    -- CoreM's ordinary `try` deliberately rethrows heartbeat exceptions.
+    -- Catch them outside the bounded reader so later VCs can still run.
+    let failure? ← tryCatchRuntimeEx
+      (do
+        Lean.withCurrHeartbeats do
+          withTheReader Core.Context
+              (fun ctx => { ctx with maxHeartbeats := corpusBenchMaxHeartbeats }) do
+            evalTactic (← `(tactic| corpus_backend))
+            unless (← getUnsolvedGoals).isEmpty do
+              throwError "backend returned without closing the goal"
+        pure none)
+      (fun ex => pure (some ex))
+    let elapsed := (← IO.monoMsNow) - start
+    match failure? with
+    | none =>
+      saved.restore
+      IO.println s!"CORPUS_BENCH\t{proofName}\t-\t{goalHash}\tpass\t-\t{elapsed}\t-\t{goalText}"
       let goal <- getMainGoal
-      let goalText := (toString (← ppExpr (← goal.getType)))
+      let proof <- mkSorry (← goal.getType) true
+      goal.assign proof
+      replaceMainGoal []
+    | some ex =>
+      let msg := (← ex.toMessageData.toString)
         |>.replace "\t" " "
         |>.replace "\n" " "
-      let goalHash := hash goalText
-      let proofName := (← Term.getDeclName?).getD `anonymous
-      let saved <- saveState
-      let start <- IO.monoMsNow
-      try
-        evalTactic (← `(tactic| corpus_backend))
-        unless (← getUnsolvedGoals).isEmpty do
-          throwError "backend returned without closing the goal"
-        let elapsed := (← IO.monoMsNow) - start
-        saved.restore
-        IO.println s!"CORPUS_BENCH\t{proofName}\t-\t{goalHash}\tpass\t-\t{elapsed}\t-\t{goalText}"
-        let goal <- getMainGoal
-        let proof <- mkSorry (← goal.getType) true
-        goal.assign proof
-        replaceMainGoal []
-      catch ex =>
-        let elapsed := (← IO.monoMsNow) - start
-        let msg := (← ex.toMessageData.toString)
-          |>.replace "\t" " "
-          |>.replace "\n" " "
-        saved.restore
-        IO.println s!"CORPUS_BENCH\t{proofName}\t-\t{goalHash}\tfail\t{corpusBenchCategory msg}\t{elapsed}\t{msg}\t{goalText}"
-        let goal <- getMainGoal
-        let proof <- mkSorry (← goal.getType) true
-        goal.assign proof
-        replaceMainGoal []
+      saved.restore
+      IO.println s!"CORPUS_BENCH\t{proofName}\t-\t{goalHash}\tfail\t{corpusBenchCategory msg}\t{elapsed}\t{msg}\t{goalText}"
+      let goal <- getMainGoal
+      let proof <- mkSorry (← goal.getType) true
+      goal.assign proof
+      replaceMainGoal []
 
 syntax "corpus_bench_solver" : tactic
 
