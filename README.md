@@ -451,6 +451,24 @@ bash benchmark-crush-modes.sh \
   --plot_only BenchmarkResults/crush-modes-<timestamp>
 ```
 
+Benchmark cases are checkpointed after all of their result and profiling rows
+have been written. Resume an interrupted run in place with the same case-study
+and backend selection:
+
+```sh
+bash benchmark.sh \
+  --case_study all \
+  --with crush \
+  --resume BenchmarkResults/reproduction-<timestamp>-crush
+
+bash benchmark-crush-modes.sh \
+  --case_study all \
+  --resume BenchmarkResults/crush-modes-<timestamp>
+```
+
+Completed cases are skipped; interrupted and truncated cases are replaced and
+rerun.
+
 The harnesses clone and build pinned source revisions, check them out in
 temporary worktrees, and overlay the local lean-crush build. Set
 `Z3_BIN`/`CVC5_BIN` when the solvers are not on `PATH`. Exact settings and

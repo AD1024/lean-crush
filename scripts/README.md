@@ -35,6 +35,16 @@ The wrapper uses the published revisions and resource settings, fetches Lake
 cache artifacts when available, and writes normalized reports and plots under
 `BenchmarkResults/reproduction-<timestamp>-<backend>`.
 
+Resume an interrupted wrapper run in the same directory, using the same
+case-study and backend selection:
+
+```sh
+bash benchmark.sh \
+  --case_study all \
+  --with crush \
+  --resume BenchmarkResults/reproduction-<timestamp>-crush
+```
+
 Regenerate only the headline figures and tables from an existing wrapper run:
 
 ```sh
@@ -51,6 +61,24 @@ bash benchmark-crush-modes.sh \
 
 This writes the reconstruction, failure, phase-breakdown, and Alethe replay
 comparison under `BenchmarkResults/crush-modes-<timestamp>`.
+
+Resume an interrupted mode study in place with:
+
+```sh
+bash benchmark-crush-modes.sh \
+  --case_study all \
+  --resume BenchmarkResults/crush-modes-<timestamp>
+```
+
+Both wrappers propagate `RESUME=true` to their selected harnesses. Each
+harness records a checkpoint only after a complete case/profile/repeat has
+flushed its result, measurement, and profiling records. On resume, completed
+units are skipped and incomplete or truncated units have their partial rows
+removed before they are rerun. Result directories made by older versions of
+the scripts are bootstrapped from their completed aggregate rows. Keep all
+selectors, revisions, and resource settings unchanged when resuming a run.
+The harness still prepares and checks the pinned downstream trees before it
+dispatches the remaining benchmark units.
 
 Regenerate only those comparison artifacts with:
 
@@ -164,11 +192,21 @@ Useful overrides include:
 | `CRUSH_PROFILE` | `true` | Include Crush phase profiling and report records |
 | `CRUSH_TRACE_REPLAY` | `false` | Emit rule-, method-, and phase-level Alethe replay telemetry |
 | `KEEP_WORKTREES` | `false` | Retain temporary detached worktrees |
+| `RESUME` | `false` | Reuse completed checkpoints in an existing `OUT_DIR` |
 
 The corpus, standalone LeanHammer, and PLean harnesses fetch cached build
 artifacts by default. They try native `lake cache get` first and retain the
 Mathlib cache executable as a compatibility fallback for older pinned Lake
 versions. Set `USE_MATHLIB_CACHE=false` to force a source build.
+
+To resume any harness directly, repeat its original command with the same
+settings and add `RESUME=true`, preserving its original `OUT_DIR`:
+
+```sh
+RESUME=true \
+OUT_DIR="$PWD/BenchmarkResults/corpora-reproduction" \
+scripts/benchmark-corpora.sh
+```
 
 ## LeanHammer
 
@@ -255,6 +293,7 @@ reports:
 
 | File | Contents |
 |---|---|
+| `checkpoints.tsv` | Fully recorded benchmark work units used by `RESUME=true` |
 | `metadata.tsv` | Revisions, toolchains, solver configuration, and dirty state |
 | `results.tsv` | Per-VC status, failure category, and tactic-local time |
 | `runs.tsv` | Per-file wall time, exit status, and VC count; corpus runs also record truncation |

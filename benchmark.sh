@@ -9,6 +9,8 @@ usage() {
 Usage:
   bash benchmark.sh --case_study <all|LeanHammer|Velvet|Cashmere|PLean> \
     --with <crush|auto|duper|grind>
+  bash benchmark.sh --case_study <all|LeanHammer|Velvet|Cashmere|PLean> \
+    --with <crush|auto|duper|grind> --resume <result-directory>
   bash benchmark.sh --plot_only <result-directory>
 EOF
 }
@@ -22,6 +24,7 @@ die() {
 case_study=""
 backend=""
 plot_only=""
+resume_dir=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -41,6 +44,12 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || die "--plot_only requires a result directory"
       [[ -z "$plot_only" ]] || die "--plot_only may only be specified once"
       plot_only="$2"
+      shift 2
+      ;;
+    --resume)
+      [[ $# -ge 2 ]] || die "--resume requires a result directory"
+      [[ -z "$resume_dir" ]] || die "--resume may only be specified once"
+      resume_dir="$2"
       shift 2
       ;;
     -h|--help)
@@ -64,8 +73,8 @@ plot_results() {
 }
 
 if [[ -n "$plot_only" ]]; then
-  [[ -z "$case_study" && -z "$backend" ]] ||
-    die "--plot_only cannot be combined with --case_study or --with"
+  [[ -z "$case_study" && -z "$backend" && -z "$resume_dir" ]] ||
+    die "--plot_only cannot be combined with --case_study, --with, or --resume"
   [[ -d "$plot_only" ]] || die "result directory not found: $plot_only"
   plot_only="$(cd "$plot_only" && pwd)"
   result_dirs=()
@@ -108,9 +117,16 @@ case "$backend" in
   *) die "unknown backend: $backend" ;;
 esac
 
-timestamp="$(date +%Y%m%d-%H%M%S)"
-result_root="$ROOT/BenchmarkResults/reproduction-$timestamp-$backend"
-mkdir -p "$result_root"
+resume=false
+if [[ -n "$resume_dir" ]]; then
+  [[ -d "$resume_dir" ]] || die "result directory not found: $resume_dir"
+  result_root="$(cd "$resume_dir" && pwd)"
+  resume=true
+else
+  timestamp="$(date +%Y%m%d-%H%M%S)"
+  result_root="$ROOT/BenchmarkResults/reproduction-$timestamp-$backend"
+  mkdir -p "$result_root"
+fi
 result_dirs=()
 
 run_leanhammer() {
@@ -124,6 +140,7 @@ run_leanhammer() {
   MAX_RECURSION_DEPTH=1000000 \
   CRUSH_PROFILE=true \
   USE_MATHLIB_CACHE=true \
+  RESUME="$resume" \
   OUT_DIR="$out" \
     "$ROOT/scripts/benchmark-leanhammer.sh"
   result_dirs+=("$out")
@@ -151,6 +168,7 @@ run_corpora() {
   MAX_RECURSION_DEPTH=1000000 \
   CRUSH_PROFILE=true \
   USE_MATHLIB_CACHE=true \
+  RESUME="$resume" \
   OUT_DIR="$out" \
     "$ROOT/scripts/benchmark-corpora.sh"
   result_dirs+=("$out")
@@ -176,6 +194,7 @@ run_plean() {
   GRIND_SPLITS=20 \
   CRUSH_PROFILE=true \
   USE_MATHLIB_CACHE=true \
+  RESUME="$resume" \
   OUT_DIR="$out" \
     "$ROOT/scripts/benchmark-plean.sh"
   result_dirs+=("$out")
@@ -183,6 +202,9 @@ run_plean() {
 
 printf 'Running %s with %s\n' "$case_study" "$backend"
 printf 'Results: %s\n' "$result_root"
+if [[ "$resume" == "true" ]]; then
+  printf 'Resuming from completed per-case checkpoints\n'
+fi
 
 case "$case_study" in
   LeanHammer)

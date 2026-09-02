@@ -54,6 +54,7 @@ RUN_CASHMERE="${RUN_CASHMERE:-true}"
 RUN_VELVET="${RUN_VELVET:-true}"
 USE_MATHLIB_CACHE="${USE_MATHLIB_CACHE:-true}"
 KEEP_WORKTREES="${KEEP_WORKTREES:-false}"
+RESUME="${RESUME:-false}"
 
 CASHMERE_CASES="${CASHMERE_CASES:-}"
 VELVET_CASES="${VELVET_CASES:-}"
@@ -67,6 +68,7 @@ SUMMARY="$OUT_DIR/summary.tsv"
 COMPARISON="$OUT_DIR/comparison.tsv"
 MEASUREMENTS="$OUT_DIR/measurements.tsv"
 PROFILES="$OUT_DIR/profile-events.tsv"
+CHECKPOINTS="$OUT_DIR/checkpoints.tsv"
 
 WORKTREES=()
 ADDED_WORKTREE=""
@@ -546,6 +548,37 @@ append_profile_records() {
   ' "$log"
 }
 
+remove_checkpoint_rows() {
+  local suite="$1"
+  local backend="$2"
+  local repeat="$3"
+  local label="$4"
+  local temporary="$OUT_DIR/.resume.$$.tsv"
+
+  awk -F '\t' -v OFS='\t' -v suite="$suite" -v backend="$backend" \
+    -v repeat="$repeat" -v file="$label" \
+    'NR == 1 || !($1 == suite && $2 == backend && $6 == repeat && $7 == file)' \
+    "$RESULTS" > "$temporary" && mv "$temporary" "$RESULTS"
+  awk -F '\t' -v OFS='\t' -v suite="$suite" -v backend="$backend" \
+    -v repeat="$repeat" -v file="$label" \
+    'NR == 1 || !($1 == suite && $2 == backend && $3 == repeat && $4 == file)' \
+    "$RUNS" > "$temporary" && mv "$temporary" "$RUNS"
+  awk -F '\t' -v OFS='\t' -v suite="$suite" -v backend="$backend" \
+    -v repeat="$repeat" -v file="$label" '
+      NR == 1 || !($1 == suite && $2 == backend && $3 == repeat &&
+        substr($4, 1, length(file) + 1) == file "|")
+    ' "$MEASUREMENTS" > "$temporary" && mv "$temporary" "$MEASUREMENTS"
+  awk -F '\t' -v OFS='\t' -v suite="$suite" -v backend="$backend" \
+    -v repeat="$repeat" -v file="$label" '
+      NR == 1 || !($1 == suite && $2 == backend && $3 == repeat &&
+        substr($4, 1, length(file) + 1) == file "|")
+    ' "$PROFILES" > "$temporary" && mv "$temporary" "$PROFILES"
+  awk -F '\t' -v OFS='\t' -v suite="$suite" -v backend="$backend" \
+    -v repeat="$repeat" -v file="$label" \
+    'NR == 1 || !($1 == suite && $2 == backend && $3 == repeat && $4 == file)' \
+    "$CHECKPOINTS" > "$temporary" && mv "$temporary" "$CHECKPOINTS"
+}
+
 run_lean_file() {
   local suite="$1"
   local backend="$2"
@@ -556,6 +589,21 @@ run_lean_file() {
   local generated="$7"
   local log="$OUT_DIR/logs/$suite/$backend/${label//\//_}.$repeat.log"
   local started elapsed exit_code vc_count commit toolchain truncated message
+
+  if is_true "$RESUME" && awk -F '\t' -v suite="$suite" \
+      -v backend="$backend" -v repeat="$repeat" -v file="$label" '
+        NR > 1 && $1 == suite && $2 == backend && $3 == repeat && $4 == file {
+          found = 1
+        }
+        END { exit !found }
+      ' "$CHECKPOINTS"; then
+    printf 'checkpoint: skipping %s %s run %s: %s\n' \
+      "$suite" "$backend" "$repeat" "$label"
+    return
+  fi
+  if is_true "$RESUME"; then
+    remove_checkpoint_rows "$suite" "$backend" "$repeat" "$label"
+  fi
 
   commit="$(git -C "$tree" rev-parse HEAD)"
   toolchain="$(tr -d '\r\n' < "$tree/lean-toolchain")"
@@ -591,6 +639,10 @@ run_lean_file() {
     "$suite" "$backend" "$repeat" "$label" "$exit_code" "$elapsed" "$vc_count" \
     "$truncated" "$message" \
     >> "$RUNS"
+  if [[ "$truncated" == "false" ]]; then
+    printf '%s\t%s\t%s\t%s\n' "$suite" "$backend" "$repeat" "$label" \
+      >> "$CHECKPOINTS"
+  fi
 }
 
 run_fixture() {
@@ -621,8 +673,12 @@ run_files() {
     for file in "${files[@]}"; do
       source="$tree/$file"
       if [[ ! -f "$source" ]]; then
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-          "$suite" "$backend" "$repeat" "$file" "missing" "0" "0" "source file missing" \
+        if is_true "$RESUME"; then
+          remove_checkpoint_rows "$suite" "$backend" "$repeat" "$file"
+        fi
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+          "$suite" "$backend" "$repeat" "$file" "missing" "0" "0" \
+          "true" "source file missing" \
           >> "$RUNS"
         continue
       fi
@@ -673,6 +729,10 @@ if ! is_true "$RUN_AUTO" && ! is_true "$RUN_CRUSH" && ! is_true "$RUN_DUPER" &&
     ! is_true "$RUN_GRIND"; then
   die "at least one backend must be enabled"
 fi
+case "$RESUME" in
+  true|false) ;;
+  *) die "RESUME must be true or false" ;;
+esac
 
 mkdir -p "$OUT_DIR/logs"
 printf 'Building local Crush\n'
@@ -825,11 +885,29 @@ if is_true "$RUN_VELVET"; then
   fi
 fi
 
-printf 'suite\tbackend\tref\tcommit\ttoolchain\trepeat\tfile\tproof\tvc\tgoal_hash\tstatus\tcategory\tmilliseconds\tmessage\tgoal\n' > "$RESULTS"
-printf 'suite\tbackend\trepeat\tfile\texit_code\twall_seconds\tvc_count\ttruncated\tmessage\n' > "$RUNS"
-printf 'suite\tbackend\tref\tcommit\ttoolchain\tsolver\ttimeout\tduper_timeout\tvc_max_heartbeats\tmax_rec_depth\tcrush_trust\tcrush_reconstruct\tcrush_commit\tduper_commit\tcrush_dirty\tworktree\tcrush_profile\tcrush_trace_replay\n' > "$METADATA"
-printf 'suite\tlane\trepeat\tvc_key\tstatus\tcategory\tmilliseconds\tmessage\n' > "$MEASUREMENTS"
-printf 'suite\tlane\trepeat\tvc_key\tdeclaration\tgoal_hash\toutcome\treplay\tdetail\ttotal_nanos\tphases\tmetrics\n' > "$PROFILES"
+initialize_tsv() {
+  local file="$1"
+  local header="$2"
+  if ! is_true "$RESUME" || [[ ! -f "$file" ]]; then
+    printf '%b\n' "$header" > "$file"
+  fi
+}
+
+legacy_checkpoints=false
+if is_true "$RESUME" && [[ ! -f "$CHECKPOINTS" ]]; then
+  legacy_checkpoints=true
+fi
+
+initialize_tsv "$RESULTS" 'suite\tbackend\tref\tcommit\ttoolchain\trepeat\tfile\tproof\tvc\tgoal_hash\tstatus\tcategory\tmilliseconds\tmessage\tgoal'
+initialize_tsv "$RUNS" 'suite\tbackend\trepeat\tfile\texit_code\twall_seconds\tvc_count\ttruncated\tmessage'
+initialize_tsv "$METADATA" 'suite\tbackend\tref\tcommit\ttoolchain\tsolver\ttimeout\tduper_timeout\tvc_max_heartbeats\tmax_rec_depth\tcrush_trust\tcrush_reconstruct\tcrush_commit\tduper_commit\tcrush_dirty\tworktree\tcrush_profile\tcrush_trace_replay'
+initialize_tsv "$MEASUREMENTS" 'suite\tlane\trepeat\tvc_key\tstatus\tcategory\tmilliseconds\tmessage'
+initialize_tsv "$PROFILES" 'suite\tlane\trepeat\tvc_key\tdeclaration\tgoal_hash\toutcome\treplay\tdetail\ttotal_nanos\tphases\tmetrics'
+initialize_tsv "$CHECKPOINTS" 'suite\tbackend\trepeat\tfile'
+if is_true "$legacy_checkpoints"; then
+  awk -F '\t' -v OFS='\t' 'NR > 1 && $8 == "false" { print $1, $2, $3, $4 }' \
+    "$RUNS" >> "$CHECKPOINTS"
+fi
 
 if is_true "$RUN_LEANHAMMER"; then
   printf 'Running LeanHammer focused suite\n'
@@ -853,6 +931,7 @@ if is_true "$RUN_LEANHAMMER"; then
     HAMMER_PROFILES="${hammer_profiles[*]}"
   fi
   if HAMMER_REPO="$HAMMER_REPO" REPEATS="$REPEATS" OUT_DIR="$hammer_out" \
+      RESUME="$RESUME" \
       PROFILES="$HAMMER_PROFILES" \
       SOLVER="$SOLVER" TIMEOUT="$TIMEOUT" DUPER_TIMEOUT="$DUPER_TIMEOUT" \
       MAX_HEARTBEATS="$MAX_HEARTBEATS" CRUSH_PROFILE="$CRUSH_PROFILE" \
