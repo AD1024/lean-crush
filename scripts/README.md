@@ -9,6 +9,7 @@ and summaries are written under `BenchmarkResults/`.
 | Script | Benchmarks |
 |---|---|
 | `../benchmark.sh` | Published headline run selected by case study and backend |
+| `../benchmark-crush-modes.sh` | Trusted and reconstructed Crush modes |
 | `benchmark-corpora.sh` | LeanHammer, Loom, Cashmere, and Velvet |
 | `benchmark-leanhammer.sh` | Standalone LeanHammer profiles |
 | `benchmark-plean.sh` | PLean verification conditions |
@@ -33,6 +34,30 @@ bash benchmark.sh \
 The wrapper uses the published revisions and resource settings, fetches Lake
 cache artifacts when available, and writes normalized reports and plots under
 `BenchmarkResults/reproduction-<timestamp>-<backend>`.
+
+Regenerate only the headline figures and tables from an existing wrapper run:
+
+```sh
+bash benchmark.sh --plot_only BenchmarkResults/reproduction-<timestamp>-<backend>
+```
+
+Run the four Crush verification and reconstruction modes for one case study,
+or for all four:
+
+```sh
+bash benchmark-crush-modes.sh \
+  --case_study <all|LeanHammer|Velvet|Cashmere|PLean>
+```
+
+This writes the reconstruction, failure, phase-breakdown, and Alethe replay
+comparison under `BenchmarkResults/crush-modes-<timestamp>`.
+
+Regenerate only those comparison artifacts with:
+
+```sh
+bash benchmark-crush-modes.sh \
+  --plot_only BenchmarkResults/crush-modes-<timestamp>
+```
 
 ## Prerequisites
 

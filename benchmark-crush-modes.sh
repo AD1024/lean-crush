@@ -7,9 +7,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
-  bash benchmark.sh --case_study <all|LeanHammer|Velvet|Cashmere|PLean> \
-    --with <crush|auto|duper|grind>
-  bash benchmark.sh --plot_only <result-directory>
+  bash benchmark-crush-modes.sh \
+    --case_study <all|LeanHammer|Velvet|Cashmere|PLean>
+  bash benchmark-crush-modes.sh --plot_only <result-directory>
 EOF
 }
 
@@ -20,21 +20,13 @@ die() {
 }
 
 case_study=""
-backend=""
 plot_only=""
-
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --case_study)
       [[ $# -ge 2 ]] || die "--case_study requires a value"
       [[ -z "$case_study" ]] || die "--case_study may only be specified once"
       case_study="$2"
-      shift 2
-      ;;
-    --with)
-      [[ $# -ge 2 ]] || die "--with requires a value"
-      [[ -z "$backend" ]] || die "--with may only be specified once"
-      backend="$2"
       shift 2
       ;;
     --plot_only)
@@ -59,13 +51,15 @@ plot_results() {
     "${result_dirs[@]}" \
     --out-dir "$output_root/artifacts" \
     --only tables \
-    --only coverage \
-    --only outcomes
+    --only reconstruction \
+    --only reconstruction-failures \
+    --only phase-breakdown \
+    --only alethe-replay-scaling
 }
 
 if [[ -n "$plot_only" ]]; then
-  [[ -z "$case_study" && -z "$backend" ]] ||
-    die "--plot_only cannot be combined with --case_study or --with"
+  [[ -z "$case_study" ]] ||
+    die "--plot_only cannot be combined with --case_study"
   [[ -d "$plot_only" ]] || die "result directory not found: $plot_only"
   plot_only="$(cd "$plot_only" && pwd)"
   result_dirs=()
@@ -79,7 +73,7 @@ if [[ -n "$plot_only" ]]; then
     done
   fi
   [[ ${#result_dirs[@]} -gt 0 ]] ||
-    die "no normalized benchmark results found under: $plot_only"
+    die "no normalized Crush-mode results found under: $plot_only"
   plot_results "$plot_only"
   printf 'Plots regenerated: %s/artifacts\n' "$plot_only"
   exit 0
@@ -95,31 +89,17 @@ case "$case_study" in
   *) die "unknown case study: $case_study" ;;
 esac
 
-run_auto=false
-run_duper=false
-run_crush=false
-run_grind=false
-case "$backend" in
-  auto) run_auto=true; leanhammer_profile="auto-duper" ;;
-  duper) run_duper=true; leanhammer_profile="duper-only" ;;
-  crush) run_crush=true; leanhammer_profile="crush-verify" ;;
-  grind) run_grind=true; leanhammer_profile="grind-only" ;;
-  "") die "--with is required" ;;
-  *) die "unknown backend: $backend" ;;
-esac
-
 timestamp="$(date +%Y%m%d-%H%M%S)"
-result_root="$ROOT/BenchmarkResults/reproduction-$timestamp-$backend"
+result_root="$ROOT/BenchmarkResults/crush-modes-$timestamp"
 mkdir -p "$result_root"
 result_dirs=()
 
 run_leanhammer() {
   local out="$result_root/leanhammer"
-  PROFILES="$leanhammer_profile" \
+  PROFILES="crush-verify crush-core crush-alethe crush-portfolio" \
   REPEATS=1 \
   SOLVER=cvc5 \
   TIMEOUT=5 \
-  DUPER_TIMEOUT=5 \
   MAX_HEARTBEATS=1000000 \
   MAX_RECURSION_DEPTH=1000000 \
   CRUSH_PROFILE=true \
@@ -138,15 +118,14 @@ run_corpora() {
   RUN_LOOM=false \
   RUN_CASHMERE="$run_cashmere" \
   RUN_VELVET="$run_velvet" \
-  RUN_AUTO="$run_auto" \
-  RUN_DUPER="$run_duper" \
-  RUN_CRUSH="$run_crush" \
-  RUN_GRIND="$run_grind" \
+  RUN_AUTO=false \
+  RUN_DUPER=false \
+  RUN_CRUSH=true \
+  RUN_GRIND=false \
   REPEATS=1 \
   SOLVER=cvc5 \
   TIMEOUT=5 \
-  DUPER_TIMEOUT=5 \
-  CRUSH_MODES=verify \
+  CRUSH_MODES="verify core alethe portfolio" \
   MAX_HEARTBEATS=1000000 \
   MAX_RECURSION_DEPTH=1000000 \
   CRUSH_PROFILE=true \
@@ -158,22 +137,18 @@ run_corpora() {
 
 run_plean() {
   local out="$result_root/plean"
-  RUN_AUTO="$run_auto" \
-  RUN_DUPER="$run_duper" \
-  RUN_CRUSH="$run_crush" \
-  RUN_GRIND="$run_grind" \
+  RUN_AUTO=false \
+  RUN_DUPER=false \
+  RUN_CRUSH=true \
+  RUN_GRIND=false \
   PREPARE_TREES=true \
   REPEATS=1 \
   SOLVER=cvc5 \
   TIMEOUT=5 \
-  CRUSH_MODES=verify \
+  CRUSH_MODES="verify core alethe portfolio" \
   MAX_HEARTBEATS=1000000 \
   MAX_RECURSION_DEPTH=1000000 \
   CRUSH_INST_FUEL=0 \
-  DUPER_TIMEOUT=1 \
-  DUPER_MAX_HEARTBEATS=20000 \
-  DUPER_FILE_CPU_SECONDS=0 \
-  GRIND_SPLITS=20 \
   CRUSH_PROFILE=true \
   USE_MATHLIB_CACHE=true \
   OUT_DIR="$out" \
@@ -181,7 +156,7 @@ run_plean() {
   result_dirs+=("$out")
 }
 
-printf 'Running %s with %s\n' "$case_study" "$backend"
+printf 'Running Crush-mode study for %s\n' "$case_study"
 printf 'Results: %s\n' "$result_root"
 
 case "$case_study" in
@@ -206,4 +181,4 @@ esac
 
 plot_results "$result_root"
 
-printf 'Benchmark reproduction complete: %s\n' "$result_root"
+printf 'Crush-mode comparison complete: %s\n' "$result_root"
