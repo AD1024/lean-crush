@@ -207,8 +207,8 @@ prepare_tree() {
     die "$label PLean dependency setup failed"
   fi
   if is_true "$USE_MATHLIB_CACHE"; then
-    if ! (cd "$tree" && lake exe cache get) \
-        > "$OUT_DIR/cache-$label.log" 2>&1; then
+    printf 'Fetching cached dependencies for %s PLean tree\n' "$label"
+    if ! benchmark_fetch_cache "$tree" "$OUT_DIR/cache-$label.log"; then
       printf 'warning: Mathlib cache unavailable for %s PLean tree\n' \
         "$label" >&2
     fi

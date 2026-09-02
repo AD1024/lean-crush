@@ -17,6 +17,7 @@ timeout="${TIMEOUT:-5}"
 max_heartbeats="${MAX_HEARTBEATS:-1000000}"
 max_rec_depth="${MAX_RECURSION_DEPTH:-1000000}"
 crush_profile="${CRUSH_PROFILE:-true}"
+use_mathlib_cache="${USE_MATHLIB_CACHE:-true}"
 out_dir="${OUT_DIR:-$crush_root/BenchmarkResults/leanhammer-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "$out_dir"
 out_dir="$(cd "$out_dir" && pwd)"
@@ -75,6 +76,12 @@ if ! (cd "$hammer_repo" && lake env printenv LEAN_PATH) \
   tail -n 80 "$out_dir/dependencies-leanhammer.log" >&2
   printf 'error: LeanHammer dependency setup failed\n' >&2
   exit 1
+fi
+if [[ "$use_mathlib_cache" == "true" ]]; then
+  printf 'Fetching cached LeanHammer dependencies\n'
+  if ! benchmark_fetch_cache "$hammer_repo" "$out_dir/cache-leanhammer.log"; then
+    printf 'warning: Mathlib cache unavailable for LeanHammer; building from source\n' >&2
+  fi
 fi
 if ! benchmark_sync_crush_sources "$crush_root" "$hammer_repo"; then
   exit 1

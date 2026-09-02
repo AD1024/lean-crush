@@ -8,6 +8,7 @@ and summaries are written under `BenchmarkResults/`.
 
 | Script | Benchmarks |
 |---|---|
+| `../benchmark.sh` | Published headline run selected by case study and backend |
 | `benchmark-corpora.sh` | LeanHammer, Loom, Cashmere, and Velvet |
 | `benchmark-leanhammer.sh` | Standalone LeanHammer profiles |
 | `benchmark-plean.sh` | PLean verification conditions |
@@ -19,6 +20,19 @@ The latest recorded results and exact tested revisions are in
 [`BENCHMARKS.md`](../BENCHMARKS.md). The machine-readable inputs for the
 published 2026-08-20 figures and baseline comparison are retained in
 [`BenchmarkResults/recorded/2026-08-20`](../BenchmarkResults/recorded/2026-08-20).
+
+For the standard one-repeat reproduction, select one case study (or all four)
+and one backend:
+
+```sh
+bash benchmark.sh \
+  --case_study <all|LeanHammer|Velvet|Cashmere|PLean> \
+  --with <crush|auto|duper|grind>
+```
+
+The wrapper uses the published revisions and resource settings, fetches Lake
+cache artifacts when available, and writes normalized reports and plots under
+`BenchmarkResults/reproduction-<timestamp>-<backend>`.
 
 ## Prerequisites
 
@@ -125,6 +139,11 @@ Useful overrides include:
 | `CRUSH_PROFILE` | `true` | Include Crush phase profiling and report records |
 | `CRUSH_TRACE_REPLAY` | `false` | Emit rule-, method-, and phase-level Alethe replay telemetry |
 | `KEEP_WORKTREES` | `false` | Retain temporary detached worktrees |
+
+The corpus, standalone LeanHammer, and PLean harnesses fetch cached build
+artifacts by default. They try native `lake cache get` first and retain the
+Mathlib cache executable as a compatibility fallback for older pinned Lake
+versions. Set `USE_MATHLIB_CACHE=false` to force a source build.
 
 ## LeanHammer
 
