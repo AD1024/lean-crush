@@ -348,7 +348,7 @@ def buildDatatypeDecl? (block : Metatheory.Reification.DatatypeBlock)
         name != "Bool" && name != "Int" && name != "String" then
       if symbolsNodup : rawSymbols.Nodup then
         if symbolsFresh : rawSymbols.all fun symbol =>
-            decide (SMT.NotBuiltin symbol) then
+            decide (SMT.NotLogical symbol) then
           if structureCheck : SMT.datatypesStructurallyWellFormed rawEntries = true then
             if finiteValueCheck : SMT.datatypesProductive rawEntries = true then
               some {
@@ -2062,8 +2062,9 @@ mutual
 
   /-- Translate `∀ (x : ty), body` / `∃ (x : ty), body` over a non-Prop sort.
   A fresh SMT-bound variable is introduced; a `Nat` domain gets a `≥ 0` guard.
-  The SMT quantifier uses the *named* binder form (not de Bruijn), so we register
-  the introduced fvar → name mapping and reference it directly. -/
+  Construction uses its printable name. Command emission resolves each bound
+  occurrence to the internal de Bruijn form consumed by the checker and
+  semantics, while the printer recovers the same name. -/
   partial def quantifier (isForall : Bool) (ty body : Expr) : TranslateM (Option SMT.Term) := do
     -- SMT sorts are non-empty; a Lean quantifier over an uninhabited type is not
     -- faithfully representable (`∀ x : Empty, P` is vacuously true, its SMT image

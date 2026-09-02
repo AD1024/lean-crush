@@ -2,12 +2,13 @@ import Crush.Metatheory.SMT.Model
 import Crush.Metatheory.SMT.Theory
 
 /-!
-# Model extension by derived-symbol graphs
+# Fixed-carrier SMT model extensions
 
-An `ExtraGraph` is disjoint from every encoded source identifier. Consequently
-all evaluations already established in the ordinary induced model remain valid
-after native derived symbols, such as datatype well-formedness predicates, are
-installed.
+`ModelExt` combines partial literal interpretations and function graphs over
+one carrier. Its well-formedness and disjointness laws preserve model
+functionality, theory reducts, and term evaluation. `SourceExt` specializes
+this construction to an encoded FO model and keeps added symbols disjoint from
+encoded source identifiers.
 -/
 
 namespace Crush.Metatheory.SMT
@@ -244,13 +245,13 @@ namespace Crush.Metatheory.SMT
 
 variable {symbols : FO.SymbolFamily}
 
-namespace ExtraGraph
+namespace SourceExt
 
 /-- Existing functionality proofs for `modelWith` discharge exactly the
 generic extension laws. This adapter reuses those proof artifacts instead of
 re-proving graph uniqueness for each native component. -/
 theorem toExt_wf {encoding : Encoding symbols} {target : FO.FamilyModel symbols}
-    (extra : ExtraGraph encoding target)
+    (extra : SourceExt encoding target)
     (functional : Crush.SMT.ApplyUnique (modelWith encoding target extra)) :
     (extra.toExt).WF (model encoding target) where
   toLiteralWF := extra.toExt_literalWF
@@ -265,13 +266,13 @@ theorem toExt_wf {encoding : Encoding symbols} {target : FO.FamilyModel symbols}
 
 /-- The compatibility constructor is definitionally the generic constructor. -/
 theorem modelWith_eq_withExt {encoding : Encoding symbols}
-    {target : FO.FamilyModel symbols} (extra : ExtraGraph encoding target) :
+    {target : FO.FamilyModel symbols} (extra : SourceExt encoding target) :
     modelWith encoding target extra =
       (model encoding target).withExt extra.toExt
         extra.toExt_literalWF := by
   rfl
 
-end ExtraGraph
+end SourceExt
 
 namespace ModelExt
 
@@ -347,7 +348,7 @@ def resolve (base : Crush.SMT.Model) (ext : ModelExt base.Value)
 mutual
   /-- Two extensions agree on every model observation used by one term.
 Logical built-ins use dedicated evaluation rules, so application-graph
-agreement is required only for identifiers admitted by `NotBuiltin`. -/
+agreement is required only for identifiers admitted by `NotLogical`. -/
   inductive AgreeOn {base : Crush.SMT.Model}
       (left right : ModelExt base.Value) : Crush.SMT.Term → Prop where
     | bool (value : Bool) : AgreeOn left right (.lit (.bool value))
@@ -357,7 +358,7 @@ agreement is required only for identifiers admitted by `NotBuiltin`. -/
     | bvar (index : Nat) : AgreeOn left right (.bvar index)
     | app {identifier arguments} :
         AgreeList left right arguments.toList →
-        (Crush.SMT.NotBuiltin identifier →
+        (Crush.SMT.NotLogical identifier →
           ∀ values output,
             (base.apply identifier values output ∨
               left.apply identifier values output) ↔
@@ -392,7 +393,7 @@ its semantics does not consult the model's application graph. -/
 theorem builtin {base : Crush.SMT.Model}
     {left right : ModelExt base.Value} {identifier arguments}
     (argumentsAgree : AgreeList left right arguments.toList)
-    (logical : ¬Crush.SMT.NotBuiltin identifier) :
+    (logical : ¬Crush.SMT.NotLogical identifier) :
     AgreeOn left right (.app identifier arguments) :=
   .app argumentsAgree (fun symbol => False.elim (logical symbol))
 
@@ -400,7 +401,7 @@ theorem app_parts {base : Crush.SMT.Model}
     {left right : ModelExt base.Value} {identifier arguments}
     (agree : AgreeOn left right (.app identifier arguments)) :
     AgreeList left right arguments.toList ∧
-      (Crush.SMT.NotBuiltin identifier →
+      (Crush.SMT.NotLogical identifier →
         ∀ values output,
           (base.apply identifier values output ∨
             left.apply identifier values output) ↔
@@ -516,15 +517,15 @@ theorem eval_transport {base : Crush.SMT.Model}
       intro environment index output lookup agreement
       exact .bvar lookup)
     (symbol := by
-      intro environment identifier arguments values output notBuiltin
+      intro environment identifier arguments values output notLogical
         argumentsEval applied argumentsIH agreement
       rcases agreement.app_parts with ⟨argumentsAgree, graphAgree⟩
-      apply Crush.SMT.Eval.symbol notBuiltin (argumentsIH argumentsAgree)
+      apply Crush.SMT.Eval.symbol notLogical (argumentsIH argumentsAgree)
       change base.apply identifier values output ∨
         right.apply identifier values output
       change base.apply identifier values output ∨
         left.apply identifier values output at applied
-      exact (graphAgree notBuiltin values output).mp applied)
+      exact (graphAgree notLogical values output).mp applied)
     (eqTrue := by
       intro environment leftTerm rightTerm leftValue rightValue leftEval
         rightEval equal leftIH rightIH agreement
@@ -607,7 +608,7 @@ end ModelExt
 /-- Sort-typing witnesses are unchanged because graph extension changes only
 `apply`. -/
 theorem valuesTyped_with_extra (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     {sorts : List Crush.SMT.SSort} {values : List (Value target)} :
     Crush.SMT.ValuesTyped (model encoding target) sorts values →
       Crush.SMT.ValuesTyped (modelWith encoding target extra) sorts values
@@ -617,7 +618,7 @@ theorem valuesTyped_with_extra (encoding : Encoding symbols)
 
 /-- The inverse conversion is needed beneath universal definition clauses. -/
 theorem valuesTyped_without_extra (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     {sorts : List Crush.SMT.SSort} {values : List (Value target)} :
     Crush.SMT.ValuesTyped (modelWith encoding target extra) sorts values →
       Crush.SMT.ValuesTyped (model encoding target) sorts values
@@ -628,7 +629,7 @@ theorem valuesTyped_without_extra (encoding : Encoding symbols)
 /-- At an identifier absent from the extra graph, application is exactly the
 ordinary induced-model application. -/
 theorem applies_iff_without_extra (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     (identifier : Crush.SMT.Ident)
     (inactive : ∀ values output, ¬extra.apply identifier values output)
     (values : List (Value target)) (output : Value target) :
@@ -643,7 +644,7 @@ theorem applies_iff_without_extra (encoding : Encoding symbols)
 /-- Totality, typing, and uniqueness of an inactive symbol survive graph
 extension. -/
 theorem symbolHasType_with_extra (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     (identifier : Crush.SMT.Ident)
     (inactive : ∀ values output, ¬extra.apply identifier values output)
     {arguments : List Crush.SMT.SSort} {result : Crush.SMT.SSort}
@@ -664,7 +665,7 @@ theorem symbolHasType_with_extra (encoding : Encoding symbols)
 /-- Constructor application is unchanged when its constructor name is absent
 from the extra graph. -/
 theorem ctorApplies_with_extra_iff (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     (ctor : Crush.SMT.CtorDecl)
     (inactive : ∀ values output,
       ¬extra.apply (.symb ctor.name) values output)
@@ -681,16 +682,16 @@ theorem ctorApplies_with_extra_iff (encoding : Encoding symbols)
 
 /-- An extra graph is disjoint from every constructor, selector, and tester
 identifier declared by an SMT datatype command. -/
-def ExtraGraph.InactiveOnDatatypes {encoding : Encoding symbols}
-    {target : FO.FamilyModel symbols} (extra : ExtraGraph encoding target)
+def SourceExt.InactiveOnDatatypes {encoding : Encoding symbols}
+    {target : FO.FamilyModel symbols} (extra : SourceExt encoding target)
     (datatypes : Array (String × Nat × Crush.SMT.DatatypeDecl)) : Prop :=
   ∀ identifier ∈ Crush.SMT.datatypeSymbols datatypes,
     ∀ values output, ¬extra.apply identifier values output
 
-namespace ExtraGraph.InactiveOnDatatypes
+namespace SourceExt.InactiveOnDatatypes
 
 theorem ctor {encoding : Encoding symbols} {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph encoding target} {datatypes}
+    {extra : SourceExt encoding target} {datatypes}
     (inactive : extra.InactiveOnDatatypes datatypes)
     {sort : Crush.SMT.SSort} {ctor : Crush.SMT.CtorDecl}
     (member : (sort, ctor) ∈ Crush.SMT.datatypeCtors datatypes) :
@@ -700,7 +701,7 @@ theorem ctor {encoding : Encoding symbols} {target : FO.FamilyModel symbols}
   exact ⟨(sort, ctor), member, by simp⟩
 
 theorem test {encoding : Encoding symbols} {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph encoding target} {datatypes}
+    {extra : SourceExt encoding target} {datatypes}
     (inactive : extra.InactiveOnDatatypes datatypes)
     {sort : Crush.SMT.SSort} {ctor : Crush.SMT.CtorDecl}
     (member : (sort, ctor) ∈ Crush.SMT.datatypeCtors datatypes) :
@@ -710,7 +711,7 @@ theorem test {encoding : Encoding symbols} {target : FO.FamilyModel symbols}
   exact ⟨(sort, ctor), member, by simp⟩
 
 theorem sel {encoding : Encoding symbols} {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph encoding target} {datatypes}
+    {extra : SourceExt encoding target} {datatypes}
     (inactive : extra.InactiveOnDatatypes datatypes)
     {sort : Crush.SMT.SSort} {ctor : Crush.SMT.CtorDecl}
     (member : (sort, ctor) ∈ Crush.SMT.datatypeCtors datatypes)
@@ -729,12 +730,12 @@ theorem sel {encoding : Encoding symbols} {target : FO.FamilyModel symbols}
   · exact Array.mem_toList_iff.mpr (Array.getElem_mem bounds)
   · simpa using congrArg Prod.fst equal
 
-end ExtraGraph.InactiveOnDatatypes
+end SourceExt.InactiveOnDatatypes
 
 /-- Native datatype semantics are stable under any graph extension disjoint
 from the command's own symbols. -/
 theorem datatypesHold_with_extra (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     (datatypes : Array (String × Nat × Crush.SMT.DatatypeDecl))
     (inactive : extra.InactiveOnDatatypes datatypes)
     (holds : Crush.SMT.DatatypesHold (model encoding target) datatypes) :
@@ -811,7 +812,7 @@ theorem datatypesHold_with_extra (encoding : Encoding symbols)
 
 /-- A valid native datatype declaration remains valid in the combined model. -/
 theorem datatypeCommand_with_extra (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     (datatypes : Array (String × Nat × Crush.SMT.DatatypeDecl))
     (inactive : extra.InactiveOnDatatypes datatypes)
     (valid : (model encoding target).SatisfiesCommand (.declDatatypes datatypes)) :
@@ -821,7 +822,7 @@ theorem datatypeCommand_with_extra (encoding : Encoding symbols)
 
 /-- Boolean-list witnesses are likewise independent of the symbol graph. -/
 theorem boolValues_with_extra (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     {values : List (Value target)} {booleans : List Bool} :
   Crush.SMT.BoolValues (model encoding target) values booleans →
       Crush.SMT.BoolValues (modelWith encoding target extra) values booleans
@@ -835,7 +836,7 @@ theorem boolValues_with_extra (encoding : Encoding symbols)
 /-- Extending the graph preserves evaluation whenever the base and extension
 agree on every literal and application observation used by the term. -/
 theorem eval_with_extra (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     {environment : List (Value target)} {term : Crush.SMT.Term}
     {value : Value target}
     (agree : ModelExt.AgreeOn (base := model encoding target)
@@ -866,18 +867,18 @@ theorem eval_with_extra (encoding : Encoding symbols)
                 ModelExt.resolve (model encoding target) extra.toExt literal
               at equal
             simpa [ModelExt.resolve, ModelExt.empty, modelWith,
-              ExtraGraph.toExt] using equal
+              SourceExt.toExt] using equal
           rw [literalEq]
           exact .literal literal notBool)
     (bvar := by intros; exact .bvar (by assumption))
     (symbol := by
-      intro environment identifier arguments values output notBuiltin
+      intro environment identifier arguments values output notLogical
         argumentsEval applied argumentsIH agreement
       rcases agreement.app_parts with ⟨argumentsAgree, graphAgree⟩
-      apply Crush.SMT.Eval.symbol notBuiltin (argumentsIH argumentsAgree)
+      apply Crush.SMT.Eval.symbol notLogical (argumentsIH argumentsAgree)
       change (model encoding target).apply identifier values output ∨
         extra.apply identifier values output
-      exact (graphAgree notBuiltin values output).mp (Or.inl applied))
+      exact (graphAgree notLogical values output).mp (Or.inl applied))
     (eqTrue := by
       intro environment leftTerm rightTerm leftValue rightValue leftEval
         rightEval equal leftIH rightIH agreement

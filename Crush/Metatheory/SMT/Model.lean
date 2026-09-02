@@ -250,7 +250,7 @@ theorem literalValue_typed (encoding : Encoding symbols)
 from every encoded source identifier guarantees that extending the model cannot
 change the denotation or type of ordinary, constructor, selector, or tester
 symbols. -/
-structure ExtraGraph (encoding : Encoding symbols)
+structure SourceExt (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) where
   apply : Crush.SMT.Ident → List (Value target) → Value target → Prop
   source_fresh : ∀ {decl : FO.SymbolDecl} (symbol : symbols decl)
@@ -260,9 +260,9 @@ structure ExtraGraph (encoding : Encoding symbols)
   literal_typed : ∀ value : Crush.SMT.Literal,
     Value.InSort encoding value.sort (literal value)
 
-/-- No derived symbols: the model used by the existing representation theorem. -/
-noncomputable def ExtraGraph.nil (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) : ExtraGraph encoding target where
+/-- Canonical literals and no derived symbols. -/
+noncomputable def SourceExt.canonical (encoding : Encoding symbols)
+    (target : FO.FamilyModel symbols) : SourceExt encoding target where
   apply := fun _ _ _ => False
   source_fresh := by simp
   literal := literalValue encoding target
@@ -270,15 +270,15 @@ noncomputable def ExtraGraph.nil (encoding : Encoding symbols)
 
 /-- View the compatibility extension as a composable fixed-carrier
 extension. -/
-def ExtraGraph.toExt {encoding : Encoding symbols}
-    {target : FO.FamilyModel symbols} (extra : ExtraGraph encoding target) :
+def SourceExt.toExt {encoding : Encoding symbols}
+    {target : FO.FamilyModel symbols} (extra : SourceExt encoding target) :
     ModelExt (Value target) where
   literal? := fun literal => some (extra.literal literal)
   apply := extra.apply
 
 /-- Union of the ordinary encoded graph and a disjoint native extension. -/
 def AppliesWith (encoding : Encoding symbols) (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph encoding target) (identifier : Crush.SMT.Ident)
+    (extra : SourceExt encoding target) (identifier : Crush.SMT.Ident)
     (values : List (Value target)) (output : Value target) : Prop :=
   Applies encoding target identifier values output ∨
     extra.apply identifier values output
@@ -324,8 +324,8 @@ noncomputable def model (encoding : Encoding symbols)
   modelOfGraph encoding target (Applies encoding target)
     (literalValue encoding target) (literalValue_typed encoding target)
 
-theorem ExtraGraph.toExt_literalWF {encoding : Encoding symbols}
-    {target : FO.FamilyModel symbols} (extra : ExtraGraph encoding target) :
+theorem SourceExt.toExt_literalWF {encoding : Encoding symbols}
+    {target : FO.FamilyModel symbols} (extra : SourceExt encoding target) :
     (extra.toExt).LiteralWF (model encoding target) where
   literal_typed := by
     intro literal value present
@@ -335,9 +335,9 @@ theorem ExtraGraph.toExt_literalWF {encoding : Encoding symbols}
 
 /-- Concrete SMT model induced by a typed FO family model and a disjoint
 graph for native derived symbols. This is the generic fixed-carrier extension
-constructor specialized to the compatibility `ExtraGraph` interface. -/
+constructor specialized to the compatibility `SourceExt` interface. -/
 noncomputable def modelWith (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target) :
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target) :
     Crush.SMT.Model :=
   (model encoding target).withExt extra.toExt extra.toExt_literalWF
 
@@ -347,7 +347,7 @@ noncomputable def modelWith (encoding : Encoding symbols)
       Value.InSort encoding sort value := Iff.rfl
 
 @[simp] theorem modelWith_inSort (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     (sort : SSort) (value : Value target) :
     (modelWith encoding target extra).inSort sort value ↔
       Value.InSort encoding sort value := Iff.rfl
@@ -357,7 +357,7 @@ noncomputable def modelWith (encoding : Encoding symbols)
     (model encoding target).bool value = boolValue target value := rfl
 
 @[simp] theorem modelWith_bool (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     (value : Bool) :
     (modelWith encoding target extra).bool value = boolValue target value := rfl
 
@@ -366,7 +366,7 @@ distinguished SMT Boolean values. Although the typed carrier is represented by
 Lean propositions, classical propositional extensionality identifies each
 proposition with either `True` or `False`. -/
 theorem modelWith_bool_exhaustive (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target) :
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target) :
     ∀ value, (modelWith encoding target extra).inSort Crush.SMT.boolSort value →
       ∃ boolean, value = (modelWith encoding target extra).bool boolean := by
   classical
@@ -398,7 +398,7 @@ integer operations nor datatype guard predicates. -/
 theorem modelWith_nil_applyUnique (encoding : Encoding symbols)
     (target : FO.FamilyModel symbols) :
     Crush.SMT.ApplyUnique
-      (modelWith encoding target (ExtraGraph.nil encoding target)) := by
+      (modelWith encoding target (SourceExt.canonical encoding target)) := by
   intro identifier values left right leftApply rightApply
   rcases leftApply with leftOrdinary | leftExtra
   · rcases rightApply with rightOrdinary | rightExtra
@@ -413,13 +413,13 @@ theorem modelWith_nil_applyUnique (encoding : Encoding symbols)
       have symbolEq := encoding.ident_injective leftSymbol rightSymbol identEq
       subst rightSymbol
       exact leftOutput.trans rightOutput.symm
-    · simp [ExtraGraph.nil, ExtraGraph.toExt] at rightExtra
-  · simp [ExtraGraph.nil, ExtraGraph.toExt] at leftExtra
+    · simp [SourceExt.canonical, SourceExt.toExt] at rightExtra
+  · simp [SourceExt.canonical, SourceExt.toExt] at leftExtra
 
 /-- Every source symbol keeps its encoded type after adding a disjoint native
 graph. -/
 theorem symbol_has_type_with (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     {decl : FO.SymbolDecl} (symbol : symbols decl) :
     Crush.SMT.SymbolHasType (modelWith encoding target extra)
       (encoding.ident symbol) (decl.args.map encoding.sort)
@@ -446,7 +446,7 @@ theorem symbol_has_type_with (encoding : Encoding symbols)
 identifier. This is the preservation fact reused by ordinary terms and native
 datatype constructors, selectors, and testers. -/
 theorem applies_source_iff (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     {decl : FO.SymbolDecl} (symbol : symbols decl)
     (values : List (Value target)) (output : Value target) :
     (modelWith encoding target extra).apply

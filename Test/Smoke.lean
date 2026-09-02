@@ -140,6 +140,8 @@ example : True := by
     let (_, translatedState) ← TranslateM.run {} (emitTerm identity)
     unless translatedState.commandEncodings.size == 3 do
       throwError "stateful defunctionalization did not retain all command encodings"
+    unless modeledScriptWellTyped translatedState.commands do
+      throwError "emitted defunctionalization commands did not use the modeled binder syntax"
     unless translatedState.commandAllocLinks.map (·.encodingIndex) == #[0, 1, 2] do
       throwError "defunctionalization allocation links drifted from encoding order"
     let allocatedNames := translatedState.nameAllocs.names
@@ -148,6 +150,13 @@ example : True := by
       throwError "an encoded command retained an unallocated symbol"
     unless translatedState.commandAllocLinks.map (·.symbols.size) == #[2, 2, 2] do
       throwError "app/closure/equation structural dependencies were not fully linked"
+    unless translatedState.commandAllocLinks.all fun link =>
+        match translatedState.commandEncodings[link.encodingIndex]?,
+            translatedState.commands[link.commandIndex]? with
+        | some encoding, some command =>
+            commandToString encoding.command == commandToString command
+        | _, _ => false do
+      throwError "binder canonicalization changed the emitted SMT-LIB command"
     match translatedState.status with
     | .trusted reasons =>
         unless reasons.size == 1 && translatedState.directSource == some identity do

@@ -16,67 +16,113 @@ namespace Crush.Metatheory.SMT.Theory
 open Crush.SMT
 open Crush.SMT.Theory
 
-/-- Characteristic function of a finite set of modeled theory entries. -/
+/-- Characteristic function of a finite set of directly required theories. -/
 abbrev Reqs (sigEnv : SigEnv) := Fin sigEnv.modeled.length → Bool
 
-/-- Dependency closure supplied with a finite registry. Keeping the closure
-operator and its laws together lets small registries use reducible definitions
-without introducing quotient-backed finite sets or opaque hashing. -/
-structure Closure (sigEnv : SigEnv) where
-  close : Reqs sigEnv → Reqs sigEnv
-  includes : ∀ requirements theory,
-    requirements theory = true → close requirements theory = true
-  deps : ∀ requirements theory,
-    close requirements theory = true →
-      ∀ dependency, dependency ∈ sigEnv.depIds theory →
-        close requirements dependency = true
-  least : ∀ requirements (closed : Reqs sigEnv),
-    (∀ theory, requirements theory = true → closed theory = true) →
-    (∀ theory, closed theory = true →
-      ∀ dependency, dependency ∈ sigEnv.depIds theory →
-        closed dependency = true) →
-    ∀ theory, close requirements theory = true → closed theory = true
+/-- Least dependency-closed set containing the direct requirements. This
+inductive definition is the ordinary graph reachability closure; registries
+provide dependency edges but do not reimplement a closure algorithm. -/
+inductive DepClosure (sigEnv : SigEnv) (requirements : Reqs sigEnv) :
+    Fin sigEnv.modeled.length → Prop where
+  | direct {theory} : requirements theory = true →
+      DepClosure sigEnv requirements theory
+  | dependency {theory dependency} :
+      DepClosure sigEnv requirements theory →
+      dependency ∈ sigEnv.depIds theory →
+      DepClosure sigEnv requirements dependency
 
-/-- A syntax registry together with semantic declarations and a checked
-dependency-closure operation. The dependent `decl` field fixes each semantic
-theory to the signature of the corresponding syntax entry. -/
+namespace DepClosure
+
+/-- Dependency closure is monotone in its direct requirements. -/
+theorem mono {sigEnv : SigEnv} {lower upper : Reqs sigEnv}
+    (subset : ∀ theory, lower theory = true → upper theory = true) :
+    ∀ {theory}, DepClosure sigEnv lower theory →
+      DepClosure sigEnv upper theory
+  | _, .direct required => .direct (subset _ required)
+  | _, .dependency active member =>
+      .dependency (mono subset active) member
+
+/-- Eliminate the least closure into any dependency-closed predicate. -/
+theorem least {sigEnv : SigEnv} {requirements : Reqs sigEnv}
+    {closed : Fin sigEnv.modeled.length → Prop}
+    (includes : ∀ theory, requirements theory = true → closed theory)
+    (deps : ∀ theory, closed theory →
+      ∀ dependency, dependency ∈ sigEnv.depIds theory →
+        closed dependency) :
+    ∀ {theory}, DepClosure sigEnv requirements theory → closed theory
+  | _, .direct required => includes _ required
+  | _, .dependency active member =>
+      deps _ (least includes deps active) _ member
+
+/-- Closing a disjunction of direct requirements is the union of their
+closures. -/
+theorem or_iff {sigEnv : SigEnv} (left right : Reqs sigEnv) (theory) :
+    DepClosure sigEnv (fun candidate => left candidate || right candidate)
+        theory ↔
+      DepClosure sigEnv left theory ∨ DepClosure sigEnv right theory := by
+  constructor
+  · intro active
+    induction active with
+    | direct required =>
+        simp only [Bool.or_eq_true] at required
+        exact required.elim
+          (fun leftRequired => Or.inl (.direct leftRequired))
+          (fun rightRequired => Or.inr (.direct rightRequired))
+    | dependency active member ih =>
+        exact ih.elim
+          (fun leftActive => Or.inl (.dependency leftActive member))
+          (fun rightActive => Or.inr (.dependency rightActive member))
+  · rintro (leftActive | rightActive)
+    · exact mono (fun candidate required => by simp [required]) leftActive
+    · exact mono (fun candidate required => by simp [required]) rightActive
+
+end DepClosure
+
+/-- A syntax registry together with one semantic theory per modeled entry.
+The dependent `decl` field fixes each theory to the corresponding syntax
+signature; dependency closure is derived generically from `sigEnv.depIds`. -/
 structure Env where
   sigEnv : SigEnv
   sig_wf : sigEnv.WF
   decl : (theory : Fin sigEnv.modeled.length) →
     Crush.Metatheory.SMT.Theory (sigEnv.modeled.get theory).sig
-  closure : Closure sigEnv
 
 /-- A dependency-closed finite combination of registered SMT theories. -/
 structure Comb (env : Env) where
-  active : Reqs env.sigEnv
-  deps : ∀ theory, active theory = true →
+  active : Fin env.sigEnv.modeled.length → Prop
+  deps : ∀ theory, active theory →
     ∀ dependency, dependency ∈ env.sigEnv.depIds theory →
-      active dependency = true
+      active dependency
 
 namespace Comb
 
 /-- Two combinations are equal when they select the same entries. -/
 @[ext] theorem ext {env : Env} {left right : Comb env}
-    (equal : ∀ theory, left.active theory = right.active theory) :
+    (equal : ∀ theory, left.active theory ↔ right.active theory) :
     left = right := by
   cases left with
   | mk leftActive leftDeps =>
     cases right with
     | mk rightActive rightDeps =>
-      have activeEq : leftActive = rightActive := funext equal
+      have activeEq : leftActive = rightActive := by
+        funext theory
+        exact propext (equal theory)
       subst rightActive
       rfl
 
 /-- Combination with no optional interpreted theory. -/
 def empty (env : Env) : Comb env where
-  active := fun _ => false
+  active := fun _ => False
   deps := by simp
 
 /-- Close an arbitrary finite requirement set under registered dependencies. -/
 def close (env : Env) (requirements : Reqs env.sigEnv) : Comb env where
-  active := env.closure.close requirements
-  deps := env.closure.deps requirements
+  active := DepClosure env.sigEnv requirements
+  deps := fun _ active _ member => .dependency active member
+
+/-- Dependency-closed combination generated by one registry entry. -/
+def singleton (env : Env) (selected : Fin env.sigEnv.modeled.length) : Comb env :=
+  close env (fun theory => decide (theory = selected))
 
 /-- Combination induced by every modeled theory used in a command array. -/
 def ofCommands (env : Env) (commands : Array Command) : Comb env :=
@@ -84,41 +130,104 @@ def ofCommands (env : Env) (commands : Array Command) : Comb env :=
 
 /-- Union of two theory combinations. -/
 def union {env : Env} (left right : Comb env) : Comb env where
-  active := fun theory => left.active theory || right.active theory
+  active := fun theory => left.active theory ∨ right.active theory
   deps := by
     intro theory active dependency member
-    simp only [Bool.or_eq_true] at active ⊢
     cases active with
     | inl leftActive => exact Or.inl (left.deps theory leftActive dependency member)
     | inr rightActive => exact Or.inr (right.deps theory rightActive dependency member)
 
-@[simp] theorem empty_active {env : Env} (theory : Fin env.sigEnv.modeled.length) :
-    (empty env).active theory = false := rfl
+/-- Closing the union of two requirement sets gives the union of their closed
+combinations. This is derived from the least-closure law. -/
+theorem close_or (env : Env) (left right : Reqs env.sigEnv) :
+    close env (fun theory => left theory || right theory) =
+      union (close env left) (close env right) := by
+  apply Comb.ext
+  intro theory
+  exact DepClosure.or_iff left right theory
+
+@[simp] theorem empty_active {env : Env}
+    (theory : Fin env.sigEnv.modeled.length) :
+    ¬(empty env).active theory := id
 
 @[simp] theorem close_active {env : Env} (requirements : Reqs env.sigEnv)
     (theory : Fin env.sigEnv.modeled.length) :
-    (close env requirements).active theory =
-      env.closure.close requirements theory := rfl
+    (close env requirements).active theory ↔
+      DepClosure env.sigEnv requirements theory := Iff.rfl
+
+@[simp] theorem singleton_active {env : Env}
+    (selected theory : Fin env.sigEnv.modeled.length) :
+    (singleton env selected).active theory ↔
+      DepClosure env.sigEnv (fun candidate => decide (candidate = selected))
+        theory := Iff.rfl
 
 @[simp] theorem union_active {env : Env} (left right : Comb env)
     (theory : Fin env.sigEnv.modeled.length) :
-    (union left right).active theory =
-      (left.active theory || right.active theory) := rfl
+    (union left right).active theory ↔
+      left.active theory ∨ right.active theory := Iff.rfl
 
 /-- Closing requirements never omits a directly used theory. -/
 theorem active_of_required {env : Env} {requirements : Reqs env.sigEnv}
     {theory : Fin env.sigEnv.modeled.length}
     (required : requirements theory = true) :
-    (close env requirements).active theory = true :=
-  env.closure.includes requirements theory required
+    (close env requirements).active theory :=
+  .direct required
 
 /-- Command-induced combinations never omit a theory found by syntax
 traversal. -/
 theorem active_of_used {env : Env} {commands : Array Command}
     {theory : Fin env.sigEnv.modeled.length}
     (used : env.sigEnv.usesCommands commands theory = true) :
-    (ofCommands env commands).active theory = true :=
+    (ofCommands env commands).active theory :=
   active_of_required used
+
+/-- An active theory also activates the modeled provider of every foreign
+sort constructor in its signature. -/
+theorem active_sortDep {env : Env} {theory dependency}
+    {identifier : Ident} (comb : Comb env) (active : comb.active theory)
+    (present : (env.sigEnv.modeled.get theory).sig.containsSortCtor
+      identifier = true)
+    (provided : env.sigEnv.sortProvider identifier = some (.modeled dependency))
+    (different : dependency ≠ theory) : comb.active dependency :=
+  comb.deps theory active dependency
+    (env.sig_wf.sort_deps theory identifier dependency
+      present provided different)
+
+/-- An active theory also activates the modeled provider of every foreign
+application identifier in its signature. -/
+theorem active_identDep {env : Env} {theory dependency}
+    {identifier : Ident} (comb : Comb env) (active : comb.active theory)
+    (present : (env.sigEnv.modeled.get theory).sig.containsIdent
+      identifier = true)
+    (provided : env.sigEnv.identProvider identifier = some (.modeled dependency))
+    (different : dependency ≠ theory) : comb.active dependency :=
+  comb.deps theory active dependency
+    (env.sig_wf.ident_deps theory identifier dependency
+      present provided different)
+
+/-- An active theory also activates the modeled provider of every foreign
+literal in its signature. -/
+theorem active_literalDep {env : Env} {theory dependency}
+    {literal : Literal} (comb : Comb env) (active : comb.active theory)
+    (present : (env.sigEnv.modeled.get theory).sig.containsLiteral literal = true)
+    (provided : env.sigEnv.literalProvider literal = some (.modeled dependency))
+    (different : dependency ≠ theory) : comb.active dependency :=
+  comb.deps theory active dependency
+    (env.sig_wf.literal_deps theory literal dependency
+      present provided different)
+
+/-- Command-array concatenation denotes union of the selected theory
+combinations. -/
+theorem ofCommands_append (env : Env) (left right : Array Command) :
+    ofCommands env (left ++ right) =
+      union (ofCommands env left) (ofCommands env right) := by
+  unfold ofCommands
+  have requirementsEq : env.sigEnv.usesCommands (left ++ right) =
+      fun theory => env.sigEnv.usesCommands left theory ||
+        env.sigEnv.usesCommands right theory := by
+    funext theory
+    exact SigEnv.usesCommands_append env.sigEnv left right theory
+  rw [requirementsEq, close_or]
 
 /-- Command-induced combinations depend only on semantic command membership,
 not array order or duplicate occurrences. -/
@@ -127,8 +236,6 @@ theorem ofCommands_congr {env : Env} {left right : Array Command}
     ofCommands env left = ofCommands env right := by
   apply Comb.ext
   intro theory
-  change env.closure.close (env.sigEnv.usesCommands left) theory =
-    env.closure.close (env.sigEnv.usesCommands right) theory
   have requirementsEq : env.sigEnv.usesCommands left =
       env.sigEnv.usesCommands right := by
     funext selected
@@ -139,6 +246,8 @@ theorem ofCommands_congr {env : Env} {left right : Array Command}
       exact ⟨command, same.1 command member, used⟩
     · rintro ⟨command, member, used⟩
       exact ⟨command, same.2 command member, used⟩
+  change DepClosure env.sigEnv (env.sigEnv.usesCommands left) theory ↔
+    DepClosure env.sigEnv (env.sigEnv.usesCommands right) theory
   rw [requirementsEq]
 
 theorem union_empty_left {env : Env} (comb : Comb env) :
@@ -154,12 +263,12 @@ theorem union_empty_right {env : Env} (comb : Comb env) :
 theorem union_assoc {env : Env} (first second third : Comb env) :
     union (union first second) third = union first (union second third) := by
   ext theory
-  simp [union, Bool.or_assoc]
+  simp [union, or_assoc]
 
 theorem union_comm {env : Env} (left right : Comb env) :
     union left right = union right left := by
   ext theory
-  simp [union, Bool.or_comm]
+  simp [union, or_comm]
 
 theorem union_idem {env : Env} (comb : Comb env) :
     union comb comb = comb := by
@@ -170,7 +279,7 @@ theorem union_idem {env : Env} (comb : Comb env) :
 the reduct to every selected signature is a model of that component theory. -/
 structure Models {env : Env} (comb : Comb env) (model : Model) : Prop where
   wf : model.WF
-  theory : ∀ theory, comb.active theory = true →
+  theory : ∀ theory, comb.active theory →
     (env.decl theory).Models
       (Model.reduct model (env.sigEnv.modeled.get theory).sig)
 
@@ -180,11 +289,30 @@ theorem Models.congr {env : Env} {left right : Comb env} {model : Model}
   subst right
   exact models
 
+/-- A combination observes only the reducts of its active theories. Changing
+free symbols preserves the combination whenever the new full model remains
+well formed and every active reduct is isomorphic to the old one. -/
+theorem Models.ofReductIso {env : Env} {comb : Comb env}
+    {left right : Model} (models : Models comb left) (rightWF : right.WF)
+    (iso : ∀ theory (active : comb.active theory),
+      Struct.Iso
+        (Model.reduct left (env.sigEnv.modeled.get theory).sig)
+        (Model.reduct right (env.sigEnv.modeled.get theory).sig)) :
+    Models comb right := by
+  refine ⟨rightWF, ?_⟩
+  intro theory active
+  exact (env.decl theory).iso_closed (iso theory active)
+    (models.theory theory active)
+
 /-- A well-typed command sequence with no model of its command-induced theory
 combination. -/
 structure CommandsUnsat (env : Env) (commands : Array Command) : Prop where
   inFragment : CommandsInFragment commands
   wellTyped : CommandsWellTypedIn env.sigEnv commands
+  /-- The selected theory laws themselves have a model. This rules out an
+  UNSAT certificate caused only by an inconsistent or empty component model
+  class. The witness need not satisfy the commands. -/
+  theoryModel : ∃ model : Model, Models (ofCommands env commands) model
   noModel : ∀ model : Model, Models (ofCommands env commands) model →
     ¬model.SatisfiesCommands commands
 
@@ -217,10 +345,17 @@ theorem models_union_iff {env : Env} {left right : Comb env} {model : Model} :
   · rintro ⟨leftModels, rightModels⟩
     refine ⟨leftModels.wf, ?_⟩
     intro theory active
-    simp only [union_active, Bool.or_eq_true] at active
     cases active with
     | inl leftActive => exact leftModels.theory theory leftActive
     | inr rightActive => exact rightModels.theory theory rightActive
+
+/-- Three-way combination is conjunction of the three component model
+predicates. Reassociation extends this result to any finite union. -/
+theorem models_union3_iff {env : Env} {first second third : Comb env}
+    {model : Model} :
+    Models (union first (union second third)) model ↔
+      Models first model ∧ Models second model ∧ Models third model := by
+  rw [models_union_iff, models_union_iff]
 
 end Comb
 

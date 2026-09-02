@@ -478,7 +478,7 @@ def coreContainsIdent : Ident → Bool
   | .symb name => #["=", "not", "=>", "and", "or"].contains name
   | .indexed _ _ => false
 
-/-- Identifiers in the currently modeled integer fragment. -/
+/-- Identifiers in the modeled integer fragment. -/
 def intContainsIdent (identifier : Ident) : Bool :=
   decide (identifier = .symb ">=")
 
@@ -498,7 +498,7 @@ def knownContainsIdent : Ident → Bool
       #["int2bv", "extract", "zero_extend", "sign_extend", "rotate_left",
         "rotate_right"] |>.contains name
 
-/-- Known identifiers whose semantics is outside the current metatheory. -/
+/-- Known identifiers whose semantics is outside this metatheory. -/
 def syntaxContainsIdent (identifier : Ident) : Bool :=
   knownContainsIdent identifier &&
     !(coreContainsIdent identifier || intContainsIdent identifier)
@@ -690,7 +690,7 @@ def coreSig : Sig := Sig.ofClassifiers coreSortArity? coreContainsIdent
     | _ => none)
   inferCoreApp
 
-/-- Signature of the integer fragment currently covered by the metatheory. -/
+/-- Signature of the integer fragment covered by the metatheory. -/
 def intSig : Sig := Sig.ofClassifiers intSortArity? intContainsIdent
   (fun literal => match literal with
     | .num _ => some intSort
@@ -719,10 +719,9 @@ def syntaxSig : Sig := Sig.ofClassifiers syntaxSortArity? syntaxContainsIdent
     | _ => none)
   inferSyntaxApp
 
-/-- One named interpreted-theory entry and its semantic dependencies. -/
+/-- One named interpreted-theory entry. Dependencies are edges in `SigEnv`. -/
 structure Entry where
-  key : Lean.Name
-  deps : List Lean.Name
+  name : Lean.Name
   sig : Sig
 
 /-- Registry component selected to provide a checker typing rule. Provider
@@ -761,8 +760,23 @@ def providerIsModeled {modeledCount syntaxCount : Nat} :
 
 /-- Well-formed registry dispatch and dependency information. These laws make
 provider selection a checked implementation of signature membership rather
-than a second, potentially drifting classification. -/
+than a second, potentially drifting classification. The logical core is fixed,
+and every semantic-signature member has a semantic provider. The three
+dependency coverage fields prevent under-approximation: whenever a theory
+signature uses syntax provided by another modeled theory, that provider must
+be a dependency. Additional dependencies only strengthen the selected model
+class; omitting a required dependency would misstate the solver semantics. -/
 structure WF (env : SigEnv) : Prop where
+  core_eq : env.core = coreSig
+  core_sort : ∀ identifier,
+    coreSig.containsSortCtor identifier = true →
+      env.sortProvider identifier = some .core
+  core_ident : ∀ identifier,
+    coreSig.containsIdent identifier = true →
+      env.identProvider identifier = some .core
+  core_literal : ∀ literal,
+    coreSig.containsLiteral literal = true →
+      env.literalProvider literal = some .core
   sort_provider : ∀ identifier provider,
     env.sortProvider identifier = some provider →
       (env.providerSig provider).containsSortCtor identifier = true
@@ -776,15 +790,30 @@ structure WF (env : SigEnv) : Prop where
     env.core.Compatible (env.modeled.get index).sig
   modeled_compatible : ∀ left right,
     (env.modeled.get left).sig.Compatible (env.modeled.get right).sig
-  deps_resolve : ∀ index dependency,
-    dependency ∈ env.depIds index →
-      (env.modeled.get dependency).key ∈ (env.modeled.get index).deps
-  deps_complete : ∀ index key,
-    key ∈ (env.modeled.get index).deps →
-      ∃ dependency, dependency ∈ env.depIds index ∧
-        (env.modeled.get dependency).key = key
-  deps_before : ∀ index dependency,
-    dependency ∈ env.depIds index → dependency.val < index.val
+  sort_complete : ∀ index identifier,
+    (env.modeled.get index).sig.containsSortCtor identifier = true →
+      ∃ provider, env.sortProvider identifier = some provider ∧
+        providerIsModeled provider = true
+  ident_complete : ∀ index identifier,
+    (env.modeled.get index).sig.containsIdent identifier = true →
+      ∃ provider, env.identProvider identifier = some provider ∧
+        providerIsModeled provider = true
+  literal_complete : ∀ index literal,
+    (env.modeled.get index).sig.containsLiteral literal = true →
+      ∃ provider, env.literalProvider literal = some provider ∧
+        providerIsModeled provider = true
+  sort_deps : ∀ index identifier dependency,
+    (env.modeled.get index).sig.containsSortCtor identifier = true →
+    env.sortProvider identifier = some (.modeled dependency) →
+    dependency ≠ index → dependency ∈ env.depIds index
+  ident_deps : ∀ index identifier dependency,
+    (env.modeled.get index).sig.containsIdent identifier = true →
+    env.identProvider identifier = some (.modeled dependency) →
+    dependency ≠ index → dependency ∈ env.depIds index
+  literal_deps : ∀ index literal dependency,
+    (env.modeled.get index).sig.containsLiteral literal = true →
+    env.literalProvider literal = some (.modeled dependency) →
+    dependency ≠ index → dependency ∈ env.depIds index
 
 /-- Whether an identifier has a typing rule in the modeled fragment. -/
 def isModeledIdent (env : SigEnv) (identifier : Ident) : Bool :=
@@ -812,6 +841,33 @@ def isModeledLiteral (env : SigEnv) (literal : Literal) : Bool :=
   | some provider => providerIsModeled provider
   | none => false
 
+@[simp] theorem isModeledSortCtor_eq_true {env : SigEnv} {identifier : Ident} :
+    env.isModeledSortCtor identifier = true ↔
+      ∃ provider, env.sortProvider identifier = some provider ∧
+        providerIsModeled provider = true := by
+  unfold isModeledSortCtor
+  cases found : env.sortProvider identifier with
+  | none => simp
+  | some provider => simp
+
+@[simp] theorem isModeledIdent_eq_true {env : SigEnv} {identifier : Ident} :
+    env.isModeledIdent identifier = true ↔
+      ∃ provider, env.identProvider identifier = some provider ∧
+        providerIsModeled provider = true := by
+  unfold isModeledIdent
+  cases found : env.identProvider identifier with
+  | none => simp
+  | some provider => cases provider <;> simp [providerIsModeled]
+
+@[simp] theorem isModeledLiteral_eq_true {env : SigEnv} {literal : Literal} :
+    env.isModeledLiteral literal = true ↔
+      ∃ provider, env.literalProvider literal = some provider ∧
+        providerIsModeled provider = true := by
+  unfold isModeledLiteral
+  cases found : env.literalProvider literal with
+  | none => simp
+  | some provider => cases provider <;> simp [providerIsModeled]
+
 /-- Application typing supplied by the selected provider. -/
 def inferApp? (env : SigEnv) (identifier : Ident)
     (arguments : Array (Option SSort)) : Option AppResult := do
@@ -830,45 +886,44 @@ def sortArity? (env : SigEnv) (identifier : Ident) : Option Nat := do
 
 end SigEnv
 
-/-! ## Registry for the currently checked fragment -/
+/-! ## Default checker registry -/
 
 private def intEntry : Entry where
-  key := `Int
-  deps := []
+  name := `Int
   sig := intSig
 
-private def currentSortProvider (identifier : Ident) : Option (Provider 1 1) :=
+private def defaultSortProvider (identifier : Ident) : Option (Provider 1 1) :=
   if coreSig.containsSortCtor identifier then some .core
   else if intSig.containsSortCtor identifier then some (.modeled ⟨0, by omega⟩)
   else if syntaxSig.containsSortCtor identifier then
     some (.syntaxOnly ⟨0, by omega⟩)
   else none
 
-private def currentIdentProvider (identifier : Ident) : Option (Provider 1 1) :=
+private def defaultIdentProvider (identifier : Ident) : Option (Provider 1 1) :=
   if coreContainsIdent identifier then some .core
   else if intContainsIdent identifier then some (.modeled ⟨0, by omega⟩)
   else if syntaxContainsIdent identifier then some (.syntaxOnly ⟨0, by omega⟩)
   else none
 
-private def currentLiteralProvider : Literal → Option (Provider 1 1)
+private def defaultLiteralProvider : Literal → Option (Provider 1 1)
   | .bool _ => some .core
   | .num _ => some (.modeled ⟨0, by omega⟩)
   | .str _ | .bitvec _ _ => some (.syntaxOnly ⟨0, by omega⟩)
 
-/-- Theory registry matching the checker fragment before this refactor. The
-logical core is mandatory, integer semantics is modeled, and the remaining
-known solver syntax is available only to the open/closed syntax checker. -/
-def currentEnv : SigEnv where
+/-- Theory registry used by the checker. The logical core is mandatory,
+integer semantics is modeled, and the remaining known solver syntax is
+available only to the open and closed syntactic checkers. -/
+def defaultSigEnv : SigEnv where
   core := coreSig
   modeled := [intEntry]
   syntaxOnly := [syntaxSig]
-  sortProvider := currentSortProvider
-  identProvider := currentIdentProvider
-  literalProvider := currentLiteralProvider
+  sortProvider := defaultSortProvider
+  identProvider := defaultIdentProvider
+  literalProvider := defaultLiteralProvider
   depIds := fun _ => []
 
-/-- Integer entry of the current one-theory modeled registry. -/
-def intId : Fin currentEnv.modeled.length := ⟨0, by decide⟩
+/-- Integer entry of the default one-theory modeled registry. -/
+def intId : Fin defaultSigEnv.modeled.length := ⟨0, by decide⟩
 
 private theorem core_not_int {identifier : Ident}
     (core : coreContainsIdent identifier = true) :
@@ -880,14 +935,14 @@ private theorem core_not_int {identifier : Ident}
       subst identifier
       simp [coreContainsIdent] at core
 
-/-- A modeled identifier provider in the current registry is exactly the
+/-- A modeled identifier provider in the default registry is exactly the
 integer comparison provider. -/
-theorem current_identProvider_modeled_iff (identifier : Ident)
-    (index : Fin currentEnv.modeled.length) :
-    currentEnv.identProvider identifier = some (.modeled index) ↔
+theorem default_identProvider_modeled_iff (identifier : Ident)
+    (index : Fin defaultSigEnv.modeled.length) :
+    defaultSigEnv.identProvider identifier = some (.modeled index) ↔
       intContainsIdent identifier = true := by
-  change currentIdentProvider identifier = some (.modeled index) ↔ _
-  unfold currentIdentProvider
+  change defaultIdentProvider identifier = some (.modeled index) ↔ _
+  unfold defaultIdentProvider
   split
   next core => simp [core_not_int core]
   next notCore =>
@@ -902,13 +957,13 @@ theorem current_identProvider_modeled_iff (identifier : Ident)
         rfl
     next notInteger => simp [notInteger]
 
-/-- A modeled sort provider in the current registry supplies exactly `Int`. -/
-theorem current_sortProvider_modeled_iff (identifier : Ident)
-    (index : Fin currentEnv.modeled.length) :
-    currentEnv.sortProvider identifier = some (.modeled index) ↔
+/-- A modeled sort provider in the default registry supplies exactly `Int`. -/
+theorem default_sortProvider_modeled_iff (identifier : Ident)
+    (index : Fin defaultSigEnv.modeled.length) :
+    defaultSigEnv.sortProvider identifier = some (.modeled index) ↔
       identifier = .symb "Int" := by
-  change currentSortProvider identifier = some (.modeled index) ↔ _
-  unfold currentSortProvider
+  change defaultSortProvider identifier = some (.modeled index) ↔ _
+  unfold defaultSortProvider
   split
   next core =>
     have notInt : identifier ≠ .symb "Int" := by
@@ -948,11 +1003,11 @@ theorem current_sortProvider_modeled_iff (identifier : Ident)
           intSortArity?, coreSortArity?] at notInteger
       simp [notInt]
 
-/-- A modeled literal provider in the current registry supplies exactly
+/-- A modeled literal provider in the default registry supplies exactly
 natural-number literals. -/
-theorem current_literalProvider_modeled_iff (literal : Literal)
-    (index : Fin currentEnv.modeled.length) :
-    currentEnv.literalProvider literal = some (.modeled index) ↔
+theorem default_literalProvider_modeled_iff (literal : Literal)
+    (index : Fin defaultSigEnv.modeled.length) :
+    defaultSigEnv.literalProvider literal = some (.modeled index) ↔
       ∃ value, literal = .num value := by
   cases literal with
   | num value =>
@@ -965,13 +1020,13 @@ theorem current_literalProvider_modeled_iff (literal : Literal)
           some (Provider.modeled index)
         exact congrArg some (congrArg Provider.modeled indexEq)
   | str value | bitvec width value | bool value =>
-      simp [currentEnv, currentLiteralProvider]
+      simp [defaultSigEnv, defaultLiteralProvider]
 
-/-- Application typing in the current registry is the ordered dispatch to the
+/-- Application typing in the default registry is the ordered dispatch to the
 core, integer, and syntax-only signatures. -/
-@[simp] theorem current_inferApp? (identifier : Ident)
+@[simp] theorem default_inferApp? (identifier : Ident)
     (arguments : Array (Option SSort)) :
-    currentEnv.inferApp? identifier arguments =
+    defaultSigEnv.inferApp? identifier arguments =
       if coreContainsIdent identifier then
         some (inferCoreApp identifier arguments)
       else if intContainsIdent identifier then
@@ -982,65 +1037,65 @@ core, integer, and syntax-only signatures. -/
   cases core : coreContainsIdent identifier <;>
     cases integer : intContainsIdent identifier <;>
     cases knownSyntax : syntaxContainsIdent identifier <;>
-    simp [SigEnv.inferApp?, currentEnv, currentIdentProvider,
+    simp [SigEnv.inferApp?, defaultSigEnv, defaultIdentProvider,
       SigEnv.providerSig, coreSig, intSig, syntaxSig, intEntry,
       Sig.ofClassifiers, core, integer, knownSyntax]
 
 /-- A sort constructor is registered exactly when one of the ordered
 component signatures contains it. -/
-@[simp] theorem current_isKnownSortCtor (identifier : Ident) :
-    currentEnv.isKnownSortCtor identifier =
+@[simp] theorem default_isKnownSortCtor (identifier : Ident) :
+    defaultSigEnv.isKnownSortCtor identifier =
       (coreSig.containsSortCtor identifier ||
         intSig.containsSortCtor identifier ||
           syntaxSig.containsSortCtor identifier) := by
   cases core : coreSig.containsSortCtor identifier <;>
     cases integer : intSig.containsSortCtor identifier <;>
     cases knownSyntax : syntaxSig.containsSortCtor identifier <;>
-    simp [SigEnv.isKnownSortCtor, currentEnv, currentSortProvider,
+    simp [SigEnv.isKnownSortCtor, defaultSigEnv, defaultSortProvider,
       core, integer, knownSyntax]
 
 /-- Only core and integer sort constructors are admitted by the modeled
 checker. -/
-@[simp] theorem current_isModeledSortCtor (identifier : Ident) :
-    currentEnv.isModeledSortCtor identifier =
+@[simp] theorem default_isModeledSortCtor (identifier : Ident) :
+    defaultSigEnv.isModeledSortCtor identifier =
       (coreSig.containsSortCtor identifier ||
         intSig.containsSortCtor identifier) := by
   cases core : coreSig.containsSortCtor identifier <;>
     cases integer : intSig.containsSortCtor identifier <;>
     cases knownSyntax : syntaxSig.containsSortCtor identifier <;>
     simp [SigEnv.isModeledSortCtor, SigEnv.providerIsModeled,
-      currentEnv, currentSortProvider, core, integer, knownSyntax]
+      defaultSigEnv, defaultSortProvider, core, integer, knownSyntax]
 
-@[simp] theorem current_sortArity_bool :
-    currentEnv.sortArity? (.symb "Bool") = some 0 := rfl
+@[simp] theorem default_sortArity_bool :
+    defaultSigEnv.sortArity? (.symb "Bool") = some 0 := rfl
 
-@[simp] theorem current_sortArity_int :
-    currentEnv.sortArity? (.symb "Int") = some 0 := rfl
+@[simp] theorem default_sortArity_int :
+    defaultSigEnv.sortArity? (.symb "Int") = some 0 := rfl
 
-@[simp] theorem current_sortArity_string :
-    currentEnv.sortArity? (.symb "String") = some 0 := rfl
+@[simp] theorem default_sortArity_string :
+    defaultSigEnv.sortArity? (.symb "String") = some 0 := rfl
 
-@[simp] theorem current_sortArity_array :
-    currentEnv.sortArity? (.symb "Array") = some 2 := rfl
+@[simp] theorem default_sortArity_array :
+    defaultSigEnv.sortArity? (.symb "Array") = some 2 := rfl
 
-@[simp] theorem current_sortArity_bitvec (width : Nat) :
-    currentEnv.sortArity? (.indexed "BitVec" #[.inr width]) = some 0 := rfl
+@[simp] theorem default_sortArity_bitvec (width : Nat) :
+    defaultSigEnv.sortArity? (.indexed "BitVec" #[.inr width]) = some 0 := rfl
 
-/-- Every literal class in the current SMT syntax has one registered sort. -/
-@[simp] theorem current_literalSort? (literal : Literal) :
-    currentEnv.literalSort? literal = some literal.sort := by
+/-- Every literal class in the default SMT syntax has one registered sort. -/
+@[simp] theorem default_literalSort? (literal : Literal) :
+    defaultSigEnv.literalSort? literal = some literal.sort := by
   cases literal <;> rfl
 
 /-- Boolean and numeral literals are modeled; string and bit-vector literals
 remain in the syntax-only tier. -/
-@[simp] theorem current_isModeledLiteral : ∀ literal : Literal,
-    currentEnv.isModeledLiteral literal =
+@[simp] theorem default_isModeledLiteral : ∀ literal : Literal,
+    defaultSigEnv.isModeledLiteral literal =
       match literal with
       | .bool _ | .num _ => true
       | .str _ | .bitvec _ _ => false
   | .bool _ | .num _ | .str _ | .bitvec _ _ => by
       simp [SigEnv.isModeledLiteral, SigEnv.providerIsModeled,
-        currentEnv, currentLiteralProvider]
+        defaultSigEnv, defaultLiteralProvider]
 
 private theorem core_int_compatible : coreSig.Compatible intSig where
   sort := by
@@ -1067,12 +1122,38 @@ private theorem core_int_compatible : coreSig.Compatible intSig where
     subst identifier
     simp [coreSig, Sig.ofClassifiers, coreContainsIdent] at corePresent
 
-/-- The current registry has coherent providers, compatible modeled
+private theorem default_id_unique
+    (left right : Fin defaultSigEnv.modeled.length) : left = right := by
+  rcases left with ⟨left, leftBound⟩
+  rcases right with ⟨right, rightBound⟩
+  change left < 1 at leftBound
+  change right < 1 at rightBound
+  have leftEq : left = 0 := by omega
+  have rightEq : right = 0 := by omega
+  subst left
+  subst right
+  rfl
+
+/-- The default registry has coherent providers, compatible modeled
 signatures, and an empty integer dependency list. -/
-theorem currentEnv_wf : currentEnv.WF where
+theorem defaultSigEnv_wf : defaultSigEnv.WF where
+  core_eq := rfl
+  core_sort := by
+    intro identifier present
+    simp [defaultSigEnv, defaultSortProvider, present]
+  core_ident := by
+    intro identifier present
+    change coreContainsIdent identifier = true at present
+    simp [defaultSigEnv, defaultIdentProvider, present]
+  core_literal := by
+    intro literal present
+    cases literal with
+    | bool value => rfl
+    | num value | str value | bitvec width value =>
+        simp [coreSig, Sig.containsLiteral, Sig.ofClassifiers] at present
   sort_provider := by
     intro identifier provider present
-    simp only [currentEnv, currentSortProvider] at present
+    simp only [defaultSigEnv, defaultSortProvider] at present
     split at present
     next core =>
       cases present
@@ -1090,7 +1171,7 @@ theorem currentEnv_wf : currentEnv.WF where
         next absent => contradiction
   ident_provider := by
     intro identifier provider present
-    simp only [currentEnv, currentIdentProvider] at present
+    simp only [defaultSigEnv, defaultIdentProvider] at present
     split at present
     next core =>
       cases present
@@ -1124,21 +1205,38 @@ theorem currentEnv_wf : currentEnv.WF where
     subst left
     subst right
     exact Sig.compatible_refl intSig
-  deps_resolve := by
-    intro index dependency member
-    change dependency ∈ [] at member
-    contradiction
-  deps_complete := by
-    rintro ⟨index, bound⟩ key member
-    change index < 1 at bound
-    have indexEq : index = 0 := by omega
+  sort_complete := by
+    intro index identifier present
+    have indexEq := default_id_unique index intId
     subst index
-    change key ∈ [] at member
-    contradiction
-  deps_before := by
-    intro index dependency member
-    change dependency ∈ [] at member
-    contradiction
+    change intSig.containsSortCtor identifier = true at present
+    rw [← SigEnv.isModeledSortCtor_eq_true,
+      default_isModeledSortCtor]
+    simp [present]
+  ident_complete := by
+    intro index identifier present
+    have indexEq := default_id_unique index intId
+    subst index
+    exact ⟨.modeled intId,
+      (default_identProvider_modeled_iff identifier intId).mpr present, rfl⟩
+  literal_complete := by
+    intro index literal present
+    have indexEq := default_id_unique index intId
+    subst index
+    change intSig.containsLiteral literal = true at present
+    rw [← SigEnv.isModeledLiteral_eq_true]
+    cases literal <;>
+      simp [default_isModeledLiteral, intSig,
+        Sig.containsLiteral, Sig.ofClassifiers] at present ⊢
+  sort_deps := by
+    intro index identifier dependency present provided different
+    exact False.elim (different (default_id_unique dependency index))
+  ident_deps := by
+    intro index identifier dependency present provided different
+    exact False.elim (different (default_id_unique dependency index))
+  literal_deps := by
+    intro index literal dependency present provided different
+    exact False.elim (different (default_id_unique dependency index))
 
 /-- The registry's known-identifier classifier is the existing finite table. -/
 private theorem core_known {identifier : Ident}
@@ -1157,23 +1255,23 @@ private theorem int_known {identifier : Ident}
   subst identifier
   simp [knownContainsIdent]
 
-@[simp] theorem current_known_ident (identifier : Ident) :
-    currentEnv.isKnownIdent identifier = knownContainsIdent identifier := by
+@[simp] theorem default_known_ident (identifier : Ident) :
+    defaultSigEnv.isKnownIdent identifier = knownContainsIdent identifier := by
   cases core : coreContainsIdent identifier <;>
     cases integer : intContainsIdent identifier <;>
     cases known : knownContainsIdent identifier <;>
-    simp [SigEnv.isKnownIdent, currentEnv, currentIdentProvider,
+    simp [SigEnv.isKnownIdent, defaultSigEnv, defaultIdentProvider,
       syntaxContainsIdent, core, integer, known] <;>
     grind [core_known, int_known]
 
-/-- The modeled registry entries reproduce the current core-plus-`>=` table. -/
-@[simp] theorem current_modeled_ident (identifier : Ident) :
-    currentEnv.isModeledIdent identifier =
+/-- The modeled registry entries reproduce the core-plus-`>=` table. -/
+@[simp] theorem default_modeled_ident (identifier : Ident) :
+    defaultSigEnv.isModeledIdent identifier =
       (coreContainsIdent identifier || intContainsIdent identifier) := by
   cases core : coreContainsIdent identifier <;>
     cases integer : intContainsIdent identifier <;>
     cases knownSyntax : syntaxContainsIdent identifier <;>
-    simp [SigEnv.isModeledIdent, currentEnv, currentIdentProvider,
+    simp [SigEnv.isModeledIdent, defaultSigEnv, defaultIdentProvider,
       core, integer, knownSyntax]
 
 end Crush.SMT.Theory

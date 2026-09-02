@@ -52,7 +52,7 @@ theorem guardedTheoryCommands_represents {signature : Signature}
 
 /-- Absence of a model in the internal relational semantics reflects through
 the pure finite-theory encoder. The translator-facing theorem in
-`CommandEquiv` additionally requires standard SMT semantics. -/
+`CommandEquiv` additionally requires the modeled SMT theory semantics. -/
 theorem theoryCommands_unsat_implies_source_unsat {signature : Signature}
     (encoding : SMT.Encoding (Symbol signature))
     (source : Theory signature)

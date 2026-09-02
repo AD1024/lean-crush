@@ -29,12 +29,10 @@ the present metatheory, it is used for monomorphic `declare-datatypes` blocks.
 Keeping this policy here gives ordinary and datatype symbols one term encoder,
 one identifier namespace, and one semantic model.
 
-`Encoding` chooses concrete syntax; it does not assert that a target carrier
-has the standard meaning of an SMT theory sort. In particular, constructing an
-induced model for commands that use integers requires an `IntView` of the
-target model: some FO sort must map to SMT `Int`, and that sort's carrier must
-be isomorphic to `Int`. This obligation depends on the target model and
-therefore cannot be a field of this syntax-only structure. -/
+`Encoding` chooses concrete syntax. Semantic realization is supplied for each
+target model. For integer commands, `Int.Carrier` selects an FO sort mapped to
+SMT `Int` and identifies its carrier with Lean `Int`; this target-dependent
+evidence accompanies model construction. -/
 structure Encoding (symbols : FO.SymbolFamily) where
   sort : FO.FOSort → SSort
   sort_injective : Function.Injective sort
@@ -47,7 +45,7 @@ structure Encoding (symbols : FO.SymbolFamily) where
   ident_injective : ∀ {decl : FO.SymbolDecl} (left right : symbols decl),
     ident left = ident right → left = right
   ident_fresh : ∀ {decl : FO.SymbolDecl} (symbol : symbols decl),
-    Crush.SMT.NotReserved (ident symbol)
+    Crush.SMT.FreshFor Crush.SMT.Theory.defaultSigEnv (ident symbol)
   nativeSort : FO.FOSort → Bool
   nativeSymbol : {decl : FO.SymbolDecl} → symbols decl → Bool
   nativeCommands : Array Command
@@ -145,8 +143,8 @@ structure Decl (symbols : FO.SymbolFamily) where
   decl : FO.SymbolDecl
   symbol : symbols decl
 
-/-- Emit the ordinary concrete declaration selected for one typed symbol.
-Callers establish that the symbol is not declared by an SMT datatype command. -/
+/-- Emit the ordinary concrete declaration selected for a symbol classified as
+ordinary by the encoding. -/
 def declaration {symbols : FO.SymbolFamily} (encoding : Encoding symbols)
     (declared : Decl symbols) : Command :=
   .declFun (encoding.name declared.symbol)

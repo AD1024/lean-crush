@@ -62,6 +62,27 @@ mutual
   decreasing_by all_goals simp [SSort.listStructuralSize] <;> omega
 end
 
+@[simp] theorem usesSort_bvar (env : SigEnv) (theory) (index : Nat) :
+    env.usesSort theory (.bvar index) = false := by
+  rw [usesSort.eq_1]
+
+@[simp] theorem usesSort_app (env : SigEnv) (theory) (identifier : Ident)
+    (arguments : Array SSort) :
+    env.usesSort theory (.app identifier arguments) =
+      (env.usesSortCtor theory identifier ||
+        env.usesSortList theory arguments.toList) := by
+  rw [usesSort.eq_2]
+
+@[simp] theorem usesSortList_nil (env : SigEnv) (theory) :
+    env.usesSortList theory [] = false := by
+  rw [usesSortList.eq_1]
+
+@[simp] theorem usesSortList_cons (env : SigEnv) (theory) (sort : SSort)
+    (sorts : List SSort) :
+    env.usesSortList theory (sort :: sorts) =
+      (env.usesSort theory sort || env.usesSortList theory sorts) := by
+  rw [usesSortList.eq_2]
+
 mutual
   /-- Whether a term's semantic syntax uses one modeled theory. Attribute
 patterns are solver guidance and do not contribute semantic obligations. -/
@@ -100,6 +121,73 @@ patterns are solver guidance and do not contribute semantic obligations. -/
   termination_by bindings => Term.bindingListStructuralSize bindings
   decreasing_by all_goals simp [Term.bindingListStructuralSize] <;> omega
 end
+
+@[simp] theorem usesTerm_lit (env : SigEnv) (theory) (literal : Literal) :
+    env.usesTerm theory (.lit literal) = env.usesLiteral theory literal := by
+  rw [usesTerm.eq_1]
+
+@[simp] theorem usesTerm_bvar (env : SigEnv) (theory) (index : Nat) :
+    env.usesTerm theory (.bvar index) = false := by
+  rw [usesTerm.eq_2]
+
+@[simp] theorem usesTerm_app (env : SigEnv) (theory) (identifier : Ident)
+    (arguments : Array Term) :
+    env.usesTerm theory (.app identifier arguments) =
+      (env.usesIdent theory identifier ||
+        env.usesTermList theory arguments.toList) := by
+  rw [usesTerm.eq_3]
+
+@[simp] theorem usesTerm_let (env : SigEnv) (theory)
+    (bindings : Array (String × Term)) (body : Term) :
+    env.usesTerm theory (.letE bindings body) =
+      (env.usesBindingList theory bindings.toList || env.usesTerm theory body) := by
+  rw [usesTerm.eq_4]
+
+@[simp] theorem usesTerm_forall (env : SigEnv) (theory)
+    (binders : Array (String × SSort)) (body : Term) :
+    env.usesTerm theory (.forallE binders body) =
+      (env.usesSortList theory (binders.toList.map (fun binder => binder.2)) ||
+        env.usesTerm theory body) := by
+  rw [usesTerm.eq_5]
+
+@[simp] theorem usesTerm_exists (env : SigEnv) (theory)
+    (binders : Array (String × SSort)) (body : Term) :
+    env.usesTerm theory (.existsE binders body) =
+      (env.usesSortList theory (binders.toList.map (fun binder => binder.2)) ||
+        env.usesTerm theory body) := by
+  rw [usesTerm.eq_6]
+
+@[simp] theorem usesTerm_lam (env : SigEnv) (theory)
+    (binders : Array (String × SSort)) (body : Term) :
+    env.usesTerm theory (.lam binders body) =
+      (env.usesSortList theory (binders.toList.map (fun binder => binder.2)) ||
+        env.usesTerm theory body) := by
+  rw [usesTerm.eq_7]
+
+@[simp] theorem usesTerm_annot (env : SigEnv) (theory) (body : Term)
+    (attributes : Array Attr) :
+    env.usesTerm theory (.annot body attributes) = env.usesTerm theory body := by
+  rw [usesTerm.eq_8]
+
+@[simp] theorem usesTermList_nil (env : SigEnv) (theory) :
+    env.usesTermList theory [] = false := by
+  rw [usesTermList.eq_1]
+
+@[simp] theorem usesTermList_cons (env : SigEnv) (theory) (term : Term)
+    (terms : List Term) :
+    env.usesTermList theory (term :: terms) =
+      (env.usesTerm theory term || env.usesTermList theory terms) := by
+  rw [usesTermList.eq_2]
+
+@[simp] theorem usesBindingList_nil (env : SigEnv) (theory) :
+    env.usesBindingList theory [] = false := by
+  rw [usesBindingList.eq_1]
+
+@[simp] theorem usesBindingList_cons (env : SigEnv) (theory) (name : String)
+    (term : Term) (bindings : List (String × Term)) :
+    env.usesBindingList theory ((name, term) :: bindings) =
+      (env.usesTerm theory term || env.usesBindingList theory bindings) := by
+  rw [usesBindingList.eq_2]
 
 /-- Whether a function definition uses one modeled theory. -/
 @[reducible] def usesFunDef (env : SigEnv) (theory : Fin env.modeled.length)
@@ -141,66 +229,72 @@ that every accepted theory symbol has semantics. -/
     (theory : Fin env.modeled.length) : Bool :=
   commands.toList.any (env.usesCommand theory)
 
-@[simp] theorem current_usesIdent_int (identifier : Ident) :
-    currentEnv.usesIdent intId identifier = intContainsIdent identifier := by
+@[simp] theorem usesCommands_append (env : SigEnv)
+    (left right : Array Command) (theory : Fin env.modeled.length) :
+    env.usesCommands (left ++ right) theory =
+      (env.usesCommands left theory || env.usesCommands right theory) := by
+  simp [usesCommands]
+
+@[simp] theorem default_usesIdent_int (identifier : Ident) :
+    defaultSigEnv.usesIdent intId identifier = intContainsIdent identifier := by
   cases integer : intContainsIdent identifier
   · unfold usesIdent
-    cases found : currentEnv.identProvider identifier with
+    cases found : defaultSigEnv.identProvider identifier with
     | none => rfl
     | some provider =>
         cases provider with
         | core | syntaxOnly index => rfl
         | modeled index =>
             have present :=
-              (current_identProvider_modeled_iff identifier index).mp found
+              (default_identProvider_modeled_iff identifier index).mp found
             simp [integer] at present
   · have found :=
-      (current_identProvider_modeled_iff identifier intId).mpr integer
+      (default_identProvider_modeled_iff identifier intId).mpr integer
     simp [usesIdent, found, selects]
 
-@[simp] theorem current_usesSortCtor_int (identifier : Ident) :
-    currentEnv.usesSortCtor intId identifier =
+@[simp] theorem default_usesSortCtor_int (identifier : Ident) :
+    defaultSigEnv.usesSortCtor intId identifier =
       decide (identifier = .symb "Int") := by
   cases isInt : decide (identifier = .symb "Int")
   · unfold usesSortCtor
-    cases found : currentEnv.sortProvider identifier with
+    cases found : defaultSigEnv.sortProvider identifier with
     | none => rfl
     | some provider =>
         cases provider with
         | core | syntaxOnly index => rfl
         | modeled index =>
             have equal :=
-              (current_sortProvider_modeled_iff identifier index).mp found
+              (default_sortProvider_modeled_iff identifier index).mp found
             have : decide (identifier = .symb "Int") = true := by
               simp [equal]
             simp [isInt] at this
   · have equal : identifier = .symb "Int" := of_decide_eq_true isInt
     subst identifier
     have found :=
-      (current_sortProvider_modeled_iff (.symb "Int") intId).mpr rfl
+      (default_sortProvider_modeled_iff (.symb "Int") intId).mpr rfl
     simp [usesSortCtor, found, selects]
 
-@[simp] theorem current_usesLiteral_int (literal : Literal) :
-    currentEnv.usesLiteral intId literal =
+@[simp] theorem default_usesLiteral_int (literal : Literal) :
+    defaultSigEnv.usesLiteral intId literal =
       match literal with
       | .num _ => true
       | _ => false := by
   cases literal with
   | num value =>
       have found :=
-        (current_literalProvider_modeled_iff (.num value) intId).mpr
+        (default_literalProvider_modeled_iff (.num value) intId).mpr
           ⟨value, rfl⟩
       simp [usesLiteral, found, selects]
   | str value | bitvec width value | bool value =>
       unfold usesLiteral
-      cases found : currentEnv.literalProvider _ with
+      cases found : defaultSigEnv.literalProvider _ with
       | none => rfl
       | some provider =>
           cases provider with
           | core | syntaxOnly index => rfl
           | modeled index =>
               have witness :=
-                (current_literalProvider_modeled_iff _ index).mp found
+                (default_literalProvider_modeled_iff _ index).mp found
               rcases witness with ⟨value, equal⟩
               contradiction
 

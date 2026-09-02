@@ -93,9 +93,9 @@ def ClauseEvals (model : Crush.SMT.Model)
     BoolEvals model environment fields fieldValues ∧
     (tester = true → fieldValues.all id = true)
 
-/-- Exact Boolean result of one tester/selector clause. Unlike `ClauseEvals`,
-this relation also describes values outside the guarded image, which is needed
-to prove the graph equation of the emitted recursive definition. -/
+/-- Exact Boolean result of one tester/selector clause, including values
+outside the guarded image. This total relation supports the graph equation of
+the emitted recursive definition. -/
 def ClauseRuns (model : Crush.SMT.Model)
     (environment : List model.Value) (ctor : String)
     (fields : Array Crush.SMT.Term) (value : Crush.SMT.Term)

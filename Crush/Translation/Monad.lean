@@ -270,10 +270,9 @@ structure TranslateState where
   facts      : Array FactSource := #[]
   /-- Counter for fresh Skolem/e-vars. -/
   nextFresh  : Nat := 0
-  /-- Lean fvars currently bound by an SMT quantifier, mapped to their SMT
-      variable name. Consulted by the translator before treating an fvar as an
-      uninterpreted symbol, so quantified variables render as references rather
-      than fresh `declare-fun`s. -/
+  /-- Lean fvars currently bound by an SMT quantifier, mapped to their printable
+      SMT name. The command-emission boundary resolves these references to
+      de Bruijn indices before retaining the command. -/
   boundVars  : Std.HashMap FVarId String := {}
   /-- Higher-order encoding bookkeeping (`Translation/HOEncoding.lean`).
 
@@ -335,13 +334,14 @@ def run {α : Type} (cfg : Config) (x : TranslateM α) : MetaM (α × TranslateS
 
 @[inline] def getConfig : TranslateM Config := return (← get).cfg
 
-/-- Emit a command into the running script. -/
+/-- Emit a command in the canonical de Bruijn binder representation. -/
 def emitCommand (c : SMT.Command) : TranslateM Unit :=
-  modify fun s => { s with commands := s.commands.push c }
+  modify fun s => { s with commands := s.commands.push c.resolveBinders }
 
 /-- Emit an encoded command only when all symbols determined by its witness have
-already been recorded in the global uniqueness trace. The command, encoding,
-and dependency link are appended atomically. -/
+already been recorded in the global uniqueness trace. The retained command is
+binder-canonicalized; its printed SMT-LIB form agrees with the syntax witness.
+The command, encoding, and dependency link are appended atomically. -/
 def emitAllocatedCommand
     (encoding : CommandEncoding) : TranslateM Unit := do
   let symbols := encoding.allocatedSymbols
@@ -351,7 +351,7 @@ def emitAllocatedCommand
     let index := state.commandEncodings.size
     let commandIndex := state.commands.size
     modify fun s => { s with
-      commands := s.commands.push encoding.command
+      commands := s.commands.push encoding.command.resolveBinders
       commandEncodings := s.commandEncodings.push encoding
       commandAllocLinks := s.commandAllocLinks.push {
         encodingIndex := index
@@ -432,7 +432,7 @@ def emitDatatypeDecl
     if namesNodup : (names.toList ++ state.datatypeDeclNames.names).Nodup then
       modify fun current => {
         current with
-          commands := current.commands.push declaration.command
+          commands := current.commands.push declaration.command.resolveBinders
           datatypeDecls := current.datatypeDecls.push declaration
           datatypeDeclIndices :=
             current.datatypeDeclIndices.push commandIndex

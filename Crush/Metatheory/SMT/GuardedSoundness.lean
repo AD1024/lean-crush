@@ -21,7 +21,7 @@ variable {symbols : FO.SymbolFamily}
 Omitting syntax is allowed only when every target value is guarded. -/
 structure GuardedEncoding.Semantics (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop) where
   omitted : ∀ sort value (environment : List (Value target)),
     guarding.guard sort (.bvar 0) = Option.none → guard sort value
@@ -35,7 +35,7 @@ structure GuardedEncoding.Semantics (guarding : GuardedEncoding symbols)
 This is the form needed by datatype guards applied to selector terms. -/
 structure GuardedEncoding.TermSemantics (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop) where
   omitted : ∀ sort value, guarding.guard sort value = Option.none →
     ∀ semantic, guard sort semantic
@@ -51,7 +51,7 @@ contract. This is the composition boundary between individual guard components
 and the complete source-to-target carrier relation. -/
 theorem GuardedEncoding.TermSemantics.congr {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph guarding.encoding target}
+    {extra : SourceExt guarding.encoding target}
     {left right : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (semantics : guarding.TermSemantics target extra left)
     (equal : ∀ sort value, left sort value ↔ right sort value) :
@@ -71,7 +71,7 @@ theorem GuardedEncoding.TermSemantics.congr {guarding : GuardedEncoding symbols}
 compositional contract. -/
 theorem GuardedEncoding.TermSemantics.toSemantics {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph guarding.encoding target}
+    {extra : SourceExt guarding.encoding target}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (semantics : guarding.TermSemantics target extra guard) :
     guarding.Semantics target extra guard where
@@ -86,7 +86,7 @@ theorem GuardedEncoding.TermSemantics.toSemantics {guarding : GuardedEncoding sy
 /-- The ordinary encoder satisfies the guarded contract with the trivial
 predicate, so it remains the zero-cost specialization of the same semantics. -/
 theorem GuardedEncoding.none_semantics (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target) :
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target) :
     (GuardedEncoding.none encoding).Semantics target extra (fun _ _ => True) where
   omitted := by intros; trivial
   encoded := by
@@ -94,7 +94,7 @@ theorem GuardedEncoding.none_semantics (encoding : Encoding symbols)
     simp [GuardedEncoding.none] at impossible
 
 theorem GuardedEncoding.none_termSemantics (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target) :
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target) :
     (GuardedEncoding.none encoding).TermSemantics target extra (fun _ _ => True) where
   omitted := by intros; trivial
   encoded := by
@@ -104,7 +104,7 @@ theorem GuardedEncoding.none_termSemantics (encoding : Encoding symbols)
 /-- One typed raw term to which a compositional guard may be applied. -/
 structure GuardInput (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     (environment : List (Value target)) where
   sort : FO.FOSort
   raw : Crush.SMT.Term
@@ -117,7 +117,7 @@ namespace GuardInput
 /-- Apply one encoded unary family symbol to an already evaluated argument. -/
 def ofUnary {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph guarding.encoding target}
+    {extra : SourceExt guarding.encoding target}
     {environment : List (Value target)} {domain result : FO.FOSort}
     (symbol : symbols { args := [domain], result := result })
     (raw : Crush.SMT.Term) (value : domain.Denote target.carriers)
@@ -130,7 +130,7 @@ def ofUnary {guarding : GuardedEncoding symbols}
   value := target.symbol symbol value
   evaluated := by
     apply Crush.SMT.Eval.symbol
-      (guarding.encoding.ident_fresh symbol).notLogicalBuiltin
+      (guarding.encoding.ident_fresh symbol).notLogical
     · exact Crush.SMT.EvalList.cons evaluated .nil
     · apply Or.inl
       refine ⟨{ args := [domain], result := result }, symbol, rfl, ?_⟩
@@ -155,7 +155,7 @@ noncomputable def truth (proposition : Prop) : Bool :=
 
 /-- Retain exactly the guard conditions emitted for a typed input list. -/
 def terms {guarding : GuardedEncoding symbols} {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph guarding.encoding target}
+    {extra : SourceExt guarding.encoding target}
     {environment : List (Value target)}
     (inputs : List (GuardInput guarding target extra environment)) :
     Array Crush.SMT.Term :=
@@ -165,7 +165,7 @@ def terms {guarding : GuardedEncoding symbols} {target : FO.FamilyModel symbols}
 /-- Boolean denotations aligned with `terms`. -/
 noncomputable def results {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph guarding.encoding target}
+    {extra : SourceExt guarding.encoding target}
     {environment : List (Value target)}
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
     (inputs : List (GuardInput guarding target extra environment)) : List Bool := by
@@ -175,7 +175,7 @@ noncomputable def results {guarding : GuardedEncoding symbols}
 
 private theorem typed_decide {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph guarding.encoding target} (proposition : Prop) :
+    {extra : SourceExt guarding.encoding target} (proposition : Prop) :
     (Value.typed .bool proposition : Value target) =
       (modelWith guarding.encoding target extra).bool (truth proposition) := by
   classical
@@ -187,7 +187,7 @@ private theorem typed_decide {guarding : GuardedEncoding symbols}
 used by `wfBody`. -/
 theorem evals {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph guarding.encoding target}
+    {extra : SourceExt guarding.encoding target}
     {environment : List (Value target)}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (semantics : guarding.TermSemantics target extra guard)
@@ -218,7 +218,7 @@ theorem evals {guarding : GuardedEncoding symbols}
 the compositional contract requires every omitted guard to be total. -/
 theorem results_all {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph guarding.encoding target}
+    {extra : SourceExt guarding.encoding target}
     {environment : List (Value target)}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (semantics : guarding.TermSemantics target extra guard)
@@ -245,7 +245,7 @@ theorem results_all {guarding : GuardedEncoding symbols}
 
 @[simp] theorem results_length {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph guarding.encoding target}
+    {extra : SourceExt guarding.encoding target}
     {environment : List (Value target)}
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
     (inputs : List (GuardInput guarding target extra environment)) :
@@ -265,7 +265,7 @@ end GuardInput
 compositional guards on its selector inputs. -/
 theorem Datatype.ClauseRuns.ofInputs {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph guarding.encoding target}
+    {extra : SourceExt guarding.encoding target}
     {environment : List (Value target)}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (semantics : guarding.TermSemantics target extra guard)
@@ -288,7 +288,7 @@ theorem Datatype.ClauseRuns.ofInputs {guarding : GuardedEncoding symbols}
 /-- One constructor clause assembled from its tester and typed selector inputs. -/
 structure GuardPart (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     (environment : List (Value target)) (valueTerm : Crush.SMT.Term) where
   name : String
   tester : Prop
@@ -301,7 +301,7 @@ namespace GuardPart
 
 /-- Semantic tester-implies-field contract represented by a clause list. -/
 def Holds {guarding : GuardedEncoding symbols} {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph guarding.encoding target}
+    {extra : SourceExt guarding.encoding target}
     {environment : List (Value target)} {valueTerm : Crush.SMT.Term}
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
     (clauses : List (GuardPart guarding target extra environment valueTerm)) : Prop :=
@@ -309,7 +309,7 @@ def Holds {guarding : GuardedEncoding symbols} {target : FO.FamilyModel symbols}
     ∀ input ∈ clause.fields, guard input.sort input.value
 
 def parts {guarding : GuardedEncoding symbols} {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph guarding.encoding target}
+    {extra : SourceExt guarding.encoding target}
     {environment : List (Value target)} {valueTerm : Crush.SMT.Term}
     (clauses : List (GuardPart guarding target extra environment valueTerm)) :
     Array (String × Array Crush.SMT.Term) :=
@@ -318,7 +318,7 @@ def parts {guarding : GuardedEncoding symbols} {target : FO.FamilyModel symbols}
 
 noncomputable def results {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph guarding.encoding target}
+    {extra : SourceExt guarding.encoding target}
     {environment : List (Value target)} {valueTerm : Crush.SMT.Term}
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
     (clauses : List (GuardPart guarding target extra environment valueTerm)) :
@@ -333,7 +333,7 @@ noncomputable def results {guarding : GuardedEncoding symbols}
 evaluator, with the same empty-field filtering as the Crush translator. -/
 theorem runs {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph guarding.encoding target}
+    {extra : SourceExt guarding.encoding target}
     {environment : List (Value target)} {valueTerm : Crush.SMT.Term}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (semantics : guarding.TermSemantics target extra guard)
@@ -362,7 +362,7 @@ tester implies all semantic field guards. Clauses omitted because every field
 guard is total are recovered through `TermSemantics.omitted`. -/
 theorem results_all {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph guarding.encoding target}
+    {extra : SourceExt guarding.encoding target}
     {environment : List (Value target)} {valueTerm : Crush.SMT.Term}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (semantics : guarding.TermSemantics target extra guard)
@@ -433,7 +433,7 @@ theorem results_all {guarding : GuardedEncoding symbols}
 tester-implies-field proposition. -/
 theorem eval {guarding : GuardedEncoding symbols}
     {target : FO.FamilyModel symbols}
-    {extra : ExtraGraph guarding.encoding target}
+    {extra : SourceExt guarding.encoding target}
     {environment : List (Value target)} {valueTerm : Crush.SMT.Term}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (semantics : guarding.TermSemantics target extra guard)
@@ -468,7 +468,7 @@ body were assembled; interpreted arithmetic and datatype predicates can
 therefore share the same final model and the same command theorem. -/
 theorem wfDef_holds_core {encoding : Encoding symbols}
     {target : FO.FamilyModel symbols}
-    (extra : ExtraGraph encoding target)
+    (extra : SourceExt encoding target)
     (functional : Crush.SMT.ApplyUnique (modelWith encoding target extra))
     {sort : FO.FOSort} {name binder : String}
     {guard : sort.Denote target.carriers → Prop}
@@ -510,8 +510,8 @@ structure UnaryGuards (encoding : Encoding symbols)
   ident_injective : ∀ {left right identifier},
     ident left = some identifier → ident right = some identifier →
       left = right
-  notBuiltin : ∀ sort identifier, ident sort = some identifier →
-    Crush.SMT.NotBuiltin identifier
+  notLogical : ∀ sort identifier, ident sort = some identifier →
+    Crush.SMT.NotLogical identifier
   sourceFresh : ∀ sort identifier, ident sort = some identifier →
     ∀ {decl : FO.SymbolDecl} (symbol : symbols decl),
       identifier ≠ encoding.ident symbol
@@ -529,7 +529,7 @@ def guarding {encoding : Encoding symbols} {target : FO.FamilyModel symbols}
 /-- Canonical graph of the fresh unary guard predicates. -/
 noncomputable def extra {encoding : Encoding symbols} {target : FO.FamilyModel symbols}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
-    (guards : UnaryGuards encoding target guard) : ExtraGraph encoding target where
+    (guards : UnaryGuards encoding target guard) : SourceExt encoding target where
   apply := fun identifier values output =>
     ∃ sort value, guards.ident sort = some identifier ∧
       values = [.typed sort value] ∧
@@ -547,7 +547,7 @@ graphs. -/
 def Fresh {encoding : Encoding symbols} {target : FO.FamilyModel symbols}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (guards : UnaryGuards encoding target guard)
-    (base : ExtraGraph encoding target) : Prop :=
+    (base : SourceExt encoding target) : Prop :=
   ∀ {sort identifier}, guards.ident sort = some identifier →
     ∀ values output, ¬base.apply identifier values output
 
@@ -557,7 +557,7 @@ noncomputable def over {encoding : Encoding symbols}
     {target : FO.FamilyModel symbols}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (guards : UnaryGuards encoding target guard)
-    (base : ExtraGraph encoding target) : ExtraGraph encoding target where
+    (base : SourceExt encoding target) : SourceExt encoding target where
   apply := fun identifier values output =>
     base.apply identifier values output ∨ guards.extra.apply identifier values output
   source_fresh := by
@@ -573,7 +573,7 @@ theorem applyUnique_over {encoding : Encoding symbols}
     {target : FO.FamilyModel symbols}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (guards : UnaryGuards encoding target guard)
-    (base : ExtraGraph encoding target)
+    (base : SourceExt encoding target)
     (baseUnique : Crush.SMT.ApplyUnique (modelWith encoding target base))
     (fresh : guards.Fresh base) :
     Crush.SMT.ApplyUnique (modelWith encoding target (guards.over base)) := by
@@ -624,7 +624,7 @@ theorem encoded_over {encoding : Encoding symbols}
     {target : FO.FamilyModel symbols}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (guards : UnaryGuards encoding target guard)
-    (base : ExtraGraph encoding target)
+    (base : SourceExt encoding target)
     {sort : FO.FOSort} {raw : Crush.SMT.Term}
     {value : sort.Denote target.carriers} {environment : List (Value target)}
     {condition : Crush.SMT.Term}
@@ -639,7 +639,7 @@ theorem encoded_over {encoding : Encoding symbols}
   | some identifier =>
       simp only [identEq, Option.map_some] at guardEq
       cases guardEq
-      apply Crush.SMT.Eval.symbol (guards.notBuiltin sort identifier identEq)
+      apply Crush.SMT.Eval.symbol (guards.notLogical sort identifier identEq)
       · exact Crush.SMT.EvalList.cons rawEval .nil
       · exact Or.inr (Or.inr ⟨sort, value, identEq, rfl, rfl⟩)
 
@@ -649,7 +649,7 @@ theorem termSemantics_over {encoding : Encoding symbols}
     {target : FO.FamilyModel symbols}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (guards : UnaryGuards encoding target guard)
-    (base : ExtraGraph encoding target)
+    (base : SourceExt encoding target)
     (omitted : ∀ sort, guards.ident sort = none →
       ∀ value, guard sort value) :
     guards.guarding.TermSemantics target (guards.over base) guard where
@@ -668,7 +668,7 @@ theorem hasType_over {encoding : Encoding symbols}
     {target : FO.FamilyModel symbols}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (guards : UnaryGuards encoding target guard)
-    (base : ExtraGraph encoding target)
+    (base : SourceExt encoding target)
     (baseUnique : Crush.SMT.ApplyUnique (modelWith encoding target base))
     (fresh : guards.Fresh base)
     {sort : FO.FOSort} {identifier : Crush.SMT.Ident}
@@ -696,7 +696,7 @@ theorem applies_iff_over {encoding : Encoding symbols}
     {target : FO.FamilyModel symbols}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (guards : UnaryGuards encoding target guard)
-    (base : ExtraGraph encoding target) (fresh : guards.Fresh base)
+    (base : SourceExt encoding target) (fresh : guards.Fresh base)
     {sort : FO.FOSort} {identifier : Crush.SMT.Ident}
     (identEq : guards.ident sort = some identifier)
     (value : sort.Denote target.carriers) (output : Value target) :
@@ -787,7 +787,7 @@ theorem termSemantics {encoding : Encoding symbols}
     | some identifier =>
         simp only [identEq, Option.map_some] at guardEq
         cases guardEq
-        apply Crush.SMT.Eval.symbol (guards.notBuiltin sort identifier identEq)
+        apply Crush.SMT.Eval.symbol (guards.notLogical sort identifier identEq)
         · exact Crush.SMT.EvalList.cons rawEval .nil
         · exact Or.inr ⟨sort, value, identEq, rfl, rfl⟩
 
@@ -939,7 +939,7 @@ theorem applyValues_guardArgValues (target : FO.FamilyModel symbols)
 
 private theorem asTrue (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     {environment : List (Value target)} {term : STerm} {proposition : Prop}
     (evaluated : Crush.SMT.Eval
       (modelWith guarding.encoding target extra) environment term
@@ -951,7 +951,7 @@ private theorem asTrue (guarding : GuardedEncoding symbols)
 
 private theorem asFalse (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     {environment : List (Value target)} {term : STerm} {proposition : Prop}
     (evaluated : Crush.SMT.Eval
       (modelWith guarding.encoding target extra) environment term
@@ -963,7 +963,7 @@ private theorem asFalse (guarding : GuardedEncoding symbols)
 
 private theorem boolNe (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target) :
+    (extra : SourceExt guarding.encoding target) :
     (modelWith guarding.encoding target extra).bool true ≠
       (modelWith guarding.encoding target extra).bool false := by
   exact fun equal => Bool.noConfusion
@@ -971,7 +971,7 @@ private theorem boolNe (guarding : GuardedEncoding symbols)
 
 private theorem evalNot (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     {environment : List (Value target)} {term : STerm} {body : Prop}
     (evaluated : Crush.SMT.Eval
       (modelWith guarding.encoding target extra) environment term
@@ -988,7 +988,7 @@ private theorem evalNot (guarding : GuardedEncoding symbols)
 
 private theorem evalAnd (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     {environment : List (Value target)} {left right : STerm}
     {leftValue rightValue : Prop}
     (leftEval : Crush.SMT.Eval
@@ -1030,7 +1030,7 @@ private theorem evalAnd (guarding : GuardedEncoding symbols)
 
 private theorem evalOr (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     {environment : List (Value target)} {left right : STerm}
     {leftValue rightValue : Prop}
     (leftEval : Crush.SMT.Eval
@@ -1072,7 +1072,7 @@ private theorem evalOr (guarding : GuardedEncoding symbols)
 
 private theorem evalImp (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     {environment : List (Value target)} {left right : STerm}
     {leftValue rightValue : Prop}
     (leftEval : Crush.SMT.Eval
@@ -1102,7 +1102,7 @@ private theorem evalImp (guarding : GuardedEncoding symbols)
 
 private theorem evalIff (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     {environment : List (Value target)} {left right : STerm}
     {leftValue rightValue : Prop}
     (leftEval : Crush.SMT.Eval
@@ -1135,7 +1135,7 @@ private theorem evalIff (guarding : GuardedEncoding symbols)
 
 private theorem guardImpEval (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
     (semantics : guarding.Semantics target extra guard)
     {sort : FO.FOSort} (value : sort.Denote target.carriers)
@@ -1162,7 +1162,7 @@ private theorem guardImpEval (guarding : GuardedEncoding symbols)
 
 private theorem guardAndEval (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
     (semantics : guarding.Semantics target extra guard)
     {sort : FO.FOSort} (value : sort.Denote target.carriers)
@@ -1189,7 +1189,7 @@ private theorem guardAndEval (guarding : GuardedEncoding symbols)
 
 private def GuardTermValid (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
     {context : FO.Context} {sort : FO.FOSort}
     (source : FO.FamilyTerm symbols context sort) : Prop :=
@@ -1201,7 +1201,7 @@ private def GuardTermValid (guarding : GuardedEncoding symbols)
 
 private def GuardArgsValid (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
     {context : FO.Context} {sorts : List FO.FOSort}
     (source : FO.FamilyArgs symbols context sorts) : Prop :=
@@ -1215,7 +1215,7 @@ private def GuardArgsValid (guarding : GuardedEncoding symbols)
 denotation in the shared extended model. -/
 theorem guardTerm_eval (guarding : GuardedEncoding symbols)
     (target : FO.FamilyModel symbols)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
     (semantics : guarding.Semantics target extra guard)
     {context : FO.Context} {sort : FO.FOSort}
@@ -1233,7 +1233,7 @@ theorem guardTerm_eval (guarding : GuardedEncoding symbols)
         Crush.SMT.Eval.bvar (related.lookup target ref))
     (symbol := fun symbol args argsIH valuation environment related => by
       apply Crush.SMT.Eval.symbol
-        (guarding.encoding.ident_fresh symbol).notLogicalBuiltin
+        (guarding.encoding.ident_fresh symbol).notLogical
         (argsIH valuation environment related)
       apply Or.inl
       refine ⟨_, symbol, rfl, ?_⟩
@@ -1399,7 +1399,7 @@ theorem guardTerm_rel_eval (guarding : GuardedEncoding symbols)
     (source target : FO.FamilyModel symbols)
     (relation : FO.CarrierRel source.carriers target.carriers)
     (models : FO.ModelRel source target relation)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     (semantics : guarding.Semantics target extra
       (fun sort => (relation sort).guard))
     {context : FO.Context} {sort : FO.FOSort}
@@ -1421,7 +1421,7 @@ guarded theorem. -/
 theorem guardTerm_lift_eval (guarding : GuardedEncoding symbols)
     (source : FO.FamilyModel symbols) (target : FO.Carriers)
     (relation : FO.CarrierRel source.carriers target)
-    (extra : ExtraGraph guarding.encoding (source.lift target relation))
+    (extra : SourceExt guarding.encoding (source.lift target relation))
     (semantics : guarding.Semantics (source.lift target relation) extra
       (fun sort => (relation sort).guard))
     {context : FO.Context} {sort : FO.FOSort}
@@ -1447,7 +1447,7 @@ theorem guardedAssertions_valid (guarding : GuardedEncoding symbols)
     (source target : FO.FamilyModel symbols)
     (relation : FO.CarrierRel source.carriers target.carriers)
     (models : FO.ModelRel source target relation)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     (semantics : guarding.Semantics target extra
       (fun sort => (relation sort).guard))
     (theory : FO.FamilyTheory symbols) (valid : source.SatisfiesTheory theory) :
@@ -1493,7 +1493,7 @@ theorem guarded_valid (guarding : GuardedEncoding symbols)
     (relation : FO.CarrierRel source.carriers target.carriers)
     (models : FO.ModelRel source target relation)
     (valid : source.SatisfiesTheory theory)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     (semantics : guarding.Semantics target extra
       (fun sort => (relation sort).guard))
     (nativeValid : (modelWith guarding.encoding target extra).SatisfiesCommands
@@ -1525,7 +1525,7 @@ theorem guarded_lift (guarding : GuardedEncoding symbols)
     (relation : FO.CarrierRel source.carriers target.carriers)
     (models : FO.ModelRel source target relation)
     (valid : source.SatisfiesTheory theory)
-    (extra : ExtraGraph guarding.encoding target)
+    (extra : SourceExt guarding.encoding target)
     (semantics : guarding.Semantics target extra
       (fun sort => (relation sort).guard))
     (nativeValid : (modelWith guarding.encoding target extra).SatisfiesCommands

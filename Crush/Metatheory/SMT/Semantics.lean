@@ -30,238 +30,6 @@ structure Model where
   literalTyped : ∀ lit, inSort (Literal.sort lit) (literal lit)
   apply : Ident → List Value → Value → Prop
 
-/-- The standard interpretations needed by the modeled SMT fragment.
-
-The raw `Model` structure is intentionally useful for intermediate
-countermodel constructions, but by itself it is not an SMT-LIB model: its
-Boolean carrier may contain extra values, numerals may collapse, and `>=` may
-be an arbitrary graph. `Standard` closes exactly those degrees of freedom used
-by the SMT subset covered by the soundness theorem. Other SMT theories remain outside
-`Command.InFragment` until an analogous interpretation is added here. -/
-structure Model.IntInterp (model : Model) where
-  int : Int → model.Value
-  int_typed : ∀ value, model.inSort intSort (int value)
-  int_injective : Function.Injective int
-  int_exhaustive : ∀ value, model.inSort intSort value →
-    ∃ integer, value = int integer
-  numeral : ∀ value : Nat, model.literal (.num value) = int value
-  ge : ∀ left right output,
-    model.apply (.symb ">=") [int left, int right] output ↔
-      (right ≤ left ∧ output = model.bool true) ∨
-        (¬right ≤ left ∧ output = model.bool false)
-
-/-- A raw model is standard for the currently modeled SMT theories when its
-Boolean carrier is exactly two-valued, it carries a standard integer
-interpretation, and every identifier graph is single-valued. `Nonempty` keeps
-this predicate proof-valued while retaining the integer embedding needed to
-state the laws. The integer clause is unconditional even for a command array
-that does not mention integers; `standardModel_exists` below proves that this
-global model class is inhabited. An induced model built from an FO model uses
-the separate, model-dependent `SMT.IntView` premise to establish this clause. -/
-structure Model.Standard (model : Model) : Prop where
-  bool_exhaustive : ∀ value, model.inSort boolSort value →
-    ∃ boolean, value = model.bool boolean
-  integer : Nonempty model.IntInterp
-  apply_unique : ∀ symbol values left right,
-    model.apply symbol values left → model.apply symbol values right →
-      left = right
-
-/-! ## Command-indexed interpreted-theory requirements -/
-
-mutual
-  /-- Whether a concrete SMT sort contains the built-in integer sort. Compound
-  sorts are traversed because an integer carrier can occur beneath another sort
-  constructor, for example as an array index or datatype field. -/
-  @[reducible] def SSort.usesInt : SSort → Bool
-    | .bvar _ => false
-    | .app (.symb "Int") arguments =>
-        true || SSort.listUsesInt arguments.toList
-    | .app _ arguments =>
-        SSort.listUsesInt arguments.toList
-  termination_by sort => sort.structuralSize
-  decreasing_by all_goals simp [SSort.structuralSize] <;> omega
-
-  @[reducible] def SSort.listUsesInt : List SSort → Bool
-    | [] => false
-    | sort :: sorts =>
-        sort.usesInt ||
-          SSort.listUsesInt sorts
-  termination_by sorts => SSort.listStructuralSize sorts
-  decreasing_by all_goals simp [SSort.listStructuralSize] <;> omega
-end
-
-@[simp] theorem SSort.usesInt_boolSort :
-    boolSort.usesInt = false := by
-  rw [SSort.usesInt.eq_def]
-  simp [boolSort, SSort.listUsesInt.eq_def]
-
-@[simp] theorem SSort.listUsesInt_nil :
-    SSort.listUsesInt [] = false := by
-  rw [SSort.listUsesInt.eq_def]
-
-@[simp] theorem SSort.listUsesInt_cons
-    (sort : SSort) (sorts : List SSort) :
-    SSort.listUsesInt (sort :: sorts) =
-      (sort.usesInt ||
-        SSort.listUsesInt sorts) := by
-  rw [SSort.listUsesInt.eq_def]
-
-mutual
-  /-- Whether a concrete term uses syntax whose SMT-LIB meaning depends on the
-  standard integer carrier. Explicit sorts are inspected at binders; numerals
-  and the currently modeled integer comparison are inspected at term nodes. -/
-  @[reducible] def Term.usesInt : Term → Bool
-    | .lit (.num _) => true
-    | .lit _ | .bvar _ => false
-    | .app (.symb ">=") arguments =>
-        true || Term.listUsesInt arguments.toList
-    | .app _ arguments =>
-        Term.listUsesInt arguments.toList
-    | .letE bindings body =>
-        Term.bindingListUsesInt bindings.toList ||
-          body.usesInt
-    | .forallE binders body | .existsE binders body | .lam binders body =>
-        SSort.listUsesInt (binders.toList.map (·.2)) ||
-          body.usesInt
-    | .annot body _ => body.usesInt
-  termination_by term => term.structuralSize
-  decreasing_by all_goals simp [Term.structuralSize] <;> omega
-
-  @[reducible] def Term.listUsesInt : List Term → Bool
-    | [] => false
-    | term :: terms =>
-        term.usesInt ||
-          Term.listUsesInt terms
-  termination_by terms => Term.listStructuralSize terms
-  decreasing_by all_goals simp [Term.listStructuralSize] <;> omega
-
-  @[reducible] def Term.bindingListUsesInt :
-      List (String × Term) → Bool
-    | [] => false
-    | (_, term) :: bindings =>
-        term.usesInt ||
-          Term.bindingListUsesInt bindings
-  termination_by bindings => Term.bindingListStructuralSize bindings
-  decreasing_by all_goals simp [Term.bindingListStructuralSize] <;> omega
-
-end
-
-@[simp] theorem Term.usesInt_bvar (index : Nat) :
-    (Term.bvar index).usesInt = false := by
-  rw [Term.usesInt.eq_def]
-
-@[simp] theorem Term.usesInt_app_integerComparison
-    (arguments : Array Term) :
-    (Term.app (.symb ">=") arguments).usesInt = true := by
-  rw [Term.usesInt.eq_def]
-  simp
-
-@[simp] theorem Term.usesInt_app_of_ne
-    (identifier : Ident) (arguments : Array Term)
-    (notIntegerComparison : identifier ≠ .symb ">=") :
-    (Term.app identifier arguments).usesInt =
-      Term.listUsesInt arguments.toList := by
-  simp only [Term.usesInt.eq_def]
-
-@[simp] theorem Term.usesInt_forallE
-    (binders : Array (String × SSort)) (body : Term) :
-    (Term.forallE binders body).usesInt =
-      (SSort.listUsesInt (binders.toList.map (·.2)) ||
-        body.usesInt) := by
-  rw [Term.usesInt.eq_def]
-
-@[simp] theorem Term.usesInt_existsE
-    (binders : Array (String × SSort)) (body : Term) :
-    (Term.existsE binders body).usesInt =
-      (SSort.listUsesInt (binders.toList.map (·.2)) ||
-        body.usesInt) := by
-  rw [Term.usesInt.eq_def]
-
-@[simp] theorem Term.listUsesInt_nil :
-    Term.listUsesInt [] = false := by
-  rw [Term.listUsesInt.eq_def]
-
-@[simp] theorem Term.listUsesInt_cons
-    (term : Term) (terms : List Term) :
-    Term.listUsesInt (term :: terms) =
-      (term.usesInt ||
-        Term.listUsesInt terms) := by
-  rw [Term.listUsesInt.eq_def]
-
-@[simp] theorem Term.usesInt_annot
-    (body : Term) (attributes : Array Attr) :
-    (Term.annot body attributes).usesInt =
-      body.usesInt := by
-  rw [Term.usesInt.eq_def]
-
-@[reducible] def FunDef.usesInt (definition : FunDef) : Bool :=
-  SSort.listUsesInt (definition.args.toList.map (·.2)) ||
-    definition.resSort.usesInt ||
-      definition.body.usesInt
-
-@[reducible] def CtorDecl.usesInt (constructor : CtorDecl) : Bool :=
-  SSort.listUsesInt (constructor.selDecls.toList.map (·.2))
-
-@[reducible] def DatatypeDecl.usesInt
-    (datatype : DatatypeDecl) : Bool :=
-  datatype.ctors.toList.any CtorDecl.usesInt
-
-/-- Whether one command requires the standard integer carrier. The test is
-conservative on malformed syntax; `CommandsWellTyped` separately establishes
-that accepted commands use only the modeled integer operations. -/
-@[reducible] def Command.usesInt : Command → Bool
-  | .declFun _ arguments result =>
-      SSort.listUsesInt arguments.toList ||
-        result.usesInt
-  | .defFun definition => definition.usesInt
-  | .defFunsRec definitions =>
-      definitions.toList.any FunDef.usesInt
-  | .declDatatypes datatypes =>
-      datatypes.toList.any fun (_, _, datatype) =>
-        datatype.usesInt
-  | .assert term => term.usesInt
-  | .setLogic _ | .setOption _ _ | .declSort _ _ | .checkSat |
-      .getModel | .getProof | .getUnsatCore | .echo _ | .exit => false
-
-/-- Whether any command requires standard integer semantics. -/
-@[reducible] def CommandsUseInt
-    (commands : Array Command) : Bool :=
-  commands.toList.any Command.usesInt
-
-/-- The standard laws needed for one concrete command array. Boolean
-two-valuedness and functional application are always required. The integer
-carrier is required exactly when integer syntax or an explicit `Int` sort
-occurs in that array. -/
-structure Model.StandardFor (model : Model) (commands : Array Command) : Prop where
-  bool_exhaustive : ∀ value, model.inSort boolSort value →
-    ∃ boolean, value = model.bool boolean
-  integer : CommandsUseInt commands = true →
-    Nonempty model.IntInterp
-  apply_unique : ∀ symbol values left right,
-    model.apply symbol values left → model.apply symbol values right →
-      left = right
-
-/-- A globally standard model is standard for every concrete command array. -/
-theorem Model.Standard.forCommands {model : Model} (standard : model.Standard)
-    (commands : Array Command) : model.StandardFor commands where
-  bool_exhaustive := standard.bool_exhaustive
-  integer := fun _ => standard.integer
-  apply_unique := standard.apply_unique
-
-/-- Transfer command-indexed standardness when two arrays require the same
-interpreted theories. -/
-theorem Model.StandardFor.congr {model : Model}
-    {left right : Array Command} (standard : model.StandardFor left)
-    (equal : CommandsUseInt left =
-      CommandsUseInt right) : model.StandardFor right where
-  bool_exhaustive := standard.bool_exhaustive
-  integer := by
-    intro required
-    apply standard.integer
-    rw [equal]
-    exact required
-  apply_unique := standard.apply_unique
-
 /-- A list of semantic values has the listed SMT sorts in the same order. -/
 inductive ValuesTyped (model : Model) : List SSort → List model.Value → Prop where
   | nil : ValuesTyped model [] []
@@ -308,146 +76,6 @@ def ApplyUnique (model : Model) : Prop :=
   ∀ symbol values left right,
     model.apply symbol values left → model.apply symbol values right →
       left = right
-
-/-- A standard SMT model interprets each function symbol as a function. -/
-theorem Model.Standard.applyUnique {model : Model} (standard : model.Standard) :
-    ApplyUnique model := standard.apply_unique
-
-/-- Command-indexed standard models retain globally functional application. -/
-theorem Model.StandardFor.applyUnique {model : Model} {commands : Array Command}
-    (standard : model.StandardFor commands) : ApplyUnique model :=
-  standard.apply_unique
-
-/-! ## A concrete standard-model witness -/
-
-/-- Values used only to show that the standard-model class is inhabited.
-Uninterpreted sorts receive one sort-indexed value. -/
-private inductive StandardWitnessValue where
-  | boolean : Bool → StandardWitnessValue
-  | integer : Int → StandardWitnessValue
-  | uninterpreted : SSort → StandardWitnessValue
-
-private def StandardWitnessValue.InSort (sort : SSort) :
-    StandardWitnessValue → Prop
-  | .boolean _ => sort = boolSort
-  | .integer _ => sort = intSort
-  | .uninterpreted declared =>
-      sort = declared ∧ sort ≠ boolSort ∧ sort ≠ intSort
-
-private def standardWitnessLiteral : Literal → StandardWitnessValue
-  | .bool value => .boolean value
-  | .num value => .integer value
-  | .str _ => .uninterpreted stringSort
-  | .bitvec width _ => .uninterpreted (bitvecSort width)
-
-private def standardWitnessApply (identifier : Ident)
-    (arguments : List StandardWitnessValue) (output : StandardWitnessValue) : Prop :=
-  ∃ left right : Int,
-    identifier = .symb ">=" ∧
-    arguments = [.integer left, .integer right] ∧
-    output = .boolean (decide (right ≤ left))
-
-/-- A concrete model of the standard Boolean and integer laws. Its only
-interpreted application symbol is integer `>=`: logical connectives and
-equality are handled directly by `Eval`, while arithmetic operators such as
-`+` and bit-vector operators are outside the SMT subset currently covered by
-the soundness theorem.
-Declarations add their own typed graphs in the model constructions used by the
-lowering proof. -/
-private def standardWitnessModel : Model where
-  Value := StandardWitnessValue
-  inSort := StandardWitnessValue.InSort
-  sortNonempty := by
-    intro sort
-    by_cases boolEq : sort = boolSort
-    · exact ⟨.boolean false, boolEq⟩
-    by_cases intEq : sort = intSort
-    · exact ⟨.integer 0, intEq⟩
-    · exact ⟨.uninterpreted sort, rfl, boolEq, intEq⟩
-  bool := .boolean
-  boolTyped := by intro value; rfl
-  boolInjective := by intro left right equal; injection equal
-  literal := standardWitnessLiteral
-  literalTyped := by
-    intro literal
-    cases literal <;>
-      simp [standardWitnessLiteral, StandardWitnessValue.InSort,
-        Literal.sort, stringSort, boolSort, intSort, bitvecSort]
-  apply := standardWitnessApply
-
-private theorem boolSort_ne_intSort : boolSort ≠ intSort := by
-  intro equal
-  change SSort.app (.symb "Bool") #[] =
-    SSort.app (.symb "Int") #[] at equal
-  injection equal with identifiersEqual
-  injection identifiersEqual with namesEqual
-  exact (by decide : ("Bool" : String) ≠ "Int") namesEqual
-
-/-- Standard SMT models exist independently of any command sequence. This
-rules out vacuity caused by an empty model class. -/
-theorem standardModel_exists : ∃ model : Model, model.Standard := by
-  refine ⟨standardWitnessModel, ?_⟩
-  refine {
-    bool_exhaustive := ?_
-    integer := ?_
-    apply_unique := ?_ }
-  · intro value typed
-    cases value with
-    | boolean value => exact ⟨value, rfl⟩
-    | integer value => exact False.elim (boolSort_ne_intSort typed)
-    | uninterpreted sort => simp [standardWitnessModel,
-        StandardWitnessValue.InSort] at typed
-  · refine ⟨{
-      int := .integer
-      int_typed := by intro value; rfl
-      int_injective := by intro left right equal; injection equal
-      int_exhaustive := ?_
-      numeral := by intro value; rfl
-      ge := ?_ }⟩
-    · intro value typed
-      cases value with
-      | boolean value => exact False.elim (boolSort_ne_intSort typed.symm)
-      | integer value => exact ⟨value, rfl⟩
-      | uninterpreted sort => simp [standardWitnessModel,
-          StandardWitnessValue.InSort] at typed
-    · intro left right output
-      constructor
-      · intro applied
-        change standardWitnessApply (.symb ">=")
-          [.integer left, .integer right] output at applied
-        rcases applied with
-          ⟨actualLeft, actualRight, identifierEq, argumentsEq, outputEq⟩
-        injection argumentsEq with leftEq restEq
-        injection restEq with rightEq tailEq
-        injection leftEq with leftIntEq
-        injection rightEq with rightIntEq
-        subst actualLeft
-        subst actualRight
-        by_cases ordered : right ≤ left
-        · exact Or.inl ⟨ordered,
-            by simpa [standardWitnessModel, ordered] using outputEq⟩
-        · exact Or.inr ⟨ordered,
-            by simpa [standardWitnessModel, ordered] using outputEq⟩
-      · intro standardOutput
-        change standardWitnessApply (.symb ">=")
-          [.integer left, .integer right] output
-        refine ⟨left, right, rfl, rfl, ?_⟩
-        rcases standardOutput with ⟨ordered, rfl⟩ | ⟨notOrdered, rfl⟩
-        · simp [standardWitnessModel, ordered]
-        · simp [standardWitnessModel, notOrdered]
-  · intro identifier arguments left right leftApplied rightApplied
-    rcases leftApplied with
-      ⟨leftArg, rightArg, identifierEq, argumentsEq, leftEq⟩
-    rcases rightApplied with
-      ⟨otherLeft, otherRight, otherIdentifierEq, otherArgumentsEq, rightEq⟩
-    rw [argumentsEq] at otherArgumentsEq
-    injection otherArgumentsEq with leftArgEq restEq
-    injection restEq with rightArgEq tailEq
-    injection leftArgEq with leftIntEq
-    injection rightArgEq with rightIntEq
-    subst otherLeft
-    subst otherRight
-    exact leftEq.trans rightEq.symm
 
 /-- Semantic values are the images of the listed Boolean values. -/
 inductive BoolValues (model : Model) : List model.Value → List Bool → Prop where
@@ -496,14 +124,14 @@ theorem BoolValues.unique {model : Model} {values : List model.Value}
 
 /-- Logical built-ins are interpreted by dedicated `Eval` constructors rather
 than the arbitrary user-symbol graph. -/
-inductive NotBuiltin : Ident → Prop where
+inductive NotLogical : Ident → Prop where
   | indexed (name : String) (indices : Array (String ⊕ Nat)) :
-      NotBuiltin (.indexed name indices)
+      NotLogical (.indexed name indices)
   | symb (name : String) :
       name ≠ "=" → name ≠ "not" → name ≠ "=>" →
-      name ≠ "and" → name ≠ "or" → NotBuiltin (.symb name)
+      name ≠ "and" → name ≠ "or" → NotLogical (.symb name)
 
-instance (identifier : Ident) : Decidable (NotBuiltin identifier) :=
+instance (identifier : Ident) : Decidable (NotLogical identifier) :=
   match identifier with
   | .indexed name indices => isTrue (.indexed name indices)
   | .symb name =>
@@ -518,54 +146,75 @@ instance (identifier : Ident) : Decidable (NotBuiltin identifier) :=
             | symb _ equal not implication conjunction disjunction =>
                 exact ⟨equal, not, implication, conjunction, disjunction⟩⟩
 
-private theorem NotBuiltin.ne_eq {symbol : Ident} (fresh : NotBuiltin symbol) :
+private theorem NotLogical.ne_eq {symbol : Ident} (fresh : NotLogical symbol) :
     symbol ≠ .symb "=" := by
   intro equal
   subst symbol
   cases fresh with
   | symb _ different _ _ _ _ => exact different rfl
 
-private theorem NotBuiltin.ne_not {symbol : Ident} (fresh : NotBuiltin symbol) :
+private theorem NotLogical.ne_not {symbol : Ident} (fresh : NotLogical symbol) :
     symbol ≠ .symb "not" := by
   intro equal
   subst symbol
   cases fresh with
   | symb _ _ different _ _ _ => exact different rfl
 
-private theorem NotBuiltin.ne_imp {symbol : Ident} (fresh : NotBuiltin symbol) :
+private theorem NotLogical.ne_imp {symbol : Ident} (fresh : NotLogical symbol) :
     symbol ≠ .symb "=>" := by
   intro equal
   subst symbol
   cases fresh with
   | symb _ _ _ different _ _ => exact different rfl
 
-private theorem NotBuiltin.ne_and {symbol : Ident} (fresh : NotBuiltin symbol) :
+private theorem NotLogical.ne_and {symbol : Ident} (fresh : NotLogical symbol) :
     symbol ≠ .symb "and" := by
   intro equal
   subst symbol
   cases fresh with
   | symb _ _ _ _ different _ => exact different rfl
 
-private theorem NotBuiltin.ne_or {symbol : Ident} (fresh : NotBuiltin symbol) :
+private theorem NotLogical.ne_or {symbol : Ident} (fresh : NotLogical symbol) :
     symbol ≠ .symb "or" := by
   intro equal
   subst symbol
   cases fresh with
   | symb _ _ _ _ _ different => exact different rfl
 
-/-- An identifier available to encoded source symbols: it is neither a
-logical built-in handled by dedicated evaluation rules nor the interpreted
-integer comparison constrained by `IntInterp`. -/
-structure NotReserved (identifier : Ident) : Prop where
-  notLogicalBuiltin : NotBuiltin identifier
-  ne_integerComparison : identifier ≠ .symb ">="
+/-- An identifier is fresh for a syntax registry when no registered theory
+provides it. This single condition reserves logical, modeled, and syntax-only
+operators without repeating their names in the metatheory. -/
+def FreshFor (env : Theory.SigEnv) (identifier : Ident) : Prop :=
+  env.isKnownIdent identifier = false
 
-instance (identifier : Ident) : Decidable (NotReserved identifier) :=
-  decidable_of_iff
-    (NotBuiltin identifier ∧ identifier ≠ .symb ">=")
-    ⟨fun properties => ⟨properties.1, properties.2⟩,
-      fun available => ⟨available.notLogicalBuiltin,
-        available.ne_integerComparison⟩⟩
+instance (env : Theory.SigEnv) (identifier : Ident) :
+    Decidable (FreshFor env identifier) :=
+  inferInstanceAs (Decidable (env.isKnownIdent identifier = false))
+
+/-- A fresh identifier differs from every identifier registered in the same
+environment. -/
+theorem FreshFor.ne {env : Theory.SigEnv} {identifier known : Ident}
+    (fresh : FreshFor env identifier)
+    (present : env.isKnownIdent known = true) : identifier ≠ known := by
+  intro equal
+  subst known
+  rw [fresh] at present
+  contradiction
+
+/-- Fresh source identifiers in the default registry are ordinary symbols,
+so their applications use the relational symbol rule. -/
+theorem FreshFor.notLogical {identifier : Ident}
+    (fresh : FreshFor Theory.defaultSigEnv identifier) :
+    NotLogical identifier := by
+  cases identifier with
+  | indexed name indices => exact .indexed name indices
+  | symb name =>
+      apply NotLogical.symb
+      all_goals
+        intro equal
+        subst name
+        simp [FreshFor, Theory.default_known_ident,
+          Theory.knownContainsIdent] at fresh
 
 mutual
   /-- Relational evaluation of a concrete SMT term under a de Bruijn
@@ -580,7 +229,7 @@ mutual
         environment[index]? = some value → Eval model environment (.bvar index) value
     | symbol {environment : List model.Value} {symbol : Ident}
         {arguments : Array Term} {values : List model.Value} {value : model.Value} :
-        NotBuiltin symbol → EvalList model environment arguments.toList values →
+        NotLogical symbol → EvalList model environment arguments.toList values →
         model.apply symbol values value → Eval model environment (.app symbol arguments) value
     | eqTrue {environment : List model.Value} {left right : Term}
         {leftValue rightValue : model.Value} :
@@ -704,8 +353,8 @@ theorem Eval.unique {model : Model} (functional : ApplyUnique model)
       generalize termEq : Term.app symbol arguments = candidate at evaluated
       cases evaluated <;>
         simp_all [Term.symbApp, ApplyUnique] <;>
-        grind [NotBuiltin.ne_eq, NotBuiltin.ne_not, NotBuiltin.ne_imp,
-          NotBuiltin.ne_and, NotBuiltin.ne_or])
+        grind [NotLogical.ne_eq, NotLogical.ne_not, NotLogical.ne_imp,
+          NotLogical.ne_and, NotLogical.ne_or])
     (eqTrue := by
       intros
       rename_i environment leftTerm rightTerm leftValue rightValue leftEval
@@ -714,7 +363,7 @@ theorem Eval.unique {model : Model} (functional : ApplyUnique model)
         at evaluated
       cases evaluated <;> simp_all [Term.symbApp] <;>
         try { rename_i fresh; cases fresh <;> contradiction } <;>
-        grind [BoolValues.unique, NotBuiltin.ne_eq])
+        grind [BoolValues.unique, NotLogical.ne_eq])
     (eqFalse := by
       intros
       rename_i environment leftTerm rightTerm leftValue rightValue leftEval
@@ -723,14 +372,14 @@ theorem Eval.unique {model : Model} (functional : ApplyUnique model)
         at evaluated
       cases evaluated <;> simp_all [Term.symbApp] <;>
         try { rename_i fresh; cases fresh <;> contradiction } <;>
-        grind [BoolValues.unique, NotBuiltin.ne_eq])
+        grind [BoolValues.unique, NotLogical.ne_eq])
     (not := by
       intros
       rename_i environment body value bodyEval bodyIH other evaluated
       generalize termEq : Term.symbApp "not" #[body] = candidate at evaluated
       cases evaluated <;> simp_all [Term.symbApp] <;>
         try { rename_i fresh; cases fresh <;> contradiction } <;>
-        grind [BoolValues.unique, NotBuiltin.ne_not])
+        grind [BoolValues.unique, NotLogical.ne_not])
     (imp := by
       intros
       rename_i environment leftTerm rightTerm leftValue rightValue leftEval
@@ -739,7 +388,7 @@ theorem Eval.unique {model : Model} (functional : ApplyUnique model)
         at evaluated
       cases evaluated <;> simp_all [Term.symbApp] <;>
         try { rename_i fresh; cases fresh <;> contradiction } <;>
-        grind [BoolValues.unique, NotBuiltin.ne_imp])
+        grind [BoolValues.unique, NotLogical.ne_imp])
     (and := by
       intros
       rename_i environment arguments values booleans argsEval boolValues argsIH
@@ -747,7 +396,7 @@ theorem Eval.unique {model : Model} (functional : ApplyUnique model)
       generalize termEq : Term.symbApp "and" arguments = candidate at evaluated
       cases evaluated <;> simp_all [Term.symbApp] <;>
         try { rename_i fresh; cases fresh <;> contradiction } <;>
-        grind [BoolValues.unique, NotBuiltin.ne_and])
+        grind [BoolValues.unique, NotLogical.ne_and])
     (or := by
       intros
       rename_i environment arguments values booleans argsEval boolValues argsIH
@@ -755,7 +404,7 @@ theorem Eval.unique {model : Model} (functional : ApplyUnique model)
       generalize termEq : Term.symbApp "or" arguments = candidate at evaluated
       cases evaluated <;> simp_all [Term.symbApp] <;>
         try { rename_i fresh; cases fresh <;> contradiction } <;>
-        grind [BoolValues.unique, NotBuiltin.ne_or])
+        grind [BoolValues.unique, NotLogical.ne_or])
     (letE := by intros; rename_i other evaluated; cases evaluated <;> grind)
     (forallTrue := by intros; rename_i other evaluated; cases evaluated <;> grind)
     (forallFalse := by intros; rename_i other evaluated; cases evaluated <;> grind)
@@ -934,7 +583,7 @@ def CommandsWellTypedIn (sigEnv : Theory.SigEnv)
 
 /-- Default-registry specialization retained for the existing lowering API. -/
 def CommandsWellTyped (commands : Array Command) : Prop :=
-  CommandsWellTypedIn Theory.currentEnv commands
+  CommandsWellTypedIn Theory.defaultSigEnv commands
 
 /-- Two arrays impose exactly the same semantic command obligations. Command
 order and duplicate occurrences are intentionally irrelevant here; concrete
@@ -978,20 +627,6 @@ structure RawCommandsUnsat (commands : Array Command) : Prop where
   inFragment : CommandsInFragment commands
   wellTyped : CommandsWellTyped commands
   noModel : ∀ model : Model, ¬model.SatisfiesCommands commands
-
-/-- A well-typed command sequence with no standard model.
-
-Both static fields are logically important. `inFragment` says that every command
-has semantics in this model; `wellTyped` rejects malformed or ill-sorted syntax.
-`noModel` quantifies only over models satisfying the standard
-laws for the theories used by this command array. In particular, integer laws
-are mandatory for arrays containing integer syntax, but not for Boolean-only
-arrays. -/
-structure CommandsUnsat (commands : Array Command) : Prop where
-  inFragment : CommandsInFragment commands
-  wellTyped : CommandsWellTyped commands
-  noModel : ∀ model : Model, model.StandardFor commands →
-    ¬model.SatisfiesCommands commands
 
 theorem Model.satisfiesCommands_empty (model : Model) :
     model.SatisfiesCommands #[] := by

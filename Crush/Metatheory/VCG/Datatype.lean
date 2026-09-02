@@ -2,7 +2,7 @@ import Crush.Metatheory.Reification.Datatype
 import Crush.Metatheory.Reification.Witness
 import Crush.Metatheory.SMT.DatatypeTransport
 import Crush.Metatheory.SMT.DatatypeRepr
-import Crush.Metatheory.SMT.IntTheory
+import Crush.Metatheory.SMT.Int
 import Crush.Metatheory.VCG.Command
 import Crush.SMT.TermEq
 
@@ -19,7 +19,7 @@ connection; it does not claim that every other translation command is correct.
 namespace Crush.Metatheory.VCG
 
 open Reification Datatype Defunctionalization.Flattened
-open Crush.SMT (ApplyUnique FunDef Ident NotReserved)
+open Crush.SMT (ApplyUnique FreshFor FunDef Ident)
 open SMT.Datatype.Native.ModelExt (DependencyOrdered DisjointFromSuffix GuardCommands)
 
 abbrev Command := Crush.SMT.Command
@@ -560,8 +560,8 @@ structure GuardDefEncoding (translation : FactTranslation)
   ident : FO.FOSort → Option Ident
   ident_injective : ∀ {left right identifier},
     ident left = some identifier → ident right = some identifier → left = right
-  notReserved : ∀ sort identifier, ident sort = some identifier →
-    NotReserved identifier
+  fresh : ∀ sort identifier, ident sort = some identifier →
+    FreshFor Crush.SMT.Theory.defaultSigEnv identifier
   sourceFresh : ∀ sort identifier, ident sort = some identifier →
     ∀ {decl : FO.SymbolDecl}
       (symbol : Symbol (translation.datatypes.signature ++ translation.ordinarySignature) decl),
@@ -583,8 +583,8 @@ def toUnaryGuards {translation : FactTranslation}
     SMT.UnaryGuards guarding.encoding target guard where
   ident := guarded.ident
   ident_injective := guarded.ident_injective
-  notBuiltin := fun sort identifier present =>
-    (guarded.notReserved sort identifier present).notLogicalBuiltin
+  notLogical := fun sort identifier present =>
+    (guarded.fresh sort identifier present).notLogical
   sourceFresh := guarded.sourceFresh
 
 end GuardDefEncoding
@@ -616,7 +616,7 @@ structure GuardedModelExt (translation : FactTranslation)
     (source : Model (translation.datatypes.signature ++ translation.ordinarySignature))
     (freeDataModel : Datatype.Env.IsFreeDatatypeModel source translation.datatypeSignaturePrefix.toModelEnv) where
   prior : Lifted (canonicalModel source)
-  base : SMT.ExtraGraph guarding.encoding
+  base : SMT.SourceExt guarding.encoding
     (represented.datatypeRepr.liftedFrom source freeDataModel prior).target
   baseUnique : ApplyUnique
     (SMT.modelWith guarding.encoding
@@ -636,7 +636,7 @@ structure GuardedModelExt (translation : FactTranslation)
   /-- The induced model satisfies the dependency-closed combination selected
   by the exact command array retained in this translation record. -/
   models : SMT.Theory.Comb.Models
-    (SMT.Theory.Comb.ofCommands SMT.Int.env translation.emittedCommands)
+    (SMT.Theory.Comb.ofCommands SMT.Theory.defaultEnv translation.emittedCommands)
     (SMT.modelWith guarding.encoding
       (represented.datatypeRepr.liftedFrom source freeDataModel prior).target
       ((guarded.toUnaryGuards
@@ -671,7 +671,7 @@ The remaining premises are source-side carrier facts: integer
 nonnegativity represents the distinguished relation guard, and every other sort
 omitted by the unary allocation has a total relation guard. All raw graph,
 functionality, freshness, and guard-term semantics fields are derived here. -/
-noncomputable def ofIntView {translation : FactTranslation}
+noncomputable def ofCarrier {translation : FactTranslation}
     {guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
     {represented : translation.DatatypeRepr guarding.encoding}
@@ -679,21 +679,21 @@ noncomputable def ofIntView {translation : FactTranslation}
     {source : Model (translation.datatypes.signature ++ translation.ordinarySignature)}
     {freeDataModel : Datatype.Env.IsFreeDatatypeModel source translation.datatypeSignaturePrefix.toModelEnv}
     (prior : Lifted (canonicalModel source))
-    (view : SMT.IntView guarding.encoding
+    (repr : SMT.Int.Carrier guarding.encoding
       (represented.datatypeRepr.liftedFrom source freeDataModel prior).target)
-    (guard_eq : guarding.guard = (view.withGuards
+    (guard_eq : guarding.guard = (repr.withGuards
       (guarded.toUnaryGuards
         (represented.datatypeRepr.liftedFrom source freeDataModel prior).target
         (fun sort => ((represented.datatypeRepr.liftedFrom source freeDataModel prior).relation
           sort).guard))).guard)
-    (omitted : ∀ sort, sort ≠ view.sort → guarded.ident sort = none →
+    (omitted : ∀ sort, sort ≠ repr.sort → guarded.ident sort = none →
       ∀ value,
         ((represented.datatypeRepr.liftedFrom source freeDataModel prior).relation sort).guard
           value)
     (integerGuard : ∀ value,
-      0 ≤ view.toInt value ↔
+      0 ≤ repr.toInt value ↔
         ((represented.datatypeRepr.liftedFrom source freeDataModel prior).relation
-          view.sort).guard value) :
+          repr.sort).guard value) :
     translation.GuardedModelExt guarding represented guarded source freeDataModel := by
   let lifted := represented.datatypeRepr.liftedFrom source freeDataModel prior
   let guards := guarded.toUnaryGuards lifted.target
@@ -701,25 +701,27 @@ noncomputable def ofIntView {translation : FactTranslation}
   have separate : ∀ sort identifier,
       guarded.ident sort = some identifier → identifier ≠ .symb ">=" := by
     intro sort identifier present
-    exact (guarded.notReserved sort identifier present).ne_integerComparison
-  have total : ∀ sort, sort ≠ view.sort → guards.ident sort = none →
+    exact (guarded.fresh sort identifier present).ne
+      (by simp [Crush.SMT.Theory.default_known_ident,
+        Crush.SMT.Theory.knownContainsIdent])
+  have total : ∀ sort, sort ≠ repr.sort → guards.ident sort = none →
       ∀ value, (lifted.relation sort).guard value := by
     intro sort unequal absent value
     exact omitted sort unequal absent value
   have guardEqual : ∀ sort value,
-      view.guardWith guards sort value ↔ (lifted.relation sort).guard value := by
+      repr.guardWith guards sort value ↔ (lifted.relation sort).guard value := by
     intro sort value
-    simp only [SMT.IntView.guardWith]
+    simp only [SMT.Int.Carrier.guardWith]
     split
     next equal =>
       subst sort
       exact integerGuard value
     next _ => rfl
   have termSemantics : guarding.TermSemantics lifted.target
-      (guards.over view.extra)
+      (guards.over repr.extra)
       (fun sort => (lifted.relation sort).guard) := by
     have combined :=
-      (view.termSemantics_withGuards guards total).congr guardEqual
+      (repr.termSemantics_withGuards guards total).congr guardEqual
     exact {
       omitted := by
         intro sort raw absent value
@@ -733,14 +735,14 @@ noncomputable def ofIntView {translation : FactTranslation}
         exact present }
   exact {
     prior
-    base := view.extra
-    baseUnique := view.applyUnique
-    fresh := view.guardsFresh guards separate
+    base := repr.extra
+    baseUnique := repr.applyUnique
+    fresh := repr.guardsFresh guards separate
     semantics := termSemantics
-    models := (SMT.Int.combModels_iff_standardFor
-      translation.emittedCommands _).mpr
-        ((view.standard_withGuards guards separate).forCommands
-          translation.emittedCommands) }
+    models := SMT.Int.combModels
+      (SMT.Theory.Comb.ofCommands SMT.Theory.defaultEnv translation.emittedCommands)
+      (repr.wfWithGuards guards separate)
+      (repr.modelsWithGuards guards separate) }
 
 end GuardedModelExt
 
@@ -794,7 +796,7 @@ theorem lifted_valid_with {translation : FactTranslation}
     (represented : translation.DatatypeRepr fo)
     (source : Model (translation.datatypes.signature ++ translation.ordinarySignature))
     (freeDataModel : Datatype.Env.IsFreeDatatypeModel source translation.datatypeSignaturePrefix.toModelEnv)
-    (extra : SMT.ExtraGraph fo (represented.datatypeRepr.lifted source freeDataModel).target) :
+    (extra : SMT.SourceExt fo (represented.datatypeRepr.lifted source freeDataModel).target) :
     (SMT.modelWith fo (represented.datatypeRepr.lifted source freeDataModel).target extra).SatisfiesCommands
       fo.nativeCommands :=
   represented.datatypeRepr.lifted_valid_with represented.decls.blocks_ordered
@@ -808,7 +810,7 @@ theorem liftedFrom_valid_with {translation : FactTranslation}
     (source : Model (translation.datatypes.signature ++ translation.ordinarySignature))
     (freeDataModel : Datatype.Env.IsFreeDatatypeModel source translation.datatypeSignaturePrefix.toModelEnv)
     (prior : Lifted (canonicalModel source))
-    (extra : SMT.ExtraGraph fo
+    (extra : SMT.SourceExt fo
       (represented.datatypeRepr.liftedFrom source freeDataModel prior).target) :
     (SMT.modelWith fo (represented.datatypeRepr.liftedFrom source freeDataModel prior).target
       extra).SatisfiesCommands fo.nativeCommands :=
@@ -830,7 +832,7 @@ theorem guards_valid {translation : FactTranslation}
       (represented.datatypeRepr.liftedFrom source freeDataModel prior).target
       (fun sort => ((represented.datatypeRepr.liftedFrom source freeDataModel prior).relation
         sort).guard))
-    (base : SMT.ExtraGraph guarding.encoding
+    (base : SMT.SourceExt guarding.encoding
       (represented.datatypeRepr.liftedFrom source freeDataModel prior).target)
     (baseUnique : ApplyUnique
       (SMT.modelWith guarding.encoding
@@ -871,13 +873,13 @@ theorem sound {translation : FactTranslation}
     {commands : Array Command}
     (encoding : SMT.GuardedTheoryRepr guarding
       translation.guardDefCommands theory commands)
-    (combEq : SMT.Theory.Comb.ofCommands SMT.Int.env
+    (combEq : SMT.Theory.Comb.ofCommands SMT.Theory.defaultEnv
         translation.emittedCommands =
-      SMT.Theory.Comb.ofCommands SMT.Int.env commands)
+      SMT.Theory.Comb.ofCommands SMT.Theory.defaultEnv commands)
     (valid : (canonicalModel source).SatisfiesTheory theory) :
     ∃ model : SMTModel,
       SMT.Theory.Comb.Models
-        (SMT.Theory.Comb.ofCommands SMT.Int.env commands) model ∧
+        (SMT.Theory.Comb.ofCommands SMT.Theory.defaultEnv commands) model ∧
       model.SatisfiesCommands commands := by
   let target :=
     (represented.datatypeRepr.liftedFrom source freeDataModel
@@ -894,10 +896,9 @@ theorem sound {translation : FactTranslation}
       guardModel.guards guardModel.base guardModel.baseUnique guardModel.fresh
       guardModel.semantics guarded.linked
 
-/-- Semantic unsatisfiability when source models must also supply all base-type
-representations in `GuardedModelExt`. Unlike ordinary datatype unsatisfiability,
-this condition can restrict opaque source base types, for example by requiring
-a `Nat → Int` representation. -/
+/-- Semantic unsatisfiability for source models carrying all base-type
+representations in `GuardedModelExt`. This model class can restrict opaque
+source base types, for example by requiring a `Nat → Int` representation. -/
 theorem unsat_under {translation : FactTranslation}
     {guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
@@ -908,9 +909,9 @@ theorem unsat_under {translation : FactTranslation}
     {commands : Array Command}
     (encoding : SMT.GuardedTheoryRepr guarding
       translation.guardDefCommands (translatedTheory formula) commands)
-    (combEq : SMT.Theory.Comb.ofCommands SMT.Int.env
+    (combEq : SMT.Theory.Comb.ofCommands SMT.Theory.defaultEnv
         translation.emittedCommands =
-      SMT.Theory.Comb.ofCommands SMT.Int.env commands)
+      SMT.Theory.Comb.ofCommands SMT.Theory.defaultEnv commands)
     (unsat : SMT.CommandsUnsat commands) :
     UnsatisfiableUnder
       (fun source =>
@@ -923,10 +924,10 @@ theorem unsat_under {translation : FactTranslation}
     guardModel encoding combEq (model_extension source formula sourceValid)
   exact unsat.noModel target models valid
 
-/-- Reflection over every source model satisfying the free-datatype condition once the
-guard interpretation is known uniformly. Unlike `unsat_under`, the quantified
-model class contains only the free-datatype source-model condition; untyped target
-construction evidence is supplied once by `GuardDefInterp`. -/
+/-- Reflection over every source model satisfying the free-datatype condition
+once the guard interpretation is known uniformly. The quantified model class
+contains the free-datatype condition; `GuardDefInterp` supplies untyped target
+construction evidence uniformly. -/
 theorem unsat {translation : FactTranslation}
     {guarding : SMT.GuardedEncoding
       (Symbol (translation.datatypes.signature ++ translation.ordinarySignature))}
@@ -938,9 +939,9 @@ theorem unsat {translation : FactTranslation}
     {commands : Array Command}
     (encoding : SMT.GuardedTheoryRepr guarding
       translation.guardDefCommands (translatedTheory formula) commands)
-    (combEq : SMT.Theory.Comb.ofCommands SMT.Int.env
+    (combEq : SMT.Theory.Comb.ofCommands SMT.Theory.defaultEnv
         translation.emittedCommands =
-      SMT.Theory.Comb.ofCommands SMT.Int.env commands)
+      SMT.Theory.Comb.ofCommands SMT.Theory.defaultEnv commands)
     (unsat : SMT.CommandsUnsat commands) :
     Datatype.Env.Unsatisfiable translation.datatypeSignaturePrefix.toModelEnv formula := by
   intro source freeDataModel sourceValid
@@ -960,9 +961,9 @@ theorem theory_unsat {translation : FactTranslation}
     {commands : Array Command}
     (encoding : SMT.GuardedTheoryRepr guarding
       translation.guardDefCommands (translatedTheories sourceTheory) commands)
-    (combEq : SMT.Theory.Comb.ofCommands SMT.Int.env
+    (combEq : SMT.Theory.Comb.ofCommands SMT.Theory.defaultEnv
         translation.emittedCommands =
-      SMT.Theory.Comb.ofCommands SMT.Int.env commands)
+      SMT.Theory.Comb.ofCommands SMT.Theory.defaultEnv commands)
     (unsat : SMT.CommandsUnsat commands) :
     Datatype.Env.TheoryUnsatisfiable translation.datatypeSignaturePrefix.toModelEnv
       sourceTheory := by

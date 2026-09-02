@@ -1,425 +1,433 @@
-import Crush.Metatheory.SMT.GuardedSoundness
+import Crush.Metatheory.SMT.TheoryEnv
 
 /-!
-# Interpreted integer guards
+# Integer theory modeled by the SMT metatheory
 
-This module gives the emitted term `(>= t 0)` its standard integer
-denotation inside the shared raw SMT model. It is independent of datatypes:
-datatype well-formedness bodies merely reuse its `TermSemantics` when a field
-is represented by the nonnegative part of an integer carrier.
+This module packages the modeled integer fragment: the standard integer
+carrier, natural-number literals, and `>=`. Further arithmetic operators remain
+in the syntax-only registry until their semantic modules are added.
 -/
 
-namespace Crush.Metatheory.SMT
+namespace Crush.Metatheory.SMT.Int
 
-open Defunctionalization.Flattened
-open scoped Crush.SMT
+open Crush.SMT
+open Crush.SMT.Theory
 
-variable {symbols : FO.SymbolFamily}
+/-- Interpretation evidence for the modeled integer signature. -/
+structure Interp (model : Struct intSig) where
+  int : Int → model.Value
+  intTyped : ∀ value,
+    model.inSort intSort (by simp) (int value)
+  intInjective : Function.Injective int
+  intExhaustive : ∀ value,
+    model.inSort intSort (by simp) value →
+      ∃ integer, value = int integer
+  numeral : ∀ value : Nat,
+    model.literal (.num value) (by rfl) = int value
+  ge : ∀ left right output,
+    model.apply (.symb ">=") (by rfl) [int left, int right] output ↔
+      (right ≤ left ∧ output = model.bool true) ∨
+        (¬right ≤ left ∧ output = model.bool false)
 
-/-- Evidence needed to give an induced raw model the standard SMT integer
-interpretation. It selects one FO sort whose concrete encoding is SMT `Int`
-and proves that the corresponding target carrier is isomorphic to Lean `Int`.
-The shared `Encoding` already keeps source-symbol identifiers distinct from
-the interpreted `>=` operator.
+/-- Models of the integer theory are well-formed structures carrying
+the standard integer interpretation. -/
+def Models (model : Struct intSig) : Prop :=
+  model.WF ∧ Nonempty (Interp model)
 
-This is an explicit model-construction premise. It is not implied by
-`Encoding`: an encoding fixes sort syntax, whereas the carrier and its
-isomorphism depend on the particular target model. -/
-structure IntView (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) where
-  sort : FO.FOSort
-  sort_eq : encoding.sort sort = Crush.SMT.intSort
-  toInt : sort.Denote target.carriers → Int
-  «from» : Int → sort.Denote target.carriers
-  to_from : ∀ value, toInt («from» value) = value
-  from_to : ∀ value, «from» (toInt value) = value
-
-namespace IntView
-
-variable {encoding : Encoding symbols} {target : FO.FamilyModel symbols}
-
-/-- Read an arbitrary raw value as an integer. Only the matching typed branch
-is observable in typed guard proofs; other inputs totalize the SMT graph. -/
-noncomputable def value (view : IntView encoding target) :
-    Value target → Int
-  | .typed sort input => by
-      classical
-      exact if equal : sort = view.sort then
-        view.toInt (equal ▸ input)
-      else 0
-  | .raw _ => 0
-
-@[simp] theorem value_typed (view : IntView encoding target)
-    (input : view.sort.Denote target.carriers) :
-    view.value (.typed view.sort input) = view.toInt input := by
-  simp [value]
-
-/-- Standard interpretation of integer numerals, retaining the ordinary
-interpretation for every other literal class. -/
-noncomputable def literal (view : IntView encoding target) :
-    Crush.SMT.Literal → Value target
-  | .num numeral =>
-      .typed view.sort (view.«from» (Int.ofNat numeral))
-  | other => literalValue encoding target other
-
-theorem literal_typed (view : IntView encoding target)
-    (literal : Crush.SMT.Literal) :
-    Value.InSort encoding literal.sort (view.literal literal) := by
-  cases literal with
-  | num numeral => simpa [IntView.literal, Value.InSort,
-      Crush.SMT.Literal.sort] using view.sort_eq
-  | bool value | str value | bitvec width value =>
-      exact literalValue_typed encoding target _
-
-/-- Total standard graph for SMT integer `>=`. -/
-def applies (view : IntView encoding target) (identifier : Crush.SMT.Ident)
-    (values : List (Value target)) (output : Value target) : Prop :=
-  ∃ left right, identifier = .symb ">=" ∧ values = [left, right] ∧
-    output = .typed .bool (view.value right ≤ view.value left)
-
-/-- Raw SMT model extension containing interpreted numerals and `>=`. -/
-noncomputable def extra (view : IntView encoding target) :
-    ExtraGraph encoding target where
-  apply := view.applies
-  source_fresh := by
-    intro decl symbol values output applied
-    rcases applied with ⟨left, right, identEq, valuesEq, outputEq⟩
-    exact (encoding.ident_fresh symbol).ne_integerComparison identEq
-  literal := view.literal
-  literal_typed := view.literal_typed
-
-/-- The emitted nonnegativity syntax at the represented integer sort. -/
-def guarding (view : IntView encoding target) : GuardedEncoding symbols where
-  encoding
-  guard := fun sort term =>
-    if sort = view.sort then some (smt| (>= $term 0)) else none
-
-/-- Semantic subset selected by `guarding`: nonnegative integers at the
-distinguished sort and the complete carrier everywhere else. -/
-def guard (view : IntView encoding target) :
-    ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop :=
-  fun sort input =>
-    if equal : sort = view.sort then
-      0 ≤ view.toInt (equal ▸ input)
-    else True
-
-@[simp] theorem guard_at (view : IntView encoding target)
-    (input : view.sort.Denote target.carriers) :
-    view.guard view.sort input ↔ 0 ≤ view.toInt input := by
-  simp [guard]
-
-/-- `(>= t 0)` denotes exactly nonnegativity in the shared raw model. -/
-theorem termSemantics (view : IntView encoding target) :
-    view.guarding.TermSemantics target view.extra view.guard where
-  omitted := by
-    intro sort raw guardEq input
-    simp only [guarding] at guardEq
-    split at guardEq
-    · contradiction
-    · simp [guard, *]
-  encoded := by
-    intro sort raw input environment condition rawEval guardEq
-    simp only [guarding] at guardEq
-    split at guardEq
-    next equal =>
-      subst sort
-      simp only [Option.some.injEq] at guardEq
-      subst condition
-      have zeroEval : Crush.SMT.Eval
-          (modelWith encoding target view.extra) environment (smt| 0)
-          (.typed view.sort (view.«from» 0)) := by
-        exact Crush.SMT.Eval.literal (.num 0) (by intro value impossible; cases impossible)
-      apply Crush.SMT.Eval.symbol (by decide)
-      · exact .cons rawEval (.cons zeroEval .nil)
-      · apply Or.inr
-        refine ⟨.typed view.sort input,
-          .typed view.sort (view.«from» 0), rfl, rfl, ?_⟩
-        simp [guard, value, view.to_from]
-    next unequal => simp at guardEq
-
-/-- The combined ordinary/integer graph is deterministic. -/
-theorem applyUnique (view : IntView encoding target) :
-    Crush.SMT.ApplyUnique (modelWith encoding target view.extra) := by
-  intro identifier values left right leftApply rightApply
-  rcases leftApply with leftOrdinary | leftInt <;>
-    rcases rightApply with rightOrdinary | rightInt
-  · rcases leftOrdinary with
-      ⟨leftDecl, leftSymbol, leftIdent, leftEq⟩
-    rcases rightOrdinary with
-      ⟨rightDecl, rightSymbol, rightIdent, rightEq⟩
-    have identEq : encoding.ident leftSymbol = encoding.ident rightSymbol :=
-      leftIdent.symm.trans rightIdent
-    have declEq := encoding.ident_decl_injective leftSymbol rightSymbol identEq
-    subst rightDecl
-    have symbolEq := encoding.ident_injective leftSymbol rightSymbol identEq
-    subst rightSymbol
-    exact leftEq.trans rightEq.symm
-  · rcases leftOrdinary with ⟨decl, symbol, identEq, outputEq⟩
-    rw [identEq] at rightInt
-    exact False.elim (view.extra.source_fresh symbol values right rightInt)
-  · rcases rightOrdinary with ⟨decl, symbol, identEq, outputEq⟩
-    rw [identEq] at leftInt
-    exact False.elim (view.extra.source_fresh symbol values left leftInt)
-  · rcases leftInt with
-      ⟨leftArg, leftZero, leftIdent, leftValues, leftEq⟩
-    rcases rightInt with
-      ⟨rightArg, rightZero, rightIdent, rightValues, rightEq⟩
-    rw [leftValues] at rightValues
-    injection rightValues with argEq zeroEq
-    subst rightArg
-    injection zeroEq with zeroEq
-    subst rightZero
-    exact leftEq.trans rightEq.symm
-
-private theorem propositionValue_eq_true (target : FO.FamilyModel symbols)
-    {proposition : Prop} (valid : proposition) :
-    Value.typed .bool proposition = boolValue target true := by
-  have equal : proposition = True :=
-    propext ⟨fun _ => trivial, fun _ => valid⟩
-  subst proposition
-  rfl
-
-private theorem propositionValue_eq_false (target : FO.FamilyModel symbols)
-    {proposition : Prop} (invalid : ¬proposition) :
-    Value.typed .bool proposition = boolValue target false := by
-  have equal : proposition = False := propext ⟨invalid, False.elim⟩
-  subst proposition
-  rfl
-
-/-- The standard integer structure induced by an `IntView`. -/
-noncomputable def intInterp (view : IntView encoding target) :
-    Crush.SMT.Model.IntInterp
-      (modelWith encoding target view.extra) where
-  int := fun value => .typed view.sort (view.«from» value)
-  int_typed := by
+/-- Transport integer interpretation evidence across a structure
+isomorphism. -/
+def Interp.ofIso {left right : Struct intSig} (iso : Struct.Iso left right)
+    (interp : Interp left) : Interp right where
+  int := fun value => iso.to (interp.int value)
+  intTyped := by
     intro value
-    simpa only [modelWith_inSort, Value.InSort] using view.sort_eq
-  int_injective := by
-    intro left right equal
-    have valuesEqual : view.«from» left = view.«from» right :=
-      eq_of_heq (Value.typed.inj equal).2
-    have := congrArg view.toInt valuesEqual
-    simpa only [view.to_from] using this
-  int_exhaustive := by
+    exact (iso.inSort intSort (by simp) (interp.int value)).mp
+      (interp.intTyped value)
+  intInjective := by
+    intro first second equal
+    have inverse := congrArg iso.inv equal
+    have clean : interp.int first = interp.int second := by
+      simpa [iso.inv_to] using inverse
+    exact interp.intInjective clean
+  intExhaustive := by
     intro value typed
-    simp only [modelWith_inSort] at typed
-    cases value with
-    | typed sort input =>
-        simp only [Value.InSort] at typed
-        have sortEq : sort = view.sort := by
-          apply encoding.sort_injective
-          exact typed.trans view.sort_eq.symm
-        subst sort
-        refine ⟨view.toInt input, ?_⟩
-        exact congrArg (Value.typed view.sort) (view.from_to input).symm
-    | raw sort =>
-        simp only [Value.InSort] at typed
-        exact False.elim (typed.2 view.sort (view.sort_eq.trans typed.1.symm))
+    have inverseTyped :
+        left.inSort intSort (by simp) (iso.inv value) := by
+      have preserved := iso.inSort intSort (by simp) (iso.inv value)
+      apply preserved.mpr
+      simpa [iso.to_inv] using typed
+    rcases interp.intExhaustive (iso.inv value) inverseTyped with
+      ⟨integer, equal⟩
+    refine ⟨integer, ?_⟩
+    have mapped := congrArg iso.to equal
+    simpa [iso.to_inv] using mapped
   numeral := by
     intro value
-    rfl
+    rw [← iso.literal (.num value) (by rfl), interp.numeral]
   ge := by
-    intro left right output
+    intro leftValue rightValue output
+    have preserved := iso.apply (.symb ">=") (by rfl)
+      [interp.int leftValue, interp.int rightValue] (iso.inv output)
+    simp only [List.map_cons, List.map_nil, iso.to_inv] at preserved
+    rw [← preserved]
+    rw [interp.ge]
     constructor
-    · intro applied
-      rcases applied with ordinary | integer
-      · rcases ordinary with ⟨decl, symbol, identifierEq, outputEq⟩
-        exact False.elim
-          ((encoding.ident_fresh symbol).ne_integerComparison identifierEq.symm)
-      · rcases integer with
-          ⟨leftValue, rightValue, identifierEq, valuesEq, outputEq⟩
-        cases valuesEq
-        simp only [value_typed, view.to_from] at outputEq
-        by_cases valid : right ≤ left
-        · exact Or.inl ⟨valid,
-            outputEq.trans (propositionValue_eq_true target valid)⟩
-        · exact Or.inr ⟨valid,
-            outputEq.trans (propositionValue_eq_false target valid)⟩
-    · intro standardOutput
-      apply Or.inr
-      refine ⟨.typed view.sort (view.«from» left),
-        .typed view.sort (view.«from» right), rfl, rfl, ?_⟩
-      simp only [value_typed, view.to_from]
-      rcases standardOutput with ⟨valid, outputEq⟩ | ⟨invalid, outputEq⟩
-      · exact outputEq.trans (propositionValue_eq_true target valid).symm
-      · exact outputEq.trans (propositionValue_eq_false target invalid).symm
+    · intro interpreted
+      rcases interpreted with ⟨ordered, equal⟩ | ⟨notOrdered, equal⟩
+      · left
+        exact ⟨ordered, by
+          have mapped := congrArg iso.to equal
+          simpa [iso.to_inv, iso.bool] using mapped⟩
+      · right
+        exact ⟨notOrdered, by
+          have mapped := congrArg iso.to equal
+          simpa [iso.to_inv, iso.bool] using mapped⟩
+    · intro interpreted
+      rcases interpreted with ⟨ordered, equal⟩ | ⟨notOrdered, equal⟩
+      · left
+        refine ⟨ordered, ?_⟩
+        have mapped := congrArg iso.inv equal
+        simpa [iso.inv_to, ← iso.bool] using mapped
+      · right
+        refine ⟨notOrdered, ?_⟩
+        have mapped := congrArg iso.inv equal
+        simpa [iso.inv_to, ← iso.bool] using mapped
 
-/-- `IntView` upgrades the induced relational model to the standard Boolean
-and integer model required at the external SMT boundary. -/
-theorem standard (view : IntView encoding target) :
-    Crush.SMT.Model.Standard (modelWith encoding target view.extra) where
-  bool_exhaustive := modelWith_bool_exhaustive encoding target view.extra
-  integer := ⟨view.intInterp⟩
-  apply_unique := view.applyUnique
+/-- The integer model predicate is closed under structure isomorphism. -/
+theorem models_ofIso {left right : Struct intSig}
+    (iso : Struct.Iso left right) (models : Models left) : Models right := by
+  rcases models with ⟨wf, ⟨interp⟩⟩
+  exact ⟨Struct.WF.ofIso iso wf, ⟨Interp.ofIso iso interp⟩⟩
 
-/-- A family of allocated unary predicates is disjoint from interpreted `>=`
-when none of its identifiers is `>=`. -/
-theorem guardsFresh (view : IntView encoding target)
-    {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
-    (guards : UnaryGuards encoding target guard)
-    (separate : ∀ sort identifier, guards.ident sort = some identifier →
-      identifier ≠ .symb ">=") :
-    guards.Fresh view.extra := by
-  intro sort identifier identEq values output applied
-  rcases applied with ⟨left, right, appliedIdent, valuesEq, outputEq⟩
-  exact separate sort identifier identEq appliedIdent
+private theorem intApp_shape {identifier : Ident}
+    {argumentSorts : List SSort} {resultSort : SSort}
+    (present : intSig.containsIdent identifier = true)
+    (inferred : intSig.inferApp? identifier
+      (argumentSorts.map some).toArray = some (.ok (some resultSort))) :
+    identifier = .symb ">=" ∧
+      argumentSorts = [intSort, intSort] ∧ resultSort = boolSort := by
+  change intContainsIdent identifier = true at present
+  have identifierEq : identifier = .symb ">=" := of_decide_eq_true present
+  subst identifier
+  refine ⟨rfl, ?_⟩
+  change (if intContainsIdent (.symb ">=") then
+      some (inferIntApp (.symb ">=") (argumentSorts.map some).toArray)
+    else none) = some (.ok (some resultSort)) at inferred
+  simp only [intContainsIdent, decide_true, if_true] at inferred
+  injection inferred with inferred
+  cases argumentSorts with
+  | nil =>
+      change Except.error _ = Except.ok (some resultSort) at inferred
+      contradiction
+  | cons first rest =>
+      cases rest with
+      | nil =>
+          change Except.error _ = Except.ok (some resultSort) at inferred
+          contradiction
+      | cons second rest =>
+          cases rest with
+          | nil =>
+              by_cases firstEq : first = intSort
+              · subst first
+                by_cases secondEq : second = intSort
+                · subst second
+                  simp [inferIntApp, requireArity, requireIntArgs,
+                    requireArgsOfSort, requireSort] at inferred
+                  injection inferred with resultEq
+                  exact ⟨rfl, Option.some.inj resultEq.symm⟩
+                · simp [inferIntApp, requireArity, requireIntArgs,
+                    requireArgsOfSort, requireSort, secondEq]
+                    at inferred
+                  change Except.error _ = Except.ok _ at inferred
+                  contradiction
+              · simp [inferIntApp, requireArity, requireIntArgs,
+                  requireArgsOfSort, requireSort,
+                  firstEq] at inferred
+                change Except.error _ = Except.ok _ at inferred
+                contradiction
+          | cons third rest =>
+              change Except.error _ = Except.ok (some resultSort) at inferred
+              contradiction
 
-/-- Emitted guard syntax with integer nonnegativity taking precedence over
-fresh datatype predicates. -/
-def withGuards (view : IntView encoding target)
-    {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
-    (guards : UnaryGuards encoding target guard) : GuardedEncoding symbols where
-  encoding
-  guard := fun sort term =>
-    if sort = view.sort then some (smt| (>= $term 0))
-    else guards.guarding.guard sort term
+private theorem sig_wf : intSig.WF where
+  literalSort := by
+    intro literal present
+    cases literal with
+    | num value => exact intSig_containsSort_int
+    | str value | bitvec width value | bool value =>
+        simp [intSig, Sig.containsLiteral, Sig.ofClassifiers] at present
+  appSorts := by
+    intro identifier argumentSorts resultSort inferred
+    have present : intSig.containsIdent identifier = true :=
+      intSig.inferApp_present identifier
+        (argumentSorts.map some).toArray (by rw [inferred]; rfl)
+    rcases intApp_shape present inferred with
+      ⟨identifierEq, argumentSortsEq, resultSortEq⟩
+    subst identifier
+    subst argumentSorts
+    subst resultSort
+    simp only [Sig.containsSortList_cons, Sig.containsSortList_nil,
+      Bool.and_true]
+    constructor
+    · simp only [intSig_containsSort_int, Bool.true_and]
+    · exact intSig_containsSort_bool
 
-/-- Semantics selected by `withGuards`. -/
-def guardWith (view : IntView encoding target)
-    {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
-    (guards : UnaryGuards encoding target guard) :
-    ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop :=
-  fun sort input =>
-    if equal : sort = view.sort then
-      0 ≤ view.toInt (equal ▸ input)
-    else guard sort input
+/-- Semantic integer theory for the modeled signature. -/
+def theory : Crush.Metatheory.SMT.Theory intSig where
+  sig_wf := sig_wf
+  Models := Models
+  models_wf := And.left
+  iso_closed := models_ofIso
 
-/-- Integer and unary datatype guards share one exact raw model and one
-component-independent `TermSemantics` contract. -/
-theorem termSemantics_withGuards (view : IntView encoding target)
-    {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
-    (guards : UnaryGuards encoding target guard)
-    (omitted : ∀ sort, sort ≠ view.sort → guards.ident sort = none →
-      ∀ value, guard sort value) :
-    (view.withGuards guards).TermSemantics target
-      (guards.over view.extra) (view.guardWith guards) where
-  omitted := by
-    intro sort raw guardEq input
-    simp only [withGuards] at guardEq
-    split at guardEq
-    · contradiction
-    next unequal =>
-      unfold UnaryGuards.guarding at guardEq
-      cases identEq : guards.ident sort with
-      | none =>
-          simpa [guardWith, unequal] using omitted sort unequal identEq input
-      | some identifier => simp [identEq] at guardEq
-  encoded := by
-    intro sort raw input environment condition rawEval guardEq
-    simp only [withGuards] at guardEq
-    split at guardEq
-    next equal =>
-      subst sort
-      simp only [Option.some.injEq] at guardEq
-      subst condition
-      have zeroEval : Crush.SMT.Eval
-          (modelWith encoding target (guards.over view.extra))
-          environment (smt| 0) (.typed view.sort (view.«from» 0)) := by
-        exact Crush.SMT.Eval.literal (.num 0)
-          (by intro value impossible; cases impossible)
-      apply Crush.SMT.Eval.symbol (by decide)
-      · exact .cons rawEval (.cons zeroEval .nil)
-      · apply Or.inr
-        apply Or.inl
-        refine ⟨.typed view.sort input,
-          .typed view.sort (view.«from» 0), rfl, rfl, ?_⟩
-        simp [guardWith, value, view.to_from]
-    next unequal =>
-      have evaluated := guards.encoded_over view.extra rawEval guardEq
-      simpa [withGuards, UnaryGuards.guarding, guardWith, unequal] using evaluated
+/-- A well-formed full model with the integer laws has a well-formed integer
+reduct. This is the structure-level adequacy theorem used by every concrete
+integer realization. -/
+theorem reduct_wf (model : Model) (wf : model.WF)
+    (interp : Interp (Model.reduct model intSig)) :
+    (Model.reduct model intSig).WF where
+  sortNonempty := by
+    intro sort present
+    exact model.sortNonempty sort
+  boolTyped := by
+    intro present value
+    exact model.boolTyped value
+  literalSort := by
+    intro literal present
+    cases literal with
+    | num value =>
+        change intSig.containsSort intSort = true
+        exact intSig_containsSort_int
+    | str value | bitvec width value | bool value =>
+        simp [intSig, Sig.ofClassifiers, Sig.containsLiteral] at present
+  literalTyped := by
+    intro literal present
+    cases literal with
+    | num value => exact model.literalTyped (.num value)
+    | str value | bitvec width value | bool value =>
+        simp [intSig, Sig.ofClassifiers, Sig.containsLiteral] at present
+  appTyped := by
+    intro identifier present argumentSorts resultSort inferred values typed
+    rcases intApp_shape present inferred with
+      ⟨identifierEq, argumentSortsEq, resultSortEq⟩
+    subst identifier
+    subst argumentSorts
+    subst resultSort
+    rcases Struct.ValuesTyped.exists_cons typed with
+      ⟨first, rest, rfl, firstTyped, restTyped⟩
+    rcases Struct.ValuesTyped.exists_cons restTyped with
+      ⟨second, tail, rfl, secondTyped, tailTyped⟩
+    have tailEq := Struct.ValuesTyped.eq_nil tailTyped
+    subst tail
+    rcases interp.intExhaustive first firstTyped with ⟨left, rfl⟩
+    rcases interp.intExhaustive second secondTyped with ⟨right, rfl⟩
+    let output := (Model.reduct model intSig).bool (decide (right ≤ left))
+    refine ⟨by simp, output, model.boolTyped _, ?_, ?_⟩
+    · by_cases ordered : right ≤ left
+      · exact (interp.ge left right output).mpr
+          (Or.inl ⟨ordered, by simp [output, ordered]⟩)
+      · exact (interp.ge left right output).mpr
+          (Or.inr ⟨ordered, by simp [output, ordered]⟩)
+    · intro other applied
+      exact wf.apply_unique (.symb ">=") [interp.int left, interp.int right]
+        other output applied (by
+          by_cases ordered : right ≤ left
+          · exact (interp.ge left right output).mpr
+              (Or.inl ⟨ordered, by simp [output, ordered]⟩)
+          · exact (interp.ge left right output).mpr
+              (Or.inr ⟨ordered, by simp [output, ordered]⟩))
 
-/-- Functionality of the complete interpreted-integer/unary-predicate graph. -/
-theorem applyUnique_withGuards (view : IntView encoding target)
-    {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
-    (guards : UnaryGuards encoding target guard)
-    (separate : ∀ sort identifier, guards.ident sort = some identifier →
-      identifier ≠ .symb ">=") :
-    Crush.SMT.ApplyUnique
-      (modelWith encoding target (guards.over view.extra)) :=
-  guards.applyUnique_over view.extra view.applyUnique
-    (view.guardsFresh guards separate)
+/-- Package full-model well-formedness and the integer laws as a model of the
+integer semantic theory. -/
+theorem models (model : Model) (wf : model.WF)
+    (interp : Interp (Model.reduct model intSig)) :
+    Models (Model.reduct model intSig) :=
+  ⟨reduct_wf model wf interp, ⟨interp⟩⟩
 
-/-- The integer structure remains standard after installing fresh unary
-datatype guards. -/
-noncomputable def intInterp_withGuards (view : IntView encoding target)
-    {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
-    (guards : UnaryGuards encoding target guard)
-    (separate : ∀ sort identifier, guards.ident sort = some identifier →
-      identifier ≠ .symb ">=") :
-    Crush.SMT.Model.IntInterp
-      (modelWith encoding target (guards.over view.extra)) where
-  int := fun value => .typed view.sort (view.«from» value)
-  int_typed := by
-    intro value
-    simpa only [modelWith_inSort, Value.InSort] using view.sort_eq
-  int_injective := by
-    intro left right equal
-    have valuesEqual : view.«from» left = view.«from» right :=
-      eq_of_heq (Value.typed.inj equal).2
-    have := congrArg view.toInt valuesEqual
-    simpa only [view.to_from] using this
-  int_exhaustive := by
+/-! ## Concrete integer model -/
+
+private inductive WitnessValue where
+  | boolean : Bool → WitnessValue
+  | integer : Int → WitnessValue
+  | other : SSort → WitnessValue
+
+private def WitnessValue.InSort (sort : SSort) : WitnessValue → Prop
+  | .boolean _ => sort = boolSort
+  | .integer _ => sort = intSort
+  | .other declared =>
+      sort = declared ∧ sort ≠ boolSort ∧ sort ≠ intSort
+
+private def witnessLiteral : Literal → WitnessValue
+  | .bool value => .boolean value
+  | .num value => .integer value
+  | .str _ => .other stringSort
+  | .bitvec width _ => .other (bitvecSort width)
+
+private def witnessApply (identifier : Ident) (arguments : List WitnessValue)
+    (output : WitnessValue) : Prop :=
+  ∃ left right : Int,
+    identifier = .symb ">=" ∧
+    arguments = [.integer left, .integer right] ∧
+    output = .boolean (decide (right ≤ left))
+
+private def witness : Model where
+  Value := WitnessValue
+  inSort := WitnessValue.InSort
+  sortNonempty := by
+    intro sort
+    by_cases boolEq : sort = boolSort
+    · exact ⟨.boolean false, boolEq⟩
+    by_cases intEq : sort = intSort
+    · exact ⟨.integer 0, intEq⟩
+    · exact ⟨.other sort, rfl, boolEq, intEq⟩
+  bool := .boolean
+  boolTyped := by intro value; rfl
+  boolInjective := by intro left right equal; injection equal
+  literal := witnessLiteral
+  literalTyped := by
+    intro literal
+    cases literal <;>
+      simp [witnessLiteral, WitnessValue.InSort,
+        Literal.sort, stringSort, boolSort, intSort, bitvecSort]
+  apply := witnessApply
+
+private theorem boolSort_ne_intSort : boolSort ≠ intSort := by
+  intro equal
+  change SSort.app (.symb "Bool") #[] = SSort.app (.symb "Int") #[] at equal
+  injection equal with identifiersEqual
+  injection identifiersEqual with namesEqual
+  exact (by decide : ("Bool" : String) ≠ "Int") namesEqual
+
+private theorem witness_wf : witness.WF where
+  bool_exhaustive := by
     intro value typed
-    simp only [modelWith_inSort] at typed
     cases value with
-    | typed sort input =>
-        simp only [Value.InSort] at typed
-        have sortEq : sort = view.sort := by
-          apply encoding.sort_injective
-          exact typed.trans view.sort_eq.symm
-        subst sort
-        refine ⟨view.toInt input, ?_⟩
-        exact congrArg (Value.typed view.sort) (view.from_to input).symm
-    | raw sort =>
-        simp only [Value.InSort] at typed
-        exact False.elim (typed.2 view.sort (view.sort_eq.trans typed.1.symm))
-  numeral := by
-    intro value
-    rfl
+    | boolean value => exact ⟨value, rfl⟩
+    | integer value => exact False.elim (boolSort_ne_intSort typed)
+    | other sort => simp [witness, WitnessValue.InSort] at typed
+  apply_unique := by
+    intro identifier arguments left right leftApplied rightApplied
+    rcases leftApplied with
+      ⟨leftArg, rightArg, identifierEq, argumentsEq, leftEq⟩
+    rcases rightApplied with
+      ⟨otherLeft, otherRight, otherIdentifierEq, otherArgumentsEq, rightEq⟩
+    rw [argumentsEq] at otherArgumentsEq
+    injection otherArgumentsEq with leftArgEq restEq
+    injection restEq with rightArgEq tailEq
+    injection leftArgEq with leftIntEq
+    injection rightArgEq with rightIntEq
+    subst otherLeft
+    subst otherRight
+    exact leftEq.trans rightEq.symm
+
+private def witnessInterp : Interp (Model.reduct witness intSig) where
+  int := .integer
+  intTyped := by intro value; rfl
+  intInjective := by intro left right equal; injection equal
+  intExhaustive := by
+    intro value typed
+    change WitnessValue at value
+    change WitnessValue.InSort intSort value at typed
+    change ∃ integer, value = WitnessValue.integer integer
+    cases value with
+    | boolean value => exact False.elim (boolSort_ne_intSort typed.symm)
+    | integer value => exact ⟨value, rfl⟩
+    | other sort => simp [WitnessValue.InSort] at typed
+  numeral := by intro value; rfl
   ge := by
     intro left right output
+    change WitnessValue at output
+    change witnessApply (.symb ">=")
+        [.integer left, .integer right] output ↔
+      (right ≤ left ∧ output = WitnessValue.boolean true) ∨
+        (¬right ≤ left ∧ output = WitnessValue.boolean false)
     constructor
-    · intro applied
-      rcases applied with ordinary | native
-      · rcases ordinary with ⟨decl, symbol, identifierEq, outputEq⟩
-        exact False.elim
-          ((encoding.ident_fresh symbol).ne_integerComparison identifierEq.symm)
-      · rcases native with integer | unary
-        · rcases integer with
-            ⟨leftValue, rightValue, identifierEq, valuesEq, outputEq⟩
-          cases valuesEq
-          simp only [value_typed, view.to_from] at outputEq
-          by_cases valid : right ≤ left
-          · exact Or.inl ⟨valid,
-              outputEq.trans (propositionValue_eq_true target valid)⟩
-          · exact Or.inr ⟨valid,
-              outputEq.trans (propositionValue_eq_false target valid)⟩
-        · rcases unary with ⟨sort, value, identEq, valuesEq, outputEq⟩
-          exact False.elim (separate sort _ identEq rfl)
+    · rintro ⟨actualLeft, actualRight, identifierEq, argumentsEq, outputEq⟩
+      injection argumentsEq with leftEq restEq
+      injection restEq with rightEq tailEq
+      injection leftEq with leftIntEq
+      injection rightEq with rightIntEq
+      subst actualLeft
+      subst actualRight
+      by_cases ordered : right ≤ left
+      · exact Or.inl ⟨ordered, by simpa [witness, ordered] using outputEq⟩
+      · exact Or.inr ⟨ordered, by simpa [witness, ordered] using outputEq⟩
     · intro standardOutput
-      apply Or.inr
-      apply Or.inl
-      refine ⟨.typed view.sort (view.«from» left),
-        .typed view.sort (view.«from» right), rfl, rfl, ?_⟩
-      simp only [value_typed, view.to_from]
-      rcases standardOutput with ⟨valid, outputEq⟩ | ⟨invalid, outputEq⟩
-      · exact outputEq.trans (propositionValue_eq_true target valid).symm
-      · exact outputEq.trans (propositionValue_eq_false target invalid).symm
+      refine ⟨left, right, rfl, rfl, ?_⟩
+      rcases standardOutput with ⟨ordered, rfl⟩ | ⟨notOrdered, rfl⟩
+      · simp [ordered]
+      · simp [notOrdered]
 
-/-- Adding fresh unary datatype guards preserves the standard integer
-interpretation supplied by `IntView`. -/
-theorem standard_withGuards (view : IntView encoding target)
-    {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
-    (guards : UnaryGuards encoding target guard)
-    (separate : ∀ sort identifier, guards.ident sort = some identifier →
-      identifier ≠ .symb ">=") :
-    Crush.SMT.Model.Standard
-      (modelWith encoding target (guards.over view.extra)) where
-  bool_exhaustive :=
-    modelWith_bool_exhaustive encoding target (guards.over view.extra)
-  integer := ⟨view.intInterp_withGuards guards separate⟩
-  apply_unique := view.applyUnique_withGuards guards separate
+/-- The integer theory has a concrete full model, including the mandatory
+logical laws. -/
+theorem models_exists : ∃ model : Model, model.WF ∧
+    Models (Model.reduct model intSig) :=
+  ⟨witness, witness_wf, models witness witness_wf witnessInterp⟩
 
-end IntView
+/-- Semantic environment matching the default checker registry. -/
+def env : Theory.Env where
+  sigEnv := defaultSigEnv
+  sig_wf := defaultSigEnv_wf
+  decl := by
+    rintro ⟨index, bound⟩
+    change index < 1 at bound
+    have indexEq : index = 0 := by omega
+    subst index
+    exact theory
+
+/-- One model of the integer reduct is a model of every combination in the
+default one-entry registry. The combination may omit Int; supplying its laws
+in that case is harmless and keeps realization monotone. -/
+theorem combModels (comb : Theory.Comb env) {model : Model}
+    (wf : model.WF) (integers : Models (Model.reduct model intSig)) :
+    Theory.Comb.Models comb model := by
+  refine ⟨wf, ?_⟩
+  intro theory active
+  rcases theory with ⟨index, bound⟩
+  change index < 1 at bound
+  have indexEq : index = 0 := by omega
+  have theoryEq : (⟨index, bound⟩ : Fin env.sigEnv.modeled.length) =
+      intId := Fin.ext indexEq
+  rw [theoryEq]
+  exact integers
+
+/-- Every combination in the default environment has a concrete model. One
+explicit integer model witnesses every requirement set, ruling out an empty
+model class at the modular UNSAT boundary. -/
+theorem combModels_exists (comb : Theory.Comb env) :
+    ∃ model : Model, Theory.Comb.Models comb model :=
+  ⟨witness, combModels comb witness_wf
+    (models witness witness_wf witnessInterp)⟩
+
+/-- The default registry has one optional theory and no dependencies, so its
+closed combination records exactly the generic syntax traversal result. -/
+theorem comb_active (commands : Array Command) :
+    (Theory.Comb.ofCommands env commands).active intId ↔
+      defaultSigEnv.usesCommands commands intId = true := by
+  constructor
+  · intro active
+    cases active with
+    | direct used => exact used
+    | dependency active member =>
+        change _ ∈ [] at member
+        contradiction
+  · intro used
+    exact Theory.Comb.active_of_used (env := env) (commands := commands) used
+
+end Int
+
+namespace Theory
+
+/-- Semantic environment used by the lowering pipeline. It contains
+the mandatory logical core and every interpreted theory registered by the
+modeled checker. The integer module constructs it while Int is the sole
+optional interpreted theory. -/
+abbrev defaultEnv : Env := Int.env
+
+end Theory
+
+/-- Default modular UNSAT boundary used by the lowering theorem. The selected
+combination is computed from the same registry used by the modeled checker. -/
+abbrev CommandsUnsat (commands : Array Crush.SMT.Command) : Prop :=
+  Theory.Comb.CommandsUnsat Theory.defaultEnv commands
 
 end Crush.Metatheory.SMT

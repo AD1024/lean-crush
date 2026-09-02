@@ -666,29 +666,73 @@ example : CommandsWellTyped #[.assert (.lit (.bool false))] := by
   unfold CommandsWellTyped
   exact modeledScriptWellTyped_assertFalse
 
+/-- The modeled semantics interprets binders through `Term.bvar`. Named
+applications are retained for open backend syntax but cannot cross the
+semantic checker boundary. -/
+private theorem namedBinder_notModeled :
+    modeledScriptWellTyped #[.assert
+      (.forallE #[("x", boolSort)] (.app (.symb "x") #[]))] = false := by
+  prove_modeled_script_well_typed
+
+/-- Command emission resolves the translator's named binder references to the
+same de Bruijn syntax used by the semantics. Printing recovers the SMT name. -/
+private theorem resolveNamedBinder :
+    (Command.assert
+      (.forallE #[("x", boolSort)] (.app (.symb "x") #[]))).resolveBinders =
+        .assert (.forallE #[("x", boolSort)] (.bvar 0)) := by
+  simp [Command.resolveBinders, Term.resolveBinders, Term.binderIndex?]
+
+private theorem resolvedNamedBinder_wellTyped :
+    modeledScriptWellTyped #[
+      (Command.assert
+        (.forallE #[("x", boolSort)]
+          (.app (.symb "x") #[]))).resolveBinders] = true := by
+  prove_modeled_script_well_typed
+
+private theorem resolveNamedBinder_printsSame :
+    termToString []
+      ((.forallE #[("x", boolSort)]
+        (.app (.symb "x") #[]) : Term).resolveBinders []) =
+      termToString []
+        (.forallE #[("x", boolSort)] (.app (.symb "x") #[])) := by
+  have quote_x : quoteSymbol "x" = "x" := by decide
+  simp [Term.resolveBinders, Term.binderIndex?, termToString, quantToString,
+    identToString, quote_x]
+
+/-- A simultaneous `let` extends the same de Bruijn environment used by its
+semantics. This catches checker/semantics drift in the binder order. -/
+private theorem letBvar_wellTyped :
+    modeledScriptWellTyped #[.assert
+      (.letE #[("x", .lit (.bool true))] (.bvar 0))] = true := by
+  prove_modeled_script_well_typed
+
 example :
-    CommandsUnsat #[.assert (.lit (.bool false))] := by
-  refine ⟨?_, ?_, ?_⟩
+    Crush.Metatheory.SMT.CommandsUnsat
+      #[.assert (.lit (.bool false))] := by
+  refine ⟨?_, ?_, ?_, ?_⟩
   · intro command member
     simp at member
     subst command
     trivial
-  · unfold CommandsWellTyped
+  · change modeledScriptWellTyped
+      #[.assert (.lit (.bool false))] = true
     exact modeledScriptWellTyped_assertFalse
-  · intro model standard valid
+  · exact Crush.Metatheory.SMT.Int.combModels_exists _
+  · intro model models valid
     have evaluated := valid (.assert (.lit (.bool false))) (by simp)
     change Eval model [] (.lit (.bool false)) (model.bool true) at evaluated
     have impossible : true = false :=
       model.boolInjective (Eval.boolLit_iff.mp evaluated)
     contradiction
 
-/-- The standard-model side condition is inhabited, so an empty script is not
-unsatisfiable by an empty-domain-of-models accident. -/
-example : ¬CommandsUnsat #[] := by
+/-- The command-selected model class is inhabited, so an empty script is not
+unsatisfiable by an empty-domain accident. -/
+example : ¬Crush.Metatheory.SMT.CommandsUnsat #[] := by
   intro unsat
-  rcases standardModel_exists with ⟨model, standard⟩
-  exact unsat.noModel model (standard.forCommands #[])
-    model.satisfiesCommands_empty
+  rcases Crush.Metatheory.SMT.Int.combModels_exists
+      (Crush.Metatheory.SMT.Theory.Comb.ofCommands
+        Crush.Metatheory.SMT.Theory.defaultEnv #[]) with ⟨model, models⟩
+  exact unsat.noModel model models model.satisfiesCommands_empty
 
 /- Standard integer semantics prevents distinct numerals from collapsing in
 the relational model. -/
@@ -697,29 +741,42 @@ example : CommandsWellTyped #[.assert (smt| (= 0 1))] := by
   exact modeledScriptWellTyped_distinctNumerals
 
 example :
-    CommandsUnsat #[.assert (smt| (= 0 1))] := by
-  refine ⟨?_, ?_, ?_⟩
+    Crush.Metatheory.SMT.CommandsUnsat
+      #[.assert (smt| (= 0 1))] := by
+  refine ⟨?_, ?_, ?_, ?_⟩
   · intro command member
     simp at member
     subst command
     trivial
-  · unfold CommandsWellTyped
+  · change modeledScriptWellTyped
+      #[.assert (smt| (= 0 1))] = true
     exact modeledScriptWellTyped_distinctNumerals
-  · intro model standard valid
+  · exact Crush.Metatheory.SMT.Int.combModels_exists _
+  · intro model models valid
     have evaluated := valid (.assert (smt| (= 0 1))) (by simp)
     change Eval model [] (smt| (= 0 1)) (model.bool true) at evaluated
-    rcases standard.integer (by rfl) with ⟨integers⟩
+    have intModels := models.theory Crush.SMT.Theory.intId (by
+      rw [Crush.Metatheory.SMT.Int.comb_active]
+      simp [Crush.SMT.Theory.SigEnv.usesCommands,
+        Crush.SMT.Theory.SigEnv.usesCommand,
+        Crush.SMT.Term.symbApp,
+        Crush.SMT.Theory.intContainsIdent])
+    rcases intModels.2 with ⟨integers⟩
+    have zeroNumeral := integers.numeral 0
+    have oneNumeral := integers.numeral 1
+    change model.literal (.num 0) = integers.int 0 at zeroNumeral
+    change model.literal (.num 1) = integers.int 1 at oneNumeral
     have different : model.literal (.num 0) ≠ model.literal (.num 1) := by
       intro equal
       apply (show (0 : Int) ≠ 1 by decide)
-      apply integers.int_injective
-      exact (integers.numeral 0).symm.trans (equal.trans (integers.numeral 1))
+      apply integers.intInjective
+      exact zeroNumeral.symm.trans (equal.trans oneNumeral)
     have expected : Eval model [] (smt| (= 0 1)) (model.bool false) :=
       Eval.eqFalse
         (Eval.literal (.num 0) (by intro boolean impossible; cases impossible))
         (Eval.literal (.num 1) (by intro boolean impossible; cases impossible))
         different
-    have impossible := evaluated.unique standard.applyUnique expected
+    have impossible := evaluated.unique models.wf.apply_unique expected
     exact Bool.noConfusion (model.boolInjective impossible)
 
 private def satisfiableIntCommands : Array Command :=
@@ -730,29 +787,45 @@ private theorem satisfiableIntCommands_wellTyped :
   unfold satisfiableIntCommands
   prove_modeled_script_well_typed
 
-/-- A concrete command using numerals and `>=` has a standard satisfying
-model. Together with the preceding `0 = 1` theorem, this checks both sides of
-the integer semantic boundary without compiled decision procedures. -/
+/-- A concrete command using numerals and `>=` has a model of its exact
+command-selected theory combination. Together with the preceding `0 = 1`
+theorem, this checks both sides of the integer semantic boundary. -/
 private theorem satisfiableIntCommands_haveModel :
     ∃ model : Model,
-      model.StandardFor satisfiableIntCommands ∧
+      Crush.Metatheory.SMT.Theory.Comb.Models
+          (Crush.Metatheory.SMT.Theory.Comb.ofCommands
+            Crush.Metatheory.SMT.Theory.defaultEnv satisfiableIntCommands) model ∧
         model.SatisfiesCommands satisfiableIntCommands := by
-  rcases standardModel_exists with ⟨model, standard⟩
-  refine ⟨model, standard.forCommands satisfiableIntCommands, ?_⟩
+  rcases Crush.Metatheory.SMT.Int.combModels_exists
+      (Crush.Metatheory.SMT.Theory.Comb.ofCommands
+        Crush.Metatheory.SMT.Theory.defaultEnv satisfiableIntCommands) with
+    ⟨model, models⟩
+  refine ⟨model, models, ?_⟩
   intro command member
   simp [satisfiableIntCommands] at member
   subst command
   change Eval model [] (smt| (>= 1 0)) (model.bool true)
-  rcases standard.integer with ⟨integers⟩
+  have intModels := models.theory Crush.SMT.Theory.intId (by
+    rw [Crush.Metatheory.SMT.Int.comb_active]
+    simp [satisfiableIntCommands,
+      Crush.SMT.Theory.SigEnv.usesCommands,
+      Crush.SMT.Theory.SigEnv.usesCommand,
+      Crush.SMT.Term.symbApp,
+      Crush.SMT.Theory.intContainsIdent])
+  rcases intModels.2 with ⟨integers⟩
+  have oneNumeral := integers.numeral 1
+  have zeroNumeral := integers.numeral 0
+  change model.literal (.num 1) = integers.int 1 at oneNumeral
+  change model.literal (.num 0) = integers.int 0 at zeroNumeral
   have oneEval : Eval model [] (smt| 1) (integers.int 1) := by
     have evaluated := Eval.literal (model := model) (environment := [])
       (.num 1) (by intro value impossible; cases impossible)
-    rw [integers.numeral 1] at evaluated
+    rw [oneNumeral] at evaluated
     exact evaluated
   have zeroEval : Eval model [] (smt| 0) (integers.int 0) := by
     have evaluated := Eval.literal (model := model) (environment := [])
       (.num 0) (by intro value impossible; cases impossible)
-    rw [integers.numeral 0] at evaluated
+    rw [zeroNumeral] at evaluated
     exact evaluated
   apply Eval.symbol (by decide)
   · exact .cons oneEval (.cons zeroEval .nil)
@@ -760,7 +833,7 @@ private theorem satisfiableIntCommands_haveModel :
       (Or.inl ⟨by omega, rfl⟩)
 
 private theorem satisfiableIntCommands_notUnsatisfiable :
-    ¬CommandsUnsat satisfiableIntCommands := by
+    ¬Crush.Metatheory.SMT.CommandsUnsat satisfiableIntCommands := by
   intro unsat
   obtain ⟨model, standard, valid⟩ := satisfiableIntCommands_haveModel
   exact unsat.noModel model standard valid
@@ -796,9 +869,8 @@ private def indexedBvCommands : Array Command :=
   let value := .app (.indexed "int2bv" #[.inr 8]) #[.lit (.num 0)]
   #[.assert (.symbApp "=" #[value, value])]
 
-/-- Indexed bit-vector operators have checker typing but no semantics in the
-current metatheory, so the modeled checker rejects them through the syntax-only
-registry tier. -/
+/-- Indexed bit-vector operators have checker typing in the syntax-only
+registry tier and are rejected by the modeled checker. -/
 private theorem indexedBvCommands_notModeled :
     modeledScriptWellTyped indexedBvCommands = false := by
   unfold indexedBvCommands
@@ -808,18 +880,17 @@ private def stringSortCommands : Array Command := #[
   .declFun "text" #[] stringSort,
   .assert (.symbApp "=" #[.symbApp "text" #[], .symbApp "text" #[]])]
 
-/-- A syntax-only sort cannot enter the semantic theorem through an otherwise
-uninterpreted declaration. Its carrier has solver theory semantics that the
-current relational model does not yet provide. -/
+/-- A declaration using a syntax-only sort is rejected by the modeled checker;
+the registered semantic environment determines the theorem's sort theories. -/
 private theorem stringSortCommands_notModeled :
     modeledScriptWellTyped stringSortCommands = false := by
   unfold stringSortCommands
   prove_modeled_script_well_typed
 
 #eval show IO Unit from do
-  unless closedScriptWellSorted indexedBvCommands do
+  unless closedScriptWellTyped indexedBvCommands do
     throw <| IO.userError "the closed checker rejected registered bit-vector syntax"
-  unless closedScriptWellSorted stringSortCommands do
+  unless closedScriptWellTyped stringSortCommands do
     throw <| IO.userError "the closed checker rejected a registered String sort"
 
 end Crush.SMT.Tests
@@ -951,6 +1022,135 @@ private def target : FO.FamilyModel NoSymbol where
   carriers := carriers
   symbol := fun symbol => nomatch symbol
 
+/-! ## Concrete realization of the integer theory -/
+
+private abbrev natBase : BaseSort := ⟨"Nat"⟩
+
+private abbrev natFOSort : FO.FOSort := .base natBase
+
+private theorem foSort_ne_intSort (sort : FO.FOSort) :
+    foSort sort ≠ Crush.SMT.intSort := by
+  cases sort <;> simp [foSort, Crush.SMT.intSort, Crush.SMT.boolSort]
+
+/-- Injective sort encoding that maps exactly the distinguished FO `Nat`
+carrier to SMT `Int`. Every other FO sort keeps the ordinary tagged encoding. -/
+private def intFOSort (sort : FO.FOSort) : Crush.SMT.SSort :=
+  if sort = natFOSort then Crush.SMT.intSort else foSort sort
+
+private theorem intFOSort_injective : Function.Injective intFOSort := by
+  intro left right equal
+  by_cases leftNat : left = natFOSort
+  · subst left
+    by_cases rightNat : right = natFOSort
+    · subst right
+      rfl
+    · have impossible : Crush.SMT.intSort = foSort right := by
+        simpa [intFOSort, rightNat] using equal
+      exact False.elim ((foSort_ne_intSort right) impossible.symm)
+  · by_cases rightNat : right = natFOSort
+    · subst right
+      have impossible : foSort left = Crush.SMT.intSort := by
+        simpa [intFOSort, leftNat] using equal
+      exact False.elim ((foSort_ne_intSort left) impossible)
+    · apply foSort_injective
+      simpa [intFOSort, leftNat, rightNat] using equal
+
+private def intEncoding : Encoding NoSymbol where
+  sort := intFOSort
+  sort_injective := intFOSort_injective
+  bool_eq := by simp [intFOSort, natFOSort, foSort]
+  name := fun symbol => nomatch symbol
+  ident := fun symbol => nomatch symbol
+  ident_decl_injective := fun left => nomatch left
+  ident_injective := fun left => nomatch left
+  ident_fresh := fun symbol => nomatch symbol
+  nativeSort := fun sort => decide (sort = natFOSort)
+  nativeSymbol := fun symbol => nomatch symbol
+  nativeCommands := #[]
+  ordinary_ident := fun symbol => nomatch symbol
+
+/-- The represented integer sort is solver-provided and therefore emits no
+uninterpreted `(declare-sort Int 0)` command. -/
+private theorem intEncoding_natSortDecl :
+    sortDecl? intEncoding natFOSort = none := by
+  exact int_sort_not_declared intEncoding natFOSort (by
+    simp [intEncoding, intFOSort])
+
+private def intCarriers : FO.Carriers where
+  Base := fun sort => if sort = natBase then Int else Unit
+  Fn := fun _ _ => Unit
+  baseNonempty := by
+    intro sort
+    by_cases equal : sort = natBase
+    · subst sort
+      simpa using (show Nonempty Int from ⟨0⟩)
+    · simpa [equal] using (show Nonempty Unit from ⟨()⟩)
+  fnNonempty := fun _ _ => ⟨()⟩
+
+private def intTarget : FO.FamilyModel NoSymbol where
+  carriers := intCarriers
+  symbol := fun symbol => nomatch symbol
+
+/-- The explicit carrier isomorphism required to interpret SMT integers is
+inhabited for this encoded FO model. -/
+private def intCarrier : Int.Carrier intEncoding intTarget where
+  sort := natFOSort
+  sort_eq := by simp [intEncoding, intFOSort]
+  toInt := id
+  «from» := id
+  to_from := by simp
+  from_to := by simp
+
+/-- The carrier construction yields the standard integer theory on the exact
+SMT model induced by the FO encoding. -/
+private theorem intCarrier_models :
+    Crush.Metatheory.SMT.Int.Models
+      (Crush.Metatheory.SMT.Model.reduct
+        (modelWith intEncoding intTarget intCarrier.extra)
+        Crush.SMT.Theory.intSig) :=
+  intCarrier.models
+
+private def intReprCommands : Array Crush.SMT.Command :=
+  #[.assert (smt| (>= 1 0))]
+
+/-- The concrete encoded model satisfies the exact command-induced
+combination for a command using numerals and `>=`. This exercises model
+construction from an FO carrier rather than the standalone integer witness. -/
+private theorem intEncoding_commands_haveModel :
+    ∃ model : Crush.SMT.Model,
+      Theory.Comb.Models
+          (Theory.Comb.ofCommands Theory.defaultEnv intReprCommands) model ∧
+        model.SatisfiesCommands intReprCommands := by
+  let model := modelWith intEncoding intTarget intCarrier.extra
+  have models : Theory.Comb.Models
+      (Theory.Comb.ofCommands Theory.defaultEnv intReprCommands) model :=
+    Int.combModels _ intCarrier.wf intCarrier.models
+  refine ⟨model, models, ?_⟩
+  intro command member
+  simp [intReprCommands] at member
+  subst command
+  change Crush.SMT.Eval model [] (smt| (>= 1 0)) (model.bool true)
+  have oneEval : Crush.SMT.Eval model [] (smt| 1)
+      (intCarrier.interp.int 1) := by
+    have evaluated := Crush.SMT.Eval.literal (model := model) (environment := [])
+      (.num 1) (by intro value impossible; cases impossible)
+    have numeral := intCarrier.interp.numeral 1
+    change model.literal (.num 1) = intCarrier.interp.int 1 at numeral
+    rw [numeral] at evaluated
+    exact evaluated
+  have zeroEval : Crush.SMT.Eval model [] (smt| 0)
+      (intCarrier.interp.int 0) := by
+    have evaluated := Crush.SMT.Eval.literal (model := model) (environment := [])
+      (.num 0) (by intro value impossible; cases impossible)
+    have numeral := intCarrier.interp.numeral 0
+    change model.literal (.num 0) = intCarrier.interp.int 0 at numeral
+    rw [numeral] at evaluated
+    exact evaluated
+  apply Crush.SMT.Eval.symbol (by decide)
+  · exact .cons oneEval (.cons zeroEval .nil)
+  · exact (intCarrier.interp.ge 1 0 (model.bool true)).2
+      (Or.inl ⟨by omega, rfl⟩)
+
 private def unaryGuards : UnaryGuards encoding target (fun _ _ => True) where
   ident
     | .bool => some (.symb "wf")
@@ -958,7 +1158,7 @@ private def unaryGuards : UnaryGuards encoding target (fun _ _ => True) where
   ident_injective := by
     intro left right identifier leftEq rightEq
     cases left <;> cases right <;> simp_all
-  notBuiltin := by
+  notLogical := by
     intro sort identifier equal
     cases sort with
     | bool =>
@@ -980,12 +1180,13 @@ example :
   exact Crush.SMT.Eval.boolLit true
 
 /-- The generic guarded evaluator includes the exact empty-guard legacy path. -/
-example : Crush.SMT.Eval (modelWith encoding target (.nil encoding target)) []
+example : Crush.SMT.Eval (modelWith encoding target (.canonical encoding target)) []
     ((GuardedEncoding.none encoding).term reflexiveFormula)
     (.typed .bool
       (reflexiveFormula.guardDenote target (fun _ _ => True)
         (FO.Valuation.empty target.carriers))) := by
-  exact guardTerm_eval (GuardedEncoding.none encoding) target (.nil encoding target)
+  exact guardTerm_eval (GuardedEncoding.none encoding) target
+    (.canonical encoding target)
     _ (GuardedEncoding.none_semantics encoding target _) reflexiveFormula _ []
       (Env.empty target)
 
@@ -1504,14 +1705,20 @@ private def twoConstantEncoding :
     cases symbol with
     | sourceConstant constant =>
         cases constant with
-        | here => exact by decide
+        | here =>
+            simp [Crush.SMT.FreshFor, Crush.SMT.Theory.default_known_ident,
+              Crush.SMT.Theory.knownContainsIdent, symbolIdent, sourceName]
         | there constant => cases constant with
-          | here => exact by decide
+          | here =>
+              simp [Crush.SMT.FreshFor, Crush.SMT.Theory.default_known_ident,
+                Crush.SMT.Theory.knownContainsIdent, symbolIdent, sourceName]
           | there constant => nomatch constant
     | application arrow =>
-        exact ⟨Crush.SMT.NotBuiltin.indexed _ _, by simp [symbolIdent]⟩
+        simp [Crush.SMT.FreshFor, Crush.SMT.Theory.default_known_ident,
+          Crush.SMT.Theory.knownContainsIdent, symbolIdent]
     | closure closure =>
-        exact ⟨Crush.SMT.NotBuiltin.indexed _ _, by simp [symbolIdent]⟩
+        simp [Crush.SMT.FreshFor, Crush.SMT.Theory.default_known_ident,
+          Crush.SMT.Theory.knownContainsIdent, symbolIdent]
   nativeSort := fun _ => false
   nativeSymbol := symbolNative
   nativeCommands := #[]
@@ -1531,8 +1738,13 @@ private def twoConstantFormula : Sentence TwoConstantSignature :=
     (.eq (.var .here) (.const leftConstant))
     (.eq (.var .here) (.const rightConstant))
 
-private def twoConstantTheory : Crush.Metatheory.Theory TwoConstantSignature :=
+private def twoConstantSatTheory : Crush.Metatheory.Theory TwoConstantSignature :=
   [twoConstantFormula]
+
+/-- Adding false makes the end-to-end reflection regression genuinely
+unsatisfiable while retaining the nontrivial constants and binder. -/
+private def twoConstantTheory : Crush.Metatheory.Theory TwoConstantSignature :=
+  [twoConstantFormula, .falseE]
 
 private def twoConstantGuarding :=
   Crush.Metatheory.SMT.GuardedEncoding.none twoConstantEncoding
@@ -1540,13 +1752,16 @@ private def twoConstantGuarding :=
 private def generatedTwoConstantCommands : Array Crush.SMT.Command :=
   Crush.Metatheory.VCG.guardedTheoryCommands twoConstantGuarding #[] twoConstantTheory
 
-private def twoConstantCommands : Array Crush.SMT.Command := #[
+private def twoConstantSatCommands : Array Crush.SMT.Command := #[
   .declFun "left" #[] Crush.SMT.boolSort,
   .declFun "right" #[] Crush.SMT.boolSort,
   .assert (.forallE #[("x", Crush.SMT.boolSort)]
     (.app (.symb "or") #[
       .app (.symb "=") #[.bvar 0, .app (.symb "left") #[]],
       .app (.symb "=") #[.bvar 0, .app (.symb "right") #[]]]))]
+
+private def twoConstantCommands : Array Crush.SMT.Command :=
+  twoConstantSatCommands.push (.assert (.lit (.bool false)))
 
 private def emptyDatatypeEnv : Crush.Metatheory.Reification.DatatypeEnv where
   blocks := #[]
@@ -1557,6 +1772,7 @@ private def twoConstantRightProposition : Prop := False
 private def leftExpression : Lean.Expr := .const ``twoConstantLeftProposition []
 private def rightExpression : Lean.Expr := .const ``twoConstantRightProposition []
 private def propositionType : Lean.Expr := .sort .zero
+private def falseExpression : Lean.Expr := .const ``False []
 
 private def reifiedConstants :
     Crush.Metatheory.Reification.ReifiedSignature TwoConstantSignature :=
@@ -1581,6 +1797,15 @@ private def reifiedFormula :
       (.or (.eq .variable .constant) (.eq .variable .constant))
     shapeCorrespondence := by rfl }
 
+private def reifiedFalse :
+    Crush.Metatheory.Reification.ReifiedSentenceFor falseExpression emptyDatatypeEnv
+      reifiedConstants where
+  typeExpr := propositionType
+  source := .falseE
+  witness := {
+    sourceShape := .boolLit
+    shapeCorrespondence := by rfl }
+
 private def translationRecord : Crush.Metatheory.VCG.FactTranslation where
   expression := sourceExpression
   datatypes := emptyDatatypeEnv
@@ -1593,8 +1818,8 @@ private def translationRecord : Crush.Metatheory.VCG.FactTranslation where
 
 private def reifiedTheory :
     Crush.Metatheory.Reification.ReifiedSentencesFor emptyDatatypeEnv reifiedConstants
-      [sourceExpression] :=
-  .cons reifiedFormula .nil
+      [sourceExpression, falseExpression] :=
+  .cons reifiedFormula (.cons reifiedFalse .nil)
 
 /-- The executable link between the exact concrete command array and the
 mathematical guarded encoder. -/
@@ -1620,7 +1845,7 @@ private def twoConstantGuardDefEncoding :
   commands_eq := rfl
   ident := fun _ => none
   ident_injective := by simp
-  notReserved := by simp
+  fresh := by simp
   sourceFresh := by simp
   linked := trivial
 
@@ -1635,7 +1860,7 @@ private noncomputable def twoConstantGuardDefInterp :
       (Defunctionalization.Flattened.canonicalModel source)
     let lifted := twoConstantRepr.datatypeRepr.liftedFrom
       source freeDataModel prior
-    let base := Crush.Metatheory.SMT.ExtraGraph.nil twoConstantEncoding
+    let base := Crush.Metatheory.SMT.SourceExt.canonical twoConstantEncoding
       lifted.target
     let guards := twoConstantGuardDefEncoding.toUnaryGuards
       lifted.target (fun sort => (lifted.relation sort).guard)
@@ -1682,23 +1907,24 @@ private noncomputable def twoConstantGuardDefInterp :
         twoConstantEncoding lifted.target (guards.over base)
       apply_unique := guards.applyUnique_over base baseUnique fresh }
     have emptyComb : Crush.Metatheory.SMT.Theory.Comb.ofCommands
-        Crush.Metatheory.SMT.Int.env translationRecord.emittedCommands =
+        Crush.Metatheory.SMT.Theory.defaultEnv translationRecord.emittedCommands =
         Crush.Metatheory.SMT.Theory.Comb.empty
-          Crush.Metatheory.SMT.Int.env := by
+          Crush.Metatheory.SMT.Theory.defaultEnv := by
       apply Crush.Metatheory.SMT.Theory.Comb.ext
       intro theory
       rcases theory with ⟨index, bound⟩
       change index < 1 at bound
       have indexEq : index = 0 := by omega
       have theoryEq : (⟨index, bound⟩ : Fin
-          Crush.Metatheory.SMT.Int.env.sigEnv.modeled.length) =
+          Crush.Metatheory.SMT.Theory.defaultEnv.sigEnv.modeled.length) =
           Crush.SMT.Theory.intId := Fin.ext indexEq
       rw [theoryEq]
-      rw [Crush.Metatheory.SMT.Int.comb_int]
+      rw [Crush.Metatheory.SMT.Int.comb_active]
       simp [translationRecord, twoConstantCommands,
-        Crush.SMT.CommandsUseInt,
-        Crush.SMT.Command.usesInt,
-        Crush.SMT.Term.usesInt]
+        twoConstantSatCommands,
+        Crush.SMT.Theory.SigEnv.usesCommands,
+        Crush.SMT.Theory.SigEnv.usesCommand,
+        Crush.SMT.boolSort, Crush.SMT.Theory.intContainsIdent]
     exact (Crush.Metatheory.SMT.Theory.Comb.models_empty_iff.mpr wf).congr
       emptyComb.symm
 
@@ -1714,15 +1940,12 @@ private theorem twoConstantShapesMatch :
 by the command-equivalence regression, with a kernel-checked certificate. -/
 private theorem twoConstantCommands_wellTyped :
     Crush.SMT.modeledScriptWellTyped twoConstantCommands = true := by
-  unfold twoConstantCommands
+  unfold twoConstantCommands twoConstantSatCommands
   prove_modeled_script_well_typed
 
-private theorem generatedTwoConstantCommands_eq :
-    generatedTwoConstantCommands = twoConstantCommands := by
-  unfold generatedTwoConstantCommands twoConstantCommands
-  unfold Crush.Metatheory.VCG.guardedTheoryCommands
-  unfold Crush.Metatheory.SMT.GuardedEncoding.theory
-  simp [twoConstantGuarding, twoConstantEncoding,
+/-- Shared normalization for the two concrete command-generation checks. -/
+macro "normalize_two_constant_generation" : tactic =>
+  `(tactic| simp [twoConstantGuarding, twoConstantEncoding,
     Crush.Metatheory.SMT.GuardedEncoding.theoryBody,
     Crush.Metatheory.SMT.GuardedEncoding.assertions,
     Crush.Metatheory.SMT.GuardedEncoding.none,
@@ -1751,9 +1974,20 @@ private theorem generatedTwoConstantCommands_eq :
     Defunctionalization.Flattened.AuxiliaryTheory.theory,
     Defunctionalization.Flattened.DeclaredSymbol.of,
     Defunctionalization.targetVar, Renaming.lift,
-    twoConstantTheory, twoConstantFormula, leftConstant, rightConstant,
+    Crush.Metatheory.Term.falseE,
+    twoConstantTheory, twoConstantSatTheory, twoConstantFormula,
+    leftConstant, rightConstant, twoConstantCommands,
+    twoConstantSatCommands,
     FO.FOSort.ofTy,
-    symbolNative, symbolName, symbolIdent, sourceName, foSort]
+    symbolNative, symbolName, symbolIdent, sourceName, foSort])
+
+private theorem generatedTwoConstantCommands_eq :
+    generatedTwoConstantCommands = twoConstantCommands := by
+  unfold generatedTwoConstantCommands twoConstantCommands
+    twoConstantSatCommands
+  unfold Crush.Metatheory.VCG.guardedTheoryCommands
+  unfold Crush.Metatheory.SMT.GuardedEncoding.theory
+  normalize_two_constant_generation
 
 private theorem checkedCommandEquiv_succeeds :
     checkedCommandEquiv.isSome = true := by
@@ -1763,7 +1997,7 @@ private theorem checkedCommandEquiv_succeeds :
   have stripped : twoConstantCommands.map
       Crush.Metatheory.VCG.stripAssertionAnnotation = twoConstantCommands := by
     apply Array.toList_inj.mp
-    simp [twoConstantCommands,
+    simp [twoConstantCommands, twoConstantSatCommands,
       Crush.Metatheory.VCG.stripAssertionAnnotation]
   unfold checkedCommandEquiv
   simp [Crush.Metatheory.VCG.CommandEquiv.build?,
@@ -1796,9 +2030,9 @@ private def twoConstantSourceModel :
     | .there .here => False
 
 private theorem twoConstantSourceModel_valid :
-    twoConstantSourceModel.SatisfiesTheory twoConstantTheory := by
+    twoConstantSourceModel.SatisfiesTheory twoConstantSatTheory := by
   intro formula member
-  simp only [twoConstantTheory, List.mem_singleton] at member
+  simp only [twoConstantSatTheory, List.mem_singleton] at member
   subst formula
   change ∀ proposition : Prop, proposition = True ∨ proposition = False
   intro proposition
@@ -1809,49 +2043,96 @@ private theorem twoConstantSourceModel_valid :
     exact propext ⟨valid, False.elim⟩
 
 /-- The complete datatype/guard/SMT model construction produces a model of the
-command-selected theory combination satisfying the exact command array. -/
-private theorem twoConstantCommands_haveModel :
+satisfiable prefix. The surrounding translation record contains one additional
+false assertion, but both Boolean-only scripts select the same empty optional
+theory combination. -/
+private theorem twoConstantSatCommands_haveModel :
     ∃ model : Crush.SMT.Model,
       Crush.Metatheory.SMT.Theory.Comb.Models
           (Crush.Metatheory.SMT.Theory.Comb.ofCommands
-            Crush.Metatheory.SMT.Int.env twoConstantCommands) model ∧
-        model.SatisfiesCommands twoConstantCommands := by
+            Crush.Metatheory.SMT.Theory.defaultEnv twoConstantSatCommands) model ∧
+        model.SatisfiesCommands twoConstantSatCommands := by
   have encoding : Crush.Metatheory.SMT.GuardedTheoryRepr
       twoConstantGuarding #[]
-        (Defunctionalization.Flattened.translatedTheories twoConstantTheory)
-        twoConstantCommands := by
-    refine ⟨Crush.Metatheory.SMT.translatedDecls twoConstantTheory, ?_⟩
-    change Crush.SMT.SameCommandSet twoConstantCommands
-      generatedTwoConstantCommands
-    rw [generatedTwoConstantCommands_eq]
+        (Defunctionalization.Flattened.translatedTheories twoConstantSatTheory)
+        twoConstantSatCommands := by
+    refine ⟨Crush.Metatheory.SMT.translatedDecls twoConstantSatTheory, ?_⟩
+    change Crush.SMT.SameCommandSet twoConstantSatCommands
+      (Crush.Metatheory.VCG.guardedTheoryCommands twoConstantGuarding #[]
+        twoConstantSatTheory)
+    have generated : Crush.Metatheory.VCG.guardedTheoryCommands
+        twoConstantGuarding #[] twoConstantSatTheory = twoConstantSatCommands := by
+      unfold Crush.Metatheory.VCG.guardedTheoryCommands
+      unfold Crush.Metatheory.SMT.GuardedEncoding.theory
+      normalize_two_constant_generation
+    rw [generated]
     exact Crush.SMT.SameCommandSet.refl _
+  have combEq : Crush.Metatheory.SMT.Theory.Comb.ofCommands
+      Crush.Metatheory.SMT.Theory.defaultEnv translationRecord.emittedCommands =
+      Crush.Metatheory.SMT.Theory.Comb.ofCommands
+        Crush.Metatheory.SMT.Theory.defaultEnv twoConstantSatCommands := by
+    apply Crush.Metatheory.SMT.Theory.Comb.ext
+    intro theory
+    rcases theory with ⟨index, bound⟩
+    change index < 1 at bound
+    have indexEq : index = 0 := by omega
+    have theoryEq : (⟨index, bound⟩ : Fin
+        Crush.Metatheory.SMT.Theory.defaultEnv.sigEnv.modeled.length) =
+        Crush.SMT.Theory.intId := Fin.ext indexEq
+    rw [theoryEq]
+    rw [Crush.Metatheory.SMT.Int.comb_active,
+      Crush.Metatheory.SMT.Int.comb_active]
+    simp [translationRecord, twoConstantCommands, twoConstantSatCommands,
+      Crush.SMT.Theory.SigEnv.usesCommands,
+      Crush.SMT.Theory.SigEnv.usesCommand,
+      Crush.SMT.boolSort, Crush.SMT.Theory.intContainsIdent]
   exact Crush.Metatheory.VCG.FactTranslation.DatatypeRepr.sound
     (translation := translationRecord) (guarding := twoConstantGuarding)
     twoConstantRepr twoConstantGuardDefEncoding
     twoConstantSourceModel .nil
     (twoConstantGuardDefInterp.realize twoConstantSourceModel .nil)
-    encoding rfl
+    encoding combEq
     (Defunctionalization.Flattened.model_extension_theory
-      twoConstantSourceModel twoConstantTheory twoConstantSourceModel_valid)
+      twoConstantSourceModel twoConstantSatTheory twoConstantSourceModel_valid)
 
-private theorem twoConstantCommands_notUnsatisfiable :
-    ¬Crush.Metatheory.SMT.CommandsUnsat twoConstantCommands := by
+private theorem twoConstantSatCommands_notUnsat :
+    ¬Crush.Metatheory.SMT.CommandsUnsat twoConstantSatCommands := by
   intro unsat
-  obtain ⟨model, models, valid⟩ := twoConstantCommands_haveModel
+  obtain ⟨model, models, valid⟩ := twoConstantSatCommands_haveModel
   exact unsat.noModel model models valid
 
-/-- The exact evidence returned by `CommandEquiv.build?` composes with
-the final reflection theorem. For this satisfiable running example the premise
-is false, as proved above; the theorem checks the complete API connection from
-the retained command array back to its reified higher-order theory. -/
-private theorem twoConstantCommands_reflectUnsatisfiability
-    (unsat : Crush.Metatheory.SMT.CommandsUnsat twoConstantCommands) :
+/-- The exact emitted command array has a substantive UNSAT certificate: the
+selected theory combination has a model, while its final false assertion has
+none. -/
+private theorem twoConstantCommands_unsat :
+    Crush.Metatheory.SMT.CommandsUnsat twoConstantCommands := by
+  refine ⟨?_, twoConstantCommands_wellTyped, ?_, ?_⟩
+  · intro command member
+    simp [twoConstantCommands, twoConstantSatCommands] at member
+    rcases member with rfl | rfl | rfl | rfl <;> trivial
+  · exact Crush.Metatheory.SMT.Int.combModels_exists
+      (Crush.Metatheory.SMT.Theory.Comb.ofCommands
+        Crush.Metatheory.SMT.Theory.defaultEnv twoConstantCommands)
+  · intro model models satisfies
+    have falseHolds : model ⊨ₛ (.lit (.bool false)) :=
+      satisfies (.assert (.lit (.bool false))) (by
+        simp [twoConstantCommands, twoConstantSatCommands])
+    have impossible : true = false :=
+      model.boolInjective (Crush.SMT.Eval.boolLit_iff.mp falseHolds)
+    contradiction
+
+/-- The executable command-equivalence certificate and the concrete modular
+UNSAT certificate compose through the final theorem. This exercises the full
+reflection interface with an inhabited theory-model premise and an actual
+inconsistent command obligation. -/
+private theorem twoConstant_unsat_source :
     Crush.Metatheory.Datatype.Env.TheoryUnsatisfiable
       translationRecord.datatypeSignaturePrefix.toModelEnv
       twoConstantTheory := by
   exact Crush.Metatheory.VCG.CommandEquiv.unsat_source
     twoConstantRepr twoConstantGuardDefEncoding
-    validatedTwoConstantCommands twoConstantGuardDefInterp unsat
+    validatedTwoConstantCommands twoConstantGuardDefInterp
+      twoConstantCommands_unsat
 
 
 end Crush.Metatheory.SMT.Tests

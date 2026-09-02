@@ -5,8 +5,8 @@ import Crush.Metatheory.SMT.Semantics
 
 A `Struct sig` exposes only the literals and application symbols contained in
 `sig`, while sharing the logical Boolean values and the sort carriers named by
-that signature. It is a restricted view of the existing relational SMT model,
-not a second term evaluator.
+that signature. It is a restricted view of the existing relational SMT model;
+term evaluation remains defined once on the full model.
 -/
 
 namespace Crush.Metatheory.SMT

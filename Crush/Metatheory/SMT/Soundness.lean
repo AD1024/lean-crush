@@ -212,7 +212,7 @@ theorem term_eval (encoding : Encoding symbols)
           (.app (encoding.ident symbol) (arguments encoding args))
           (.typed _ (args.apply target valuation (target.symbol symbol))) := by
         apply Crush.SMT.Eval.symbol
-          (encoding.ident_fresh symbol).notLogicalBuiltin
+          (encoding.ident_fresh symbol).notLogical
           (argsIH valuation environment related)
         refine ⟨_, symbol, rfl, ?_⟩
         rw [applyValues_argumentValues]
@@ -416,7 +416,7 @@ theorem term_eval (encoding : Encoding symbols)
 an encoded typed FO term. Source-symbol agreement follows from the encoding
 freshness field; logical built-ins use dedicated evaluation rules. -/
 theorem term_agrees (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     {context : FO.Context} {sort : FO.FOSort}
     (source : FO.FamilyTerm symbols context sort) :
     ModelExt.AgreeOn (base := model encoding target)
@@ -432,7 +432,7 @@ theorem term_agrees (encoding : Encoding symbols)
         (arguments encoding args).toList)
     (var := fun ref => .bvar _)
     (symbol := fun symbol args argsAgree => .app argsAgree (by
-      intro notBuiltin values output
+      intro notLogical values output
       change (Applies encoding target (encoding.ident symbol) values output ∨
           False) ↔
         (Applies encoding target (encoding.ident symbol) values output ∨
@@ -534,7 +534,7 @@ theorem sortDecls_valid (encoding : Encoding symbols)
 
 /-- Ordinary source-symbol declarations remain valid in an extended model. -/
 theorem declaration_valid_with (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     (declared : Decl symbols)
     (ordinary : encoding.nativeSymbol declared.symbol = false) :
     (modelWith encoding target extra).SatisfiesCommand
@@ -550,7 +550,7 @@ theorem declaration_valid_with (encoding : Encoding symbols)
 /-- Valid encoded assertions stay valid after installing a disjoint native
 graph. -/
 theorem assertions_valid_with (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     (source : FO.FamilyTheory symbols) (valid : target ⊨ᵀ source) :
     modelWith encoding target extra ⊨ₛᶜ
       (source.map fun formula => .assert (𝒶⟦formula⟧[encoding])).toArray := by
@@ -578,7 +578,7 @@ theorem assertions_valid_with (encoding : Encoding symbols)
 /-- Every ordinary declaration in the represented list is valid in the extended
 model. -/
 theorem declarations_valid_with (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     (declarations : List (Decl symbols)) :
     modelWith encoding target extra ⊨ₛᶜ
       ((ordinaryDecls encoding declarations).map
@@ -598,7 +598,7 @@ theorem declarations_valid_with (encoding : Encoding symbols)
 
 /-- Sort declarations are graph-independent. -/
 theorem sortDecls_valid_with (encoding : Encoding symbols)
-    (target : FO.FamilyModel symbols) (extra : ExtraGraph encoding target)
+    (target : FO.FamilyModel symbols) (extra : SourceExt encoding target)
     (sorts : List FO.FOSort) :
     modelWith encoding target extra ⊨ₛᶜ
       (sorts.filterMap (sortDecl? encoding)).toArray := by
@@ -624,7 +624,7 @@ theorem lift_with_extra (encoding : Encoding symbols)
     {source : FO.FamilyTheory symbols} {commands : Array Command}
     (repr : TheoryRepr encoding source commands)
     (target : FO.FamilyModel symbols) (valid : target ⊨ᵀ source)
-    (extra : ExtraGraph encoding target)
+    (extra : SourceExt encoding target)
     (nativeValid : modelWith encoding target extra ⊨ₛᶜ
       encoding.nativeCommands) :
     ∃ smtModel : Crush.SMT.Model, smtModel ⊨ₛᶜ commands := by

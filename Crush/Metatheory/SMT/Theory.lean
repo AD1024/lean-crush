@@ -21,20 +21,48 @@ structure WF (model : Model) : Prop where
     ∃ boolean, value = model.bool boolean
   apply_unique : ApplyUnique model
 
-/-- Existing globally standard models satisfy the theory-independent laws. -/
-theorem Standard.wf {model : Model} (standard : model.Standard) : model.WF :=
-  ⟨standard.bool_exhaustive, standard.apply_unique⟩
+private inductive CoreValue where
+  | boolean : Bool → CoreValue
+  | other : SSort → CoreValue
 
-/-- Existing command-indexed standard models satisfy the theory-independent
-laws. -/
-theorem StandardFor.wf {model : Model} {commands : Array Command}
-    (standard : model.StandardFor commands) : model.WF :=
-  ⟨standard.bool_exhaustive, standard.apply_unique⟩
+private def CoreValue.InSort (sort : SSort) : CoreValue → Prop
+  | .boolean _ => sort = boolSort
+  | .other declared => sort = declared ∧ sort ≠ boolSort
 
-/-- The full-model well-formedness class is inhabited. -/
+private def coreLiteral : Literal → CoreValue
+  | .bool value => .boolean value
+  | literal => .other literal.sort
+
+private def coreModel : Model where
+  Value := CoreValue
+  inSort := CoreValue.InSort
+  sortNonempty := by
+    intro sort
+    by_cases equal : sort = boolSort
+    · exact ⟨.boolean false, equal⟩
+    · exact ⟨.other sort, rfl, equal⟩
+  bool := .boolean
+  boolTyped := by intro value; rfl
+  boolInjective := by intro left right equal; injection equal
+  literal := coreLiteral
+  literalTyped := by
+    intro literal
+    cases literal <;>
+      simp [coreLiteral, CoreValue.InSort, Literal.sort,
+        boolSort, intSort, stringSort, bitvecSort]
+  apply := fun _ _ _ => False
+
+/-- The mandatory logical model class has a concrete witness independently of
+every optional interpreted theory. -/
 theorem wf_exists : ∃ model : Model, model.WF := by
-  rcases standardModel_exists with ⟨model, standard⟩
-  exact ⟨model, standard.wf⟩
+  refine ⟨coreModel, ?_⟩
+  constructor
+  · intro value typed
+    cases value with
+    | boolean value => exact ⟨value, rfl⟩
+    | other sort => simp [coreModel, CoreValue.InSort] at typed
+  · intro symbol values left right leftApplied
+    contradiction
 
 end Model
 

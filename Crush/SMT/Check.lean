@@ -10,15 +10,16 @@ That makes construction ergonomic, but previously let malformed applications rea
 the backend, where they surfaced as solver-specific parser errors. This pass checks:
 
 * every application of a declared function, constructor, or selector;
-* the core Bool, Int, BitVec, String, and Array theory operators emitted by crush;
+* registered Bool, Int, BitVec, String, and Array theory operators;
 * binder, `let`, lambda, assertion, and definition result sorts.
 
 The ordinary `checkScript` entry point leaves unknown undeclared symbols
 unclassified. Translation extensions may target additional SMT theories, so treating
-every symbol outside the core table as an error would make the public lowering API
-artificially closed. `checkClosedScript` selects the stricter mode used by the
-metatheory: every referenced symbol must instead be a known theory operator, a local
-binder, or a preceding declaration.
+every symbol outside the registry as an error would make the public lowering API
+artificially closed. `checkClosedScript` requires every referenced symbol to be a
+known theory operator, a local binder, or a preceding declaration;
+`checkModeledScript` further restricts accepted operators to theories with semantics
+in the metatheory.
 -/
 
 namespace Crush.SMT
@@ -29,61 +30,14 @@ open Theory (requireArity requireSort)
 sort and term checking is total, and the generated equation theorems let small
 concrete successes be proved by kernel-checked simplification. -/
 
-/-- Solver-defined operators recognized by the shared SMT checker. An
-identifier in this table cannot be redeclared as an uninterpreted function in
-the closed metatheory fragment. -/
-private def legacyKnownTheoryOperator : Ident → Bool
-  | .symb name =>
-      #["true", "false", "=", "not", "=>", "and", "or", "xor",
-        "distinct", "ite", "+", "*", "-", "div", "mod", "<", "<=",
-        ">", ">=", "abs", "bvnot", "bvneg", "bvadd", "bvsub", "bvmul",
-        "bvand", "bvor", "bvxor", "bvudiv", "bvurem", "bvsdiv",
-        "bvsrem", "bvsmod", "bvshl", "bvlshr", "bvashr", "bvult",
-        "bvule", "bvugt", "bvuge", "bvslt", "bvsle", "bvsgt",
-        "bvsge", "concat", "bv2nat", "sbv_to_int", "str.len", "str.++",
-        "str.prefixof", "str.suffixof", "str.contains", "select", "store"]
-        |>.contains name
-  | .indexed name _ =>
-      #["int2bv", "extract", "zero_extend", "sign_extend", "rotate_left",
-        "rotate_right"] |>.contains name
-
-/-- Theory operators whose denotation is present in `Metatheory.SMT.Semantics`.
-Datatype constructors, selectors, and indexed testers are handled separately
-by datatype declarations rather than this fixed table. -/
-private def legacyModeledTheoryOperator : Ident → Bool
-  | .symb name =>
-      #["=", "not", "=>", "and", "or", ">="] |>.contains name
-  | .indexed _ _ => false
-
-/-- Whether the current theory registry provides a checker rule. -/
+/-- Whether the default theory registry provides a checker rule. -/
 def isKnownTheoryOperator (identifier : Ident) : Bool :=
-  Theory.currentEnv.isKnownIdent identifier
+  Theory.defaultSigEnv.isKnownIdent identifier
 
-/-- Whether the current theory registry also supplies semantics in the
+/-- Whether the default theory registry also supplies semantics in the
 metatheory. -/
 def isModeledTheoryOperator (identifier : Ident) : Bool :=
-  Theory.currentEnv.isModeledIdent identifier
-
-/-- The registry preserves the previous known-operator classification. -/
-theorem knownTheoryOperator_compat (identifier : Ident) :
-    legacyKnownTheoryOperator identifier = isKnownTheoryOperator identifier := by
-  rw [isKnownTheoryOperator, Theory.current_known_ident]
-  rfl
-
-/-- The registry preserves the previous modeled-operator classification. -/
-theorem modeledTheoryOperator_compat (identifier : Ident) :
-    legacyModeledTheoryOperator identifier =
-      isModeledTheoryOperator identifier := by
-  cases identifier with
-  | symb name =>
-      simp [legacyModeledTheoryOperator, isModeledTheoryOperator,
-        Theory.current_modeled_ident, Theory.coreContainsIdent,
-        Theory.intContainsIdent]
-      grind
-  | indexed name indices =>
-      simp [legacyModeledTheoryOperator, isModeledTheoryOperator,
-        Theory.current_modeled_ident, Theory.coreContainsIdent,
-        Theory.intContainsIdent]
+  Theory.defaultSigEnv.isModeledIdent identifier
 
 @[simp] private theorem builtinSortArity?_bool :
     Ident.builtinSortArity? (.symb "Bool") = some 0 := rfl
@@ -261,7 +215,8 @@ mutual
     inferApp mode env locals ident argSorts.toArray
   | .letE bindings body => do
     let bindingSorts ← inferBindingList mode env locals bvars bindings.toList
-    inferTerm mode env (bindingSorts.reverse ++ locals) bvars body
+    let reversed := bindingSorts.reverse
+    inferTerm mode env (reversed ++ locals) (reversed.map (·.2) ++ bvars) body
   | .forallE binders body => do
     for (_, sort) in binders do checkSort mode env sort
     let bodySort ← inferTerm mode env (binders.toList.reverse ++ locals)
@@ -311,6 +266,8 @@ where
               throw s!"unknown indexed symbol `{ident}`"
             else pure none
       if let some localSort := lookupLocal locals name then
+        if mode.modeledTheoriesOnly then
+          throw s!"named local `{name}` is outside the de Bruijn SMT semantic fragment"
         if args.isEmpty then return some localSort
         let some sig := arrowSig? localSort
           | throw s!"local symbol `{name}` of sort `{localSort}` is not applicable"
@@ -599,24 +556,23 @@ private def checkScriptWith (mode : CheckMode)
 symbols remain unclassified so registered translation extensions can introduce
 operators outside the built-in table. -/
 def checkScript (commands : Array Command) : Except SortError Unit :=
-  checkScriptWith ⟨Theory.currentEnv, false, false⟩ commands
+  checkScriptWith ⟨Theory.defaultSigEnv, false, false⟩ commands
 
 /-- Validate a closed SMT script. Unlike `checkScript`, this rejects every
 unknown or use-before-declaration symbol. The metatheory uses this judgment so
 an invalid SMT script cannot establish unsatisfiability merely because its
 untyped terms have incompatible sorts. -/
 def checkClosedScript (commands : Array Command) : Except SortError Unit :=
-  checkScriptWith ⟨Theory.currentEnv, true, false⟩ commands
+  checkScriptWith ⟨Theory.defaultSigEnv, true, false⟩ commands
 
-/-- Computable success flag for `checkClosedScript`, used when a checked
-translation must retain the validation result as proof data. -/
-def closedScriptWellSorted (commands : Array Command) : Bool :=
+/-- Computable success flag for `checkClosedScript`. -/
+def closedScriptWellTyped (commands : Array Command) : Bool :=
   (checkClosedScript commands).isOk
 
 /-- Type-check a closed command sequence in exactly the first-order theory
 fragment whose denotation is mechanized by `Crush.Metatheory.SMT`. -/
 def checkModeledScript (commands : Array Command) : Except SortError Unit :=
-  checkScriptWith ⟨Theory.currentEnv, true, true⟩ commands
+  checkScriptWith ⟨Theory.defaultSigEnv, true, true⟩ commands
 
 /-- Type-check a closed command sequence against a supplied registry of
 semantically modeled theories. This is the checker entry point used to test
@@ -653,21 +609,24 @@ macro "prove_modeled_script_well_typed" : tactic =>
       inferTerm.inferApp, insertSort, insertFun, checkSignature,
       arrowSig?, lookupLocal, testerCtor?,
       validateStringLiteral, isKnownTheoryOperator, isModeledTheoryOperator,
-      Theory.current_inferApp?, Theory.inferCoreApp, Theory.inferIntApp,
+      Theory.default_inferApp?, Theory.inferCoreApp, Theory.inferIntApp,
       Theory.requireArity, Theory.requireSort,
       Theory.requireSame, Theory.requireArgsOfSort, Theory.requireBoolArgs,
       Theory.requireIntArgs,
       Theory.knownContainsIdent, Theory.coreContainsIdent,
       Theory.intContainsIdent, Theory.syntaxContainsIdent,
-      Theory.current_isKnownSortCtor, Theory.current_isModeledSortCtor,
-      Theory.current_sortArity_bool, Theory.current_sortArity_int,
-      Theory.current_sortArity_string, Theory.current_sortArity_array,
-      Theory.current_sortArity_bitvec,
+      Theory.default_isKnownSortCtor, Theory.default_isModeledSortCtor,
+      Theory.default_sortArity_bool, Theory.default_sortArity_int,
+      Theory.default_sortArity_string, Theory.default_sortArity_array,
+      Theory.default_sortArity_bitvec,
       Theory.coreSortArity?, Theory.intSortArity?,
       Theory.coreSig, Theory.intSig, Theory.syntaxSig,
       Theory.Sig.ofClassifiers, Theory.Sig.containsSortCtor,
       boolSort, intSort, stringSort, bitvecSort,
       Literal.sort,
+      Command.resolveBinders, FunDef.resolveBinders,
+      Term.resolveBinders, Term.resolveTermList, Term.resolveBindingList,
+      Term.resolveAttr, Term.resolveAttrList, Term.binderIndex?,
       Pure.pure, Bind.bind, Functor.map, Except.pure, Except.bind, Except.map,
       Term.symbApp] <;> try rfl)
 

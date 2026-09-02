@@ -265,6 +265,109 @@ inductive Command where
   | exit       : Command
   deriving Inhabited, Repr
 
+namespace Term
+
+/-- Index of the nearest binder with a given printed name. -/
+def binderIndex? (binders : List String) (name : String) : Option Nat :=
+  match binders with
+  | [] => none
+  | binder :: rest =>
+      if binder = name then some 0 else (binderIndex? rest name).map (· + 1)
+
+mutual
+  /-- Resolve named nullary references captured by SMT binders to the internal
+  de Bruijn representation. Generated commands use this canonical form; the
+  printer recovers the declared names. -/
+  def resolveBinders (binders : List String) : Term → Term
+    | .lit literal => .lit literal
+    | .bvar index => .bvar index
+    | .app identifier arguments =>
+        if arguments.isEmpty then
+          match identifier with
+          | .symb name =>
+              match binderIndex? binders name with
+              | some index => .bvar index
+              | none => .app identifier #[]
+          | .indexed _ _ => .app identifier #[]
+        else
+          .app identifier (resolveTermList binders arguments.toList).toArray
+    | .letE bindings body =>
+        let names := bindings.toList.map (·.1)
+        .letE (resolveBindingList binders bindings.toList).toArray
+          (resolveBinders (names.reverse ++ binders) body)
+    | .forallE declarations body =>
+        let names := declarations.toList.map (·.1)
+        .forallE declarations (resolveBinders (names.reverse ++ binders) body)
+    | .existsE declarations body =>
+        let names := declarations.toList.map (·.1)
+        .existsE declarations (resolveBinders (names.reverse ++ binders) body)
+    | .lam declarations body =>
+        let names := declarations.toList.map (·.1)
+        .lam declarations (resolveBinders (names.reverse ++ binders) body)
+    | .annot body attributes =>
+        .annot (resolveBinders binders body)
+          (resolveAttrList binders attributes.toList).toArray
+  termination_by term => sizeOf term
+  decreasing_by
+    all_goals first
+      | exact Nat.zero_lt_succ _
+      | omega
+      | (obtain ⟨list⟩ := arguments; simp [Array.mk.sizeOf_spec]; omega)
+      | (obtain ⟨list⟩ := attributes; simp [Array.mk.sizeOf_spec]; omega)
+      | (obtain ⟨list⟩ := bindings; simp [Array.mk.sizeOf_spec]; omega)
+      | (simp_wf; omega)
+
+  def resolveTermList (binders : List String) : List Term → List Term
+    | [] => []
+    | term :: terms =>
+        resolveBinders binders term :: resolveTermList binders terms
+  termination_by terms => sizeOf terms
+  decreasing_by all_goals (simp_wf; omega)
+
+  def resolveBindingList (binders : List String) :
+      List (String × Term) → List (String × Term)
+    | [] => []
+    | (name, value) :: bindings =>
+        (name, resolveBinders binders value) ::
+          resolveBindingList binders bindings
+  termination_by bindings => sizeOf bindings
+  decreasing_by all_goals (simp_wf; omega)
+
+  def resolveAttr (binders : List String) : Attr → Attr
+    | .named name => .named name
+    | .pattern terms =>
+        .pattern (resolveTermList binders terms.toList).toArray
+    | .keyword key value => .keyword key value
+  termination_by attr => sizeOf attr
+  decreasing_by
+    obtain ⟨list⟩ := terms
+    simp [Array.mk.sizeOf_spec]
+    omega
+
+  def resolveAttrList (binders : List String) : List Attr → List Attr
+    | [] => []
+    | attr :: attributes =>
+        resolveAttr binders attr :: resolveAttrList binders attributes
+  termination_by attributes => sizeOf attributes
+  decreasing_by all_goals (simp_wf; omega)
+end
+
+end Term
+
+/-- Canonicalize every binder scope in one function definition. -/
+def FunDef.resolveBinders (definition : FunDef) : FunDef :=
+  { definition with
+    body := definition.body.resolveBinders
+      (definition.args.toList.map (·.1)).reverse }
+
+/-- Canonicalize named binder references in the term-bearing parts of one
+command. Commands kept by the translator use this internal representation. -/
+def Command.resolveBinders : Command → Command
+  | .defFun definition => .defFun definition.resolveBinders
+  | .defFunsRec definitions => .defFunsRec (definitions.map (·.resolveBinders))
+  | .assert term => .assert (term.resolveBinders [])
+  | command => command
+
 /-- Convenience: apply a symbol by name. -/
 def Term.symbApp (s : String) (args : Array Term) : Term := .app (.symb s) args
 

@@ -21,7 +21,7 @@ variable {native : DatatypeSymbols (Symbol signature) block}
 /-- Typed selector applications belonging to one constructor, in field order. -/
 def fieldInputs {target : FO.FamilyModel (Symbol signature)}
     {guarding : SMT.GuardedEncoding (Symbol signature)}
-    {extra : SMT.ExtraGraph guarding.encoding target}
+    {extra : SMT.SourceExt guarding.encoding target}
     {environment : List (SMT.Value target)}
     {data : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block data ctor) (valueTerm : Crush.SMT.Term)
@@ -38,7 +38,7 @@ def fieldInputs {target : FO.FamilyModel (Symbol signature)}
 the constructor's typed fields. -/
 theorem fieldInputs_iff {target : FO.FamilyModel (Symbol signature)}
     {guarding : SMT.GuardedEncoding (Symbol signature)}
-    {extra : SMT.ExtraGraph guarding.encoding target}
+    {extra : SMT.SourceExt guarding.encoding target}
     {environment : List (SMT.Value target)}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     {data : DataRef block} {ctor : CtorDecl arity}
@@ -68,7 +68,7 @@ theorem fieldInputs_iff {target : FO.FamilyModel (Symbol signature)}
 /-- One constructor clause with its indexed tester and typed selector inputs. -/
 def ctorPart {target : FO.FamilyModel (Symbol signature)}
     {guarding : SMT.GuardedEncoding (Symbol signature)}
-    {extra : SMT.ExtraGraph guarding.encoding target}
+    {extra : SMT.SourceExt guarding.encoding target}
     {environment : List (SMT.Value target)}
     {data : DataRef block} {ctor : CtorDecl arity}
     (ctorRef : CtorRef block data ctor) (ctorName : String)
@@ -95,7 +95,7 @@ def ctorPart {target : FO.FamilyModel (Symbol signature)}
 /-- Every constructor clause of one datatype declaration, in declaration order. -/
 def dataParts {target : FO.FamilyModel (Symbol signature)}
     {guarding : SMT.GuardedEncoding (Symbol signature)}
-    {extra : SMT.ExtraGraph guarding.encoding target}
+    {extra : SMT.SourceExt guarding.encoding target}
     {environment : List (SMT.Value target)}
     (data : DataRef block)
     (ctorName : ∀ {ctor : CtorDecl arity},
@@ -126,7 +126,7 @@ def wfFields (guarding : SMT.GuardedEncoding (Symbol signature))
         #[valueTerm])) |>.toArray
 
 /-- Exact constructor names and selector guards used by one generated `wf_T`
-body. Unlike `dataParts`, this syntax has no model-dependent evidence. -/
+body, represented as syntax without model-dependent evidence. -/
 def wfParts (guarding : SMT.GuardedEncoding (Symbol signature))
     (data : DataRef block)
     (ctorName : ∀ {ctor : CtorDecl arity},
@@ -152,7 +152,7 @@ def wfDefs (guarding : SMT.GuardedEncoding (Symbol signature))
 `wf_T` syntax exactly. -/
 theorem dataParts_parts {target : FO.FamilyModel (Symbol signature)}
     {guarding : SMT.GuardedEncoding (Symbol signature)}
-    {extra : SMT.ExtraGraph guarding.encoding target}
+    {extra : SMT.SourceExt guarding.encoding target}
     {environment : List (SMT.Value target)}
     (data : DataRef block)
     (ctorName : ∀ {ctor : CtorDecl arity},
@@ -179,7 +179,7 @@ theorem dataParts_parts {target : FO.FamilyModel (Symbol signature)}
 condition for every constructor and every field. -/
 theorem dataParts_iff {target : FO.FamilyModel (Symbol signature)}
     {guarding : SMT.GuardedEncoding (Symbol signature)}
-    {extra : SMT.ExtraGraph guarding.encoding target}
+    {extra : SMT.SourceExt guarding.encoding target}
     {environment : List (SMT.Value target)}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (data : DataRef block)
@@ -264,7 +264,7 @@ theorem parts_iff_selWF
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {guarding : SMT.GuardedEncoding (Symbol signature)}
-    {extra : SMT.ExtraGraph guarding.encoding
+    {extra : SMT.SourceExt guarding.encoding
       (law.extend wf productive prior priorRel priorModels)}
     {environment : List
       (SMT.Value (law.extend wf productive prior priorRel priorModels))}
@@ -317,7 +317,7 @@ theorem dataParts_eval_wf
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {guarding : SMT.GuardedEncoding (Symbol signature)}
-    {extra : SMT.ExtraGraph guarding.encoding
+    {extra : SMT.SourceExt guarding.encoding
       (law.extend wf productive prior priorRel priorModels)}
     {environment : List
       (SMT.Value (law.extend wf productive prior priorRel priorModels))}
@@ -381,7 +381,7 @@ theorem wfParts_eval_wf
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {guarding : SMT.GuardedEncoding (Symbol signature)}
-    {extra : SMT.ExtraGraph guarding.encoding
+    {extra : SMT.SourceExt guarding.encoding
       (law.extend wf productive prior priorRel priorModels)}
     {environment : List
       (SMT.Value (law.extend wf productive prior priorRel priorModels))}
@@ -418,7 +418,7 @@ theorem wfParts_eval_wf
 tester-implies-field contract. -/
 theorem dataParts_eval {target : FO.FamilyModel (Symbol signature)}
     {guarding : SMT.GuardedEncoding (Symbol signature)}
-    {extra : SMT.ExtraGraph guarding.encoding target}
+    {extra : SMT.SourceExt guarding.encoding target}
     {environment : List (SMT.Value target)}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (semantics : guarding.TermSemantics target extra guard)
@@ -461,7 +461,7 @@ def Repr.guardParts
     {target : FO.FamilyModel (Symbol signature)}
     {guarding : SMT.GuardedEncoding (Symbol signature)}
     (encodingEq : guarding.encoding = fo)
-    {extra : SMT.ExtraGraph guarding.encoding target}
+    {extra : SMT.SourceExt guarding.encoding target}
     {environment : List (SMT.Value target)}
     (data : DataRef block) (valueTerm : Crush.SMT.Term)
     (value : target.carriers.Base data.decl.sort)
@@ -589,7 +589,7 @@ theorem Repr.guardParts_iff_guard
     {target : FO.FamilyModel (Symbol signature)}
     {guarding : SMT.GuardedEncoding (Symbol signature)}
     (encodingEq : guarding.encoding = fo)
-    {extra : SMT.ExtraGraph guarding.encoding target}
+    {extra : SMT.SourceExt guarding.encoding target}
     {environment : List (SMT.Value target)}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (law : represented.GuardLaw target guard)
@@ -616,7 +616,7 @@ theorem Repr.guardParts_eval
     {target : FO.FamilyModel (Symbol signature)}
     {guarding : SMT.GuardedEncoding (Symbol signature)}
     (encodingEq : guarding.encoding = fo)
-    {extra : SMT.ExtraGraph guarding.encoding target}
+    {extra : SMT.SourceExt guarding.encoding target}
     {environment : List (SMT.Value target)}
     {guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop}
     (semantics : guarding.TermSemantics target extra guard)
@@ -694,7 +694,7 @@ theorem wfDef_valid
     (priorRel : FO.CarrierRel source.carriers prior.carriers)
     (priorModels : FO.ModelRel source prior priorRel)
     {guarding : SMT.GuardedEncoding (Symbol signature)}
-    {extra : SMT.ExtraGraph fo
+    {extra : SMT.SourceExt fo
       (law.extend wf productive prior priorRel priorModels)}
     (encodingEq : guarding.encoding = fo)
     (semantics : guarding.TermSemantics
@@ -742,7 +742,7 @@ theorem wfDefs_valid_of_guard
     {target : FO.FamilyModel (Symbol signature)}
     (guarding : SMT.GuardedEncoding (Symbol signature))
     (encodingEq : guarding.encoding = fo)
-    (extra : SMT.ExtraGraph guarding.encoding target)
+    (extra : SMT.SourceExt guarding.encoding target)
     (guard : ∀ sort : FO.FOSort, sort.Denote target.carriers → Prop)
     (semantics : guarding.TermSemantics target extra guard)
     (functional : Crush.SMT.ApplyUnique
@@ -800,7 +800,7 @@ theorem wfDefs_valid
     (priorModels : FO.ModelRel source prior priorRel)
     (guarding : SMT.GuardedEncoding (Symbol signature))
     (encodingEq : guarding.encoding = fo)
-    (extra : SMT.ExtraGraph fo
+    (extra : SMT.SourceExt fo
       (law.extend wf productive prior priorRel priorModels))
     (semantics : guarding.TermSemantics
       (law.extend wf productive prior priorRel priorModels)

@@ -100,9 +100,10 @@ theorem comb_stripAssertionAnnotations
       SMT.Theory.Comb.ofCommands env commands := by
   apply SMT.Theory.Comb.ext
   intro theory
-  change env.closure.close
-      (env.sigEnv.usesCommands (commands.map stripAssertionAnnotation)) theory =
-    env.closure.close (env.sigEnv.usesCommands commands) theory
+  change SMT.Theory.DepClosure env.sigEnv
+      (env.sigEnv.usesCommands (commands.map stripAssertionAnnotation)) theory ↔
+    SMT.Theory.DepClosure env.sigEnv
+      (env.sigEnv.usesCommands commands) theory
   rw [usesCommands_stripAssertionAnnotations]
 
 /-- Removing top-level assertion names preserves the class of satisfying SMT
@@ -160,14 +161,20 @@ theorem commandsUnsat_stripAssertionAnnotations
   constructor
   · intro unsat
     refine ⟨(commandsInFragment_stripAssertionAnnotations commands).mp
-      unsat.inFragment, originalWellTyped, ?_⟩
+      unsat.inFragment, originalWellTyped, ?_, ?_⟩
+    · rcases unsat.theoryModel with ⟨model, models⟩
+      exact ⟨model,
+        models.congr (comb_stripAssertionAnnotations env commands)⟩
     · intro model models valid
       exact unsat.noModel model
         (models.congr (comb_stripAssertionAnnotations env commands).symm)
         ((satisfiesCommands_stripAssertionAnnotations model commands).mpr valid)
   · intro unsat
     refine ⟨(commandsInFragment_stripAssertionAnnotations commands).mpr
-      unsat.inFragment, normalizedWellTyped, ?_⟩
+      unsat.inFragment, normalizedWellTyped, ?_, ?_⟩
+    · rcases unsat.theoryModel with ⟨model, models⟩
+      exact ⟨model,
+        models.congr (comb_stripAssertionAnnotations env commands).symm⟩
     · intro model models valid
       exact unsat.noModel model
         (models.congr (comb_stripAssertionAnnotations env commands))
@@ -203,9 +210,10 @@ theorem comb_setLogic (env : SMT.Theory.Env) (logic : String)
       SMT.Theory.Comb.ofCommands env commands := by
   apply SMT.Theory.Comb.ext
   intro theory
-  change env.closure.close
-      (env.sigEnv.usesCommands (#[.setLogic logic] ++ commands)) theory =
-    env.closure.close (env.sigEnv.usesCommands commands) theory
+  change SMT.Theory.DepClosure env.sigEnv
+      (env.sigEnv.usesCommands (#[.setLogic logic] ++ commands)) theory ↔
+    SMT.Theory.DepClosure env.sigEnv
+      (env.sigEnv.usesCommands commands) theory
   rw [usesCommands_setLogic]
 
 /-- Semantic unsatisfiability is unchanged when the emitted script adds its
@@ -223,11 +231,13 @@ theorem commandsUnsat_setLogic (env : SMT.Theory.Env) (logic : String)
     have supportedParts :=
       (commandsInFragment_append #[.setLogic logic] commands).mp
         unsat.inFragment
-    refine ⟨supportedParts.2, commandsWellTyped, ?_⟩
-    intro model models valid
-    exact unsat.noModel model
-      (models.congr (comb_setLogic env logic commands).symm)
-      ((satisfiesCommands_setLogic model logic commands).mpr valid)
+    refine ⟨supportedParts.2, commandsWellTyped, ?_, ?_⟩
+    · rcases unsat.theoryModel with ⟨model, models⟩
+      exact ⟨model, models.congr (comb_setLogic env logic commands)⟩
+    · intro model models valid
+      exact unsat.noModel model
+        (models.congr (comb_setLogic env logic commands).symm)
+        ((satisfiesCommands_setLogic model logic commands).mpr valid)
   · intro unsat
     have logicInFragment : CommandsInFragment #[.setLogic logic] := by
       intro command member
@@ -235,11 +245,13 @@ theorem commandsUnsat_setLogic (env : SMT.Theory.Env) (logic : String)
       subst command
       trivial
     refine ⟨(commandsInFragment_append _ _).mpr
-      ⟨logicInFragment, unsat.inFragment⟩, scriptWellTyped, ?_⟩
-    intro model models valid
-    exact unsat.noModel model
-      (models.congr (comb_setLogic env logic commands))
-      ((satisfiesCommands_setLogic model logic commands).mp valid)
+      ⟨logicInFragment, unsat.inFragment⟩, scriptWellTyped, ?_, ?_⟩
+    · rcases unsat.theoryModel with ⟨model, models⟩
+      exact ⟨model, models.congr (comb_setLogic env logic commands).symm⟩
+    · intro model models valid
+      exact unsat.noModel model
+        (models.congr (comb_setLogic env logic commands))
+        ((satisfiesCommands_setLogic model logic commands).mp valid)
 
 /-- Decide whether two arrays impose the same model requirements. The command
 semantics depends on membership, so order and duplicate occurrences do not
@@ -319,9 +331,9 @@ theorem unsat_source {translation : FactTranslation}
       reified.sources := by
   apply represented.theory_unsat guarded interp reified.sources
     cert.theory
-    (comb_stripAssertionAnnotations SMT.Int.env
+    (comb_stripAssertionAnnotations SMT.Theory.defaultEnv
       translation.emittedCommands).symm
-  exact (commandsUnsat_stripAssertionAnnotations SMT.Int.env
+  exact (commandsUnsat_stripAssertionAnnotations SMT.Theory.defaultEnv
     translation.emittedCommands cert.normalizedWellTyped
     cert.emittedWellTyped).mpr unsat
 
@@ -343,7 +355,7 @@ theorem unsat_source_script {translation : FactTranslation}
     Datatype.Env.TheoryUnsatisfiable translation.datatypeSignaturePrefix.toModelEnv
       reified.sources :=
   unsat_source represented guarded cert interp (by
-    exact (commandsUnsat_setLogic SMT.Int.env logic
+    exact (commandsUnsat_setLogic SMT.Theory.defaultEnv logic
       translation.emittedCommands cert.emittedWellTyped
       unsat.wellTyped).mp unsat)
 

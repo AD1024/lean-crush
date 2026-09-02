@@ -29,7 +29,7 @@ structure CommandWF {arity : Nat} (block : Block arity)
   symbols : (Crush.SMT.datatypeSymbols (entries block encoding)).Nodup
   symbols_fresh : ∀ symbol ∈
     Crush.SMT.datatypeSymbols (entries block encoding),
-      Crush.SMT.NotBuiltin symbol
+      Crush.SMT.NotLogical symbol
 
 /-- Native datatype sorts retain their intrinsic mutual-block indices. -/
 theorem dataSort_injective {arity : Nat} {encoding : BlockEncoding arity}

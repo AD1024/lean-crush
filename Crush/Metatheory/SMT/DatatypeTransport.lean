@@ -1,5 +1,5 @@
 import Crush.Metatheory.SMT.DatatypeLifted
-import Crush.Metatheory.SMT.Int
+import Crush.Metatheory.SMT.NatGuard
 
 /-!
 # Transporting SMT datatype laws through later blocks
@@ -1499,7 +1499,7 @@ theorem DisjointFromSuffix.wfDefs_valid
     (prior : Lifted (canonicalModel sourceModel))
     (guarding : SMT.GuardedEncoding (Symbol signature))
     (encodingEq : guarding.encoding = fo)
-    (extra : SMT.ExtraGraph guarding.encoding
+    (extra : SMT.SourceExt guarding.encoding
       (liftFrom sourceModel env tailLaw tailWF
         (prior.extend headLaw.flattened headWF headLaw.productive)).target)
     (semantics : guarding.TermSemantics
@@ -1571,7 +1571,7 @@ theorem DependencyOrdered.guards_valid
       (liftFrom sourceModel env freeDataModel represented.blocksWF prior).target
       (fun sort => ((liftFrom sourceModel env freeDataModel represented.blocksWF
         prior).relation sort).guard))
-    (base : SMT.ExtraGraph guarding.encoding
+    (base : SMT.SourceExt guarding.encoding
       (liftFrom sourceModel env freeDataModel represented.blocksWF prior).target)
     (baseUnique : Crush.SMT.ApplyUnique
       (SMT.modelWith guarding.encoding
@@ -1687,16 +1687,16 @@ open Crush.Metatheory.Datatype
 open Crush.Metatheory.Defunctionalization.Flattened
 open Crush.Metatheory.Datatype.Env (IsFreeDatatypeModel liftFrom)
 
-/-- Any `ExtraGraph` is inactive on a represented native datatype block: every
+/-- Any `SourceExt` is inactive on a represented native datatype block: every
 raw constructor, selector, and tester identifier is the encoding of a declared
-source symbol, and `ExtraGraph.source_fresh` excludes exactly those identifiers. -/
+source symbol, and `SourceExt.source_fresh` excludes exactly those identifiers. -/
 theorem Repr.extra_inactive
     {signature : Signature} {arity : Nat} {block : Block arity}
     {symbols : Symbols signature block}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Repr block symbols fo data)
     (target : FO.FamilyModel (Symbol signature))
-    (extra : SMT.ExtraGraph fo target) :
+    (extra : SMT.SourceExt fo target) :
     extra.InactiveOnDatatypes (entries block data) := by
   intro identifier member values output applied
   simp only [Crush.SMT.datatypeSymbols, List.mem_flatMap] at member
@@ -1736,23 +1736,25 @@ theorem Repr.extra_inactive
     exact extra.source_fresh (symbols.datatypeSymbols.sel ctorRef fieldRef)
       values output applied
 
-/-- A represented datatype declaration has a standard SMT model whenever the
-source datatype has its free-algebra interpretation and the shared target
-supplies the standard integer view used by the proved SMT fragment.  This is
+/-- A represented datatype declaration has an SMT model whenever the source
+datatype has its free-algebra interpretation and the shared target supplies
+the integer carrier used by the modeled fragment. This is
 the non-vacuity counterpart of `command_sound`: it installs the integer graph
 in the same model without disturbing constructors, selectors, or testers. -/
-theorem Repr.standardModel_exists
+theorem Repr.model_exists
     {signature : Signature} {arity : Nat} {block : Block arity}
     {symbols : Symbols signature block} {source : Model signature}
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Repr block symbols fo data)
     (freeDataModel : Datatype.IsFreeDatatypeModel symbols source)
-    (integer : SMT.IntView fo (canonicalModel source)) :
+    (integer : SMT.Int.Carrier fo (canonicalModel source)) :
     ∃ model : Crush.SMT.Model,
-      model.Standard ∧
+      Theory.Comb.Models
+          (Theory.Comb.ofCommands Theory.defaultEnv #[command block data]) model ∧
         model.SatisfiesCommand (command block data) := by
   let target := canonicalModel source
-  refine ⟨SMT.modelWith fo target integer.extra, integer.standard, ?_⟩
+  refine ⟨SMT.modelWith fo target integer.extra,
+    Int.combModels _ integer.wf integer.models, ?_⟩
   exact SMT.datatypeCommand_with_extra fo target integer.extra
     (entries block data) (represented.extra_inactive target integer.extra)
     (command_sound freeDataModel represented)
@@ -1765,12 +1767,12 @@ theorem Repr.not_commandsUnsat
     {fo : SMT.Encoding (Symbol signature)} {data : BlockEncoding arity}
     (represented : Repr block symbols fo data)
     (freeDataModel : Datatype.IsFreeDatatypeModel symbols source)
-    (integer : SMT.IntView fo (canonicalModel source)) :
-    ¬Crush.SMT.CommandsUnsat #[command block data] := by
+    (integer : SMT.Int.Carrier fo (canonicalModel source)) :
+    ¬Crush.Metatheory.SMT.CommandsUnsat #[command block data] := by
   intro unsat
-  obtain ⟨model, standard, commandValid⟩ :=
-    represented.standardModel_exists freeDataModel integer
-  apply unsat.noModel model (standard.forCommands #[command block data])
+  obtain ⟨model, models, commandValid⟩ :=
+    represented.model_exists freeDataModel integer
+  apply unsat.noModel model models
   intro command member
   simp only [List.mem_singleton] at member
   subst command
@@ -1782,7 +1784,7 @@ theorem Represented.commands_with_extra
     {signature : Signature} {fo : SMT.Encoding (Symbol signature)}
     {env : List (Entry signature)} (represented : Represented fo env)
     (target : FO.FamilyModel (Symbol signature))
-    (extra : SMT.ExtraGraph fo target)
+    (extra : SMT.SourceExt fo target)
     (valid : (SMT.model fo target).SatisfiesCommands represented.commands) :
     (SMT.modelWith fo target extra).SatisfiesCommands represented.commands := by
   induction represented with
@@ -1807,7 +1809,7 @@ theorem Represented.commands_with_extra
         ih parts.2⟩
 
 /-- One block's native declaration and exact recursive `wf_T` command coexist
-in the same graph-extended model. The base graph may be `IntView.extra`; unary
+in the same graph-extended model. The base graph may be `Int.Carrier.extra`; unary
 guards are installed over it once and supply all premises of `wfDefs_valid`. -/
 theorem Native.block_valid_with_guards
     {signature : Signature} {arity : Nat} {block : Block arity}
@@ -1825,7 +1827,7 @@ theorem Native.block_valid_with_guards
         sort).guard))
     (omitted : ∀ sort, guards.ident sort = none → ∀ value,
       (BaseLift.carrierRel wf productive priorRel law.carrier sort).guard value)
-    (base : SMT.ExtraGraph fo
+    (base : SMT.SourceExt fo
       (law.extend wf productive prior priorRel priorModels))
     (baseUnique : Crush.SMT.ApplyUnique
       (SMT.modelWith fo
@@ -1882,7 +1884,7 @@ theorem Native.block_valid_with_int
         sort).guard))
     (omitted : ∀ sort, guards.ident sort = none → ∀ value,
       (BaseLift.carrierRel wf productive priorRel law.carrier sort).guard value)
-    (view : SMT.IntView fo
+    (repr : SMT.Int.Carrier fo
       (law.extend wf productive prior priorRel priorModels))
     (separate : ∀ sort identifier, guards.ident sort = some identifier →
       identifier ≠ .symb ">=")
@@ -1891,15 +1893,15 @@ theorem Native.block_valid_with_int
       some (.symb (guardName child))) :
     (SMT.modelWith fo
       (law.extend wf productive prior priorRel priorModels)
-      (guards.over view.extra)).SatisfiesCommand (command block data) ∧
+      (guards.over repr.extra)).SatisfiesCommand (command block data) ∧
     (SMT.modelWith fo
       (law.extend wf productive prior priorRel priorModels)
-      (guards.over view.extra)).SatisfiesCommand
+      (guards.over repr.extra)).SatisfiesCommand
       (.defFunsRec (wfDefs (native := symbols.datatypeSymbols) guards.guarding
         data guardName binder)) :=
   Native.block_valid_with_guards represented law wf productive priorRel
-    priorModels guards omitted view.extra view.applyUnique
-    (view.guardsFresh guards separate) guardName binder guardIdent
+    priorModels guards omitted repr.extra repr.applyUnique
+    (repr.guardsFresh guards separate) guardName binder guardIdent
 
 /-- The exact native command prefix is valid after installing every datatype
 block over an arbitrary already-guarded base model. -/
@@ -1944,7 +1946,7 @@ theorem EnvRepr.liftedFrom_valid_with
     (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     (source : Model signature) (freeDataModel : IsFreeDatatypeModel source env)
     (prior : Lifted (canonicalModel source))
-    (extra : SMT.ExtraGraph fo
+    (extra : SMT.SourceExt fo
       (represented.liftedFrom source freeDataModel prior).target) :
     (SMT.modelWith fo (represented.liftedFrom source freeDataModel prior).target
       extra).SatisfiesCommands
@@ -1961,28 +1963,31 @@ theorem EnvRepr.lifted_valid_with
     {env : List (Entry signature)} (represented : EnvRepr fo env)
     (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     (source : Model signature) (freeDataModel : IsFreeDatatypeModel source env)
-    (extra : SMT.ExtraGraph fo (represented.lifted source freeDataModel).target) :
+    (extra : SMT.SourceExt fo (represented.lifted source freeDataModel).target) :
     (SMT.modelWith fo (represented.lifted source freeDataModel).target extra).SatisfiesCommands
       fo.nativeCommands := by
   simpa [EnvRepr.lifted, EnvRepr.liftedFrom, Env.lift] using
     represented.liftedFrom_valid_with ordered source freeDataModel
       (Lifted.refl (canonicalModel source)) extra
 
-/-- A dependency-ordered native datatype prefix has one standard SMT model.
-All blocks use the existing dependency fold, and the integer interpretation is
+/-- A dependency-ordered native datatype prefix has one SMT model. All blocks
+use the existing dependency fold, and the integer interpretation is
 added only after that fold, so this theorem introduces no parallel datatype
 model construction. -/
-theorem EnvRepr.standardModel_exists
+theorem EnvRepr.model_exists
     {signature : Signature} {fo : SMT.Encoding (Symbol signature)}
     {env : List (Entry signature)} (represented : EnvRepr fo env)
     (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     (source : Model signature) (freeDataModel : IsFreeDatatypeModel source env)
-    (integer : SMT.IntView fo
+    (integer : SMT.Int.Carrier fo
       (represented.lifted source freeDataModel).target) :
     ∃ model : Crush.SMT.Model,
-      model.Standard ∧ model.SatisfiesCommands fo.nativeCommands := by
+      Theory.Comb.Models
+          (Theory.Comb.ofCommands Theory.defaultEnv fo.nativeCommands) model ∧
+        model.SatisfiesCommands fo.nativeCommands := by
   let target := (represented.lifted source freeDataModel).target
-  refine ⟨SMT.modelWith fo target integer.extra, integer.standard, ?_⟩
+  refine ⟨SMT.modelWith fo target integer.extra,
+    Int.combModels _ integer.wf integer.models, ?_⟩
   exact represented.lifted_valid_with ordered source freeDataModel integer.extra
 
 /-- A represented datatype prefix cannot be UNSAT merely because datatype
@@ -1992,13 +1997,13 @@ theorem EnvRepr.not_commandsUnsat
     {env : List (Entry signature)} (represented : EnvRepr fo env)
     (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     (source : Model signature) (freeDataModel : IsFreeDatatypeModel source env)
-    (integer : SMT.IntView fo
+    (integer : SMT.Int.Carrier fo
       (represented.lifted source freeDataModel).target) :
-    ¬Crush.SMT.CommandsUnsat fo.nativeCommands := by
+    ¬Crush.Metatheory.SMT.CommandsUnsat fo.nativeCommands := by
   intro unsat
-  obtain ⟨model, standard, commandsValid⟩ :=
-    represented.standardModel_exists ordered source freeDataModel integer
-  exact unsat.noModel model (standard.forCommands fo.nativeCommands) commandsValid
+  obtain ⟨model, models, commandsValid⟩ :=
+    represented.model_exists ordered source freeDataModel integer
+  exact unsat.noModel model models commandsValid
 
 /-- Whole-theory model lifting over a caller-supplied interpreted or guarded
 base model. Native datatypes, derived graphs, ordinary declarations, and
@@ -2012,7 +2017,7 @@ theorem EnvRepr.soundFrom
     (repr : SMT.TheoryRepr fo theory commands)
     (source : Model signature) (freeDataModel : IsFreeDatatypeModel source env)
     (prior : Lifted (canonicalModel source))
-    (extra : SMT.ExtraGraph fo
+    (extra : SMT.SourceExt fo
       (represented.liftedFrom source freeDataModel prior).target)
     (valid : (represented.liftedFrom source freeDataModel prior).target.SatisfiesTheory
       theory) :
@@ -2030,7 +2035,7 @@ theorem EnvRepr.sound_with
     {commands : Array Crush.SMT.Command}
     (repr : SMT.TheoryRepr fo theory commands)
     (source : Model signature) (freeDataModel : IsFreeDatatypeModel source env)
-    (extra : SMT.ExtraGraph fo (represented.lifted source freeDataModel).target)
+    (extra : SMT.SourceExt fo (represented.lifted source freeDataModel).target)
     (valid : (represented.lifted source freeDataModel).target.SatisfiesTheory theory) :
     ∃ model : Crush.SMT.Model, model.SatisfiesCommands commands := by
   simpa [EnvRepr.lifted, EnvRepr.liftedFrom, Env.lift] using

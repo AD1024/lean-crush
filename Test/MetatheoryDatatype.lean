@@ -344,7 +344,7 @@ private theorem rawLoop_not_wellFormed :
   if Crush.SMT.modeledScriptWellTyped #[.declDatatypes rawLoop] then
     throw <| IO.userError "nonproductive self-recursive datatype was accepted"
 
-example : ¬Crush.SMT.CommandsUnsat
+example : ¬Crush.Metatheory.SMT.CommandsUnsat
     #[.declDatatypes rawLoop] := by
   intro unsat
   exact rawLoop_not_wellFormed
@@ -391,8 +391,8 @@ private def nestedRecursiveField :
       ("values", .app (.symb "Array") #[Crush.SMT.intSort,
         .app (.symb "Nested") #[]])] }] })]
 
-/- The current modeled subset has no positivity/nonemptiness semantics for a
-same-block datatype nested under another sort constructor. -/
+/- The modeled datatype grammar admits direct recursive fields. A same-block
+datatype nested under another sort constructor is rejected. -/
 #eval show IO Unit from do
   if Crush.SMT.modeledScriptWellTyped
       #[.declDatatypes nestedRecursiveField] then
@@ -757,25 +757,26 @@ example (freeDataModel : IsFreeDatatypeModel symbols source)
       (command block data) :=
   command_sound freeDataModel represented
 
-/-- The datatype declaration is satisfiable in a standard SMT model, not just
-the internal relational model, when the represented integer carrier is
-available. -/
+/-- The datatype declaration is satisfiable in a model of its exact selected
+theory combination when the represented integer carrier is available. -/
 example (freeDataModel : IsFreeDatatypeModel symbols source)
     (represented : Repr block symbols fo data)
-    (integer : SMT.IntView fo (canonicalModel source)) :
+    (integer : SMT.Int.Carrier fo (canonicalModel source)) :
     ∃ model : Crush.SMT.Model,
-      model.Standard ∧ model.SatisfiesCommand (command block data) :=
-  represented.standardModel_exists freeDataModel integer
+      SMT.Theory.Comb.Models
+          (SMT.Theory.Comb.ofCommands SMT.Theory.defaultEnv #[command block data]) model ∧
+        model.SatisfiesCommand (command block data) :=
+  represented.model_exists freeDataModel integer
 
 example (freeDataModel : IsFreeDatatypeModel symbols source)
     (represented : Repr block symbols fo data)
-    (integer : SMT.IntView fo (canonicalModel source)) :
-    ¬Crush.SMT.CommandsUnsat #[command block data] :=
+    (integer : SMT.Int.Carrier fo (canonicalModel source)) :
+    ¬SMT.CommandsUnsat #[command block data] :=
   represented.not_commandsUnsat freeDataModel integer
 
 /-- Additional derived graphs compose with the same FO representation: ordinary
 symbols and assertions remain valid by disjointness. -/
-example (extra : SMT.ExtraGraph fo (canonicalModel source))
+example (extra : SMT.SourceExt fo (canonicalModel source))
     (formula : Sentence signature) {commands : Array Crush.SMT.Command}
     (encoded : SMT.TheoryRepr fo (translatedTheory formula) commands)
     (valid : canonicalModel source ⊨ᵀ translatedTheory formula)
@@ -822,7 +823,7 @@ do not disturb the SMT datatype prefix. -/
 example {env : Datatype.Env signature} (represented : EnvRepr fo env)
     (ordered : Native.ModelExt.DependencyOrdered represented.blocks)
     (freeDataModel : Datatype.Env.IsFreeDatatypeModel source env)
-    (extra : SMT.ExtraGraph fo (represented.lifted source freeDataModel).target) :
+    (extra : SMT.SourceExt fo (represented.lifted source freeDataModel).target) :
     (SMT.modelWith fo (represented.lifted source freeDataModel).target extra).SatisfiesCommands
       fo.nativeCommands :=
   represented.lifted_valid_with ordered source freeDataModel extra
@@ -835,7 +836,7 @@ example {env : Datatype.Env signature} (represented : EnvRepr fo env)
     {theory : FO.FamilyTheory (Symbol signature)}
     {commands : Array Crush.SMT.Command}
     (encoded : SMT.TheoryRepr fo theory commands)
-    (extra : SMT.ExtraGraph fo (represented.lifted source freeDataModel).target)
+    (extra : SMT.SourceExt fo (represented.lifted source freeDataModel).target)
     (valid : (represented.lifted source freeDataModel).target.SatisfiesTheory theory) :
     ∃ model : Crush.SMT.Model, model.SatisfiesCommands commands :=
   represented.sound_with ordered encoded source freeDataModel extra valid
@@ -849,7 +850,7 @@ example {env : Datatype.Env signature} (represented : EnvRepr fo env)
     {theory : FO.FamilyTheory (Symbol signature)}
     {commands : Array Crush.SMT.Command}
     (encoded : SMT.TheoryRepr fo theory commands)
-    (extra : SMT.ExtraGraph fo
+    (extra : SMT.SourceExt fo
       (represented.liftedFrom source freeDataModel prior).target)
     (valid : (represented.liftedFrom source freeDataModel prior).target.SatisfiesTheory
       theory) :
@@ -912,7 +913,7 @@ example (translation : FactTranslation)
     (representation : FactCommandRepr translation guarding represented guarded
       reified)
     (interpretation : translation.GuardDefInterp guarding represented guarded)
-    (unsat : Crush.SMT.CommandsUnsat translation.emittedCommands) :
+    (unsat : SMT.CommandsUnsat translation.emittedCommands) :
     Datatype.Env.Unsatisfiable translation.datatypeSignaturePrefix.toModelEnv reified.source :=
   representation.unsat_source interpretation unsat
 
@@ -929,7 +930,7 @@ example (translation : FactTranslation)
       reified)
     (interpretation : translation.GuardDefInterp guarding represented guarded)
     (logic : String)
-    (unsat : Crush.SMT.CommandsUnsat
+    (unsat : SMT.CommandsUnsat
       (#[.setLogic logic] ++ translation.emittedCommands)) :
     Datatype.Env.Unsatisfiable translation.datatypeSignaturePrefix.toModelEnv reified.source :=
   representation.unsat_source_script interpretation logic unsat
@@ -1260,6 +1261,8 @@ run_meta do
         descr := label }
       let (_, legacy) ← Crush.buildScript {} #[fact]
       let (_, state) ← Crush.buildScript { certifyDatatype := true } #[fact]
+      unless Crush.SMT.modeledScriptWellTyped state.commands do
+        throwError "{label}: emitted commands failed the modeled SMT checker"
       unless legacy.commands.map Crush.SMT.commandToString ==
           state.commands.map Crush.SMT.commandToString do
         throwError "{label}: certified and legacy translation commands differ"
