@@ -213,6 +213,13 @@ def label_suite(suite: str) -> str:
     return SUITE_LABELS.get(suite, suite)
 
 
+def reconstruction_denominators(row: dict[str, str]) -> tuple[int, int]:
+    if "smt_verified_vcs" in row:
+        return int(row["verify_solved_vcs"]), int(row["smt_verified_vcs"])
+    verified = int(row["verified_vcs"])
+    return verified, verified
+
+
 def suite_sort_key(suite: str) -> tuple[int, str]:
     try:
         return (SUITE_ORDER.index(suite), suite)
@@ -655,13 +662,13 @@ def plot_reconstruction(rows: list[dict[str, str]], path: Path) -> None:
 
     group_width = chart_width / max(len(rows), 1)
     for suite_index, row in enumerate(sorted(rows, key=lambda item: item["suite"])):
-        verified = int(row["verified_vcs"])
+        verify_solved, smt_verified = reconstruction_denominators(row)
         bar_width = min(42.0, group_width * 0.19)
         bars_width = len(fields) * bar_width + (len(fields) - 1) * 8
         group_start = left + suite_index * group_width + (group_width - bars_width) / 2
         for field_index, (field, _, color) in enumerate(fields):
             count = int(row[field])
-            percentage = 100.0 * count / verified if verified else 0.0
+            percentage = 100.0 * count / smt_verified if smt_verified else 0.0
             x = group_start + field_index * (bar_width + 8)
             y = top + chart_height * (1.0 - percentage / 100.0)
             elements.append(
@@ -671,7 +678,7 @@ def plot_reconstruction(rows: list[dict[str, str]], path: Path) -> None:
                 text(
                     x + bar_width / 2,
                     max(top - 5, y - 7),
-                    f"{count}/{verified}",
+                    f"{count}/{smt_verified}",
                     "value",
                     "middle",
                 )
@@ -684,7 +691,16 @@ def plot_reconstruction(rows: list[dict[str, str]], path: Path) -> None:
             text(
                 center,
                 top + chart_height + 47,
-                f'{verified}/{row["total_vcs"]} SMT-verified',
+                f"{smt_verified}/{verify_solved} SMT cohort",
+                "axis",
+                "middle",
+            )
+        )
+        elements.append(
+            text(
+                center,
+                top + chart_height + 64,
+                f'{verify_solved}/{row["total_vcs"]} verify solved',
                 "axis",
                 "middle",
             )
@@ -817,7 +833,7 @@ def plot_failures(
             width / 2,
             height - 24,
             (
-                "A verified VC may contribute one record per strict lane; "
+                "An SMT-cohort VC may contribute one record per strict lane; "
                 "not attempted remains a separate outcome."
             ),
             "subtitle",
@@ -1337,18 +1353,24 @@ def write_tables(
                 stream,
                 [
                     "Corpus",
-                    "SMT verified / total",
-                    "Core / verified",
-                    "Alethe / verified",
-                    "Portfolio / verified",
+                    "Verify solved / total",
+                    "SMT cohort / verify solved",
+                    "Core / SMT cohort",
+                    "Alethe / SMT cohort",
+                    "Portfolio / SMT cohort",
                 ],
                 (
                     [
                         row["suite"],
-                        f'{row["verified_vcs"]} / {row["total_vcs"]}',
-                        f'{row["core_reconstructed"]} / {row["verified_vcs"]}',
-                        f'{row["alethe_reconstructed"]} / {row["verified_vcs"]}',
-                        f'{row["portfolio_reconstructed"]} / {row["verified_vcs"]}',
+                        f'{reconstruction_denominators(row)[0]} / {row["total_vcs"]}',
+                        f"{reconstruction_denominators(row)[1]} / "
+                        f"{reconstruction_denominators(row)[0]}",
+                        f'{row["core_reconstructed"]} / '
+                        f'{reconstruction_denominators(row)[1]}',
+                        f'{row["alethe_reconstructed"]} / '
+                        f'{reconstruction_denominators(row)[1]}',
+                        f'{row["portfolio_reconstructed"]} / '
+                        f'{reconstruction_denominators(row)[1]}',
                     ]
                     for row in sorted(
                         reconstruction, key=lambda item: item["suite"]

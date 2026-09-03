@@ -61,10 +61,13 @@ a bar unless its four segments sum to the corpus total.
 # Proof Reconstruction
 
 Proof reconstruction is measured separately from the headline comparison. Its
-denominator is the set of VCs discharged by the trusted verification lane.
-Core reconstruction re-proves an unsat core with Lean tactics. Alethe
-reconstruction replays cvc5's refutation step by step. The portfolio first
-attempts Alethe and then falls back to core reconstruction.
+denominator is the subset of successful trusted-verification VCs whose profile
+records that SMT actually returned `unsat`; selected facts and goals closed by
+checked pre-SMT reconstruction are reported as verify-lane successes but are
+not treated as certificate-reconstruction attempts. Core reconstruction
+re-proves an unsat core with Lean tactics. Alethe reconstruction replays cvc5's
+refutation step by step. The portfolio first attempts Alethe and then falls
+back to core reconstruction.
 
 These plots retain an earlier reconstruction-focused run. They characterize
 the checked strategies and are not extra Crush rows in the latest headline
@@ -79,8 +82,8 @@ declaration heartbeat stopped the generated file before that VC reached the
 strict lane; it is not classified as a reconstruction attempt.
 
 Each pie aggregates failure records from Core, Alethe, and Portfolio for one
-corpus. A verified VC can therefore contribute one record per strict lane; the
-lane-specific counts remain available in `reconstruction-failures.tsv` and
+corpus. An SMT-cohort VC can therefore contribute one record per strict lane;
+the lane-specific counts remain available in `reconstruction-failures.tsv` and
 the tables in
 [BENCHMARKS.md](https://github.com/AD1024/lean-crush/blob/main/BENCHMARKS.md).
 

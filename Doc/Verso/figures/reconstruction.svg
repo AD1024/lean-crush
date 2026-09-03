@@ -32,21 +32,23 @@ text { fill: #1B2927; font-family: 'Avenir Next', 'IBM Plex Sans', sans-serif; }
 <line x1="80.00" y1="140.00" x2="1101.00" y2="140.00" class="grid"/>
 <text x="68.00" y="144.00" text-anchor="end" class="axis">100%</text>
 <rect x="115.90" y="140.00" width="38.80" height="352.00" rx="2.00" fill="#DD7A45" opacity="1.000"/>
-<text x="135.30" y="135.00" text-anchor="middle" class="value">38/38</text>
-<rect x="162.70" y="408.63" width="38.80" height="83.37" rx="2.00" fill="#D3A22E" opacity="1.000"/>
-<text x="182.10" y="401.63" text-anchor="middle" class="value">9/38</text>
+<text x="135.30" y="135.00" text-anchor="middle" class="value">23/23</text>
+<rect x="162.70" y="492.00" width="38.80" height="0.00" rx="2.00" fill="#D3A22E" opacity="1.000"/>
+<text x="182.10" y="485.00" text-anchor="middle" class="value">0/23</text>
 <rect x="209.50" y="140.00" width="38.80" height="352.00" rx="2.00" fill="#254A62" opacity="1.000"/>
-<text x="228.90" y="135.00" text-anchor="middle" class="value">38/38</text>
+<text x="228.90" y="135.00" text-anchor="middle" class="value">23/23</text>
 <text x="182.10" y="519.00" text-anchor="middle" class="label">cashmere</text>
-<text x="182.10" y="539.00" text-anchor="middle" class="axis">38/38 SMT-verified</text>
+<text x="182.10" y="539.00" text-anchor="middle" class="axis">23/38 SMT cohort</text>
+<text x="182.10" y="556.00" text-anchor="middle" class="axis">38/38 verify solved</text>
 <rect x="320.10" y="140.00" width="38.80" height="352.00" rx="2.00" fill="#DD7A45" opacity="1.000"/>
-<text x="339.50" y="135.00" text-anchor="middle" class="value">19/19</text>
-<rect x="366.90" y="251.16" width="38.80" height="240.84" rx="2.00" fill="#D3A22E" opacity="1.000"/>
-<text x="386.30" y="244.16" text-anchor="middle" class="value">13/19</text>
+<text x="339.50" y="135.00" text-anchor="middle" class="value">15/15</text>
+<rect x="366.90" y="233.87" width="38.80" height="258.13" rx="2.00" fill="#D3A22E" opacity="1.000"/>
+<text x="386.30" y="226.87" text-anchor="middle" class="value">11/15</text>
 <rect x="413.70" y="140.00" width="38.80" height="352.00" rx="2.00" fill="#254A62" opacity="1.000"/>
-<text x="433.10" y="135.00" text-anchor="middle" class="value">19/19</text>
+<text x="433.10" y="135.00" text-anchor="middle" class="value">15/15</text>
 <text x="386.30" y="519.00" text-anchor="middle" class="label">leanhammer</text>
-<text x="386.30" y="539.00" text-anchor="middle" class="axis">19/20 SMT-verified</text>
+<text x="386.30" y="539.00" text-anchor="middle" class="axis">15/19 SMT cohort</text>
+<text x="386.30" y="556.00" text-anchor="middle" class="axis">19/20 verify solved</text>
 <rect x="524.30" y="140.00" width="38.80" height="352.00" rx="2.00" fill="#DD7A45" opacity="1.000"/>
 <text x="543.70" y="135.00" text-anchor="middle" class="value">4/4</text>
 <rect x="571.10" y="140.00" width="38.80" height="352.00" rx="2.00" fill="#D3A22E" opacity="1.000"/>
@@ -54,21 +56,24 @@ text { fill: #1B2927; font-family: 'Avenir Next', 'IBM Plex Sans', sans-serif; }
 <rect x="617.90" y="140.00" width="38.80" height="352.00" rx="2.00" fill="#254A62" opacity="1.000"/>
 <text x="637.30" y="135.00" text-anchor="middle" class="value">4/4</text>
 <text x="590.50" y="519.00" text-anchor="middle" class="label">loom</text>
-<text x="590.50" y="539.00" text-anchor="middle" class="axis">4/4 SMT-verified</text>
-<rect x="728.50" y="174.39" width="38.80" height="317.61" rx="2.00" fill="#DD7A45" opacity="1.000"/>
-<text x="747.90" y="167.39" text-anchor="middle" class="value">157/174</text>
-<rect x="775.30" y="489.98" width="38.80" height="2.02" rx="2.00" fill="#D3A22E" opacity="1.000"/>
-<text x="794.70" y="482.98" text-anchor="middle" class="value">1/174</text>
-<rect x="822.10" y="174.39" width="38.80" height="317.61" rx="2.00" fill="#254A62" opacity="1.000"/>
-<text x="841.50" y="167.39" text-anchor="middle" class="value">157/174</text>
+<text x="590.50" y="539.00" text-anchor="middle" class="axis">4/4 SMT cohort</text>
+<text x="590.50" y="556.00" text-anchor="middle" class="axis">4/4 verify solved</text>
+<rect x="728.50" y="174.79" width="38.80" height="317.21" rx="2.00" fill="#DD7A45" opacity="1.000"/>
+<text x="747.90" y="167.79" text-anchor="middle" class="value">155/172</text>
+<rect x="775.30" y="492.00" width="38.80" height="0.00" rx="2.00" fill="#D3A22E" opacity="1.000"/>
+<text x="794.70" y="485.00" text-anchor="middle" class="value">0/172</text>
+<rect x="822.10" y="174.79" width="38.80" height="317.21" rx="2.00" fill="#254A62" opacity="1.000"/>
+<text x="841.50" y="167.79" text-anchor="middle" class="value">155/172</text>
 <text x="794.70" y="519.00" text-anchor="middle" class="label">plean</text>
-<text x="794.70" y="539.00" text-anchor="middle" class="axis">174/192 SMT-verified</text>
-<rect x="932.70" y="184.22" width="38.80" height="307.78" rx="2.00" fill="#DD7A45" opacity="1.000"/>
-<text x="952.10" y="177.22" text-anchor="middle" class="value">355/406</text>
-<rect x="979.50" y="376.69" width="38.80" height="115.31" rx="2.00" fill="#D3A22E" opacity="1.000"/>
-<text x="998.90" y="369.69" text-anchor="middle" class="value">133/406</text>
-<rect x="1026.30" y="184.22" width="38.80" height="307.78" rx="2.00" fill="#254A62" opacity="1.000"/>
-<text x="1045.70" y="177.22" text-anchor="middle" class="value">355/406</text>
+<text x="794.70" y="539.00" text-anchor="middle" class="axis">172/174 SMT cohort</text>
+<text x="794.70" y="556.00" text-anchor="middle" class="axis">174/192 verify solved</text>
+<rect x="932.70" y="190.86" width="38.80" height="301.14" rx="2.00" fill="#DD7A45" opacity="1.000"/>
+<text x="952.10" y="183.86" text-anchor="middle" class="value">225/263</text>
+<rect x="979.50" y="459.88" width="38.80" height="32.12" rx="2.00" fill="#D3A22E" opacity="1.000"/>
+<text x="998.90" y="452.88" text-anchor="middle" class="value">24/263</text>
+<rect x="1026.30" y="190.86" width="38.80" height="301.14" rx="2.00" fill="#254A62" opacity="1.000"/>
+<text x="1045.70" y="183.86" text-anchor="middle" class="value">225/263</text>
 <text x="998.90" y="519.00" text-anchor="middle" class="label">velvet</text>
-<text x="998.90" y="539.00" text-anchor="middle" class="axis">406/425 SMT-verified</text>
+<text x="998.90" y="539.00" text-anchor="middle" class="axis">263/406 SMT cohort</text>
+<text x="998.90" y="556.00" text-anchor="middle" class="axis">406/425 verify solved</text>
 </svg>

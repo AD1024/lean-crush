@@ -305,7 +305,7 @@ reports:
 | `measurements.tsv` | Normalized per-VC status and tactic-local time |
 | `profile-events.tsv` | Normalized Crush outcomes, replay failures, phases, and numeric metrics |
 | `coverage-summary.tsv` | All-lane coverage over a fixed suite denominator, including attempted, failed, and missing counts |
-| `reconstruction-summary.tsv` | Verified VCs reconstructed by Core, Alethe, and the portfolio |
+| `reconstruction-summary.tsv` | Verify-lane successes, the SMT-`unsat` reconstruction cohort, and checked reconstruction coverage |
 | `reconstruction-failures.tsv` | Reconstruction failures grouped by reported cause |
 | `outcome-summary.tsv` | Crush outcomes and replay statuses grouped by suite and lane |
 | `phase-summary.tsv` | Total, mean, minimum, and maximum time for each Crush phase |
@@ -367,8 +367,18 @@ Everything else is `failed_to_prove`. Thus solver `sat` and `unknown` remain
 distinguishable in the raw/profile data but are both `failed_to_prove` in the
 headline outcome partition.
 
-`reconstruction-failures.tsv` has a separate taxonomy for VCs that trusted
-`crush-verify` solved but a checked reconstruction lane did not:
+`reconstruction-summary.tsv` distinguishes all VCs closed by `crush-verify`
+from the reconstruction cohort. `verify_solved_vcs` counts every successful
+verify-lane attempt, including selected facts and checked pre-SMT closures.
+`smt_verified_vcs` is the subset whose verify-lane profiler emitted at least
+one `outcome=verified`, establishing that the SMT solver actually returned
+`unsat`. Only this latter set is used as the denominator for Core, Alethe, and
+portfolio reconstruction. This prevents a strict Alethe run from being called
+a reconstruction failure merely because it forced a sound-but-incomplete SMT
+encoding for a goal that the verify lane had solved before invoking SMT.
+
+`reconstruction-failures.tsv` has a separate taxonomy for SMT-cohort VCs that
+a checked reconstruction lane did not reconstruct:
 
 | Failure mode | Meaning |
 |---|---|
@@ -383,7 +393,7 @@ headline outcome partition.
 | `<replay-mode>+core-failed` | In the portfolio lane, Alethe replay failed for `<replay-mode>` and the core-directed fallback failed too; for example, `certificate-error+core-failed`. |
 | `solver-sat` | The reconstruction lane's solver returned `sat`. |
 | `solver-unknown` | The reconstruction lane's solver returned `unknown`, including solver timeouts represented by an `unknown` profile event. |
-| `not-attempted` | No attempt row was available for that verified VC and reconstruction lane. |
+| `not-attempted` | No attempt row was available for that SMT-cohort VC and reconstruction lane. |
 | `tactic` / `unclassified` | No more specific profiler failure was available, so the report used the per-attempt category or the final fallback. |
 
 For strict Alethe, a `reconstruction-failed` profiler event maps directly to
@@ -432,7 +442,7 @@ The command writes:
 | `tables.md` | All-VC backend comparison, pairwise matched-VC, reconstruction, failure, phase, and scaling tables |
 | `coverage.svg` | Solved VCs by corpus and headline backend |
 | `outcomes.svg` | Four-way stacked outcome partition for every corpus and headline backend |
-| `reconstruction.svg` | Core, Alethe, and portfolio reconstruction among verified VCs |
+| `reconstruction.svg` | Core, Alethe, and portfolio reconstruction among SMT-`unsat` VCs |
 | `reconstruction-failures.svg` | One failure-mode pie chart per corpus |
 | `phase-breakdown.svg` | Stacked profiler-accounted time by Crush phase |
 | `alethe-replay-scaling.svg` | Successful replay time against parsed command count |

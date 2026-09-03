@@ -1,1 +1,1 @@
-suite	total_vcs	verified_vcs	core_reconstructed	alethe_reconstructed	portfolio_reconstructed
+suite	total_vcs	verify_solved_vcs	smt_verified_vcs	core_reconstructed	alethe_reconstructed	portfolio_reconstructed
