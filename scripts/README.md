@@ -338,6 +338,68 @@ solver `sat` or `unknown`, exhausted proof search, and ordinary tactic errors.
 The report rejects nonuniform headline workloads rather than adding a fifth
 `missing` outcome.
 
+### Error and failure categories
+
+The per-attempt `category` in `results.tsv` and `measurements.tsv` describes the
+diagnostic emitted by the benchmarked tactic. The shell harnesses classify it
+as follows:
+
+| Category | Diagnostic that selects it |
+|---|---|
+| `-` | The tactic closed the VC. |
+| `timeout` | A solver timeout, Lean heartbeat exhaustion, or Duper saturation-time/limit diagnostic. |
+| `translation` | Text reporting an unsupported translation or encoding, higher-order input, or an inability to translate or encode a term. |
+| `unknown` | The corpus harness received another solver `unknown` diagnostic. LeanHammer and PLean fold this into `tactic`. |
+| `sat` | The corpus harness was told that the goal was not provable or false, normally because the solver found a model. LeanHammer and PLean fold this into `tactic`. |
+| `reconstruction` | The corpus harness received an Alethe or other reconstruction diagnostic that did not match an earlier category. |
+| `tactic` | No more specific rule matched; this includes ordinary proof-search failures and harness-specific diagnostics that expose no finer reason. |
+
+Timeout matching has priority over translation in the shell harnesses. The
+corpus harness then checks `unknown`, `sat`, and reconstruction in that order.
+LeanHammer and PLean expose only `timeout`, `translation`, and the `tactic`
+fallback at this layer.
+
+`headline-outcomes.tsv` deliberately uses a smaller, backend-independent
+taxonomy. An all-pass VC is `success`. Otherwise an explicit translation or
+unsupported-encoding marker gives `translation_error`; if none exists, an
+explicit timeout, heartbeat, or saturation-limit marker gives `timeout`.
+Everything else is `failed_to_prove`. Thus solver `sat` and `unknown` remain
+distinguishable in the raw/profile data but are both `failed_to_prove` in the
+headline outcome partition.
+
+`reconstruction-failures.tsv` has a separate taxonomy for VCs that trusted
+`crush-verify` solved but a checked reconstruction lane did not:
+
+| Failure mode | Meaning |
+|---|---|
+| `certificate-error` | cvc5 returned an explicit `(error "...")` in its proof output instead of a usable Alethe certificate. For example, cvc5 may report `Proof unsupported by Alethe: contains operator DUMMY_SKOLEM`. This is a certificate-generation limitation, not a Lean kernel rejection. |
+| `no-certificate` | The solver returned no Alethe proof output. |
+| `malformed-certificate` | Proof output was nonempty but had no parseable command list, or the parsed proof was structurally unusable, such as a missing referenced premise or empty-clause conclusion. |
+| `term-gap` | A certificate assumption, clause, sort, operator, or anchor term could not be decoded into the corresponding Lean proposition or binder. |
+| `rule-gap` | The certificate step was decoded, but Lean could not prove that concrete inference from its already replayed premises. It also covers a decoded SMT assumption that cannot be derived from its Lean source fact. |
+| `kernel-reject` | Replay constructed a candidate final proof, but the final elaborator/kernel check rejected it. |
+| `replay-exception` | An unexpected exception escaped while replaying the certificate. |
+| `core-failed` | The core reconstruction lane received `unsat`, but none of its checked finishing tactics closed the goal from the selected unsat-core facts and explicit reconstruction hints. |
+| `<replay-mode>+core-failed` | In the portfolio lane, Alethe replay failed for `<replay-mode>` and the core-directed fallback failed too; for example, `certificate-error+core-failed`. |
+| `solver-sat` | The reconstruction lane's solver returned `sat`. |
+| `solver-unknown` | The reconstruction lane's solver returned `unknown`, including solver timeouts represented by an `unknown` profile event. |
+| `not-attempted` | No attempt row was available for that verified VC and reconstruction lane. |
+| `tactic` / `unclassified` | No more specific profiler failure was available, so the report used the per-attempt category or the final fallback. |
+
+For strict Alethe, a `reconstruction-failed` profiler event maps directly to
+its replay label. For Core it maps to `core-failed`. For the portfolio, the
+replay label is combined with `core-failed` because both reconstruction paths
+must have failed. If multiple profiler events exist for one VC, the report uses
+the most frequently occurring candidate category.
+
+The exact diagnostic is retained with different fidelity by each harness.
+Corpus `results.tsv` and `measurements.tsv` contain the complete diagnostic
+with tabs and newlines flattened. LeanHammer `measurements.tsv` retains the
+first matching diagnostic or error line. PLean's normalized attempt rows retain
+only the coarse category, while `profile-events.tsv` contains the structured
+replay label and concise detail. The complete original Lean and solver output
+is always in the corresponding file under `logs/`.
+
 In `comparison.tsv`, `matched_vcs` is the exact VC-identity intersection for
 the named baseline and Crush. `baseline_only_solved`, `crush_only_solved`,
 `both_solved`, and `neither_solved` partition that intersection. The two timing
