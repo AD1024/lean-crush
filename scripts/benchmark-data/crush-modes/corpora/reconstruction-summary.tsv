@@ -1,4 +1,4 @@
-suite	total_vcs	verified_vcs	core_reconstructed	alethe_reconstructed	portfolio_reconstructed
-cashmere	38	38	38	9	38
-loom	4	4	4	4	4
-velvet	425	406	355	133	355
+suite	total_vcs	verify_solved_vcs	smt_verified_vcs	core_reconstructed	alethe_reconstructed	portfolio_reconstructed
+cashmere	38	38	23	23	0	23
+loom	4	4	4	4	4	4
+velvet	425	406	263	225	24	225

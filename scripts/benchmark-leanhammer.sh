@@ -17,6 +17,8 @@ timeout="${TIMEOUT:-5}"
 max_heartbeats="${MAX_HEARTBEATS:-1000000}"
 max_rec_depth="${MAX_RECURSION_DEPTH:-1000000}"
 crush_profile="${CRUSH_PROFILE:-true}"
+use_mathlib_cache="${USE_MATHLIB_CACHE:-true}"
+resume="${RESUME:-false}"
 out_dir="${OUT_DIR:-$crush_root/BenchmarkResults/leanhammer-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "$out_dir"
 out_dir="$(cd "$out_dir" && pwd)"
@@ -25,6 +27,7 @@ metadata="$out_dir/metadata.tsv"
 summary="$out_dir/summary.tsv"
 measurements="$out_dir/measurements.tsv"
 profiles_out="$out_dir/profile-events.tsv"
+checkpoints="$out_dir/checkpoints.tsv"
 logs="$out_dir/logs"
 read -r -a profiles <<< \
   "${PROFILES:-crush-only crush-verify crush-core crush-alethe crush-portfolio grind-only duper-only auto-duper aesop-auto-duper aesop-crush}"
@@ -75,6 +78,12 @@ if ! (cd "$hammer_repo" && lake env printenv LEAN_PATH) \
   tail -n 80 "$out_dir/dependencies-leanhammer.log" >&2
   printf 'error: LeanHammer dependency setup failed\n' >&2
   exit 1
+fi
+if [[ "$use_mathlib_cache" == "true" ]]; then
+  printf 'Fetching cached LeanHammer dependencies\n'
+  if ! benchmark_fetch_cache "$hammer_repo" "$out_dir/cache-leanhammer.log"; then
+    printf 'warning: Mathlib cache unavailable for LeanHammer; building from source\n' >&2
+  fi
 fi
 if ! benchmark_sync_crush_sources "$crush_root" "$hammer_repo"; then
   exit 1
@@ -267,10 +276,42 @@ failure_message() {
   ' "$1"
 }
 
-printf 'profile\tcase\trun\tstatus\ttactic_ms\n' > "$results"
-printf 'suite\tlane\trepeat\tvc_key\tstatus\tcategory\tmilliseconds\tmessage\n' > "$measurements"
-printf 'suite\tlane\trepeat\tvc_key\tdeclaration\tgoal_hash\toutcome\treplay\tdetail\ttotal_nanos\tphases\tmetrics\n' > "$profiles_out"
-printf 'hammer_commit\ttoolchain\tduper_commit\tduper_timeout\tsolver\ttimeout\tmax_heartbeats\tmax_rec_depth\tcrush_profile\tcrush_commit\tcrush_dirty\tcrush_root\n' > "$metadata"
+case "$resume" in
+  true|false) ;;
+  *) printf 'error: RESUME must be true or false\n' >&2; exit 1 ;;
+esac
+
+initialize_tsv() {
+  local file="$1"
+  local header="$2"
+  if [[ "$resume" != "true" || ! -f "$file" ]]; then
+    printf '%b\n' "$header" > "$file"
+  fi
+}
+
+initialize_tsv "$results" 'profile\tcase\trun\tstatus\ttactic_ms'
+initialize_tsv "$measurements" 'suite\tlane\trepeat\tvc_key\tstatus\tcategory\tmilliseconds\tmessage'
+initialize_tsv "$profiles_out" 'suite\tlane\trepeat\tvc_key\tdeclaration\tgoal_hash\toutcome\treplay\tdetail\ttotal_nanos\tphases\tmetrics'
+initialize_tsv "$metadata" 'hammer_commit\ttoolchain\tduper_commit\tduper_timeout\tsolver\ttimeout\tmax_heartbeats\tmax_rec_depth\tcrush_profile\tcrush_commit\tcrush_dirty\tcrush_root'
+
+legacy_checkpoints=false
+if [[ "$resume" == "true" && ! -f "$checkpoints" ]]; then
+  legacy_checkpoints=true
+fi
+initialize_tsv "$checkpoints" 'profile\tcase\trun'
+if [[ "$legacy_checkpoints" == "true" ]]; then
+  while IFS=$'\t' read -r profile case_name run _; do
+    [[ "$profile" != "profile" ]] || continue
+    if [[ "$case_name" == "00_import_only" ]] ||
+        awk -F '\t' -v profile="$profile" -v case_name="$case_name" -v run="$run" '
+          NR > 1 && $2 == profile && $3 == run && $4 == case_name { found = 1 }
+          END { exit !found }
+        ' "$measurements"; then
+      printf '%s\t%s\t%s\n' "$profile" "$case_name" "$run" >> "$checkpoints"
+    fi
+  done < "$results"
+fi
+
 crush_dirty=false
 if [[ -n "$(git -C "$crush_root" status --porcelain -- \
     . ':(exclude)BenchmarkResults')" ]]; then
@@ -290,6 +331,40 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
   "$(git -C "$crush_root" rev-parse HEAD)" \
   "$crush_dirty" \
   "$crush_root" >> "$metadata"
+
+checkpoint_complete() {
+  local profile="$1"
+  local case_name="$2"
+  local run="$3"
+  [[ "$resume" == "true" ]] || return 1
+  awk -F '\t' -v profile="$profile" -v case_name="$case_name" -v run="$run" '
+    NR > 1 && $1 == profile && $2 == case_name && $3 == run { found = 1 }
+    END { exit !found }
+  ' "$checkpoints"
+}
+
+remove_checkpoint_rows() {
+  local profile="$1"
+  local case_name="$2"
+  local run="$3"
+  local temporary="$out_dir/.resume.$$.tsv"
+  awk -F '\t' -v OFS='\t' -v profile="$profile" -v case_name="$case_name" \
+    -v run="$run" \
+    'NR == 1 || !($1 == profile && $2 == case_name && $3 == run)' \
+    "$results" > "$temporary" && mv "$temporary" "$results"
+  awk -F '\t' -v OFS='\t' -v profile="$profile" -v case_name="$case_name" \
+    -v run="$run" \
+    'NR == 1 || !($2 == profile && $3 == run && $4 == case_name)' \
+    "$measurements" > "$temporary" && mv "$temporary" "$measurements"
+  awk -F '\t' -v OFS='\t' -v profile="$profile" -v case_name="$case_name" \
+    -v run="$run" \
+    'NR == 1 || !($2 == profile && $3 == run && $4 == case_name)' \
+    "$profiles_out" > "$temporary" && mv "$temporary" "$profiles_out"
+  awk -F '\t' -v OFS='\t' -v profile="$profile" -v case_name="$case_name" \
+    -v run="$run" \
+    'NR == 1 || !($1 == profile && $2 == case_name && $3 == run)' \
+    "$checkpoints" > "$temporary" && mv "$temporary" "$checkpoints"
+}
 
 case_files=("$hammer_repo"/Benchmark/Cases/*.lean)
 if [[ -n "${HAMMER_CASES:-}" ]]; then
@@ -328,6 +403,14 @@ for profile in "${profiles[@]}"; do
       input_case="$generated"
     fi
     for ((run = 1; run <= repeats; run++)); do
+      if checkpoint_complete "$profile" "$case_name" "$run"; then
+        printf 'checkpoint: skipping %-12s %-24s run %s\n' \
+          "$profile" "$case_name" "$run"
+        continue
+      fi
+      if [[ "$resume" == "true" ]]; then
+        remove_checkpoint_rows "$profile" "$case_name" "$run"
+      fi
       log="$logs/${profile}-${case_name}-${run}.log"
       lean_args=(
         "-DElab.async=false"
@@ -393,6 +476,7 @@ for profile in "${profiles[@]}"; do
           }
         ' "$log"
       fi
+      printf '%s\t%s\t%s\n' "$profile" "$case_name" "$run" >> "$checkpoints"
       printf '%-12s %-24s run %s: %-4s %6sms\n' \
         "$profile" "$case_name" "$run" "$status" "$tactic_ms"
     done

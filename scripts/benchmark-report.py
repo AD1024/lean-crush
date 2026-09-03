@@ -126,6 +126,28 @@ def reconstruction_succeeded(
     return all(profile["outcome"] in accepted for profile in profiles)
 
 
+def verification_cohorts(
+    attempts: dict[tuple[str, str, str], list[dict[str, str]]],
+    profile_groups: dict[tuple[str, str, str], list[dict[str, str]]],
+    suite: str,
+) -> tuple[dict[str, list[dict[str, str]]], set[str], set[str]]:
+    verify_vcs = {
+        vc: rows
+        for (row_suite, lane, vc), rows in attempts.items()
+        if row_suite == suite and lane == "crush-verify"
+    }
+    verify_solved = {vc for vc, rows in verify_vcs.items() if all_pass(rows)}
+    smt_verified = {
+        vc
+        for vc in verify_solved
+        if any(
+            profile["outcome"] == "verified"
+            for profile in profile_groups.get((suite, "crush-verify", vc), [])
+        )
+    }
+    return verify_vcs, verify_solved, smt_verified
+
+
 def failure_mode(
     rows: list[dict[str, str]], profiles: list[dict[str, str]], lane: str
 ) -> str:
@@ -457,17 +479,14 @@ def reconstruction_rows(
             for row_suite, lane, _ in attempts
         ):
             continue
-        verify_vcs = {
-            vc: rows
-            for (row_suite, lane, vc), rows in attempts.items()
-            if row_suite == suite and lane == "crush-verify"
-        }
-        verified = {vc for vc, rows in verify_vcs.items() if all_pass(rows)}
+        verify_vcs, verify_solved, smt_verified = verification_cohorts(
+            attempts, profile_groups, suite
+        )
         counts = []
         for lane in RECONSTRUCTION_LANES:
             counts.append(
                 sum(
-                    vc in verified
+                    vc in smt_verified
                     and reconstruction_succeeded(
                         attempts.get((suite, lane, vc), []),
                         profile_groups.get((suite, lane, vc), []),
@@ -476,7 +495,15 @@ def reconstruction_rows(
                     for vc in verify_vcs
                 )
             )
-        output.append([suite, len(verify_vcs), len(verified), *counts])
+        output.append(
+            [
+                suite,
+                len(verify_vcs),
+                len(verify_solved),
+                len(smt_verified),
+                *counts,
+            ]
+        )
     return output
 
 
@@ -488,18 +515,16 @@ def reconstruction_failure_rows(
     counts: Counter[tuple[str, str, str]] = Counter()
     suites = {suite for suite, lane, _ in attempts if lane == "crush-verify"}
     for suite in suites:
-        verified = {
-            vc
-            for (row_suite, lane, vc), rows in attempts.items()
-            if row_suite == suite and lane == "crush-verify" and all_pass(rows)
-        }
+        _, _, smt_verified = verification_cohorts(
+            attempts, profile_groups, suite
+        )
         for lane in RECONSTRUCTION_LANES:
             if not any(
                 row_suite == suite and row_lane == lane
                 for row_suite, row_lane, _ in attempts
             ):
                 continue
-            for vc in verified:
+            for vc in smt_verified:
                 rows = attempts.get((suite, lane, vc), [])
                 vc_profiles = profile_groups[(suite, lane, vc)]
                 if reconstruction_succeeded(rows, vc_profiles, lane):
@@ -732,7 +757,8 @@ def main() -> None:
         [
             "suite",
             "total_vcs",
-            "verified_vcs",
+            "verify_solved_vcs",
+            "smt_verified_vcs",
             "core_reconstructed",
             "alethe_reconstructed",
             "portfolio_reconstructed",

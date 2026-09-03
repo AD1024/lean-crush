@@ -60,6 +60,29 @@ benchmark_add_worktree() {
   git -C "$repository" worktree add --detach "$destination" "$revision"
 }
 
+benchmark_fetch_cache() {
+  local project="$1"
+  local log="$2"
+  local mathlib="$project/.lake/packages/mathlib"
+
+  if (cd "$project" && lake cache get) > "$log" 2>&1; then
+    return 0
+  fi
+  printf '\nNative Lake cache unavailable; trying the legacy cache executable.\n' \
+    >> "$log"
+  if (cd "$project" && lake exe cache get) >> "$log" 2>&1; then
+    return 0
+  fi
+  if [[ -d "$mathlib" ]]; then
+    printf '\nRoot cache unavailable; trying Mathlib directly.\n' \
+      >> "$log"
+    if (cd "$mathlib" && lake exe cache get) >> "$log" 2>&1; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
 benchmark_sync_crush_sources() {
   local crush_root="$1"
   local project_tree="$2"

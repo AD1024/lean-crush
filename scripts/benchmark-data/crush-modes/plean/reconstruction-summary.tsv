@@ -1,2 +1,2 @@
-suite	total_vcs	verified_vcs	core_reconstructed	alethe_reconstructed	portfolio_reconstructed
-plean	192	174	157	1	157
+suite	total_vcs	verify_solved_vcs	smt_verified_vcs	core_reconstructed	alethe_reconstructed	portfolio_reconstructed
+plean	192	174	172	155	0	155

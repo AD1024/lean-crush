@@ -121,40 +121,38 @@ workload. It remains useful for comparing trusted verification, Core
 reconstruction, strict Alethe replay, and the reconstruction portfolio on the
 same recorded Crush inputs.
 
-| Corpus | SMT verified / total | Core / verified | Alethe / verified | Portfolio / verified |
-|---|---:|---:|---:|---:|
-| LeanHammer | 19 / 20 | **19 / 19** | 13 / 19 | **19 / 19** |
-| Loom | 4 / 4 | **4 / 4** | **4 / 4** | **4 / 4** |
-| Cashmere | 38 / 38 | **38 / 38** | 9 / 38 | **38 / 38** |
-| Velvet | 406 / 425 | **355 / 406** | 133 / 406 | **355 / 406** |
-| PLean | 174 / 192 | **157 / 174** | 1 / 174 | **157 / 174** |
+| Corpus | Verify solved / total | SMT cohort / verify solved | Core / SMT cohort | Alethe / SMT cohort | Portfolio / SMT cohort |
+|---|---:|---:|---:|---:|---:|
+| LeanHammer | 19 / 20 | 15 / 19 | 15 / 15 | 11 / 15 | 15 / 15 |
+| Loom | 4 / 4 | 4 / 4 | 4 / 4 | 4 / 4 | 4 / 4 |
+| Cashmere | 38 / 38 | 23 / 38 | 23 / 23 | 0 / 23 | 23 / 23 |
+| Velvet | 406 / 425 | 263 / 406 | 225 / 263 | 24 / 263 | 225 / 263 |
+| PLean | 174 / 192 | 172 / 174 | 155 / 172 | 0 / 172 | 155 / 172 |
 
-The checked denominator is the set solved by trusted verification. A checked
-lane also counts selected Lean facts and pre-reconstruction closures because
-they already provide kernel-checked proofs.
+`Verify solved` includes selected Lean facts and goals closed by checked pre-SMT
+reconstruction. The reconstruction denominator is the narrower `SMT cohort`:
+verify-lane successes whose profile records that SMT actually returned
+`unsat`. This keeps pre-SMT closures out of certificate-reconstruction rates.
 
 ### Reconstruction Gaps
 
-| Corpus | Lane | Failure mode | Verified VCs |
+| Corpus | Lane | Failure mode | SMT-cohort VCs |
 |---|---|---|---:|
 | LeanHammer | Alethe | certificate error | 2 |
 | LeanHammer | Alethe | assumption/rule gap | 1 |
 | LeanHammer | Alethe | term decoder gap | 1 |
-| LeanHammer | Alethe | solver `sat` | 1 |
-| LeanHammer | Alethe | solver `unknown` | 1 |
-| Cashmere | Alethe | certificate error | 29 |
+| Cashmere | Alethe | certificate error | 23 |
 | Velvet | Core | reconstruction failed | 4 |
-| Velvet | Core | not attempted after file termination | 47 |
-| Velvet | Alethe | certificate error | 230 |
-| Velvet | Alethe | assumption/rule gap | 26 |
-| Velvet | Alethe | term decoder gap | 14 |
-| Velvet | Alethe | solver `unknown` | 3 |
+| Velvet | Core | not attempted after file termination | 34 |
+| Velvet | Alethe | certificate error | 210 |
+| Velvet | Alethe | assumption/rule gap | 21 |
+| Velvet | Alethe | term decoder gap | 8 |
 | Velvet | Portfolio | Alethe certificate error + Core failed | 4 |
-| Velvet | Portfolio | not attempted after file termination | 47 |
+| Velvet | Portfolio | not attempted after file termination | 34 |
 | PLean | Core | reconstruction failed | 6 |
 | PLean | Core | solver `unknown` | 4 |
 | PLean | Core | host tactic failed | 7 |
-| PLean | Alethe | certificate error | 173 |
+| PLean | Alethe | certificate error | 172 |
 | PLean | Portfolio | Alethe certificate error + Core failed | 6 |
 | PLean | Portfolio | solver `unknown` | 4 |
 | PLean | Portfolio | host tactic failed | 7 |

@@ -28,7 +28,7 @@ diff --git a/PLean/Verify/Tactic.lean b/PLean/Verify/Tactic.lean
      ))
  
  /-- Arithmetic / boolean fallback for default-invariant goals SMT
-@@ -1357,11 +1357,7 @@ macro_rules
+@@ -1357,11 +1357,7 @@
    | `(tactic| pverify_close_chain) => `(tactic| (
        first
          | default_inv
@@ -41,11 +41,7 @@ diff --git a/PLean/Verify/Tactic.lean b/PLean/Verify/Tactic.lean
  
  /-- Internal close-chain used by `pverify_default`: SMT first because
  the goal arrives with explicit `DefaultInvariants` content the SMT
-@@ -1370,10 +1366,6 @@ syntax "pverify_close_chain_smt_first" : tactic
- macro_rules
-   | `(tactic| pverify_close_chain_smt_first) => `(tactic| (
-       first
-         | pverify_smt
+@@ -1374,5 +1370 @@
 -        | pverify_structural_smt
 -        | pverify_split_ite_smt
 -        | pverify_split_smt

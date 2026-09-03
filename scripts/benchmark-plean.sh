@@ -38,6 +38,7 @@ RUN_DUPER="${RUN_DUPER:-false}"
 RUN_GRIND="${RUN_GRIND:-true}"
 USE_MATHLIB_CACHE="${USE_MATHLIB_CACHE:-true}"
 PREPARE_TREES="${PREPARE_TREES:-true}"
+RESUME="${RESUME:-false}"
 OUT_DIR="${OUT_DIR:-$CRUSH_ROOT/BenchmarkResults/plean-$(date +%Y%m%d-%H%M%S)}"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/lean-crush-plean.XXXXXX")"
 
@@ -49,6 +50,7 @@ FILE_SUMMARY="$OUT_DIR/file-summary.tsv"
 COMPARISON="$OUT_DIR/comparison.tsv"
 MEASUREMENTS="$OUT_DIR/measurements.tsv"
 PROFILES="$OUT_DIR/profile-events.tsv"
+CHECKPOINTS="$OUT_DIR/checkpoints.tsv"
 WORKTREES=()
 PROVISIONED_TREE=""
 HARNESS_FAILURES=0
@@ -207,8 +209,8 @@ prepare_tree() {
     die "$label PLean dependency setup failed"
   fi
   if is_true "$USE_MATHLIB_CACHE"; then
-    if ! (cd "$tree" && lake exe cache get) \
-        > "$OUT_DIR/cache-$label.log" 2>&1; then
+    printf 'Fetching cached dependencies for %s PLean tree\n' "$label"
+    if ! benchmark_fetch_cache "$tree" "$OUT_DIR/cache-$label.log"; then
       printf 'warning: Mathlib cache unavailable for %s PLean tree\n' \
         "$label" >&2
     fi
@@ -615,6 +617,46 @@ append_synthetic_records() {
   done
 }
 
+checkpoint_complete() {
+  local backend="$1"
+  local repeat="$2"
+  local file="$3"
+  is_true "$RESUME" || return 1
+  awk -F '\t' -v backend="$backend" -v repeat="$repeat" -v file="$file" '
+    NR > 1 && $1 == backend && $2 == repeat && $3 == file { found = 1 }
+    END { exit !found }
+  ' "$CHECKPOINTS"
+}
+
+remove_checkpoint_rows() {
+  local backend="$1"
+  local repeat="$2"
+  local file="$3"
+  local temporary="$OUT_DIR/.resume.$$.tsv"
+  awk -F '\t' -v OFS='\t' -v backend="$backend" -v repeat="$repeat" \
+    -v file="$file" \
+    'NR == 1 || !($2 == backend && $3 == repeat && $4 == file)' \
+    "$RESULTS" > "$temporary" && mv "$temporary" "$RESULTS"
+  awk -F '\t' -v OFS='\t' -v backend="$backend" -v repeat="$repeat" \
+    -v file="$file" \
+    'NR == 1 || !($2 == backend && $3 == repeat && $4 == file)' \
+    "$RUNS" > "$temporary" && mv "$temporary" "$RUNS"
+  awk -F '\t' -v OFS='\t' -v backend="$backend" -v repeat="$repeat" \
+    -v file="$file" '
+      NR == 1 || !($2 == backend && $3 == repeat &&
+        substr($4, 1, length(file) + 1) == file "|")
+    ' "$MEASUREMENTS" > "$temporary" && mv "$temporary" "$MEASUREMENTS"
+  awk -F '\t' -v OFS='\t' -v backend="$backend" -v repeat="$repeat" \
+    -v file="$file" '
+      NR == 1 || !($2 == backend && $3 == repeat &&
+        substr($4, 1, length(file) + 1) == file "|")
+    ' "$PROFILES" > "$temporary" && mv "$temporary" "$PROFILES"
+  awk -F '\t' -v OFS='\t' -v backend="$backend" -v repeat="$repeat" \
+    -v file="$file" \
+    'NR == 1 || !($1 == backend && $2 == repeat && $3 == file)' \
+    "$CHECKPOINTS" > "$temporary" && mv "$temporary" "$CHECKPOINTS"
+}
+
 run_file() {
   local backend="$1"
   local tree="$2"
@@ -624,6 +666,15 @@ run_file() {
   local log="$OUT_DIR/logs/$backend/${file//\//_}.$repeat.log"
   local started elapsed exit_code total max_heartbeats cpu_limited message
   local prelude_end prelude_errors guard_log
+
+  if checkpoint_complete "$backend" "$repeat" "$file"; then
+    printf 'checkpoint: skipping %-5s run %s: %s\n' \
+      "$backend" "$repeat" "$file"
+    return
+  fi
+  if is_true "$RESUME"; then
+    remove_checkpoint_rows "$backend" "$repeat" "$file"
+  fi
 
   mkdir -p "$(dirname "$generated")" "$(dirname "$log")"
   write_benchmark_file "$tree/$file" "$generated" "$backend"
@@ -701,6 +752,9 @@ run_file() {
   printf 'plean\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$backend" "$repeat" "$file" "$exit_code" "$elapsed" "${total:-0}" \
     "$cpu_limited" "$message" >> "$RUNS"
+  if [[ "$message" == "-" || "$cpu_limited" == "true" ]]; then
+    printf '%s\t%s\t%s\n' "$backend" "$repeat" "$file" >> "$CHECKPOINTS"
+  fi
 }
 
 write_reports() {
@@ -765,6 +819,10 @@ if ! is_true "$RUN_AUTO" && ! is_true "$RUN_CRUSH" && ! is_true "$RUN_DUPER" &&
     ! is_true "$RUN_GRIND"; then
   die "at least one backend must be enabled"
 fi
+case "$RESUME" in
+  true|false) ;;
+  *) die "RESUME must be true or false" ;;
+esac
 
 mkdir -p "$OUT_DIR/logs"
 
@@ -842,11 +900,30 @@ if is_true "$RUN_DUPER"; then
   fi
 fi
 
-printf 'suite\tbackend\trepeat\tfile\tproof\tgoal_hash\tstatus\tcategory\tmilliseconds\tsynthetic\tmessage\tgoal\n' > "$RESULTS"
-printf 'suite\tbackend\trepeat\tfile\texit_code\twall_seconds\tvc_count\tcpu_limited\tmessage\n' > "$RUNS"
-printf 'backend\tcommit\ttoolchain\tdirty\tdiff_sha256\tsolver\ttimeout\tduper_timeout\tmax_heartbeats\tmax_rec_depth\tfile_cpu_seconds\tcrush_trust\tcrush_reconstruct\tcrush_inst_fuel\tcrush_commit\tduper_commit\tcrush_dirty\ttree\tcrush_profile\tgrind_splits\n' > "$METADATA"
-printf 'suite\tlane\trepeat\tvc_key\tstatus\tcategory\tmilliseconds\tmessage\n' > "$MEASUREMENTS"
-printf 'suite\tlane\trepeat\tvc_key\tdeclaration\tgoal_hash\toutcome\treplay\tdetail\ttotal_nanos\tphases\tmetrics\n' > "$PROFILES"
+initialize_tsv() {
+  local file="$1"
+  local header="$2"
+  if ! is_true "$RESUME" || [[ ! -f "$file" ]]; then
+    printf '%b\n' "$header" > "$file"
+  fi
+}
+
+legacy_checkpoints=false
+if is_true "$RESUME" && [[ ! -f "$CHECKPOINTS" ]]; then
+  legacy_checkpoints=true
+fi
+
+initialize_tsv "$RESULTS" 'suite\tbackend\trepeat\tfile\tproof\tgoal_hash\tstatus\tcategory\tmilliseconds\tsynthetic\tmessage\tgoal'
+initialize_tsv "$RUNS" 'suite\tbackend\trepeat\tfile\texit_code\twall_seconds\tvc_count\tcpu_limited\tmessage'
+initialize_tsv "$METADATA" 'backend\tcommit\ttoolchain\tdirty\tdiff_sha256\tsolver\ttimeout\tduper_timeout\tmax_heartbeats\tmax_rec_depth\tfile_cpu_seconds\tcrush_trust\tcrush_reconstruct\tcrush_inst_fuel\tcrush_commit\tduper_commit\tcrush_dirty\ttree\tcrush_profile\tgrind_splits'
+initialize_tsv "$MEASUREMENTS" 'suite\tlane\trepeat\tvc_key\tstatus\tcategory\tmilliseconds\tmessage'
+initialize_tsv "$PROFILES" 'suite\tlane\trepeat\tvc_key\tdeclaration\tgoal_hash\toutcome\treplay\tdetail\ttotal_nanos\tphases\tmetrics'
+initialize_tsv "$CHECKPOINTS" 'backend\trepeat\tfile'
+if is_true "$legacy_checkpoints"; then
+  awk -F '\t' -v OFS='\t' \
+    'NR > 1 && ($9 == "-" || $8 == "true") { print $2, $3, $4 }' \
+    "$RUNS" >> "$CHECKPOINTS"
+fi
 
 if is_true "$RUN_AUTO"; then
   record_metadata "auto" "$PLEAN_AUTO_TREE"

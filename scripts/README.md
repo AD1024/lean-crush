@@ -8,6 +8,8 @@ and summaries are written under `BenchmarkResults/`.
 
 | Script | Benchmarks |
 |---|---|
+| `../benchmark.sh` | Published headline run selected by case study and backend |
+| `../benchmark-crush-modes.sh` | Trusted and reconstructed Crush modes |
 | `benchmark-corpora.sh` | LeanHammer, Loom, Cashmere, and Velvet |
 | `benchmark-leanhammer.sh` | Standalone LeanHammer profiles |
 | `benchmark-plean.sh` | PLean verification conditions |
@@ -19,6 +21,71 @@ The latest recorded results and exact tested revisions are in
 [`BENCHMARKS.md`](../BENCHMARKS.md). The machine-readable inputs for the
 published 2026-08-20 figures and baseline comparison are retained in
 [`BenchmarkResults/recorded/2026-08-20`](../BenchmarkResults/recorded/2026-08-20).
+
+For the standard one-repeat reproduction, select one case study (or all four)
+and one backend:
+
+```sh
+bash benchmark.sh \
+  --case_study <all|LeanHammer|Velvet|Cashmere|PLean> \
+  --with <crush|auto|duper|grind>
+```
+
+The wrapper uses the published revisions and resource settings, fetches Lake
+cache artifacts when available, and writes normalized reports and plots under
+`BenchmarkResults/reproduction-<timestamp>-<backend>`.
+
+Resume an interrupted wrapper run in the same directory, using the same
+case-study and backend selection:
+
+```sh
+bash benchmark.sh \
+  --case_study all \
+  --with crush \
+  --resume BenchmarkResults/reproduction-<timestamp>-crush
+```
+
+Regenerate only the headline figures and tables from an existing wrapper run:
+
+```sh
+bash benchmark.sh --plot_only BenchmarkResults/reproduction-<timestamp>-<backend>
+```
+
+Run the four Crush verification and reconstruction modes for one case study,
+or for all four:
+
+```sh
+bash benchmark-crush-modes.sh \
+  --case_study <all|LeanHammer|Velvet|Cashmere|PLean>
+```
+
+This writes the reconstruction, failure, phase-breakdown, and Alethe replay
+comparison under `BenchmarkResults/crush-modes-<timestamp>`.
+
+Resume an interrupted mode study in place with:
+
+```sh
+bash benchmark-crush-modes.sh \
+  --case_study all \
+  --resume BenchmarkResults/crush-modes-<timestamp>
+```
+
+Both wrappers propagate `RESUME=true` to their selected harnesses. Each
+harness records a checkpoint only after a complete case/profile/repeat has
+flushed its result, measurement, and profiling records. On resume, completed
+units are skipped and incomplete or truncated units have their partial rows
+removed before they are rerun. Result directories made by older versions of
+the scripts are bootstrapped from their completed aggregate rows. Keep all
+selectors, revisions, and resource settings unchanged when resuming a run.
+The harness still prepares and checks the pinned downstream trees before it
+dispatches the remaining benchmark units.
+
+Regenerate only those comparison artifacts with:
+
+```sh
+bash benchmark-crush-modes.sh \
+  --plot_only BenchmarkResults/crush-modes-<timestamp>
+```
 
 ## Prerequisites
 
@@ -125,6 +192,21 @@ Useful overrides include:
 | `CRUSH_PROFILE` | `true` | Include Crush phase profiling and report records |
 | `CRUSH_TRACE_REPLAY` | `false` | Emit rule-, method-, and phase-level Alethe replay telemetry |
 | `KEEP_WORKTREES` | `false` | Retain temporary detached worktrees |
+| `RESUME` | `false` | Reuse completed checkpoints in an existing `OUT_DIR` |
+
+The corpus, standalone LeanHammer, and PLean harnesses fetch cached build
+artifacts by default. They try native `lake cache get` first and retain the
+Mathlib cache executable as a compatibility fallback for older pinned Lake
+versions. Set `USE_MATHLIB_CACHE=false` to force a source build.
+
+To resume any harness directly, repeat its original command with the same
+settings and add `RESUME=true`, preserving its original `OUT_DIR`:
+
+```sh
+RESUME=true \
+OUT_DIR="$PWD/BenchmarkResults/corpora-reproduction" \
+scripts/benchmark-corpora.sh
+```
 
 ## LeanHammer
 
@@ -211,6 +293,7 @@ reports:
 
 | File | Contents |
 |---|---|
+| `checkpoints.tsv` | Fully recorded benchmark work units used by `RESUME=true` |
 | `metadata.tsv` | Revisions, toolchains, solver configuration, and dirty state |
 | `results.tsv` | Per-VC status, failure category, and tactic-local time |
 | `runs.tsv` | Per-file wall time, exit status, and VC count; corpus runs also record truncation |
@@ -222,7 +305,7 @@ reports:
 | `measurements.tsv` | Normalized per-VC status and tactic-local time |
 | `profile-events.tsv` | Normalized Crush outcomes, replay failures, phases, and numeric metrics |
 | `coverage-summary.tsv` | All-lane coverage over a fixed suite denominator, including attempted, failed, and missing counts |
-| `reconstruction-summary.tsv` | Verified VCs reconstructed by Core, Alethe, and the portfolio |
+| `reconstruction-summary.tsv` | Verify-lane successes, the SMT-`unsat` reconstruction cohort, and checked reconstruction coverage |
 | `reconstruction-failures.tsv` | Reconstruction failures grouped by reported cause |
 | `outcome-summary.tsv` | Crush outcomes and replay statuses grouped by suite and lane |
 | `phase-summary.tsv` | Total, mean, minimum, and maximum time for each Crush phase |
@@ -254,6 +337,78 @@ limit. `failed_to_prove` contains every other unsuccessful attempt, including
 solver `sat` or `unknown`, exhausted proof search, and ordinary tactic errors.
 The report rejects nonuniform headline workloads rather than adding a fifth
 `missing` outcome.
+
+### Error and failure categories
+
+The per-attempt `category` in `results.tsv` and `measurements.tsv` describes the
+diagnostic emitted by the benchmarked tactic. The shell harnesses classify it
+as follows:
+
+| Category | Diagnostic that selects it |
+|---|---|
+| `-` | The tactic closed the VC. |
+| `timeout` | A solver timeout, Lean heartbeat exhaustion, or Duper saturation-time/limit diagnostic. |
+| `translation` | Text reporting an unsupported translation or encoding, higher-order input, or an inability to translate or encode a term. |
+| `unknown` | The corpus harness received another solver `unknown` diagnostic. LeanHammer and PLean fold this into `tactic`. |
+| `sat` | The corpus harness was told that the goal was not provable or false, normally because the solver found a model. LeanHammer and PLean fold this into `tactic`. |
+| `reconstruction` | The corpus harness received an Alethe or other reconstruction diagnostic that did not match an earlier category. |
+| `tactic` | No more specific rule matched; this includes ordinary proof-search failures and harness-specific diagnostics that expose no finer reason. |
+
+Timeout matching has priority over translation in the shell harnesses. The
+corpus harness then checks `unknown`, `sat`, and reconstruction in that order.
+LeanHammer and PLean expose only `timeout`, `translation`, and the `tactic`
+fallback at this layer.
+
+`headline-outcomes.tsv` deliberately uses a smaller, backend-independent
+taxonomy. An all-pass VC is `success`. Otherwise an explicit translation or
+unsupported-encoding marker gives `translation_error`; if none exists, an
+explicit timeout, heartbeat, or saturation-limit marker gives `timeout`.
+Everything else is `failed_to_prove`. Thus solver `sat` and `unknown` remain
+distinguishable in the raw/profile data but are both `failed_to_prove` in the
+headline outcome partition.
+
+`reconstruction-summary.tsv` distinguishes all VCs closed by `crush-verify`
+from the reconstruction cohort. `verify_solved_vcs` counts every successful
+verify-lane attempt, including selected facts and checked pre-SMT closures.
+`smt_verified_vcs` is the subset whose verify-lane profiler emitted at least
+one `outcome=verified`, establishing that the SMT solver actually returned
+`unsat`. Only this latter set is used as the denominator for Core, Alethe, and
+portfolio reconstruction. This prevents a strict Alethe run from being called
+a reconstruction failure merely because it forced a sound-but-incomplete SMT
+encoding for a goal that the verify lane had solved before invoking SMT.
+
+`reconstruction-failures.tsv` has a separate taxonomy for SMT-cohort VCs that
+a checked reconstruction lane did not reconstruct:
+
+| Failure mode | Meaning |
+|---|---|
+| `certificate-error` | cvc5 returned an explicit `(error "...")` in its proof output instead of a usable Alethe certificate. For example, cvc5 may report `Proof unsupported by Alethe: contains operator DUMMY_SKOLEM`. This is a certificate-generation limitation, not a Lean kernel rejection. |
+| `no-certificate` | The solver returned no Alethe proof output. |
+| `malformed-certificate` | Proof output was nonempty but had no parseable command list, or the parsed proof was structurally unusable, such as a missing referenced premise or empty-clause conclusion. |
+| `term-gap` | A certificate assumption, clause, sort, operator, or anchor term could not be decoded into the corresponding Lean proposition or binder. |
+| `rule-gap` | The certificate step was decoded, but Lean could not prove that concrete inference from its already replayed premises. It also covers a decoded SMT assumption that cannot be derived from its Lean source fact. |
+| `kernel-reject` | Replay constructed a candidate final proof, but the final elaborator/kernel check rejected it. |
+| `replay-exception` | An unexpected exception escaped while replaying the certificate. |
+| `core-failed` | The core reconstruction lane received `unsat`, but none of its checked finishing tactics closed the goal from the selected unsat-core facts and explicit reconstruction hints. |
+| `<replay-mode>+core-failed` | In the portfolio lane, Alethe replay failed for `<replay-mode>` and the core-directed fallback failed too; for example, `certificate-error+core-failed`. |
+| `solver-sat` | The reconstruction lane's solver returned `sat`. |
+| `solver-unknown` | The reconstruction lane's solver returned `unknown`, including solver timeouts represented by an `unknown` profile event. |
+| `not-attempted` | No attempt row was available for that SMT-cohort VC and reconstruction lane. |
+| `tactic` / `unclassified` | No more specific profiler failure was available, so the report used the per-attempt category or the final fallback. |
+
+For strict Alethe, a `reconstruction-failed` profiler event maps directly to
+its replay label. For Core it maps to `core-failed`. For the portfolio, the
+replay label is combined with `core-failed` because both reconstruction paths
+must have failed. If multiple profiler events exist for one VC, the report uses
+the most frequently occurring candidate category.
+
+The exact diagnostic is retained with different fidelity by each harness.
+Corpus `results.tsv` and `measurements.tsv` contain the complete diagnostic
+with tabs and newlines flattened. LeanHammer `measurements.tsv` retains the
+first matching diagnostic or error line. PLean's normalized attempt rows retain
+only the coarse category, while `profile-events.tsv` contains the structured
+replay label and concise detail. The complete original Lean and solver output
+is always in the corresponding file under `logs/`.
 
 In `comparison.tsv`, `matched_vcs` is the exact VC-identity intersection for
 the named baseline and Crush. `baseline_only_solved`, `crush_only_solved`,
@@ -287,7 +442,7 @@ The command writes:
 | `tables.md` | All-VC backend comparison, pairwise matched-VC, reconstruction, failure, phase, and scaling tables |
 | `coverage.svg` | Solved VCs by corpus and headline backend |
 | `outcomes.svg` | Four-way stacked outcome partition for every corpus and headline backend |
-| `reconstruction.svg` | Core, Alethe, and portfolio reconstruction among verified VCs |
+| `reconstruction.svg` | Core, Alethe, and portfolio reconstruction among SMT-`unsat` VCs |
 | `reconstruction-failures.svg` | One failure-mode pie chart per corpus |
 | `phase-breakdown.svg` | Stacked profiler-accounted time by Crush phase |
 | `alethe-replay-scaling.svg` | Successful replay time against parsed command count |
