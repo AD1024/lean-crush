@@ -18,6 +18,60 @@ RECONSTRUCTION_LANES = (
     "crush-portfolio",
 )
 
+# lean-smt's lane in the LeanHammer harness. It translates the goal, calls
+# cvc5, and replays the Alethe certificate in Lean, so it is comparable with
+# Crush's strict Alethe lane and with the reconstruction portfolio.
+SMT_LANE = "smt-only"
+
+# Checked-reconstruction lanes compared across tools. Each one must return a
+# Lean proof term, so a lane that only trusts the SMT verdict is excluded.
+RECONSTRUCTION_COMPARISON_LANES = (
+    SMT_LANE,
+    "crush-alethe",
+    "crush-portfolio",
+)
+
+# Profiler outcomes that count as a completed reconstruction for each lane.
+RECONSTRUCTION_ACCEPTED_OUTCOMES = {
+    "crush-core": {
+        "selected-fact",
+        "pre-reconstructed",
+        "core-reconstructed",
+    },
+    "crush-alethe": {"alethe-reconstructed"},
+    "crush-portfolio": {
+        "selected-fact",
+        "pre-reconstructed",
+        "alethe-reconstructed",
+        "core-reconstructed",
+    },
+    SMT_LANE: {"alethe-reconstructed"},
+}
+
+# Lanes with a single certificate-replay route and no core-directed fallback,
+# so a replay failure is the whole failure.
+ALETHE_ONLY_LANES = frozenset({"crush-alethe", SMT_LANE})
+
+# Outcomes that mean the lane handed back a Lean proof term the kernel
+# accepted, whichever route produced it. This is the cross-tool question of
+# whether a checked proof was obtained, so it is deliberately wider than the
+# per-lane sets above: a goal closed by checked pre-SMT reconstruction is a
+# checked proof even though no certificate was replayed.
+CHECKED_PROOF_OUTCOMES = frozenset(
+    {
+        "alethe-reconstructed",
+        "core-reconstructed",
+        "pre-reconstructed",
+        "selected-fact",
+    }
+)
+
+# One suite's comparison cohort: the compared lanes, their attempt rows keyed
+# by lane and VC, and the VC identities every compared lane attempted.
+ComparisonCohort = tuple[
+    list[str], dict[str, dict[str, list[dict[str, str]]]], set[str]
+]
+
 HEADLINE_COLUMNS = [
     "suite",
     "backend",
@@ -109,21 +163,21 @@ def reconstruction_succeeded(
         return False
     if not profiles:
         return True
-    accepted = {
-        "crush-core": {
-            "selected-fact",
-            "pre-reconstructed",
-            "core-reconstructed",
-        },
-        "crush-alethe": {"alethe-reconstructed"},
-        "crush-portfolio": {
-            "selected-fact",
-            "pre-reconstructed",
-            "alethe-reconstructed",
-            "core-reconstructed",
-        },
-    }[lane]
+    accepted = RECONSTRUCTION_ACCEPTED_OUTCOMES[lane]
     return all(profile["outcome"] in accepted for profile in profiles)
+
+
+def checked_proof_succeeded(
+    rows: list[dict[str, str]], profiles: list[dict[str, str]]
+) -> bool:
+    """Whether the lane closed the VC with a kernel-checked Lean proof."""
+    if not all_pass(rows):
+        return False
+    if not profiles:
+        return True
+    return all(
+        profile["outcome"] in CHECKED_PROOF_OUTCOMES for profile in profiles
+    )
 
 
 def verification_cohorts(
@@ -158,7 +212,7 @@ def failure_mode(
         if outcome == "reconstruction-failed":
             if lane == "crush-core" or replay == "not-attempted":
                 candidates.append("core-failed")
-            elif lane == "crush-alethe":
+            elif lane in ALETHE_ONLY_LANES:
                 candidates.append(replay)
             else:
                 candidates.append(f"{replay}+core-failed")
@@ -235,6 +289,8 @@ def headline_lane_map(suite: str, lanes: set[str]) -> list[tuple[str, str]]:
     for backend, lane in candidates:
         if lane in lanes:
             selected.append((backend, lane))
+    if SMT_LANE in lanes:
+        selected.append(("lean-smt", SMT_LANE))
     crush_lane = canonical_crush_lane(lanes)
     if crush_lane is not None:
         selected.append(("crush", crush_lane))
@@ -483,6 +539,7 @@ def reconstruction_rows(
             attempts, profile_groups, suite
         )
         counts = []
+        checked = []
         for lane in RECONSTRUCTION_LANES:
             counts.append(
                 sum(
@@ -495,6 +552,20 @@ def reconstruction_rows(
                     for vc in verify_vcs
                 )
             )
+            # Counted over every VC, not the SMT cohort: a goal closed by
+            # checked pre-SMT reconstruction or a selected fact carries a
+            # kernel-checked proof even though no certificate was replayed,
+            # so gating this on `smt_verified` would undercount the proofs
+            # the lane actually produced.
+            checked.append(
+                sum(
+                    checked_proof_succeeded(
+                        attempts.get((suite, lane, vc), []),
+                        profile_groups.get((suite, lane, vc), []),
+                    )
+                    for vc in verify_vcs
+                )
+            )
         output.append(
             [
                 suite,
@@ -502,6 +573,7 @@ def reconstruction_rows(
                 len(verify_solved),
                 len(smt_verified),
                 *counts,
+                *checked,
             ]
         )
     return output
@@ -535,6 +607,128 @@ def reconstruction_failure_rows(
                     else "not-attempted"
                 )
                 counts[(suite, lane, mode)] += 1
+    return [
+        [suite, lane, mode, count]
+        for (suite, lane, mode), count in sorted(counts.items())
+    ]
+
+
+def reconstruction_comparison_cohort(
+    attempts: dict[tuple[str, str, str], list[dict[str, str]]],
+) -> dict[str, ComparisonCohort]:
+    """Group the compared reconstruction lanes and their shared VC identities.
+
+    The denominator is the exact VC-identity intersection of every compared
+    lane present in the suite, matching the convention already used by
+    `comparison.tsv`. A lane that never attempted a VC cannot claim it, and a
+    lane that attempted extra VCs cannot inflate its rate.
+    """
+    lanes_by_suite: dict[str, set[str]] = defaultdict(set)
+    vcs_by_lane: dict[
+        tuple[str, str], dict[str, list[dict[str, str]]]
+    ] = defaultdict(dict)
+    for (suite, lane, vc), rows in attempts.items():
+        lanes_by_suite[suite].add(lane)
+        vcs_by_lane[(suite, lane)][vc] = rows
+
+    cohorts: dict[str, ComparisonCohort] = {}
+    for suite, lanes in sorted(lanes_by_suite.items()):
+        selected = [
+            lane for lane in RECONSTRUCTION_COMPARISON_LANES if lane in lanes
+        ]
+        if len(selected) < 2:
+            continue
+        by_lane = {lane: vcs_by_lane[(suite, lane)] for lane in selected}
+        matched = set(by_lane[selected[0]])
+        for lane in selected[1:]:
+            matched &= set(by_lane[lane])
+        if not matched:
+            continue
+        cohorts[suite] = (selected, by_lane, matched)
+    return cohorts
+
+
+def reconstruction_comparison_rows(
+    attempts: dict[tuple[str, str, str], list[dict[str, str]]],
+    profiles: list[dict[str, str]],
+) -> list[list[object]]:
+    profile_groups = profiles_by_vc(profiles)
+    output: list[list[object]] = []
+    for suite, (selected, by_lane, matched) in sorted(
+        reconstruction_comparison_cohort(attempts).items()
+    ):
+        succeeded = {
+            lane: {
+                vc
+                for vc in matched
+                if checked_proof_succeeded(
+                    by_lane[lane][vc],
+                    profile_groups.get((suite, lane, vc), []),
+                )
+            }
+            for lane in selected
+        }
+        # The narrower per-lane accept sets, so these columns line up with
+        # `reconstruction-summary.tsv` instead of restating the wider question.
+        replayed = {
+            lane: {
+                vc
+                for vc in matched
+                if reconstruction_succeeded(
+                    by_lane[lane][vc],
+                    profile_groups.get((suite, lane, vc), []),
+                    lane,
+                )
+            }
+            for lane in selected
+        }
+        common = set(matched)
+        for lane in selected:
+            common &= succeeded[lane]
+        _, _, smt_verified = verification_cohorts(
+            attempts, profile_groups, suite
+        )
+        cohort = matched & smt_verified
+        for lane in selected:
+            solved = succeeded[lane]
+            own = [mean_milliseconds(by_lane[lane][vc]) for vc in sorted(solved)]
+            shared = [
+                mean_milliseconds(by_lane[lane][vc]) for vc in sorted(common)
+            ]
+            output.append(
+                [
+                    suite,
+                    lane,
+                    len(matched),
+                    len(solved),
+                    len(matched) - len(solved),
+                    f"{100.0 * len(solved) / len(matched):.1f}",
+                    len(common),
+                    f"{sum(own) / len(own):.3f}" if own else "0.000",
+                    f"{sum(shared) / len(shared):.3f}" if shared else "0.000",
+                    len(cohort),
+                    len(replayed[lane] & cohort),
+                ]
+            )
+    return output
+
+
+def reconstruction_comparison_failure_rows(
+    attempts: dict[tuple[str, str, str], list[dict[str, str]]],
+    profiles: list[dict[str, str]],
+) -> list[list[object]]:
+    profile_groups = profiles_by_vc(profiles)
+    counts: Counter[tuple[str, str, str]] = Counter()
+    for suite, (selected, by_lane, matched) in reconstruction_comparison_cohort(
+        attempts
+    ).items():
+        for lane in selected:
+            for vc in matched:
+                rows = by_lane[lane][vc]
+                vc_profiles = profile_groups.get((suite, lane, vc), [])
+                if checked_proof_succeeded(rows, vc_profiles):
+                    continue
+                counts[(suite, lane, failure_mode(rows, vc_profiles, lane))] += 1
     return [
         [suite, lane, mode, count]
         for (suite, lane, mode), count in sorted(counts.items())
@@ -762,6 +956,9 @@ def main() -> None:
             "core_reconstructed",
             "alethe_reconstructed",
             "portfolio_reconstructed",
+            "core_checked",
+            "alethe_checked",
+            "portfolio_checked",
         ],
         reconstruction_rows(attempts, profiles),
     )
@@ -769,6 +966,28 @@ def main() -> None:
         args.out_dir / "reconstruction-failures.tsv",
         ["suite", "lane", "failure_mode", "vcs"],
         reconstruction_failure_rows(attempts, profiles),
+    )
+    write_tsv(
+        args.out_dir / "reconstruction-comparison.tsv",
+        [
+            "suite",
+            "lane",
+            "matched_vcs",
+            "checked_proof_vcs",
+            "failed_vcs",
+            "pass_pct",
+            "common_checked_proof_vcs",
+            "mean_ms",
+            "common_mean_ms",
+            "verify_smt_cohort_vcs",
+            "cohort_reconstructed_vcs",
+        ],
+        reconstruction_comparison_rows(attempts, profiles),
+    )
+    write_tsv(
+        args.out_dir / "reconstruction-comparison-failures.tsv",
+        ["suite", "lane", "failure_mode", "vcs"],
+        reconstruction_comparison_failure_rows(attempts, profiles),
     )
     write_tsv(
         args.out_dir / "phase-summary.tsv",

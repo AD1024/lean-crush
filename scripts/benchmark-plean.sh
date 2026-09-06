@@ -11,6 +11,7 @@ PLEAN_AUTO_TREE="${PLEAN_AUTO_TREE:-}"
 PLEAN_CRUSH_TREE="${PLEAN_CRUSH_TREE:-}"
 PLEAN_DUPER_TREE="${PLEAN_DUPER_TREE:-}"
 PLEAN_GRIND_TREE="${PLEAN_GRIND_TREE:-}"
+PLEAN_SMT_TREE="${PLEAN_SMT_TREE:-}"
 PLEAN_AUTO_REPO_URL="${PLEAN_AUTO_REPO_URL:-https://github.com/AD1024/P.git}"
 PLEAN_AUTO_REV="${PLEAN_AUTO_REV:-be39726723e71f9aa1e02c6cfeeae9b0c31b8947}"
 PLEAN_CRUSH_REPO_URL="${PLEAN_CRUSH_REPO_URL:-https://github.com/AD1024/P.git}"
@@ -19,6 +20,10 @@ PLEAN_DUPER_REPO_URL="${PLEAN_DUPER_REPO_URL:-https://github.com/AD1024/P.git}"
 PLEAN_DUPER_REV="${PLEAN_DUPER_REV:-3557f1f0fa5246ee88fcde3776f3973349049968}"
 PLEAN_GRIND_REPO_URL="${PLEAN_GRIND_REPO_URL:-$PLEAN_CRUSH_REPO_URL}"
 PLEAN_GRIND_REV="${PLEAN_GRIND_REV:-$PLEAN_CRUSH_REV}"
+# The lean-smt lane patches the Crush revision so both lanes discharge the
+# same obligations through the same `#pverify` pipeline.
+PLEAN_SMT_REPO_URL="${PLEAN_SMT_REPO_URL:-$PLEAN_CRUSH_REPO_URL}"
+PLEAN_SMT_REV="${PLEAN_SMT_REV:-$PLEAN_CRUSH_REV}"
 BENCHMARK_SOURCE_CACHE="${BENCHMARK_SOURCE_CACHE:-$CRUSH_ROOT/BenchmarkResults/sources}"
 REPEATS="${REPEATS:-1}"
 SOLVER="${SOLVER:-cvc5}"
@@ -30,12 +35,28 @@ CRUSH_INST_FUEL="${CRUSH_INST_FUEL:-0}"
 MAX_HEARTBEATS="${MAX_HEARTBEATS:-1000000}"
 MAX_RECURSION_DEPTH="${MAX_RECURSION_DEPTH:-1000000}"
 GRIND_SPLITS="${GRIND_SPLITS:-20}"
+SMT_REPO_URL="${SMT_REPO_URL:-https://github.com/ufmg-smite/lean-smt.git}"
+# lean-smt `no_mathlib`, the revision LeanHammer itself pins. Its `main`
+# branch requires Mathlib v4.33.0, which would force PLean off the
+# v4.32.2 closure every other lane measures.
+SMT_REV="${SMT_REV:-e50256657e5d213241005bcf353f28d13f3e6ea7}"
+SMT_TIMEOUT="${SMT_TIMEOUT:-$TIMEOUT}"
+SMT_MONO="${SMT_MONO:-true}"
+# Where the lean-smt tree lives. It carries PLean's Mathlib build plus
+# lean-smt's, so it is worth keeping between runs; unset means a temporary
+# checkout, rebuilt every run.
+SMT_TREE_ROOT="${SMT_TREE_ROOT:-}"
+# Shared with the other harnesses so all of them normalize into the same
+# `lean-smt` headline row.
+SMT_LANE="smt-only"
 DUPER_MAX_HEARTBEATS="${DUPER_MAX_HEARTBEATS:-20000}"
 DUPER_FILE_CPU_SECONDS="${DUPER_FILE_CPU_SECONDS:-0}"
 RUN_AUTO="${RUN_AUTO:-true}"
 RUN_CRUSH="${RUN_CRUSH:-true}"
 RUN_DUPER="${RUN_DUPER:-false}"
 RUN_GRIND="${RUN_GRIND:-true}"
+# Off by default: the lane patches PLean's tactic module and lakefile.
+RUN_SMT="${RUN_SMT:-false}"
 USE_MATHLIB_CACHE="${USE_MATHLIB_CACHE:-true}"
 PREPARE_TREES="${PREPARE_TREES:-true}"
 RESUME="${RESUME:-false}"
@@ -84,6 +105,15 @@ is_true() {
 is_crush_lane() {
   [[ "$1" == crush-* ]]
 }
+
+is_smt_lane() {
+  [[ "$1" == "$SMT_LANE" ]]
+}
+
+smt_config="(timeout := $SMT_TIMEOUT)"
+if is_true "$SMT_MONO"; then
+  smt_config="+mono $smt_config"
+fi
 
 validate_nat() {
   local name="$1"
@@ -146,11 +176,22 @@ provision_tree() {
   local revision="$3"
   local cache_name="$4"
   local checkout_name="$5"
+  local keep="${6:-false}"
   local repo checkout
 
   repo="$(benchmark_ensure_repo "$label" "$url" "$revision" \
     "$BENCHMARK_SOURCE_CACHE/$cache_name")" ||
     die "failed to provision $label"
+  if is_true "$keep" && [[ -n "$SMT_TREE_ROOT" ]]; then
+    mkdir -p "$SMT_TREE_ROOT"
+    checkout="$(cd "$SMT_TREE_ROOT" && pwd)/$checkout_name"
+    if [[ ! -d "$checkout" ]]; then
+      benchmark_add_worktree "$repo" "$revision" "$checkout" >/dev/null ||
+        die "failed to check out $label at $revision"
+    fi
+    PROVISIONED_TREE="$checkout/Src/PLean"
+    return
+  fi
   checkout="$TMP_ROOT/$checkout_name"
   benchmark_add_worktree "$repo" "$revision" "$checkout" >/dev/null ||
     die "failed to check out $label at $revision"
@@ -194,6 +235,99 @@ patch_grind_tree() {
     die "failed to apply the pinned PLean grind backend patch"
   fi
   validate_grind_tree "$tree"
+}
+
+# PLean reaches its backend from inside `PLean/Verify/Tactic.lean`, so the
+# lean-smt lane substitutes the backend there exactly as the grind lane does,
+# and adds the dependency the pinned revision predates. Both edits live in one
+# recorded patch so a run is reproducible from the pinned revision alone.
+validate_smt_tree() {
+  local tree="$1"
+  local tactic="$tree/PLean/Verify/Tactic.lean"
+  local expected
+
+  expected="$(grep -F -c "all_goals smt $smt_config [*]" "$tactic")"
+  [[ "$expected" -eq 3 ]] ||
+    die "lean-smt PLean tree is not patched for SMT_TIMEOUT=$SMT_TIMEOUT SMT_MONO=$SMT_MONO"
+  if grep -Fq 'all_goals crush [*]' "$tactic"; then
+    die "lean-smt PLean tree still contains a direct Crush backend call"
+  fi
+  grep -Fq "require Smt from git \"$SMT_REPO_URL\" @ \"$SMT_REV\"" \
+      "$tree/lakefile.lean" ||
+    die "lean-smt PLean tree does not require lean-smt $SMT_REV"
+}
+
+patch_smt_tree() {
+  local tree="$1"
+  local patch_file="$TMP_ROOT/plean-smt.patch"
+  local manifest="$tree/lake-manifest.json"
+  local before="$TMP_ROOT/plean-smt-manifest-before.json"
+
+  sed -e "s|@SMT_CONFIG@|$smt_config|g" \
+    -e "s|@SMT_REPO_URL@|$SMT_REPO_URL|g" \
+    -e "s|@SMT_REV@|$SMT_REV|g" \
+    "$SCRIPT_DIR/patches/plean-smt.patch.in" > "$patch_file"
+  if ! patch -d "$tree" -p1 --forward --batch < "$patch_file"; then
+    die "failed to apply the pinned PLean lean-smt backend patch"
+  fi
+  validate_smt_tree "$tree"
+  cp "$manifest" "$before" || die "the PLean tree has no lake manifest"
+  printf 'Resolving lean-smt for the PLean tree\n'
+  if ! (cd "$tree" && lake update Smt) \
+      > "$OUT_DIR/smt-update.log" 2>&1; then
+    tail -n 80 "$OUT_DIR/smt-update.log" >&2
+    die "failed to resolve lean-smt for the PLean tree"
+  fi
+  # `lake update Smt` resolves the new require by name; anything else moving
+  # would mean this lane measured a different Mathlib than the others.
+  if ! python3 - "$before" "$manifest" "$SMT_REV" <<'PYTHON'
+import json
+import sys
+
+
+def pins(path):
+    with open(path, encoding="utf-8") as stream:
+        return {
+            package["name"]: package.get("rev")
+            for package in json.load(stream).get("packages", [])
+        }
+
+
+before, after, expected = pins(sys.argv[1]), pins(sys.argv[2]), sys.argv[3]
+moved = sorted(name for name, rev in before.items() if after.get(name) != rev)
+for name in moved:
+    print(
+        f"error: {name} moved from {before[name]} to {after.get(name)}",
+        file=sys.stderr,
+    )
+if after.get("Smt") != expected:
+    print(
+        f"error: Smt resolved to {after.get('Smt')}, expected {expected}",
+        file=sys.stderr,
+    )
+    moved.append("Smt")
+raise SystemExit(1 if moved else 0)
+PYTHON
+  then
+    die "lean-smt resolution disturbed PLean's pinned dependency graph"
+  fi
+}
+
+# lean-cvc5 precompiles its bindings, so the tactic reaches cvc5 through FFI.
+# `lake env lean` does not load a dependency's shared library on its own, and
+# the missing extern only surfaces when the tactic first calls it.
+smt_dynlib_path() {
+  local tree="$1"
+  local candidate
+  for candidate in \
+      "$tree/.lake/packages/cvc5/.lake/build/lib/libcvc5_cvc5.dylib" \
+      "$tree/.lake/packages/cvc5/.lake/build/lib/libcvc5_cvc5.so"; do
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
 }
 
 prepare_tree() {
@@ -270,7 +404,9 @@ macro "#plean_bench_pverify " name:ident : command =>
     set_option pverify.profile true in
     #pverify \$name)
 EOF
-  elif [[ "$backend" == "grind" ]]; then
+  elif [[ "$backend" == "grind" ]] || is_smt_lane "$backend"; then
+    # Both lanes reach their backend from inside the patched tactic module, so
+    # the command needs no backend options of its own.
     cat >> "$output" <<EOF
 
 macro "#plean_bench_pverify " name:ident : command =>
@@ -357,7 +493,9 @@ elab "#plean_bench_report" : command => do
     liftM (pleanBenchReportDiagnostic row.obligation)
 
 EOF
-  elif [[ "$backend" == "grind" ]]; then
+  elif [[ "$backend" == "grind" ]] || is_smt_lane "$backend"; then
+    # The patch substitutes the backend at the site the profiler already times
+    # as `smtCrush`, so the same two fields cover both lanes.
     cat >> "$output" <<'EOF'
 
 open Lean Elab Command
@@ -473,6 +611,7 @@ record_metadata() {
   local tree="$2"
   local commit toolchain dirty diff_hash crush_commit duper_commit crush_dirty
   local max_heartbeats file_cpu_seconds trust reconstruct grind_splits
+  local smt_commit
   commit="$(git -C "$tree" rev-parse HEAD)"
   toolchain="$(tr -d '\r\n' < "$tree/lean-toolchain")"
   dirty="false"
@@ -506,12 +645,16 @@ record_metadata() {
   if [[ "$backend" == "grind" ]]; then
     grind_splits="$GRIND_SPLITS"
   fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  smt_commit="-"
+  if is_smt_lane "$backend"; then
+    smt_commit="$(git -C "$tree/.lake/packages/Smt" rev-parse HEAD)"
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$backend" "$commit" "$toolchain" "$dirty" "$diff_hash" "$SOLVER" \
     "$TIMEOUT" "$DUPER_TIMEOUT" "$max_heartbeats" "$MAX_RECURSION_DEPTH" \
     "$file_cpu_seconds" "$trust" "$reconstruct" "$CRUSH_INST_FUEL" \
     "$crush_commit" "$duper_commit" "$crush_dirty" "$tree" "$CRUSH_PROFILE" \
-    "$grind_splits" \
+    "$grind_splits" "$smt_commit" "$SMT_TIMEOUT" "$SMT_MONO" \
     >> "$METADATA"
 }
 
@@ -665,7 +808,7 @@ run_file() {
   local generated="$TMP_ROOT/generated/$backend/${file//\//_}"
   local log="$OUT_DIR/logs/$backend/${file//\//_}.$repeat.log"
   local started elapsed exit_code total max_heartbeats cpu_limited message
-  local prelude_end prelude_errors guard_log
+  local prelude_end prelude_errors guard_log dynlib
 
   if checkpoint_complete "$backend" "$repeat" "$file"; then
     printf 'checkpoint: skipping %-5s run %s: %s\n' \
@@ -700,6 +843,15 @@ run_file() {
         "-DmaxRecDepth=$MAX_RECURSION_DEPTH" \
         "-Dpverify.cache=false" "$generated"
     ) > "$log" 2>&1
+  elif is_smt_lane "$backend"; then
+    dynlib="$(smt_dynlib_path "$tree")" ||
+      die "cvc5 bindings are not built in $tree; lean-smt cannot load them"
+    (cd "$tree" && lake env lean \
+      "-DElab.async=false" \
+      "-DmaxHeartbeats=$max_heartbeats" \
+      "-DmaxRecDepth=$MAX_RECURSION_DEPTH" \
+      "--load-dynlib=$dynlib" \
+      "-Dpverify.cache=false" "$generated") > "$log" 2>&1
   elif [[ "$backend" == "grind" ]]; then
     guard_log="$log.solver-guard"
     (cd "$tree" && PATH="$SOLVER_GUARD_DIR:$PATH" \
@@ -816,8 +968,11 @@ write_reports() {
 }
 
 if ! is_true "$RUN_AUTO" && ! is_true "$RUN_CRUSH" && ! is_true "$RUN_DUPER" &&
-    ! is_true "$RUN_GRIND"; then
+    ! is_true "$RUN_GRIND" && ! is_true "$RUN_SMT"; then
   die "at least one backend must be enabled"
+fi
+if is_true "$RUN_SMT" && [[ "$SOLVER" != "cvc5" ]]; then
+  die "RUN_SMT requires SOLVER=cvc5; lean-smt drives cvc5 through in-process bindings"
 fi
 case "$RESUME" in
   true|false) ;;
@@ -886,6 +1041,31 @@ if is_true "$RUN_GRIND"; then
   fi
 fi
 
+if is_true "$RUN_SMT"; then
+  if [[ -z "$PLEAN_SMT_TREE" ]]; then
+    provision_tree "lean-smt PLean" "$PLEAN_SMT_REPO_URL" \
+      "$PLEAN_SMT_REV" "P-crush" "P-smt" true
+    PLEAN_SMT_TREE="$PROVISIONED_TREE"
+  else
+    PLEAN_SMT_TREE="$(cd "$PLEAN_SMT_TREE" && pwd)"
+  fi
+  check_tree "$PLEAN_SMT_TREE" "lean-smt"
+  if is_true "$PREPARE_TREES"; then
+    # A kept tree is already patched, and `patch --forward` treats that as a
+    # failure, so validate instead of reapplying.
+    if grep -Fq 'require Smt from git' "$PLEAN_SMT_TREE/lakefile.lean"; then
+      validate_smt_tree "$PLEAN_SMT_TREE"
+    else
+      patch_smt_tree "$PLEAN_SMT_TREE"
+    fi
+    prepare_tree "smt" "$PLEAN_SMT_TREE"
+    smt_dynlib_path "$PLEAN_SMT_TREE" >/dev/null ||
+      die "the lean-smt PLean build produced no cvc5 bindings"
+  else
+    validate_smt_tree "$PLEAN_SMT_TREE"
+  fi
+fi
+
 if is_true "$RUN_DUPER"; then
   if [[ -z "$PLEAN_DUPER_TREE" ]]; then
     provision_tree "Duper PLean" "$PLEAN_DUPER_REPO_URL" \
@@ -915,7 +1095,7 @@ fi
 
 initialize_tsv "$RESULTS" 'suite\tbackend\trepeat\tfile\tproof\tgoal_hash\tstatus\tcategory\tmilliseconds\tsynthetic\tmessage\tgoal'
 initialize_tsv "$RUNS" 'suite\tbackend\trepeat\tfile\texit_code\twall_seconds\tvc_count\tcpu_limited\tmessage'
-initialize_tsv "$METADATA" 'backend\tcommit\ttoolchain\tdirty\tdiff_sha256\tsolver\ttimeout\tduper_timeout\tmax_heartbeats\tmax_rec_depth\tfile_cpu_seconds\tcrush_trust\tcrush_reconstruct\tcrush_inst_fuel\tcrush_commit\tduper_commit\tcrush_dirty\ttree\tcrush_profile\tgrind_splits'
+initialize_tsv "$METADATA" 'backend\tcommit\ttoolchain\tdirty\tdiff_sha256\tsolver\ttimeout\tduper_timeout\tmax_heartbeats\tmax_rec_depth\tfile_cpu_seconds\tcrush_trust\tcrush_reconstruct\tcrush_inst_fuel\tcrush_commit\tduper_commit\tcrush_dirty\ttree\tcrush_profile\tgrind_splits\tsmt_commit\tsmt_timeout\tsmt_mono'
 initialize_tsv "$MEASUREMENTS" 'suite\tlane\trepeat\tvc_key\tstatus\tcategory\tmilliseconds\tmessage'
 initialize_tsv "$PROFILES" 'suite\tlane\trepeat\tvc_key\tdeclaration\tgoal_hash\toutcome\treplay\tdetail\ttotal_nanos\tphases\tmetrics'
 initialize_tsv "$CHECKPOINTS" 'backend\trepeat\tfile'
@@ -933,6 +1113,9 @@ if is_true "$RUN_CRUSH"; then
     record_metadata "$lane" "$PLEAN_CRUSH_TREE"
   done
 fi
+if is_true "$RUN_SMT"; then
+  record_metadata "$SMT_LANE" "$PLEAN_SMT_TREE"
+fi
 if is_true "$RUN_GRIND"; then
   record_metadata "grind" "$PLEAN_GRIND_TREE"
 fi
@@ -949,6 +1132,9 @@ for repeat in $(seq 1 "$REPEATS"); do
       for lane in "${CRUSH_LANES[@]}"; do
         run_file "$lane" "$PLEAN_CRUSH_TREE" "$repeat" "$file"
       done
+    fi
+    if is_true "$RUN_SMT"; then
+      run_file "$SMT_LANE" "$PLEAN_SMT_TREE" "$repeat" "$file"
     fi
     if is_true "$RUN_GRIND"; then
       run_file "grind" "$PLEAN_GRIND_TREE" "$repeat" "$file"

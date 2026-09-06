@@ -22,17 +22,22 @@ LANE_LABELS = {
     "grind-only": "grind",
     "crush-only": "Crush (Z3)",
     "crush-verify": "Crush (trusted SMT)",
-    "crush-core": "Core",
-    "crush-alethe": "Alethe",
-    "crush-portfolio": "Portfolio",
+    "crush-core": "Crush w/ Core",
+    "crush-alethe": "Crush w/ Alethe",
+    "crush-portfolio": "Crush w/ Portfolio",
+    "smt-only": "lean-smt",
 }
 
 BACKEND_LABELS = {
     "auto": "Auto",
     "duper": "Duper",
+    "lean-smt": "lean-smt",
     "crush": "Crush",
     "grind": "grind",
 }
+
+# Column order for every headline table and figure.
+BACKEND_ORDER = ("auto", "duper", "lean-smt", "crush", "grind")
 
 SUITE_LABELS = {
     "leanhammer": "LeanHammer",
@@ -44,11 +49,21 @@ SUITE_LABELS = {
 
 SUITE_ORDER = ("leanhammer", "loom", "cashmere", "velvet", "plean")
 
+# Suites the published figures and tables leave out. Loom contributes four VCs,
+# too few for a coverage curve or a meaningful percentage, so the paper reports
+# LeanHammer, Cashmere, Velvet, and PLean. The recorded TSVs keep every suite.
+PAPER_EXCLUDED_SUITES = ("loom",)
+
+# Okabe-Ito, the colourblind-safe qualitative palette, picked for maximum hue
+# separation rather than a house style: the previous set was five mid-lightness
+# muted tones that blurred together where curves overlap. Blue, orange, green,
+# magenta, near-black separate under deuteranopia, protanopia, and greyscale.
 BACKEND_COLORS = {
-    "auto": "#597A91",
-    "duper": "#B55B45",
-    "crush": "#178078",
-    "grind": "#77834D",
+    "auto": "#E69F00",
+    "duper": "#CC79A7",
+    "lean-smt": "#009E73",
+    "crush": "#0072B2",
+    "grind": "#3A3A3A",
 }
 
 OUTCOME_FIELDS = (
@@ -63,6 +78,7 @@ LANE_ORDER = (
     "auto-duper",
     "duper",
     "duper-only",
+    "smt-only",
     "crush-only",
     "crush-verify",
     "crush-core",
@@ -72,18 +88,22 @@ LANE_ORDER = (
     "grind",
 )
 
+# Same palette. The three lanes that share the reconstruction figure --
+# smt-only, crush-alethe, crush-portfolio -- take green, orange, and blue so
+# they are the maximally separated triple.
 LANE_COLORS = {
-    "auto": "#597A91",
-    "auto-duper": "#597A91",
-    "duper": "#B55B45",
-    "duper-only": "#B55B45",
-    "crush-only": "#0B504A",
-    "crush-verify": "#178078",
-    "crush-core": "#DD7A45",
-    "crush-alethe": "#D3A22E",
-    "crush-portfolio": "#254A62",
-    "grind-only": "#77834D",
-    "grind": "#77834D",
+    "auto": "#E69F00",
+    "auto-duper": "#E69F00",
+    "duper": "#CC79A7",
+    "duper-only": "#CC79A7",
+    "smt-only": "#009E73",
+    "crush-only": "#003F5C",
+    "crush-verify": "#3A3A3A",
+    "crush-core": "#8C6BB1",
+    "crush-alethe": "#E69F00",
+    "crush-portfolio": "#0072B2",
+    "grind-only": "#56B4E9",
+    "grind": "#56B4E9",
 }
 
 PHASE_COLORS = {
@@ -111,30 +131,53 @@ FAILURE_MODE_ORDER = (
     "certificate-error",
     "certificate-error+core-failed",
     "core-failed",
+    "kernel-reject",
+    "malformed-certificate",
+    "no-certificate",
     "not-attempted",
+    "replay-exception",
     "rule-gap",
+    "rule-gap+core-failed",
+    "solver-error",
     "solver-sat",
     "solver-unknown",
     "tactic",
     "term-gap",
+    "term-gap+core-failed",
+    "timeout",
+    "translation-failed",
+    "unclassified",
 )
 
 FAILURE_MODE_COLORS = {
     "certificate-error": "#A4433E",
     "certificate-error+core-failed": "#D27645",
     "core-failed": "#D6A73A",
+    "kernel-reject": "#8C3B4A",
+    "malformed-certificate": "#C2603F",
+    "no-certificate": "#9A6B3F",
     "not-attempted": "#557A75",
+    "replay-exception": "#6B4E7D",
     "rule-gap": "#476A8A",
+    "rule-gap+core-failed": "#5E7FA0",
+    "solver-error": "#96543F",
     "solver-sat": "#7B7653",
     "solver-unknown": "#80546B",
     "tactic": "#B7684B",
     "term-gap": "#3D7C83",
+    "term-gap+core-failed": "#4F8E93",
+    "timeout": "#8F7A3D",
+    "translation-failed": "#D69A3A",
+    "unclassified": "#8A8880",
 }
 
 INK = "#1B2927"
 MUTED = "#64716E"
 GRID = "#D9D5CB"
-PAPER = "#FBF8F1"
+# White, not an off-white: the figures land on white paper and a tinted
+# panel reads as a deliberate box around each one. Also used as the stroke
+# separating stacked bar segments, which needs to match the background.
+PAPER = "#FFFFFF"
 
 OUTPUTS = (
     "tables",
@@ -142,6 +185,7 @@ OUTPUTS = (
     "outcomes",
     "reconstruction",
     "reconstruction-failures",
+    "reconstruction-comparison",
     "phase-breakdown",
     "alethe-replay-scaling",
 )
@@ -209,6 +253,13 @@ def label_backend(backend: str) -> str:
     return BACKEND_LABELS.get(backend, backend)
 
 
+def backend_sort_key(backend: str) -> tuple[int, str]:
+    try:
+        return (BACKEND_ORDER.index(backend), backend)
+    except ValueError:
+        return (len(BACKEND_ORDER), backend)
+
+
 def label_suite(suite: str) -> str:
     return SUITE_LABELS.get(suite, suite)
 
@@ -218,6 +269,39 @@ def reconstruction_denominators(row: dict[str, str]) -> tuple[int, int]:
         return int(row["verify_solved_vcs"]), int(row["smt_verified_vcs"])
     verified = int(row["verified_vcs"])
     return verified, verified
+
+
+# Bars count VCs closed with a kernel-checked proof by any route. The
+# `_reconstructed` columns count only certificate replay inside the SMT
+# cohort, which drops goals closed by checked pre-SMT reconstruction or a
+# selected fact -- those carry a proof too, so plotting them understates the
+# lane.
+CHECKED_FIELDS = ("core_checked", "alethe_checked", "portfolio_checked")
+REPLAY_FIELDS = (
+    "core_reconstructed",
+    "alethe_reconstructed",
+    "portfolio_reconstructed",
+)
+
+
+def reconstruction_fields(rows: list[dict[str, str]]) -> tuple[tuple[str, ...], bool]:
+    """The count columns to plot, and whether they are checked-proof counts.
+
+    Runs recorded before the `_checked` columns existed carry only the
+    SMT-cohort replay counts. Fall back to those rather than failing, and let
+    the caller relabel the chart so the two measures are never confused.
+    """
+    if rows and all(CHECKED_FIELDS[-1] in row for row in rows):
+        return CHECKED_FIELDS, True
+    return REPLAY_FIELDS, False
+
+
+def drop_suites(
+    rows: list[dict[str, str]], excluded: set[str]
+) -> list[dict[str, str]]:
+    if not excluded:
+        return rows
+    return [row for row in rows if row.get("suite") not in excluded]
 
 
 def suite_sort_key(suite: str) -> tuple[int, str]:
@@ -390,14 +474,7 @@ def plot_coverage(rows: list[dict[str, str]], path: Path) -> None:
     suites = sorted({row["suite"] for row in rows})
     is_headline = all(row.get("backend") for row in rows)
     if is_headline:
-        order = ("auto", "duper", "crush", "grind")
-        series = sorted(
-            {row["backend"] for row in rows},
-            key=lambda backend: (
-                order.index(backend) if backend in order else len(order),
-                backend,
-            ),
-        )
+        series = sorted({row["backend"] for row in rows}, key=backend_sort_key)
         indexed = {(row["suite"], row["backend"]): row for row in rows}
         labels = {backend: label_backend(backend) for backend in series}
         colors = {
@@ -494,7 +571,7 @@ def plot_coverage(rows: list[dict[str, str]], path: Path) -> None:
 
 def plot_outcomes(rows: list[dict[str, str]], path: Path) -> None:
     suites = sorted({row["suite"] for row in rows}, key=suite_sort_key)
-    backend_order = ("auto", "duper", "crush", "grind")
+    backend_order = BACKEND_ORDER
     indexed = {(row["suite"], row["backend"]): row for row in rows}
     totals_by_suite: dict[str, set[int]] = defaultdict(set)
     for row in rows:
@@ -623,31 +700,34 @@ def plot_outcomes(rows: list[dict[str, str]], path: Path) -> None:
 
 def plot_reconstruction(rows: list[dict[str, str]], path: Path) -> None:
     suites = sorted(row["suite"] for row in rows)
-    fields = (
-        ("core_reconstructed", "Core", LANE_COLORS["crush-core"]),
-        ("alethe_reconstructed", "Alethe", LANE_COLORS["crush-alethe"]),
-        ("portfolio_reconstructed", "Portfolio", LANE_COLORS["crush-portfolio"]),
+    names, checked = reconstruction_fields(rows)
+    # Named from LANE_LABELS so the reconstruction figures, the tables, and
+    # the comparison agree on what each mode is called.
+    fields = tuple(
+        (name, LANE_LABELS[lane], LANE_COLORS[lane])
+        for name, lane in zip(
+            names, ("crush-core", "crush-alethe", "crush-portfolio")
+        )
     )
+    if checked:
+        title = "Checked proof coverage"
+        subtitle = "VCs closed with a kernel-checked proof / all VCs; higher is better"
+        blurb = (
+            "VCs closed with a kernel-checked Lean proof, over every "
+            "verification condition in the corpus."
+        )
+    else:
+        title = "Proof reconstruction coverage"
+        subtitle = "Successfully reconstructed VCs / SMT-verified VCs; higher is better"
+        blurb = "Kernel-checked reconstruction success among SMT-verified conditions."
     width = max(1000, 260 + len(suites) * 175)
     height = 600
     left, right, top, bottom = 80.0, 34.0, 140.0, 108.0
     chart_width = width - left - right
     chart_height = height - top - bottom
-    elements = svg_open(
-        width,
-        height,
-        "Proof reconstruction coverage",
-        "Kernel-checked reconstruction success among SMT-verified conditions.",
-    )
-    elements.append(text(42, 42, "Proof reconstruction coverage", "title"))
-    elements.append(
-        text(
-            42,
-            66,
-            "Successfully reconstructed VCs / SMT-verified VCs; higher is better",
-            "subtitle",
-        )
-    )
+    elements = svg_open(width, height, title, blurb)
+    elements.append(text(42, 42, title, "title"))
+    elements.append(text(42, 66, subtitle, "subtitle"))
     draw_legend(
         elements,
         [(label, color) for _, label, color in fields],
@@ -663,12 +743,14 @@ def plot_reconstruction(rows: list[dict[str, str]], path: Path) -> None:
     group_width = chart_width / max(len(rows), 1)
     for suite_index, row in enumerate(sorted(rows, key=lambda item: item["suite"])):
         verify_solved, smt_verified = reconstruction_denominators(row)
+        total_vcs = int(row["total_vcs"])
+        denominator = total_vcs if checked else smt_verified
         bar_width = min(42.0, group_width * 0.19)
         bars_width = len(fields) * bar_width + (len(fields) - 1) * 8
         group_start = left + suite_index * group_width + (group_width - bars_width) / 2
         for field_index, (field, _, color) in enumerate(fields):
             count = int(row[field])
-            percentage = 100.0 * count / smt_verified if smt_verified else 0.0
+            percentage = 100.0 * count / denominator if denominator else 0.0
             x = group_start + field_index * (bar_width + 8)
             y = top + chart_height * (1.0 - percentage / 100.0)
             elements.append(
@@ -678,7 +760,7 @@ def plot_reconstruction(rows: list[dict[str, str]], path: Path) -> None:
                 text(
                     x + bar_width / 2,
                     max(top - 5, y - 7),
-                    f"{count}/{smt_verified}",
+                    f"{count}/{denominator}",
                     "value",
                     "middle",
                 )
@@ -691,7 +773,7 @@ def plot_reconstruction(rows: list[dict[str, str]], path: Path) -> None:
             text(
                 center,
                 top + chart_height + 47,
-                f"{smt_verified}/{verify_solved} SMT cohort",
+                f"{verify_solved}/{total_vcs} verify solved",
                 "axis",
                 "middle",
             )
@@ -700,11 +782,137 @@ def plot_reconstruction(rows: list[dict[str, str]], path: Path) -> None:
             text(
                 center,
                 top + chart_height + 64,
-                f'{verify_solved}/{row["total_vcs"]} verify solved',
+                f"{smt_verified} SMT cohort",
                 "axis",
                 "middle",
             )
         )
+    write_svg(path, elements)
+
+
+def plot_reconstruction_comparison(
+    rows: list[dict[str, str]], path: Path
+) -> None:
+    lanes = sorted({row["lane"] for row in rows}, key=lane_sort_key)
+    suites = sorted({row["suite"] for row in rows}, key=suite_sort_key)
+    indexed = {(row["suite"], row["lane"]): row for row in rows}
+    width = max(1000, 260 + len(suites) * max(150, len(lanes) * 56))
+    height = 600
+    left, right, top, bottom = 80.0, 34.0, 140.0, 108.0
+    chart_width = width - left - right
+    chart_height = height - top - bottom
+    elements = svg_open(
+        width,
+        height,
+        "Checked proof reconstruction by tool",
+        (
+            "Kernel-checked reconstruction success for lean-smt, Crush's strict "
+            "Alethe lane, and Crush's reconstruction portfolio over the VC "
+            "identities that all three lanes attempted."
+        ),
+    )
+    elements.append(text(42, 42, "Checked proof reconstruction", "title"))
+    elements.append(
+        text(
+            42,
+            66,
+            "Checked Lean proofs / VCs attempted by every compared lane; higher is better",
+            "subtitle",
+        )
+    )
+    draw_legend(
+        elements,
+        [
+            (label_lane(lane), LANE_COLORS.get(lane, "#66736F"))
+            for lane in lanes
+        ],
+        42,
+        98,
+        width - 84,
+    )
+    for value in (0, 25, 50, 75, 100):
+        y = top + chart_height * (1.0 - value / 100.0)
+        elements.append(line(left, y, width - right, y, "grid"))
+        elements.append(text(left - 12, y + 4, f"{value}%", "axis", "end"))
+
+    group_width = chart_width / max(len(suites), 1)
+    for suite_index, suite in enumerate(suites):
+        available = [lane for lane in lanes if (suite, lane) in indexed]
+        bar_width = min(46.0, max(12.0, group_width * 0.72 / max(len(available), 1) - 8))
+        bars_width = (
+            len(available) * bar_width + max(0, len(available) - 1) * 8
+        )
+        group_start = (
+            left + suite_index * group_width + (group_width - bars_width) / 2
+        )
+        matched = 0
+        common = 0
+        for lane_index, lane in enumerate(available):
+            row = indexed[(suite, lane)]
+            matched = int(row["matched_vcs"])
+            common = int(row["common_checked_proof_vcs"])
+            count = int(row["checked_proof_vcs"])
+            percentage = 100.0 * count / matched if matched else 0.0
+            x = group_start + lane_index * (bar_width + 8)
+            y = top + chart_height * (1.0 - percentage / 100.0)
+            tooltip = (
+                f"{label_suite(suite)} / {label_lane(lane)}: {count} checked "
+                f"proofs of {matched} matched VCs ({percentage:.1f}%), "
+                f'{row["mean_ms"]} ms mean'
+            )
+            elements.append(
+                f"<g><title>{xml(tooltip)}</title>"
+                f'{rect(x, y, bar_width, top + chart_height - y, LANE_COLORS.get(lane, "#66736F"), 2)}'
+                "</g>"
+            )
+            elements.append(
+                text(
+                    x + bar_width / 2,
+                    max(top - 5, y - 7),
+                    f"{count}/{matched}",
+                    "value",
+                    "middle",
+                )
+            )
+        center = left + (suite_index + 0.5) * group_width
+        elements.append(
+            text(
+                center,
+                top + chart_height + 27,
+                label_suite(suite),
+                "label",
+                "middle",
+            )
+        )
+        elements.append(
+            text(
+                center,
+                top + chart_height + 47,
+                f"{matched} matched VCs",
+                "axis",
+                "middle",
+            )
+        )
+        elements.append(
+            text(
+                center,
+                top + chart_height + 64,
+                f"{common} proved by all lanes",
+                "axis",
+                "middle",
+            )
+        )
+        if suite_index > 0:
+            separator = left + suite_index * group_width
+            elements.append(
+                line(
+                    separator,
+                    top,
+                    separator,
+                    top + chart_height + 70,
+                    stroke=GRID,
+                )
+            )
     write_svg(path, elements)
 
 
@@ -1041,32 +1249,19 @@ def plot_scaling(
         def map_x(value: float) -> float:
             return left + chart_width * value / x_max
 
-        fit = linear_fit(xs, ys)
-        fit_label = "fit unavailable"
-        if fit is not None:
-            correlation, slope, intercept = fit
-            fit_label = (
-                f"n={len(values)}, r={correlation:.3f}, "
-                f"R2={correlation * correlation:.3f}, "
-                f"slope={slope * 100:.1f} ms / 100 commands"
-            )
-            start_x = max(0.0, -intercept / slope) if slope > 0 else 0.0
-            start_x = min(start_x, x_max)
-            end_x = x_max
-            start_y = max(10.0**min_power if replay_axis == "log" else 0.0, intercept + slope * start_x)
-            end_y = max(10.0**min_power if replay_axis == "log" else 0.0, intercept + slope * end_x)
-            elements.append(
-                line(
-                    map_x(start_x),
-                    map_y(start_y),
-                    map_x(end_x),
-                    map_y(end_y),
-                    stroke=LANE_COLORS["crush-alethe"],
-                    dash="7 5",
-                )
-            )
+        # Samples only: no fitted line and no smoothed trend. Replay cost
+        # against command count is not assumed to have a shape, and the
+        # correlation statistics that describe a linear model are reported in
+        # the Alethe Replay Scaling table instead.
         elements.append(text(left, panel_top + 18, suite, "label"))
-        elements.append(text(left + 90, panel_top + 18, fit_label, "subtitle"))
+        elements.append(
+            text(
+                left + 90,
+                panel_top + 18,
+                f"{len(values)} replayed certificates",
+                "subtitle",
+            )
+        )
 
         for tick_index in range(6):
             value = x_max * tick_index / 5
@@ -1102,7 +1297,7 @@ def plot_scaling(
                 circle(
                     map_x(commands),
                     map_y(replay_ms),
-                    5.2,
+                    3.4,
                     LANE_COLORS["crush-alethe"],
                     tooltip,
                 )
@@ -1149,6 +1344,8 @@ def write_tables(
     coverage: list[dict[str, str]],
     reconstruction: list[dict[str, str]],
     failures: list[dict[str, str]],
+    comparison_reconstruction: list[dict[str, str]],
+    comparison_failures: list[dict[str, str]],
     phases: list[dict[str, str]],
     scaling: list[dict[str, str]],
 ) -> None:
@@ -1169,6 +1366,15 @@ def write_tables(
                 "unsolved for coverage and are excluded from timing "
                 "statistics.\n\n"
             )
+            if any(row["backend"] == "lean-smt" for row in headline):
+                stream.write(
+                    "`lean-smt` answers a stricter question than the other "
+                    "rows: it closes a goal only when it also replays cvc5's "
+                    "Alethe certificate into a Lean proof term. The "
+                    "**Reconstruction Comparison** table below compares it "
+                    "against Crush's checked reconstruction lanes on equal "
+                    "terms.\n\n"
+                )
             write_markdown_table(
                 stream,
                 [
@@ -1204,9 +1410,7 @@ def write_tables(
                         headline,
                         key=lambda item: (
                             item["suite"],
-                            ("auto", "duper", "crush", "grind").index(
-                                item["backend"]
-                            ),
+                            backend_sort_key(item["backend"]),
                         ),
                     )
                 ),
@@ -1248,9 +1452,7 @@ def write_tables(
                         outcomes,
                         key=lambda item: (
                             item["suite"],
-                            ("auto", "duper", "crush", "grind").index(
-                                item["backend"]
-                            ),
+                            backend_sort_key(item["backend"]),
                         ),
                     )
                 ),
@@ -1399,6 +1601,95 @@ def write_tables(
                     )
                 ),
             )
+        if comparison_reconstruction:
+            stream.write("## Reconstruction Comparison\n\n")
+            stream.write(
+                "Every lane in this table returns a Lean proof term, so the "
+                "rows compare checked reconstruction across tools. `lean-smt` "
+                "translates the goal, calls cvc5, and replays the Alethe "
+                "certificate; `Alethe` is Crush's strict certificate lane; and "
+                "`Portfolio` is Crush's certificate replay with its "
+                "core-directed fallback.\n\n"
+                "`Matched` is the exact VC-identity intersection of every "
+                "compared lane, so no lane is credited for a VC another lane "
+                "never saw. `Checked proof` counts matched VCs the lane closed "
+                "with a kernel-accepted Lean proof by any of its routes, "
+                "including a goal closed by checked pre-SMT reconstruction "
+                "before a certificate was needed. `Common` counts VCs every "
+                "lane proved, and `Common mean` uses only those VCs so a lane "
+                "cannot appear faster by proving less.\n\n"
+                "`Certificate replay / SMT cohort` asks the narrower question "
+                "instead. Its denominator is the matched VCs whose trusted "
+                "Crush lane recorded an SMT `unsat`, and its numerator uses "
+                "each lane's own accept set, so the `Alethe` row matches the "
+                "**Proof Reconstruction** table above. It is empty when the "
+                "run has no `crush-verify` lane.\n\n"
+            )
+            write_markdown_table(
+                stream,
+                [
+                    "Corpus",
+                    "Lane",
+                    "Checked proof / matched",
+                    "Failed",
+                    "Coverage",
+                    "Common",
+                    "Mean (ms)",
+                    "Common mean (ms)",
+                    "Certificate replay / SMT cohort",
+                ],
+                (
+                    [
+                        row["suite"],
+                        label_lane(row["lane"]),
+                        f'{row["checked_proof_vcs"]} / {row["matched_vcs"]}',
+                        row["failed_vcs"],
+                        f'{row["pass_pct"]}%',
+                        row["common_checked_proof_vcs"],
+                        row["mean_ms"],
+                        row["common_mean_ms"],
+                        f'{row["cohort_reconstructed_vcs"]} / '
+                        f'{row["verify_smt_cohort_vcs"]}',
+                    ]
+                    for row in sorted(
+                        comparison_reconstruction,
+                        key=lambda item: (
+                            suite_sort_key(item["suite"]),
+                            lane_sort_key(item["lane"]),
+                        ),
+                    )
+                ),
+            )
+        if comparison_failures:
+            stream.write("## Reconstruction Comparison Gaps\n\n")
+            stream.write(
+                "Failure modes for the matched cohort above. Each row counts "
+                "matched VCs for which the named lane produced no checked Lean "
+                "proof. `rule-gap` for `lean-smt` means it replayed the "
+                "certificate but left an unhandled Alethe step as an open "
+                "goal; `translation-failed` means the goal never reached the "
+                "solver.\n\n"
+            )
+            write_markdown_table(
+                stream,
+                ["Corpus", "Lane", "Failure mode", "VCs"],
+                (
+                    [
+                        row["suite"],
+                        label_lane(row["lane"]),
+                        row["failure_mode"],
+                        row["vcs"],
+                    ]
+                    for row in sorted(
+                        comparison_failures,
+                        key=lambda item: (
+                            suite_sort_key(item["suite"]),
+                            lane_sort_key(item["lane"]),
+                            item["failure_mode"],
+                        ),
+                    )
+                ),
+            )
         if phases:
             stream.write("## Crush Phase Breakdown\n\n")
             write_markdown_table(
@@ -1474,6 +1765,17 @@ def main() -> None:
         choices=OUTPUTS,
         help="generate only this output; repeat to select multiple outputs",
     )
+    parser.add_argument(
+        "--exclude-suite",
+        action="append",
+        default=[],
+        metavar="SUITE",
+        help=(
+            "omit this corpus from every table and figure; repeat to omit "
+            f"several. The published artifacts omit "
+            f"{', '.join(PAPER_EXCLUDED_SUITES)}."
+        ),
+    )
     args = parser.parse_args()
 
     missing = [path for path in args.result_dirs if not path.is_dir()]
@@ -1493,6 +1795,9 @@ def main() -> None:
         or "reconstruction-failures" in selected
     )
     need_failures = need_tables or "reconstruction-failures" in selected
+    need_comparison_reconstruction = (
+        need_tables or "reconstruction-comparison" in selected
+    )
     need_phases = need_tables or "phase-breakdown" in selected
     need_scaling = need_tables or "alethe-replay-scaling" in selected
 
@@ -1553,6 +1858,24 @@ def main() -> None:
         if need_failures
         else []
     )
+    comparison_reconstruction = (
+        unique_rows(
+            read_tsv(args.result_dirs, "reconstruction-comparison.tsv"),
+            ("suite", "lane"),
+            "reconstruction-comparison.tsv",
+        )
+        if need_comparison_reconstruction
+        else []
+    )
+    comparison_failures = (
+        unique_rows(
+            read_tsv(args.result_dirs, "reconstruction-comparison-failures.tsv"),
+            ("suite", "lane", "failure_mode"),
+            "reconstruction-comparison-failures.tsv",
+        )
+        if need_comparison_reconstruction
+        else []
+    )
     phases = (
         unique_rows(
             read_tsv(args.result_dirs, "phase-summary.tsv"),
@@ -1568,6 +1891,34 @@ def main() -> None:
         else []
     )
 
+    excluded = set(args.exclude_suite)
+    (
+        headline,
+        coverage,
+        outcomes,
+        comparisons,
+        reconstruction,
+        failures,
+        comparison_reconstruction,
+        comparison_failures,
+        phases,
+        scaling,
+    ) = (
+        drop_suites(rows, excluded)
+        for rows in (
+            headline,
+            coverage,
+            outcomes,
+            comparisons,
+            reconstruction,
+            failures,
+            comparison_reconstruction,
+            comparison_failures,
+            phases,
+            scaling,
+        )
+    )
+
     if not any(
         (
             headline,
@@ -1576,11 +1927,15 @@ def main() -> None:
             coverage,
             reconstruction,
             failures,
+            comparison_reconstruction,
             phases,
             scaling,
         )
     ):
-        raise SystemExit("no normalized benchmark reports found")
+        raise SystemExit(
+            "no normalized benchmark reports found"
+            + (f" outside {', '.join(sorted(excluded))}" if excluded else "")
+        )
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     generated: list[Path] = []
@@ -1594,6 +1949,8 @@ def main() -> None:
             coverage,
             reconstruction,
             failures,
+            comparison_reconstruction,
+            comparison_failures,
             phases,
             scaling,
         )
@@ -1614,6 +1971,13 @@ def main() -> None:
     if "reconstruction-failures" in selected and reconstruction:
         path = args.out_dir / "reconstruction-failures.svg"
         plot_failures(failures, reconstruction, path)
+        generated.append(path)
+    if (
+        "reconstruction-comparison" in selected
+        and comparison_reconstruction
+    ):
+        path = args.out_dir / "reconstruction-comparison.svg"
+        plot_reconstruction_comparison(comparison_reconstruction, path)
         generated.append(path)
     if "phase-breakdown" in selected and phases:
         path = args.out_dir / "phase-breakdown.svg"

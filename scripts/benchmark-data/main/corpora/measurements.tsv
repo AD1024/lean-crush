@@ -2183,3 +2183,545 @@ velvet	duper	1	Velvet/Examples/Total_Partial_example.lean|42|5964899400721509044
 velvet	duper	1	Velvet/Examples/Total_Partial_example.lean|43|16800718018059787263	pass	-	1	-
 velvet	duper	1	Velvet/Examples/Total_Partial_example.lean|44|6709257883257101731	pass	-	120	-
 velvet	duper	1	Velvet/Examples/Total_Partial_example.lean|45|16576486626369642801	fail	timeout	5573	Duper encountered a (deterministic) timeout. The maximum number of heartbeats 1000000 has been reached (use 'set_option maxHeartbeats <num>' to set the limit)
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|1|1631738648950044227	pass	-	181	-
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|2|11756138257855701010	fail	tactic	159	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|3|2825169037077011539	pass	-	118	-
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|4|14833385480787993856	pass	-	114	-
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|5|15214630116673553496	fail	tactic	136	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|6|11756138257855701010	fail	tactic	145	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|7|2592897230707726799	fail	tactic	120	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|8|2825169037077011539	pass	-	116	-
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|9|14833385480787993856	pass	-	116	-
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|10|15214630116673553496	fail	tactic	137	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|11|12346872860079934512	fail	tactic	161	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|12|11756138257855701010	fail	tactic	188	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|13|12800241106604992563	fail	tactic	184	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|14|2592897230707726799	fail	tactic	162	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|15|2825169037077011539	pass	-	129	-
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|16|14810769858554953377	pass	-	120	-
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|17|14833385480787993856	pass	-	121	-
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|18|8275436438937433806	pass	-	41	-
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|19|15214630116673553496	fail	tactic	151	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|20|684110104125275636	fail	tactic	155	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|21|10455387604875970312	fail	tactic	46	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|22|12346872860079934512	fail	tactic	171	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|23|9920644537135092340	fail	tactic	208	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|24|2592897230707726799	fail	tactic	179	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|25|8954427794409453576	pass	-	142	-
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|26|14833385480787993856	pass	-	134	-
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|27|5928940248694370277	fail	tactic	164	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|28|12566989642252477834	fail	tactic	162	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|1|9427426964918022923	pass	-	244	-
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|2|1587904245978985587	pass	-	201	-
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|3|12290697138917920290	fail	tactic	181	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|4|6449264834289021715	fail	tactic	173	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|5|11664442347342473650	pass	-	159	-
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|6|6579164554781296205	pass	-	159	-
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|7|7126761714196821540	pass	-	166	-
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|8|2232656262363782188	pass	-	69	-
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|9|15183118018364320695	fail	tactic	47	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|10|12346872860079934512	fail	tactic	188	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|1|4325354716326072573	pass	-	280	-
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|2|3233717574493770211	fail	tactic	203	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|3|14557075163885871591	pass	-	114	-
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|4|6384732382134649439	pass	-	109	-
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|5|13851523499043008614	pass	-	112	-
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|6|8816666150414203262	pass	-	58	-
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|7|7432640679462075544	fail	tactic	71	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|8|9639754685172097330	fail	tactic	137	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|9|10203002127808532242	pass	-	258	-
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|10|15527439877898811686	fail	tactic	228	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|11|4253526900314070824	pass	-	212	-
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|12|17087698223479619887	pass	-	250	-
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|13|13168721855841554394	pass	-	221	-
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|14|8050235650381385355	pass	-	126	-
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|15|3874562368415809942	pass	-	154	-
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|16|16403843650363689650	pass	-	213	-
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|17|17528322019345720798	fail	tactic	230	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|18|14846570717984605519	fail	tactic	95	Monomorphization failed because currently the procedure cannot deal with expression `(cifvar_8 cifvar_9     (cifvar_10 (cifvar_11 cifvar_12 cifvar_13) (cifvar_14 cifvar_15 cifvar_13)))[i✝]`. This is because it has subterms possessing at least one of the following features · Type argument with bound variables, e.g. `@Fin.add (n + 2) a b` where `n` is a bound variable · λ binders whose type contain bound variables, e.g. `fun (x : a) => x` where `a` is a bound variable · Other (TODO) `set_option auto.mono.ignoreNonQuasiHigherOrder true` will instruct Lean-auto to ignore all the `LemmaInst`s which contain expressions that cannot be handled by the current procedure
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|19|17345521196864181404	pass	-	100	-
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|20|4720720642953332999	pass	-	100	-
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|21|16873295595722686018	fail	tactic	41	Monomorphization failed because currently the procedure cannot deal with expression `cifvar_8[i✝]`. This is because it has subterms possessing at least one of the following features · Type argument with bound variables, e.g. `@Fin.add (n + 2) a b` where `n` is a bound variable · λ binders whose type contain bound variables, e.g. `fun (x : a) => x` where `a` is a bound variable · Other (TODO) `set_option auto.mono.ignoreNonQuasiHigherOrder true` will instruct Lean-auto to ignore all the `LemmaInst`s which contain expressions that cannot be handled by the current procedure
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|22|5769627519083430677	pass	-	93	-
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|23|15630242782200619292	pass	-	32	-
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|24|4390242841053229048	fail	tactic	49	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|25|4098508629850130765	fail	tactic	14	Monomorphization failed because currently the procedure cannot deal with expression `(cifvar_8 cifvar_9)[i✝]`. This is because it has subterms possessing at least one of the following features · Type argument with bound variables, e.g. `@Fin.add (n + 2) a b` where `n` is a bound variable · λ binders whose type contain bound variables, e.g. `fun (x : a) => x` where `a` is a bound variable · Other (TODO) `set_option auto.mono.ignoreNonQuasiHigherOrder true` will instruct Lean-auto to ignore all the `LemmaInst`s which contain expressions that cannot be handled by the current procedure
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|26|6449688271898666716	fail	tactic	128	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|27|3108445719328028112	fail	tactic	59	Monomorphization failed because currently the procedure cannot deal with expression `cifvar_8[i✝]`. This is because it has subterms possessing at least one of the following features · Type argument with bound variables, e.g. `@Fin.add (n + 2) a b` where `n` is a bound variable · λ binders whose type contain bound variables, e.g. `fun (x : a) => x` where `a` is a bound variable · Other (TODO) `set_option auto.mono.ignoreNonQuasiHigherOrder true` will instruct Lean-auto to ignore all the `LemmaInst`s which contain expressions that cannot be handled by the current procedure
+velvet	smt-only	1	Velvet/Examples/Examples.lean|1|6162910358734672275	fail	tactic	953	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples.lean|2|1066791641437412485	pass	-	255	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|3|9866248891257573647	fail	tactic	1914	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples.lean|4|18360837223612973524	fail	tactic	699	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples.lean|5|5794584936190196715	pass	-	234	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|6|1066791641437412485	pass	-	250	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|7|14825588553610653054	pass	-	389	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|8|15257391885382474665	pass	-	211	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|9|5794584936190196715	pass	-	215	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|10|12031026870814429192	pass	-	223	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|11|16465886849738339639	pass	-	295	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|12|15257391885382474665	pass	-	212	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|13|2438232962388206336	pass	-	212	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|14|5964899400721509044	pass	-	151	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|15|12155028420956038391	pass	-	154	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|16|14852526092468225565	pass	-	246	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|17|17117294935281830098	pass	-	150	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|18|5288706169439222084	fail	tactic	318	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples.lean|19|12688677688377801211	fail	tactic	306	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples.lean|20|7903702650473013145	fail	tactic	423	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples.lean|21|8905801618567038615	fail	tactic	313	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples.lean|22|5964899400721509044	pass	-	150	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|23|5379360585891885096	pass	-	162	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|24|11248877774576345437	pass	-	228	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|25|17117294935281830098	pass	-	147	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|26|11532741708565178815	pass	-	145	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|27|13894794097547967513	pass	-	40	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|28|11235314628722112900	pass	-	107	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|29|8905801618567038615	fail	tactic	248	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples.lean|30|18214290959922115111	fail	tactic	355	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples.lean|31|17119794831572106230	pass	-	95	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|32|16395326812896940336	pass	-	97	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|33|4559485301326837329	pass	-	88	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|34|15833581759277421577	pass	-	196	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|35|7228731597997214785	fail	tactic	5111	unable to prove goal. Try providing more hints. Reason: TIMEOUT
+velvet	smt-only	1	Velvet/Examples/Examples.lean|36|17256355208408803011	pass	-	112	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|37|13635698331308129878	pass	-	101	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|38|10800841518550636949	pass	-	225	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|39|12457966505053151830	pass	-	435	-
+velvet	smt-only	1	Velvet/Examples/Examples.lean|40|17578352201394481400	pass	-	172	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|1|6162910358734672275	fail	tactic	949	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|2|1066791641437412485	pass	-	258	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|3|9866248891257573647	fail	tactic	1911	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|4|18360837223612973524	fail	tactic	702	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|5|11568103068982921353	pass	-	245	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|6|5794584936190196715	pass	-	238	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|7|1066791641437412485	pass	-	242	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|8|14825588553610653054	pass	-	383	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|9|15257391885382474665	pass	-	217	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|10|11568103068982921353	pass	-	234	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|11|5794584936190196715	pass	-	216	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|12|12031026870814429192	pass	-	224	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|13|16465886849738339639	pass	-	298	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|14|15257391885382474665	pass	-	216	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|15|5918835836158453730	pass	-	217	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|16|5964899400721509044	pass	-	151	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|17|12155028420956038391	pass	-	152	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|18|14852526092468225565	pass	-	245	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|19|17117294935281830098	pass	-	154	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|20|5288706169439222084	fail	tactic	534	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|21|12688677688377801211	fail	tactic	442	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|22|7903702650473013145	fail	tactic	760	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|23|8905801618567038615	fail	tactic	629	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|24|18088860687919872176	fail	tactic	1742	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|25|5964899400721509044	pass	-	153	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|26|5379360585891885096	pass	-	167	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|27|11248877774576345437	pass	-	246	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|28|17117294935281830098	pass	-	154	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|29|6709257883257101731	pass	-	154	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|30|13894794097547967513	pass	-	40	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|31|11235314628722112900	pass	-	111	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|32|891049678225498279	fail	tactic	249	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|33|18214290959922115111	fail	tactic	591	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|34|17119794831572106230	pass	-	44	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|35|16395326812896940336	pass	-	42	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|36|4559485301326837329	pass	-	28	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|37|15833581759277421577	pass	-	153	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|38|17892696244691966181	pass	-	233	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|39|7228731597997214785	fail	tactic	5068	unable to prove goal. Try providing more hints. Reason: TIMEOUT
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|40|13073343856082995605	pass	-	88	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|41|13635698331308129878	pass	-	57	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|42|10800841518550636949	pass	-	182	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|43|12457966505053151830	pass	-	250	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|44|17578352201394481400	pass	-	153	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|45|628191952620585962	pass	-	41	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|46|5408980950461060684	pass	-	44	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|47|17796805544787031687	pass	-	28	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|48|12597585967811959528	pass	-	207	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|49|17892696244691966181	pass	-	234	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|50|11504389341422214604	fail	tactic	5071	unable to prove goal. Try providing more hints. Reason: TIMEOUT
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|51|1828175149019549874	pass	-	72	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|52|8027176826117333927	pass	-	55	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|53|8642365996124661698	pass	-	253	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|54|1031468476226669362	pass	-	611	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|55|9859620190106577091	pass	-	221	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|56|7745518040588453633	fail	tactic	139	lean-smt did not close the goal: 1 open goal(s) remain after proof replay
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|57|7275559839122250210	pass	-	131	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|58|17809363630590163151	fail	tactic	259	lean-smt did not close the goal: 10 open goal(s) remain after proof replay
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|59|3756677303263535492	fail	tactic	137	Failed to reconstruct term (< (+ (to_real (* (- 1) (+ |f✝²| (* (- 1) @purify_3) (* (- 1) @purify_4)))) (* (/ (- 1) 2) (to_real @purify_2)) (* (/ 1 2) (to_real (+ |f✝²| (* (- 1) |f✝¹|) (* (- 1) @purify_2)))) (to_real (+ @purify_2 (* (- 1) @purify_3))) (* (/ 1 2) (to_real (+ |f✝²| |f✝¹| (* (- 2) @purify_4))))) (+ (to_real (* (- 1) 0)) (* (/ (- 1) 2) 2.0) (* (/ 1 2) 0.0) 0.0 (* (/ 1 2) 2.0))) with kind LT
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|60|4049183095434299843	pass	-	127	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|61|845228717509319176	fail	tactic	133	lean-smt did not close the goal: 1 open goal(s) remain after proof replay
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|62|14080923781397173690	pass	-	223	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|63|2013384436827156188	fail	tactic	156	Failed to reconstruct term (<= (+ (to_real (* (- 1) (+ |f✝¹| (* (- 1) @purify_4)))) (* (/ 1 2) (to_real (+ |f✝²| |f✝¹| (* (- 2) @purify_4)))) (* (/ (- 1) 2) (to_real (+ |f✝²| (* (- 1) |f✝¹|) (* (- 1) @purify_2)))) (* (/ (- 1) 2) (to_real @purify_2))) (+ (to_real (* (- 1) 1)) (* (/ 1 2) 1.0) (* (/ (- 1) 2) 0.0) (* (/ (- 1) 2) 2.0))) with kind LEQ
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|64|4049183095434299843	pass	-	95	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|65|7275559839122250210	pass	-	99	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|66|14080923781397173690	pass	-	192	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|67|5112937323286018014	pass	-	99	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|68|4559485301326837329	pass	-	49	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|69|6911359079999020658	pass	-	32	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|70|16395326812896940336	pass	-	69	-
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|71|18362062349273978007	fail	tactic	150	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|72|8802921734925604215	fail	tactic	131	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|73|8723303018838369810	fail	tactic	125	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).
+velvet	smt-only	1	Velvet/Examples/GCD.lean|1|4384199359441751320	pass	-	83	-
+velvet	smt-only	1	Velvet/Examples/GCD.lean|2|9601099415740649235	pass	-	39	-
+velvet	smt-only	1	Velvet/Examples/GCD.lean|3|1185000637665826843	pass	-	40	-
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|1|3150397294412475763	fail	tactic	64	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|2|8498703091421742660	pass	-	198	-
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|3|15405612526479945524	fail	tactic	196	lean-smt did not close the goal: 1 open goal(s) remain after proof replay
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|4|3635621084297233985	pass	-	190	-
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|5|8498703091421742660	pass	-	167	-
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|6|15497101072354692966	fail	tactic	5155	unable to prove goal. Try providing more hints. Reason: TIMEOUT
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|7|3635621084297233985	pass	-	187	-
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|8|8419734978408419013	pass	-	149	-
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|9|18150307703072330979	pass	-	169	-
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|10|1456886557593529150	pass	-	157	-
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|11|16017810969246570786	pass	-	155	-
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|12|12543135627460772462	pass	-	29	-
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|13|1572539502098385654	pass	-	83	-
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|14|11076373139303988464	pass	-	47	-
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|15|15559572021364972958	fail	tactic	318	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|1|11207960766534651515	pass	-	326	-
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|2|4413675682266163545	pass	-	250	-
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|3|9518487208184120090	pass	-	274	-
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|4|11207960766534651515	pass	-	253	-
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|5|16465854614385299804	pass	-	295	-
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|6|1749803822950348457	pass	-	232	-
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|7|6461838523585744673	pass	-	220	-
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|8|5698263445699273715	pass	-	260	-
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|9|1749803822950348457	pass	-	237	-
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|10|16458001095677251802	pass	-	237	-
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|11|11716511832970583731	pass	-	87	-
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|12|13412663338101939313	pass	-	83	-
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|13|10877051663303345536	pass	-	131	-
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|14|2102916384874846137	fail	tactic	5337	unable to prove goal. Try providing more hints. Reason: TIMEOUT
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|1|6189042491608852705	pass	-	222	-
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|2|13979591039540523316	pass	-	186	-
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|3|6189042491608852705	pass	-	161	-
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|4|3496913807798796367	pass	-	180	-
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|5|13935834157065255340	pass	-	95	-
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|6|10716558625718226994	pass	-	110	-
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|7|12429897440204793908	pass	-	97	-
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|8|6662270672118944889	pass	-	69	-
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|9|10294878435885712953	pass	-	68	-
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|10|15821608085576758365	fail	tactic	122	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|1|633235845480694220	fail	translation	189	cannot translate fun eb!_0 => decide (f✝ ≤ f eb!_0), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|2|12262280732602434251	fail	translation	106	cannot translate fun eb!_0 => decide (f✝ ≤ f eb!_0), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|3|5395433166570123997	fail	tactic	148	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|4|7858921023181799469	fail	tactic	147	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|5|12307778664191690486	fail	tactic	142	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|6|14651957694487509304	fail	tactic	143	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|7|5395433166570123997	fail	tactic	137	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|8|12933711973000179377	fail	tactic	152	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|9|1502598827083788742	fail	tactic	130	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|10|5948121399058639032	fail	tactic	151	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|11|7320909626913503829	fail	tactic	141	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|12|13680370559755953061	fail	tactic	144	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|13|5395433166570123997	fail	tactic	57	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|14|9725332222063365643	fail	tactic	88	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|15|400422252958227942	fail	tactic	59	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|16|880346177993498408	fail	tactic	49	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|17|15369885961681168000	fail	translation	199	cannot translate fun eb!_0 => decide (f✝ ≤ f eb!_0), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|18|633235845480694220	fail	translation	191	cannot translate fun eb!_0 => decide (f✝ ≤ f eb!_0), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|1|9632926918213658529	pass	-	76	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|2|16321134497628070328	pass	-	61	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|3|15399959404188881270	pass	-	57	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|4|6729724634728447689	pass	-	48	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|5|6331840417009367668	pass	-	30	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|6|928177310960349346	pass	-	167	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|7|14502607232842720358	fail	tactic	28	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|8|5360899794933563671	pass	-	86	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|9|16083086069592683677	pass	-	101	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|10|17426933449823366573	pass	-	107	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|11|8436330743851721663	pass	-	76	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|12|5516634396000359850	pass	-	85	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|13|3040060259141493307	pass	-	73	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|14|8843960039229350233	pass	-	32	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|15|414362943496193222	pass	-	46	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|16|17682712502848666117	fail	tactic	116	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|17|10153057550358142642	pass	-	20	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|18|1511426402368662420	pass	-	34	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|19|12303175613740643342	pass	-	49	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|20|10153057550358142642	pass	-	27	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|21|419217539048902517	pass	-	32	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|22|785945476856620183	pass	-	22	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|23|14100858011260313832	pass	-	43	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|24|5439148242694091386	pass	-	57	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|25|13358020527010658417	pass	-	35	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|26|8603391761408256204	pass	-	43	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|27|403261720200322615	pass	-	58	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|28|13334821868243949956	pass	-	35	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|29|10034441991535992553	pass	-	30	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|30|8410732340261024813	pass	-	89	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|31|13887296291903300382	pass	-	82	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|32|6517665507579609563	pass	-	70	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|33|1926823926199498616	pass	-	64	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|34|4691160922418792609	pass	-	126	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|35|5459752633259142580	pass	-	144	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|36|14235806948139691359	pass	-	94	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|37|275146994291977655	pass	-	64	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|38|7037529583856086989	pass	-	125	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|39|5348143843544294657	pass	-	142	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|40|11865403806314311412	pass	-	95	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|41|4528940613904177901	pass	-	137	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|42|4049183095434299843	pass	-	74	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|43|7275559839122250210	pass	-	102	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|44|7360868690920052366	fail	tactic	113	lean-smt did not close the goal: 1 open goal(s) remain after proof replay
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|45|4851910658932930142	pass	-	124	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|46|7656706852135243209	pass	-	124	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|47|9897963110172432531	fail	tactic	110	lean-smt did not close the goal: 1 open goal(s) remain after proof replay
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|48|4049183095434299843	pass	-	99	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|49|4851910658932930142	pass	-	120	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|50|7656706852135243209	pass	-	121	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|51|5804668677648722939	fail	tactic	41	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|52|5360899794933563671	pass	-	87	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|53|2669204144888843361	fail	tactic	137	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|54|17426933449823366573	pass	-	112	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|55|8436330743851721663	pass	-	74	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|56|50664709297785488	pass	-	78	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|57|3040060259141493307	pass	-	72	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|58|8843960039229350233	pass	-	24	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|59|11033618788013063028	pass	-	44	-
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|60|12960500676855313787	fail	tactic	115	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|1|15016508801900672495	fail	tactic	5687	unable to prove goal. Try providing more hints. Reason: TIMEOUT
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|2|15016508801900672495	fail	tactic	5632	unable to prove goal. Try providing more hints. Reason: TIMEOUT
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|3|2028202278093280602	pass	-	1155	-
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|4|15016508801900672495	pass	-	1734	-
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|5|15016508801900672495	pass	-	1708	-
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|6|3737123472131748703	pass	-	1932	-
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|7|7513237505621560861	pass	-	213	-
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|8|8096766621563827002	pass	-	210	-
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|9|18343663110535115658	fail	tactic	5942	unable to prove goal. Try providing more hints. Reason: TIMEOUT
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|1|1967192165379400567	fail	tactic	253	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|2|8738685113314976701	pass	-	129	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|3|3203096880704497577	fail	tactic	249	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|4|13561229236986007424	pass	-	102	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|5|4023749508134620518	pass	-	106	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|6|6516497319029947851	pass	-	109	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|7|6511268073169614694	pass	-	100	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|8|3467184461832131134	pass	-	40	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|9|975338514235632457	pass	-	28	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|10|12341185047943028706	pass	-	62	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|11|17907350532264535304	fail	tactic	142	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|12|6948348975417913427	fail	tactic	128	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|13|2560064229450187973	fail	tactic	375	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|14|11268031057524734514	fail	tactic	501	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|15|10035930273513517515	fail	tactic	417	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|16|4828757563640441921	fail	tactic	5556	unable to prove goal. Try providing more hints. Reason: TIMEOUT
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|17|11230331504797547582	pass	-	205	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|18|17578923063843270768	pass	-	206	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|19|9723121325275610683	pass	-	239	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|20|17138153512408342530	pass	-	254	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|21|1779879977175361606	pass	-	257	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|22|1927473323286999035	fail	tactic	45	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|23|1927473323286999035	fail	tactic	45	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|24|3184815126966959579	fail	tactic	108	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|25|1119395027554635835	fail	tactic	133	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|26|2867453267844152322	fail	tactic	408	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|27|16615537408723427288	fail	tactic	280	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|28|7752079179715214779	fail	tactic	244	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|29|12365816836206760017	pass	-	208	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|30|14837198768818932204	fail	tactic	317	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|31|13561229236986007424	pass	-	186	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|32|15323100967004739210	pass	-	208	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|33|10656169208955874266	fail	tactic	229	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|34|13561229236986007424	pass	-	187	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|35|9762937465648280212	pass	-	205	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|36|2195194365498566470	fail	tactic	222	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|37|13561229236986007424	pass	-	124	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|38|11853401597336712609	pass	-	132	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|39|8906564304959696025	pass	-	137	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|40|2836632441074815746	pass	-	131	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|41|3467184461832131134	pass	-	37	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|42|9157999431728333977	pass	-	33	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|43|12484676100150332319	fail	tactic	66	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|44|6547543738413559297	fail	tactic	191	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|45|4428589781148415831	fail	tactic	180	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|46|10600388612998636634	fail	tactic	2392	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|47|12568830336983413194	fail	tactic	2373	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|48|326977185203169709	fail	tactic	2793	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|49|16599719904663808863	fail	tactic	2599	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|50|9413868035314052637	fail	tactic	2515	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|51|11331147013392176036	fail	tactic	5435	unable to prove goal. Try providing more hints. Reason: TIMEOUT
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|52|3439126561156933339	pass	-	417	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|53|12568830336983413194	fail	tactic	2631	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|54|17578923063843270768	pass	-	426	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|55|16599719904663808863	fail	tactic	2664	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|56|14915918579342464454	pass	-	417	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|57|9290686424640906065	fail	tactic	2026	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|58|10600388612998636634	fail	tactic	2414	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|59|4457183463164791376	pass	-	401	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|60|17578923063843270768	pass	-	403	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|61|4823872097887552574	pass	-	421	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|62|9413868035314052637	fail	tactic	2213	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|63|4033875047981720732	fail	tactic	1146	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|64|3439126561156933339	pass	-	282	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|65|4457183463164791376	pass	-	276	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|66|17578923063843270768	pass	-	275	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|67|4823872097887552574	pass	-	315	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|68|14915918579342464454	pass	-	315	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|69|10972595422634862877	pass	-	328	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|70|8550776788309984180	pass	-	388	-
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|71|1927473323286999035	fail	tactic	45	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|72|1927473323286999035	fail	tactic	45	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|73|1927473323286999035	fail	tactic	44	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|74|3184815126966959579	fail	tactic	110	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|75|5592904318722155373	fail	tactic	108	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|76|9139246173028146264	fail	tactic	132	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|77|1600226093076966364	fail	tactic	737	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|78|16615823506960250981	fail	tactic	540	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|1|18217664312208415458	pass	-	152	-
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|2|14717207787831772510	fail	tactic	228	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|3|10323933724704776680	fail	translation	56	cannot translate fun a₁ => decide (f✝ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|4|8391554914672281118	pass	-	41	-
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|5|6640297411548399355	pass	-	36	-
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|6|4492008039209323302	fail	translation	224	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|7|16506446102682745284	fail	translation	220	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|8|4056255141881592010	fail	translation	226	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|9|10653939026877543916	fail	translation	230	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|10|11759649870705798849	fail	translation	224	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|11|18143633401136980304	fail	translation	228	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|12|16856248441874989194	fail	translation	229	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|13|1598574868652780333	fail	translation	239	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|14|6083540873046640352	fail	tactic	383	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|15|18314524564682266162	fail	translation	230	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|16|14859665284842375974	fail	translation	238	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|17|16859604855349517182	pass	-	588	-
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|18|12762377925475098934	fail	translation	233	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|19|4492008039209323302	fail	translation	228	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|20|16506446102682745284	fail	translation	230	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|21|4056255141881592010	fail	translation	231	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|22|18313498382677451279	fail	translation	225	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|23|5902668824617064985	fail	translation	226	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|24|18214680451177329292	fail	translation	225	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|25|4587180649363296126	fail	translation	227	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|26|1598574868652780333	fail	translation	241	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|27|7138545743425854663	fail	tactic	369	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|28|4681422515724674825	fail	translation	231	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|29|14859665284842375974	fail	translation	238	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|30|15621397202025328223	pass	-	567	-
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|31|12762377925475098934	fail	translation	234	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|32|6640297411548399355	fail	translation	224	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|33|12035722151280848636	fail	translation	229	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|34|4056255141881592010	fail	translation	229	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|35|18313498382677451279	fail	translation	224	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|36|5902668824617064985	fail	translation	227	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|37|11007454110672083430	fail	translation	225	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|38|4587180649363296126	fail	translation	229	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|39|4995387128902807839	fail	translation	247	cannot translate fun a₁ => decide (f✝⁶ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|40|7138545743425854663	fail	tactic	369	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|41|4681422515724674825	fail	translation	230	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|42|9257442500105266102	fail	translation	241	cannot translate fun a₁ => decide (f✝⁶ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|43|15621397202025328223	fail	tactic	5327	unable to prove goal. Try providing more hints. Reason: TIMEOUT
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|44|12762377925475098934	fail	translation	243	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|45|14757371069243260877	fail	translation	230	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|46|10355523733004803458	fail	translation	229	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|47|802985032057732284	fail	translation	233	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|48|18313498382677451279	fail	translation	228	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|49|5902668824617064985	fail	translation	230	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|50|6469834297383728061	fail	translation	225	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|51|529893491977289627	fail	translation	224	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|52|7110337632391962636	fail	translation	230	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|53|7138545743425854663	fail	tactic	369	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|54|12240785285064077065	fail	translation	225	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|55|8901178409804151575	fail	translation	231	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|56|8890844706151052704	fail	tactic	394	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|57|8801584380004644131	fail	translation	228	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|58|6640297411548399355	pass	-	35	-
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|59|6640297411548399355	pass	-	36	-
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|60|17707774690084689736	pass	-	35	-
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|61|6640297411548399355	pass	-	36	-
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|62|4974301628068507188	pass	-	39	-
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|63|6640297411548399355	pass	-	37	-
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|64|6640297411548399355	pass	-	37	-
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|65|577474350103851300	pass	-	125	-
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|66|12819951545662893426	fail	tactic	209	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|67|16471188947338966842	pass	-	90	-
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|68|9975741777879173881	pass	-	93	-
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|69|88332911118243609	fail	tactic	234	cvc5.Error.error "Symbol '->' not declared as a type"
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|70|4316548289593557355	fail	translation	289	cannot translate fun a₁ => decide (f✝¹⁵ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|71|1800578837535211584	fail	translation	304	cannot translate fun a₁ => decide (f✝¹⁷ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|72|10230862668540398183	fail	translation	294	cannot translate fun a₁ => decide (f✝¹⁵ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|73|16982021311738439252	fail	translation	297	cannot translate fun a₁ => decide (f✝¹⁰ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|74|2906785913913327379	fail	translation	295	cannot translate fun a₁ => decide (f✝⁹ a₁), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/SumOfDigits.lean|1|4887343456502517186	fail	tactic	171	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/SumOfDigits.lean|2|5431800701729144158	fail	tactic	152	lean-smt did not close the goal: 3 open goal(s) remain after proof replay
+velvet	smt-only	1	Velvet/Examples/SumOfDigits.lean|3|3012699503639543524	pass	-	66	-
+velvet	smt-only	1	Velvet/Examples/SumOfDigits.lean|4|12835711844832851839	pass	-	62	-
+velvet	smt-only	1	Velvet/Examples/SumOfDigits.lean|5|7475080825861972690	pass	-	72	-
+velvet	smt-only	1	Velvet/Examples/SumOfDigits.lean|6|15970435702129902192	pass	-	33	-
+velvet	smt-only	1	Velvet/Examples/SumOfDigits.lean|7|6640297411548399355	pass	-	19	-
+velvet	smt-only	1	Velvet/Examples/SumOfDigits.lean|8|3871074223281074707	fail	tactic	72	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|1|4791612905070682933	pass	-	116	-
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|2|4635955882467741603	pass	-	58	-
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|3|4791612905070682933	pass	-	60	-
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|4|8037191589732674397	pass	-	37	-
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|5|4982008840348523404	pass	-	49	-
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|6|14929476196725773389	pass	-	30	-
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|7|2311107858308393802	fail	tactic	65	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|8|8037191589732674397	pass	-	55	-
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|9|4791612905070682933	pass	-	73	-
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|10|8037191589732674397	pass	-	37	-
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|11|817407402121334710	pass	-	44	-
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|12|14929476196725773389	pass	-	29	-
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|13|2311107858308393802	fail	tactic	76	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|14|8140981983620881888	pass	-	253	-
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|15|13972406881857011341	fail	translation	503	cannot translate fun eb!_0 => decide (↑eb!_0 % 2 = 0), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|16|8140981983620881888	pass	-	253	-
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|17|2763434902891560151	fail	translation	603	cannot translate fun eb!_0 => decide (↑eb!_0 % 2 = 0), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|18|9560710549938607088	pass	-	181	-
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|19|4016036276427276962	fail	translation	260	cannot translate fun eb!_0 => decide (↑eb!_0 % 2 = 0), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|20|12910903814107581038	fail	translation	284	cannot translate fun eb!_0 => decide (↑eb!_0 % 2 = 0), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|21|8811351339800985865	pass	-	29	-
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|22|8466542615974342579	fail	translation	153	cannot translate fun eb!_0 => decide (↑eb!_0 % 2 = 0), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|23|10603200310498800727	fail	translation	414	cannot translate fun eb!_0 => decide (↑eb!_0 % 2 = 0), SMT-LIB does not support lambdas
+velvet	smt-only	1	Velvet/Examples/TestMatch.lean|1|7475080825861972690	pass	-	69	-
+velvet	smt-only	1	Velvet/Examples/TestMatch.lean|2|12712313322610564863	pass	-	31	-
+velvet	smt-only	1	Velvet/Examples/TestMatch.lean|3|10112861571242978892	fail	tactic	39	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/TestMatch.lean|4|9817662802794804509	fail	tactic	51	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/TestMatch.lean|5|18226621409008708882	fail	tactic	56	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/TestMatch.lean|6|12313593517213863317	pass	-	34	-
+velvet	smt-only	1	Velvet/Examples/TestMatch.lean|7|5915416142655103160	pass	-	73	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|1|1993702872115081742	pass	-	172	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|2|8793228589483947084	fail	tactic	1227	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|3|1066791641437412485	pass	-	268	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|4|8472930623785656869	fail	tactic	1911	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|5|2816846931760221370	fail	tactic	1033	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|6|5794584936190196715	pass	-	246	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|7|1066791641437412485	pass	-	271	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|8|14825588553610653054	pass	-	381	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|9|15257391885382474665	pass	-	248	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|10|5794584936190196715	pass	-	201	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|11|12031026870814429192	pass	-	207	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|12|16465886849738339639	pass	-	294	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|13|15257391885382474665	pass	-	202	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|14|5918835836158453730	pass	-	202	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|15|5964899400721509044	pass	-	138	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|16|12155028420956038391	pass	-	139	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|17|14852526092468225565	pass	-	239	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|18|17117294935281830098	pass	-	139	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|19|5288706169439222084	fail	tactic	5233	unable to prove goal. Try providing more hints. Reason: TIMEOUT
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|20|4477598582358312981	fail	tactic	5222	unable to prove goal. Try providing more hints. Reason: TIMEOUT
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|21|7903702650473013145	fail	tactic	1160	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|22|8905801618567038615	fail	tactic	5222	unable to prove goal. Try providing more hints. Reason: TIMEOUT
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|23|5964899400721509044	pass	-	131	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|24|16800718018059787263	pass	-	135	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|25|11248877774576345437	pass	-	219	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|26|17117294935281830098	pass	-	133	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|27|6709257883257101731	pass	-	136	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|28|16576486626369642801	pass	-	42	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|29|11235314628722112900	pass	-	102	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|30|8905801618567038615	fail	tactic	217	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|31|18214290959922115111	fail	tactic	519	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|32|8793228589483947084	fail	tactic	197	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|33|11568103068982921353	pass	-	134	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|34|5794584936190196715	pass	-	115	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|35|11568103068982921353	pass	-	135	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|36|5794584936190196715	pass	-	69	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|37|5918835836158453730	pass	-	66	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|38|5964899400721509044	pass	-	54	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|39|5288706169439222084	fail	tactic	89	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|40|4477598582358312981	fail	tactic	98	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|41|18088860687919872176	fail	tactic	130	unable to prove goal. Try providing more hints. Reason: INCOMPLETE
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|42|5964899400721509044	pass	-	53	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|43|16800718018059787263	pass	-	53	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|44|6709257883257101731	pass	-	53	-
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|45|16576486626369642801	pass	-	45	-

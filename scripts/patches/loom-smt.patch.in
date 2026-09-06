@@ -1,0 +1,14 @@
+diff --git a/lakefile.lean b/lakefile.lean
+--- a/lakefile.lean
++++ b/lakefile.lean
+@@ -3,6 +3,10 @@ open Lake DSL System
+ 
+ require "leanprover-community" / "mathlib" @ git "v4.32.2"
+ require crush from git "https://github.com/AD1024/lean-crush.git" @ "main"
++-- The lean-smt lane for Loom. Added by the benchmark harness: the
++-- pinned revision predates lean-smt, and `lake update Smt` leaves every
++-- revision this manifest already pins exactly where it is.
++require Smt from git "@SMT_REPO_URL@" @ "@SMT_REV@"
+ 
+ package Loom where
+   leanOptions :=  #[⟨`pp.unicode.fun , true⟩] -- pretty-prints `fun a ↦ b`

@@ -60,23 +60,46 @@ benchmark_add_worktree() {
   git -C "$repository" worktree add --detach "$destination" "$revision"
 }
 
+# Lake fetches each package's build outputs with `curl --retry 3` and no
+# `--max-time`. `--retry` only retries a request that fails, so a connection
+# that goes quiet without closing blocks forever: observed on 2026-09-03 as a
+# single Reservoir request for proofwidgets sitting at 0% CPU for 66 minutes
+# while the harness looked alive. Bound each attempt so a hung request falls
+# through to the next strategy instead of hanging the run. `timeout` signals
+# the whole process group, which is what reaches the curl underneath.
+BENCHMARK_CACHE_TIMEOUT="${BENCHMARK_CACHE_TIMEOUT:-1200}"
+
+benchmark_bounded() {
+  local seconds="$1"
+  shift
+  if [[ "$seconds" -le 0 ]] || ! command -v timeout >/dev/null 2>&1; then
+    "$@"
+    return
+  fi
+  timeout -k 30 "$seconds" "$@"
+}
+
 benchmark_fetch_cache() {
   local project="$1"
   local log="$2"
   local mathlib="$project/.lake/packages/mathlib"
+  local limit="$BENCHMARK_CACHE_TIMEOUT"
 
-  if (cd "$project" && lake cache get) > "$log" 2>&1; then
+  if (cd "$project" && benchmark_bounded "$limit" lake cache get) \
+      > "$log" 2>&1; then
     return 0
   fi
   printf '\nNative Lake cache unavailable; trying the legacy cache executable.\n' \
     >> "$log"
-  if (cd "$project" && lake exe cache get) >> "$log" 2>&1; then
+  if (cd "$project" && benchmark_bounded "$limit" lake exe cache get) \
+      >> "$log" 2>&1; then
     return 0
   fi
   if [[ -d "$mathlib" ]]; then
     printf '\nRoot cache unavailable; trying Mathlib directly.\n' \
       >> "$log"
-    if (cd "$mathlib" && lake exe cache get) >> "$log" 2>&1; then
+    if (cd "$mathlib" && benchmark_bounded "$limit" lake exe cache get) \
+        >> "$log" 2>&1; then
       return 0
     fi
   fi

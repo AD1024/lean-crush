@@ -22,6 +22,8 @@ LOOM_DUPER_TREE="${LOOM_DUPER_TREE:-}"
 VELVET_AUTO_TREE="${VELVET_AUTO_TREE:-}"
 VELVET_CRUSH_TREE="${VELVET_CRUSH_TREE:-}"
 VELVET_DUPER_TREE="${VELVET_DUPER_TREE:-}"
+LOOM_SMT_TREE="${LOOM_SMT_TREE:-}"
+VELVET_SMT_TREE="${VELVET_SMT_TREE:-}"
 
 HAMMER_REF="${HAMMER_REF:-df4dd13671412591d678eada250b04c030fd4d40}"
 HAMMER_PROFILES="${HAMMER_PROFILES:-}"
@@ -31,6 +33,10 @@ LOOM_DUPER_REF="${LOOM_DUPER_REF:-616f9cd8db660dcd74a1c92b0d19bb50420e1c59}"
 VELVET_AUTO_REF="${VELVET_AUTO_REF:-d254391d5e84546f96576e5b67dfb6bafe9fc301}"
 VELVET_CRUSH_REF="${VELVET_CRUSH_REF:-e90d79341bb8ef510ec868623e74cfe98feaa4e8}"
 VELVET_DUPER_REF="${VELVET_DUPER_REF:-5a1180338958908323a921255a8d158cf1f26c95}"
+# The lean-smt lane measures the Crush revision of each corpus so both see
+# byte-identical verification conditions; only the backend tactic differs.
+LOOM_SMT_REF="${LOOM_SMT_REF:-$LOOM_CRUSH_REF}"
+VELVET_SMT_REF="${VELVET_SMT_REF:-$VELVET_CRUSH_REF}"
 
 REPEATS="${REPEATS:-1}"
 TIMEOUT="${TIMEOUT:-5}"
@@ -43,11 +49,28 @@ CRUSH_TRACE_REPLAY="${CRUSH_TRACE_REPLAY:-false}"
 MAX_HEARTBEATS="${MAX_HEARTBEATS:-1000000}"
 MAX_RECURSION_DEPTH="${MAX_RECURSION_DEPTH:-1000000}"
 GRIND_SPLITS="${GRIND_SPLITS:-20}"
+SMT_REPO_URL="${SMT_REPO_URL:-https://github.com/ufmg-smite/lean-smt.git}"
+SMT_REV="${SMT_REV:-e50256657e5d213241005bcf353f28d13f3e6ea7}"
+SMT_TIMEOUT="${SMT_TIMEOUT:-$TIMEOUT}"
+SMT_MONO="${SMT_MONO:-true}"
+# Where the lean-smt trees live. A corpus lean-smt lane needs the corpus
+# Mathlib build plus lean-smt's, so the trees are worth keeping between
+# runs: each is created from the pinned revision on first use and reused
+# afterwards. Unset means temporary worktrees, rebuilt every run.
+SMT_TREE_ROOT="${SMT_TREE_ROOT:-}"
+# Shared with scripts/benchmark-leanhammer.sh so both harnesses normalize
+# into the same `lean-smt` headline row.
+SMT_LANE="smt-only"
 
 RUN_AUTO="${RUN_AUTO:-true}"
 RUN_CRUSH="${RUN_CRUSH:-true}"
 RUN_DUPER="${RUN_DUPER:-true}"
 RUN_GRIND="${RUN_GRIND:-true}"
+# Only the pinned LeanHammer tree requires lean-smt already. Loom, Cashmere,
+# and Velvet do not, so this lane adds the dependency to the corpus it
+# measures (see `provision_smt_tree`). Off by default because that mutates
+# the tree's lakefile and manifest.
+RUN_SMT="${RUN_SMT:-false}"
 RUN_LEANHAMMER="${RUN_LEANHAMMER:-true}"
 RUN_LOOM="${RUN_LOOM:-true}"
 RUN_CASHMERE="${RUN_CASHMERE:-true}"
@@ -86,6 +109,15 @@ is_true() {
 is_crush_lane() {
   [[ "$1" == crush-* ]]
 }
+
+is_smt_lane() {
+  [[ "$1" == "$SMT_LANE" ]]
+}
+
+smt_config="(timeout := $SMT_TIMEOUT)"
+if is_true "$SMT_MONO"; then
+  smt_config="+mono $smt_config"
+fi
 
 crush_lane_trust() {
   case "$1" in
@@ -246,17 +278,162 @@ prepare_tree() {
   fi
 }
 
+# The pinned Loom and Velvet revisions predate lean-smt, so the lane has to add
+# the dependency to the corpus it measures. The edit is a recorded patch under
+# scripts/patches, applied the same way as the PLean grind backend, so a run is
+# reproducible from the pinned revision alone. It touches only the root lakefile:
+# `lake update Smt` then resolves the new require by name and leaves every
+# revision the corpus already pinned exactly where it was, which
+# `assert_smt_update_kept_pins` verifies rather than assumes. Measuring against
+# a re-resolved Mathlib would make this lane incomparable to the others.
+smt_patch_marker='require Smt from git'
+
+apply_smt_patch() {
+  local label="$1"
+  local tree="$2"
+  local patch_name="$3"
+  local patch_file="$TMP_ROOT/$patch_name.patch"
+
+  sed -e "s|@SMT_REPO_URL@|$SMT_REPO_URL|g" -e "s|@SMT_REV@|$SMT_REV|g" \
+    "$SCRIPT_DIR/patches/$patch_name.patch.in" > "$patch_file"
+  if ! patch -d "$tree" -p1 --forward --batch < "$patch_file"; then
+    die "failed to apply the pinned lean-smt patch to $label"
+  fi
+}
+
+validate_smt_tree() {
+  local label="$1"
+  local tree="$2"
+
+  grep -Fq "$smt_patch_marker \"$SMT_REPO_URL\" @ \"$SMT_REV\"" \
+      "$tree/lakefile.lean" ||
+    die "$label is not patched for lean-smt $SMT_REV"
+}
+
+assert_smt_update_kept_pins() {
+  local before="$1"
+  local after="$2"
+  local rev="$3"
+
+  if ! python3 - "$before" "$after" "$rev" <<'PYTHON'
+import json
+import sys
+
+
+def pins(path):
+    with open(path, encoding="utf-8") as stream:
+        manifest = json.load(stream)
+    return {
+        package["name"]: package.get("rev")
+        for package in manifest.get("packages", [])
+    }
+
+
+before, after, expected = pins(sys.argv[1]), pins(sys.argv[2]), sys.argv[3]
+moved = sorted(name for name, rev in before.items() if after.get(name) != rev)
+for name in moved:
+    print(
+        f"error: {name} moved from {before[name]} to {after.get(name)}",
+        file=sys.stderr,
+    )
+if after.get("Smt") != expected:
+    print(
+        f"error: Smt resolved to {after.get('Smt')}, expected {expected}",
+        file=sys.stderr,
+    )
+    moved.append("Smt")
+raise SystemExit(1 if moved else 0)
+PYTHON
+  then
+    die "lean-smt resolution disturbed the pinned dependency graph"
+  fi
+}
+
+provision_smt_tree() {
+  local label="$1"
+  local tree="$2"
+  local patch_name="$3"
+  local manifest="$tree/lake-manifest.json"
+  local before="$TMP_ROOT/manifest-before-$label.json"
+
+  if grep -Fq "$smt_patch_marker" "$tree/lakefile.lean"; then
+    printf 'Reusing the patched %s tree\n' "$label"
+    validate_smt_tree "$label" "$tree"
+    return
+  fi
+  apply_smt_patch "$label" "$tree" "$patch_name"
+  validate_smt_tree "$label" "$tree"
+  cp "$manifest" "$before" || die "$label has no lake manifest to compare"
+  printf 'Resolving lean-smt for %s\n' "$label"
+  if ! (cd "$tree" && lake update Smt) \
+      > "$OUT_DIR/smt-update-$label.log" 2>&1; then
+    tail -n 80 "$OUT_DIR/smt-update-$label.log" >&2
+    die "failed to resolve lean-smt for $label"
+  fi
+  assert_smt_update_kept_pins "$before" "$manifest" "$SMT_REV"
+}
+
+# A lean-smt tree is expensive enough to keep between runs, so SMT_TREE_ROOT
+# names a directory the harness does not clean up. Sets RESOLVED_SMT_TREE.
+RESOLVED_SMT_TREE=""
+resolve_smt_tree() {
+  local configured="$1"
+  local repo="$2"
+  local ref="$3"
+  local name="$4"
+  local path
+
+  RESOLVED_SMT_TREE=""
+  if [[ -n "$configured" ]]; then
+    [[ -d "$configured" ]] || die "$name tree not found at $configured"
+    RESOLVED_SMT_TREE="$(cd "$configured" && pwd)"
+    return
+  fi
+  if [[ -n "$SMT_TREE_ROOT" ]]; then
+    mkdir -p "$SMT_TREE_ROOT"
+    path="$(cd "$SMT_TREE_ROOT" && pwd)/$name"
+    if [[ ! -d "$path" ]]; then
+      benchmark_add_worktree "$repo" "$ref" "$path" >/dev/null ||
+        die "failed to create the $name tree at $path"
+    fi
+    RESOLVED_SMT_TREE="$path"
+    return
+  fi
+  add_worktree "$repo" "$ref" "$name"
+  RESOLVED_SMT_TREE="$ADDED_WORKTREE"
+}
+
+# lean-cvc5 precompiles its bindings, so the tactic reaches cvc5 through FFI.
+# `lake env lean` does not load a dependency's shared library on its own, and
+# the missing extern only surfaces when the tactic first calls it -- which
+# would look like a solver failure instead of a setup error.
+smt_dynlib_path() {
+  local tree="$1"
+  local candidate
+  for candidate in \
+      "$tree/.lake/packages/cvc5/.lake/build/lib/libcvc5_cvc5.dylib" \
+      "$tree/.lake/packages/cvc5/.lake/build/lib/libcvc5_cvc5.so"; do
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 record_metadata() {
   local suite="$1"
   local backend="$2"
   local ref="$3"
   local tree="$4"
   local commit toolchain crush_commit crush_dirty duper_commit trust reconstruct
+  local smt_commit
   commit="$(git -C "$tree" rev-parse HEAD)"
   toolchain="$(tr -d '\r\n' < "$tree/lean-toolchain")"
   crush_commit="-"
   crush_dirty="false"
   duper_commit="-"
+  smt_commit="-"
   if is_crush_lane "$backend"; then
     crush_commit="$(git -C "$CRUSH_ROOT" rev-parse HEAD)"
     if [[ -n "$(git -C "$CRUSH_ROOT" status --porcelain -- \
@@ -267,14 +444,123 @@ record_metadata() {
   if [[ "$backend" == "duper" ]]; then
     duper_commit="$(git -C "$tree/.lake/packages/Duper" rev-parse HEAD)"
   fi
+  if is_smt_lane "$backend"; then
+    smt_commit="$(git -C "$tree/.lake/packages/Smt" rev-parse HEAD)"
+  fi
   trust="$(crush_lane_trust "$backend")"
   reconstruct="$(crush_lane_reconstruct "$backend")"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$suite" "$backend" "$ref" "$commit" "$toolchain" "$SOLVER" "$TIMEOUT" \
     "$DUPER_TIMEOUT" "$MAX_HEARTBEATS" "$MAX_RECURSION_DEPTH" "$trust" \
     "$reconstruct" "$crush_commit" "$duper_commit" "$crush_dirty" "$tree" \
-    "$CRUSH_PROFILE" "$CRUSH_TRACE_REPLAY" \
+    "$CRUSH_PROFILE" "$CRUSH_TRACE_REPLAY" "$smt_commit" "$SMT_TIMEOUT" \
+    "$SMT_MONO" \
     >> "$METADATA"
+}
+
+# lean-smt replays cvc5's Alethe certificate in Lean. An Alethe rule it cannot
+# replay is left behind as an open goal rather than reported as an error, so the
+# lane checks the goal list itself and emits its own machine record. The record
+# uses `CRUSH_PROFILE`'s field layout and reconstruction vocabulary so both
+# tools normalize into one report.
+write_smt_backend() {
+  local output="$1"
+
+  printf 'import Smt\n' >> "$output"
+  cat >> "$output" <<'LEAN'
+
+open Lean Elab Tactic Meta
+
+private def smtBenchSanitize (value : String) : String :=
+  value.replace "\t" " " |>.replace "\n" " " |>.replace "\r" " "
+
+private def smtBenchRecord (decl : String) (goalHash : UInt64)
+    (outcome replay detail : String) (nanos : Nat) : String :=
+  s!"SMT_PROFILE\t1\t{smtBenchSanitize decl}\t{goalHash}\t{outcome}\t\
+{replay}\t{smtBenchSanitize detail}\t{nanos}\t\t"
+
+private def smtBenchContains (text needle : String) : Bool :=
+  (text.splitOn needle).length > 1
+
+/-- Classify a lean-smt diagnostic with the shared reconstruction vocabulary.
+Kept identical to the LeanHammer lane so one taxonomy covers every corpus. -/
+private def smtBenchOutcome (message : String) : String × String :=
+  let text := message.toLower
+  if smtBenchContains text "either it is false" ||
+      smtBenchContains text "could not produce a counter-example" then
+    ("sat", "-")
+  else if smtBenchContains text "try providing more hints" ||
+      smtBenchContains text "solver returned unknown" then
+    ("unknown", "-")
+  else if smtBenchContains text "failed to reconstruct proof for unsat result" then
+    ("reconstruction-failed", "no-certificate")
+  else if smtBenchContains text "failed to reconstruct sort" ||
+      smtBenchContains text "failed to reconstruct term" ||
+      smtBenchContains text "expected a sort, but got" then
+    ("reconstruction-failed", "term-gap")
+  -- lean-smt's own translators report the first two. The rest are cvc5
+  -- rejecting a query lean-smt had already built, which is still an encoding
+  -- limit and not a replay one: no proof existed to replay.
+  else if smtBenchContains text "no translator matched" ||
+      smtBenchContains text "cannot translate" ||
+      smtBenchContains text "not declared as a type" ||
+      smtBenchContains text "has variable width" ||
+      smtBenchContains text "invalid datatype declaration" then
+    ("translation-failed", "-")
+  else if smtBenchContains text "unexpected check-sat result" then
+    ("reconstruction-failed", "certificate-error")
+  else if smtBenchContains text "maximum number of heartbeats" ||
+      smtBenchContains text "deterministic) timeout" ||
+      smtBenchContains text "timed out" then
+    ("timeout", "-")
+  -- Any other error raised through the cvc5 API. Kept distinct so it is not
+  -- silently attributed to certificate replay.
+  else if smtBenchContains text "cvc5.error" then
+    ("solver-error", "-")
+  else
+    ("reconstruction-failed", "replay-exception")
+LEAN
+  cat >> "$output" <<LEAN
+
+private def runCorpusSmt : TacticM Unit := withMainContext do
+  let decl := toString ((<- Term.getDeclName?).getD \`anonymous)
+  let goalText := (toString (<- ppExpr (<- (<- getMainGoal).getType)))
+    |>.replace "\t" " "
+    |>.replace "\n" " "
+  let goalHash := hash goalText
+  let start <- IO.monoNanosNow
+  -- CoreM's ordinary \`try\` rethrows heartbeat exhaustion without running the
+  -- handler, which would drop this VC's record entirely.
+  let failure? <- tryCatchRuntimeEx
+    (do
+      evalTactic (<- \`(tactic| smt $smt_config [*]))
+      pure none)
+    (fun ex => pure (some ex))
+  let nanos := (<- IO.monoNanosNow) - start
+  match failure? with
+  | none =>
+    let remaining <- getUnsolvedGoals
+    if remaining.isEmpty then
+      IO.println (smtBenchRecord decl goalHash "alethe-reconstructed" "-" "-" nanos)
+    else
+      IO.println (smtBenchRecord decl goalHash "reconstruction-failed" "rule-gap"
+        s!"{remaining.length} replayed step(s) left as open goals" nanos)
+      throwError "lean-smt did not close the goal: \
+{remaining.length} open goal(s) remain after proof replay"
+  | some ex =>
+    let message <- ex.toMessageData.toString
+    let (outcome, replay) := smtBenchOutcome message
+    IO.println (smtBenchRecord decl goalHash outcome replay message nanos)
+    throw ex
+
+syntax "corpus_bench_smt" : tactic
+
+elab_rules : tactic
+  | \`(tactic| corpus_bench_smt) => runCorpusSmt
+
+macro "corpus_backend" : tactic =>
+  \`(tactic| corpus_bench_smt)
+LEAN
 }
 
 write_prelude() {
@@ -282,7 +568,9 @@ write_prelude() {
   local backend="$2"
   local trust reconstruct
 
-  if [[ "$backend" == "auto" ]]; then
+  if is_smt_lane "$backend"; then
+    write_smt_backend "$output"
+  elif [[ "$backend" == "auto" ]]; then
     cat >> "$output" <<EOF
 
 macro "corpus_backend" : tactic =>
@@ -513,7 +801,8 @@ append_profile_records() {
       -v file="$file" -v profiles="$PROFILES" '
     BEGIN { FS = OFS = "\t"; pending = 0; occurrence = 0 }
     {
-      if (index($0, "CRUSH_PROFILE\t") == 1) {
+      if (index($0, "CRUSH_PROFILE\t") == 1 ||
+          index($0, "SMT_PROFILE\t") == 1) {
         split($0, profile, "\t")
         pending++
         declaration[pending] = profile[3]
@@ -589,6 +878,7 @@ run_lean_file() {
   local generated="$7"
   local log="$OUT_DIR/logs/$suite/$backend/${label//\//_}.$repeat.log"
   local started elapsed exit_code vc_count commit toolchain truncated message
+  local dynlib
 
   if is_true "$RESUME" && awk -F '\t' -v suite="$suite" \
       -v backend="$backend" -v repeat="$repeat" -v file="$label" '
@@ -614,6 +904,12 @@ run_lean_file() {
       "-DElab.async=false" "-DmaxHeartbeats=0" \
       "-DmaxRecDepth=$MAX_RECURSION_DEPTH" \
       "$generated" > "$log" 2>&1
+  elif is_smt_lane "$backend"; then
+    dynlib="$(smt_dynlib_path "$tree")" ||
+      die "cvc5 bindings are not built in $tree; lean-smt cannot load them"
+    (cd "$tree" && lake env lean "-DElab.async=false" "-DmaxHeartbeats=0" \
+      "-DmaxRecDepth=$MAX_RECURSION_DEPTH" "--load-dynlib=$dynlib" \
+      "$generated") > "$log" 2>&1
   else
     (cd "$tree" && lake env lean "-DElab.async=false" "-DmaxHeartbeats=0" \
       "-DmaxRecDepth=$MAX_RECURSION_DEPTH" "$generated") \
@@ -726,8 +1022,11 @@ write_reports() {
 
 check_repo "$CRUSH_ROOT" "lean-crush"
 if ! is_true "$RUN_AUTO" && ! is_true "$RUN_CRUSH" && ! is_true "$RUN_DUPER" &&
-    ! is_true "$RUN_GRIND"; then
+    ! is_true "$RUN_GRIND" && ! is_true "$RUN_SMT"; then
   die "at least one backend must be enabled"
+fi
+if is_true "$RUN_SMT" && [[ "$SOLVER" != "cvc5" ]]; then
+  die "RUN_SMT requires SOLVER=cvc5; lean-smt drives cvc5 through in-process bindings"
 fi
 case "$RESUME" in
   true|false) ;;
@@ -758,6 +1057,7 @@ if is_true "$RUN_LOOM" || is_true "$RUN_CASHMERE"; then
   loom_need_auto=false
   loom_need_crush=false
   loom_need_duper=false
+  loom_need_smt=false
   if is_true "$RUN_AUTO" && [[ -z "$LOOM_AUTO_TREE" ]]; then
     loom_need_auto=true
   fi
@@ -768,8 +1068,11 @@ if is_true "$RUN_LOOM" || is_true "$RUN_CASHMERE"; then
   if is_true "$RUN_DUPER" && [[ -z "$LOOM_DUPER_TREE" ]]; then
     loom_need_duper=true
   fi
+  if is_true "$RUN_SMT" && [[ -z "$LOOM_SMT_TREE" ]]; then
+    loom_need_smt=true
+  fi
   if is_true "$loom_need_auto" || is_true "$loom_need_crush" ||
-      is_true "$loom_need_duper"; then
+      is_true "$loom_need_duper" || is_true "$loom_need_smt"; then
     loom_managed=false
     if [[ -z "$LOOM_REPO" ]]; then
       loom_managed=true
@@ -781,9 +1084,13 @@ if is_true "$RUN_LOOM" || is_true "$RUN_CASHMERE"; then
         LOOM_REPO="$(benchmark_ensure_repo "Loom" "$LOOM_REPO_URL" \
           "$LOOM_CRUSH_REF" "$BENCHMARK_SOURCE_CACHE/loom")" ||
           die "failed to provision Loom"
-      else
+      elif is_true "$loom_need_duper"; then
         LOOM_REPO="$(benchmark_ensure_repo "Loom" "$LOOM_REPO_URL" \
           "$LOOM_DUPER_REF" "$BENCHMARK_SOURCE_CACHE/loom")" ||
+          die "failed to provision Loom"
+      else
+        LOOM_REPO="$(benchmark_ensure_repo "Loom" "$LOOM_REPO_URL" \
+          "$LOOM_SMT_REF" "$BENCHMARK_SOURCE_CACHE/loom")" ||
           die "failed to provision Loom"
       fi
     else
@@ -817,12 +1124,22 @@ if is_true "$RUN_LOOM" || is_true "$RUN_CASHMERE"; then
         check_ref "$LOOM_REPO" "$LOOM_DUPER_REF"
       fi
     fi
+    if is_true "$loom_need_smt"; then
+      if is_true "$loom_managed"; then
+        benchmark_ensure_repo "Loom" "$LOOM_REPO_URL" "$LOOM_SMT_REF" \
+          "$LOOM_REPO" >/dev/null ||
+          die "failed to provision Loom lean-smt revision"
+      else
+        check_ref "$LOOM_REPO" "$LOOM_SMT_REF"
+      fi
+    fi
   fi
 fi
 if is_true "$RUN_VELVET"; then
   velvet_need_auto=false
   velvet_need_crush=false
   velvet_need_duper=false
+  velvet_need_smt=false
   if is_true "$RUN_AUTO" && [[ -z "$VELVET_AUTO_TREE" ]]; then
     velvet_need_auto=true
   fi
@@ -833,8 +1150,11 @@ if is_true "$RUN_VELVET"; then
   if is_true "$RUN_DUPER" && [[ -z "$VELVET_DUPER_TREE" ]]; then
     velvet_need_duper=true
   fi
+  if is_true "$RUN_SMT" && [[ -z "$VELVET_SMT_TREE" ]]; then
+    velvet_need_smt=true
+  fi
   if is_true "$velvet_need_auto" || is_true "$velvet_need_crush" ||
-      is_true "$velvet_need_duper"; then
+      is_true "$velvet_need_duper" || is_true "$velvet_need_smt"; then
     velvet_managed=false
     if [[ -z "$VELVET_REPO" ]]; then
       velvet_managed=true
@@ -846,9 +1166,13 @@ if is_true "$RUN_VELVET"; then
         VELVET_REPO="$(benchmark_ensure_repo "Velvet" "$VELVET_REPO_URL" \
           "$VELVET_CRUSH_REF" "$BENCHMARK_SOURCE_CACHE/velvet")" ||
           die "failed to provision Velvet"
-      else
+      elif is_true "$velvet_need_duper"; then
         VELVET_REPO="$(benchmark_ensure_repo "Velvet" "$VELVET_REPO_URL" \
           "$VELVET_DUPER_REF" "$BENCHMARK_SOURCE_CACHE/velvet")" ||
+          die "failed to provision Velvet"
+      else
+        VELVET_REPO="$(benchmark_ensure_repo "Velvet" "$VELVET_REPO_URL" \
+          "$VELVET_SMT_REF" "$BENCHMARK_SOURCE_CACHE/velvet")" ||
           die "failed to provision Velvet"
       fi
     else
@@ -882,6 +1206,15 @@ if is_true "$RUN_VELVET"; then
         check_ref "$VELVET_REPO" "$VELVET_DUPER_REF"
       fi
     fi
+    if is_true "$velvet_need_smt"; then
+      if is_true "$velvet_managed"; then
+        benchmark_ensure_repo "Velvet" "$VELVET_REPO_URL" \
+          "$VELVET_SMT_REF" "$VELVET_REPO" >/dev/null ||
+          die "failed to provision Velvet lean-smt revision"
+      else
+        check_ref "$VELVET_REPO" "$VELVET_SMT_REF"
+      fi
+    fi
   fi
 fi
 
@@ -900,7 +1233,7 @@ fi
 
 initialize_tsv "$RESULTS" 'suite\tbackend\tref\tcommit\ttoolchain\trepeat\tfile\tproof\tvc\tgoal_hash\tstatus\tcategory\tmilliseconds\tmessage\tgoal'
 initialize_tsv "$RUNS" 'suite\tbackend\trepeat\tfile\texit_code\twall_seconds\tvc_count\ttruncated\tmessage'
-initialize_tsv "$METADATA" 'suite\tbackend\tref\tcommit\ttoolchain\tsolver\ttimeout\tduper_timeout\tvc_max_heartbeats\tmax_rec_depth\tcrush_trust\tcrush_reconstruct\tcrush_commit\tduper_commit\tcrush_dirty\tworktree\tcrush_profile\tcrush_trace_replay'
+initialize_tsv "$METADATA" 'suite\tbackend\tref\tcommit\ttoolchain\tsolver\ttimeout\tduper_timeout\tvc_max_heartbeats\tmax_rec_depth\tcrush_trust\tcrush_reconstruct\tcrush_commit\tduper_commit\tcrush_dirty\tworktree\tcrush_profile\tcrush_trace_replay\tsmt_commit\tsmt_timeout\tsmt_mono'
 initialize_tsv "$MEASUREMENTS" 'suite\tlane\trepeat\tvc_key\tstatus\tcategory\tmilliseconds\tmessage'
 initialize_tsv "$PROFILES" 'suite\tlane\trepeat\tvc_key\tdeclaration\tgoal_hash\toutcome\treplay\tdetail\ttotal_nanos\tphases\tmetrics'
 initialize_tsv "$CHECKPOINTS" 'suite\tbackend\trepeat\tfile'
@@ -925,6 +1258,9 @@ if is_true "$RUN_LEANHAMMER"; then
         hammer_profiles+=("$lane")
       done
     fi
+    if is_true "$RUN_SMT"; then
+      hammer_profiles+=("smt-only")
+    fi
     if is_true "$RUN_GRIND"; then
       hammer_profiles+=("grind-only")
     fi
@@ -936,6 +1272,7 @@ if is_true "$RUN_LEANHAMMER"; then
       SOLVER="$SOLVER" TIMEOUT="$TIMEOUT" DUPER_TIMEOUT="$DUPER_TIMEOUT" \
       MAX_HEARTBEATS="$MAX_HEARTBEATS" CRUSH_PROFILE="$CRUSH_PROFILE" \
       MAX_RECURSION_DEPTH="$MAX_RECURSION_DEPTH" \
+      SMT_TIMEOUT="${SMT_TIMEOUT:-$TIMEOUT}" SMT_MONO="${SMT_MONO:-true}" \
       "$CRUSH_ROOT/scripts/benchmark-leanhammer.sh" \
       > "$OUT_DIR/leanhammer.log" 2>&1; then
     tail -n 12 "$OUT_DIR/leanhammer.log"
@@ -1016,6 +1353,18 @@ if is_true "$RUN_LOOM" || is_true "$RUN_CASHMERE"; then
     prepare_tree "loom-duper" "$loom_duper_tree" \
       CaseStudies.Tactic CaseStudies.Cashmere.Syntax_Cashmere
   fi
+  if is_true "$RUN_SMT"; then
+    resolve_smt_tree "$LOOM_SMT_TREE" "$LOOM_REPO" "$LOOM_SMT_REF" "loom-smt"
+    loom_smt_tree="$RESOLVED_SMT_TREE"
+    [[ "$(git -C "$loom_smt_tree" rev-parse HEAD)" == \
+        "$(git -C "$loom_smt_tree" rev-parse "${LOOM_SMT_REF}^{commit}")" ]] ||
+      die "the loom-smt tree is not at $LOOM_SMT_REF"
+    provision_smt_tree "loom-smt" "$loom_smt_tree" "loom-smt"
+    prepare_tree "loom-smt" "$loom_smt_tree" \
+      CaseStudies.Tactic CaseStudies.Cashmere.Syntax_Cashmere Smt
+    smt_dynlib_path "$loom_smt_tree" >/dev/null ||
+      die "the loom-smt build produced no cvc5 bindings"
+  fi
 fi
 
 if is_true "$RUN_LOOM"; then
@@ -1037,6 +1386,10 @@ if is_true "$RUN_LOOM"; then
     record_metadata "loom" "duper" "$LOOM_DUPER_REF" "$loom_duper_tree"
     run_fixture "duper" "$LOOM_DUPER_REF" "$loom_duper_tree"
   fi
+  if is_true "$RUN_SMT"; then
+    record_metadata "loom" "$SMT_LANE" "$LOOM_SMT_REF" "$loom_smt_tree"
+    run_fixture "$SMT_LANE" "$LOOM_SMT_REF" "$loom_smt_tree"
+  fi
 fi
 
 if is_true "$RUN_CASHMERE"; then
@@ -1057,6 +1410,11 @@ if is_true "$RUN_CASHMERE"; then
   if is_true "$RUN_DUPER"; then
     record_metadata "cashmere" "duper" "$LOOM_DUPER_REF" "$loom_duper_tree"
     run_files "cashmere" "duper" "$LOOM_DUPER_REF" "$loom_duper_tree" "${CASHMERE_FILES[@]}"
+  fi
+  if is_true "$RUN_SMT"; then
+    record_metadata "cashmere" "$SMT_LANE" "$LOOM_SMT_REF" "$loom_smt_tree"
+    run_files "cashmere" "$SMT_LANE" "$LOOM_SMT_REF" "$loom_smt_tree" \
+      "${CASHMERE_FILES[@]}"
   fi
 fi
 
@@ -1097,6 +1455,18 @@ if is_true "$RUN_VELVET"; then
       die "VELVET_DUPER_TREE is not at $VELVET_DUPER_REF"
     prepare_tree "velvet-duper" "$velvet_duper_tree" Velvet.Std
   fi
+  if is_true "$RUN_SMT"; then
+    resolve_smt_tree "$VELVET_SMT_TREE" "$VELVET_REPO" "$VELVET_SMT_REF" \
+      "velvet-smt"
+    velvet_smt_tree="$RESOLVED_SMT_TREE"
+    [[ "$(git -C "$velvet_smt_tree" rev-parse HEAD)" == \
+        "$(git -C "$velvet_smt_tree" rev-parse "${VELVET_SMT_REF}^{commit}")" ]] ||
+      die "the velvet-smt tree is not at $VELVET_SMT_REF"
+    provision_smt_tree "velvet-smt" "$velvet_smt_tree" "velvet-smt"
+    prepare_tree "velvet-smt" "$velvet_smt_tree" Velvet.Std Smt
+    smt_dynlib_path "$velvet_smt_tree" >/dev/null ||
+      die "the velvet-smt build produced no cvc5 bindings"
+  fi
   if is_true "$RUN_AUTO"; then
     record_metadata "velvet" "auto" "$VELVET_AUTO_REF" "$velvet_auto_tree"
     run_files "velvet" "auto" "$VELVET_AUTO_REF" "$velvet_auto_tree" "${VELVET_FILES[@]}"
@@ -1114,6 +1484,11 @@ if is_true "$RUN_VELVET"; then
   if is_true "$RUN_DUPER"; then
     record_metadata "velvet" "duper" "$VELVET_DUPER_REF" "$velvet_duper_tree"
     run_files "velvet" "duper" "$VELVET_DUPER_REF" "$velvet_duper_tree" "${VELVET_FILES[@]}"
+  fi
+  if is_true "$RUN_SMT"; then
+    record_metadata "velvet" "$SMT_LANE" "$VELVET_SMT_REF" "$velvet_smt_tree"
+    run_files "velvet" "$SMT_LANE" "$VELVET_SMT_REF" "$velvet_smt_tree" \
+      "${VELVET_FILES[@]}"
   fi
 fi
 

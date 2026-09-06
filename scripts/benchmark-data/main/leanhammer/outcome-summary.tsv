@@ -2,3 +2,6 @@ suite	lane	outcome	replay	events
 leanhammer	crush-verify	pre-reconstructed	not-attempted	4
 leanhammer	crush-verify	unknown	not-attempted	1
 leanhammer	crush-verify	verified	not-requested	15
+leanhammer	smt-only	alethe-reconstructed	-	12
+leanhammer	smt-only	sat	-	3
+leanhammer	smt-only	translation-failed	-	5

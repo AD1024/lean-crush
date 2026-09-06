@@ -1,0 +1,14 @@
+diff --git a/lakefile.lean b/lakefile.lean
+--- a/lakefile.lean
++++ b/lakefile.lean
+@@ -2,6 +2,10 @@ import Lake
+ open Lake DSL System
+ 
+ require Loom from git "https://github.com/AD1024/loom.git" @ "crush-backend"
++-- The lean-smt lane for Velvet. Added by the benchmark harness: the
++-- pinned revision predates lean-smt, and `lake update Smt` leaves every
++-- revision this manifest already pins exactly where it is.
++require Smt from git "@SMT_REPO_URL@" @ "@SMT_REV@"
+ 
+ package Velvet where
+   leanOptions := #[⟨`pp.unicode.fun, true⟩]

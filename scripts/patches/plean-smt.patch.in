@@ -1,0 +1,78 @@
+diff --git a/PLean/Verify/Tactic.lean b/PLean/Verify/Tactic.lean
+--- a/PLean/Verify/Tactic.lean
++++ b/PLean/Verify/Tactic.lean
+@@ -37,6 +37,7 @@ import PLean.Semantics.Primitives
+ import PLean.Semantics.Loop
+ import PLean.Verify.SimpLemmas
+ import PLean.Verify.Profile
++import Smt
+ 
+ open Lean Elab Tactic Meta
+ 
+@@ -733,7 +734,7 @@ def pverifySmtCloseDefault : TacticM Unit := do
+   unless cacheHit do
+     evalTactic (← `(tactic| pverify_smt_prep))
+     unless (← getGoals).isEmpty do
+-      evalTactic (← `(tactic| all_goals crush [*]))
++      evalTactic (← `(tactic| all_goals smt @SMT_CONFIG@ [*]))
+     if let some (hash, text) := cacheHash? then
+       liftM (pverifyCacheInsert hash text)
+ 
+@@ -783,7 +784,7 @@ def pverifySmtCloseProfiled : TacticM Unit := do
+       { r with smtPrep := r.smtPrep + prepNs }))
+     unless (← getGoals).isEmpty do
+       let (_, crushNs) ← PLean.Verify.Profile.timeTacticNanos
+-        (evalTactic (← `(tactic| all_goals crush [*])))
++        (evalTactic (← `(tactic| all_goals smt @SMT_CONFIG@ [*])))
+       liftM (m := IO) (PLean.Verify.Profile.modifyRow key (fun r =>
+         { r with smtCrush := r.smtCrush + crushNs }))
+     if let some (hash, text) := cacheHash? then
+@@ -815,7 +816,7 @@ syntax "pverify_structural_smt" : tactic
+ macro_rules
+   | `(tactic| pverify_structural_smt) => `(tactic| (
+       pverify_smt_prep_structural
+-      all_goals crush [*]
++      all_goals smt @SMT_CONFIG@ [*]
+     ))
+ 
+ /-- Arithmetic / boolean fallback for default-invariant goals SMT
+@@ -1357,11 +1358,7 @@ macro_rules
+   | `(tactic| pverify_close_chain) => `(tactic| (
+       first
+         | default_inv
+-        | pverify_smt
+-        | pverify_structural_smt
+-        | pverify_split_ite_smt
+-        | pverify_split_smt
+-        | pverify_grind))
++        | pverify_smt))
+ 
+ /-- Internal close-chain used by `pverify_default`: SMT first because
+ the goal arrives with explicit `DefaultInvariants` content the SMT
+@@ -1371,11 +1368,7 @@ macro_rules
+   | `(tactic| pverify_close_chain_smt_first) => `(tactic| (
+       first
+         | pverify_smt
+-        | pverify_structural_smt
+-        | pverify_split_ite_smt
+-        | pverify_split_smt
+-        | default_inv
+-        | pverify_grind))
++        | default_inv))
+ 
+ /-- The headline auto-discharge tactic. Three branches in order:
+ trivial / `True`-shaped post; post-equals-pre (any handler whose
+diff --git a/lakefile.lean b/lakefile.lean
+--- a/lakefile.lean
++++ b/lakefile.lean
+@@ -5,6 +5,10 @@ require Loom from git "https://github.com/AD1024/loom.git"
+   @ "ec16b95ff8bbd047248de031cabd3160847e4b1b"
+ require crush from git "https://github.com/AD1024/lean-crush.git"
+   @ "c1a2e13b2cc84abc1152eed46ad39b9cab328903"
++-- The lean-smt lane for PLean. Added by the benchmark harness: the
++-- pinned revision predates lean-smt, and `lake update Smt` leaves every
++-- revision this manifest already pins exactly where it is.
++require Smt from git "@SMT_REPO_URL@" @ "@SMT_REV@"
+ 
+ package PLean where
+   leanOptions := #[⟨`pp.unicode.fun, true⟩]

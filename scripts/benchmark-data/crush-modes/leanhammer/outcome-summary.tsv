@@ -8,8 +8,6 @@ leanhammer	crush-alethe	unknown	not-attempted	2
 leanhammer	crush-core	core-reconstructed	not-attempted	10
 leanhammer	crush-core	pre-reconstructed	not-attempted	9
 leanhammer	crush-core	unknown	not-attempted	1
-leanhammer	crush-only	core-reconstructed	malformed-certificate	11
-leanhammer	crush-only	pre-reconstructed	not-attempted	9
 leanhammer	crush-portfolio	alethe-reconstructed	success	7
 leanhammer	crush-portfolio	core-reconstructed	certificate-error	2
 leanhammer	crush-portfolio	core-reconstructed	rule-gap	1

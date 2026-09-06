@@ -391,3 +391,545 @@ velvet	crush-verify	1	Velvet/Examples/Total_Partial_example.lean|40|447759858235
 velvet	crush-verify	1	Velvet/Examples/Total_Partial_example.lean|41|18088860687919872176	insertionSort_termination_correct	18088860687919872176	verified	not-requested	solver returned unsat; closed under the trust policy	58728876	collect=202500,pre-reconstruct=123250,normalize=1221250,monomorphize=4961625,instantiate=1249792,translate=6487125,solve=44483334	
 velvet	crush-verify	1	Velvet/Examples/Total_Partial_example.lean|44|6709257883257101731	insertionSort_termination_correct	6709257883257101731	selected-fact	not-attempted	closed from a selected Lean fact	180125	collect=180125	
 velvet	crush-verify	1	Velvet/Examples/Total_Partial_example.lean|45|16576486626369642801	insertionSort_termination_correct	16576486626369642801	verified	not-requested	solver returned unsat; closed under the trust policy	42463833	collect=76166,pre-reconstruct=87333,normalize=83917,monomorphize=2440708,instantiate=659125,translate=3657834,solve=35458750	
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|1|1631738648950044227	withdraw_correct	1631738648950044227	alethe-reconstructed	-	-	179774208		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|2|11756138257855701010	withdrawSession_correct	11756138257855701010	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	157599042		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|3|2825169037077011539	withdrawSession_correct	2825169037077011539	alethe-reconstructed	-	-	116881209		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|4|14833385480787993856	withdrawSession_correct	14833385480787993856	alethe-reconstructed	-	-	113311292		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|5|15214630116673553496	withdrawSession_correct	15214630116673553496	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	135059709		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|6|11756138257855701010	withdrawSessionTot_correct	11756138257855701010	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	143947708		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|7|2592897230707726799	withdrawSessionTot_correct	2592897230707726799	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	118750333		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|8|2825169037077011539	withdrawSessionTot_correct	2825169037077011539	alethe-reconstructed	-	-	115819958		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|9|14833385480787993856	withdrawSessionTot_correct	14833385480787993856	alethe-reconstructed	-	-	115643083		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|10|15214630116673553496	withdrawSessionTot_correct	15214630116673553496	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	136933791		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|11|12346872860079934512	withdrawSessionExcept_correct	12346872860079934512	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	159919708		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|12|11756138257855701010	withdrawSessionExcept_correct	11756138257855701010	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	187206375		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|13|12800241106604992563	withdrawSessionExcept_correct	12800241106604992563	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	182889375		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|14|2592897230707726799	withdrawSessionExcept_correct	2592897230707726799	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	161335542		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|15|2825169037077011539	withdrawSessionExcept_correct	2825169037077011539	alethe-reconstructed	-	-	128277209		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|16|14810769858554953377	withdrawSessionExcept_correct	14810769858554953377	alethe-reconstructed	-	-	119255209		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|17|14833385480787993856	withdrawSessionExcept_correct	14833385480787993856	alethe-reconstructed	-	-	120841750		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|18|8275436438937433806	withdrawSessionExcept_correct	8275436438937433806	alethe-reconstructed	-	-	40445291		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|19|15214630116673553496	withdrawSessionExcept_correct	15214630116673553496	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	150371583		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|20|684110104125275636	withdrawSessionExcept_correct	684110104125275636	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	154955500		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|21|10455387604875970312	withdrawSessionNonDet_correct	10455387604875970312	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	44823667		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|22|12346872860079934512	withdrawSessionNonDet_correct	12346872860079934512	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	170577958		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|23|9920644537135092340	withdrawSessionNonDet_correct	9920644537135092340	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	206864917		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|24|2592897230707726799	withdrawSessionNonDet_correct	2592897230707726799	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	178114458		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|25|8954427794409453576	withdrawSessionNonDet_correct	8954427794409453576	alethe-reconstructed	-	-	140955708		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|26|14833385480787993856	withdrawSessionNonDet_correct	14833385480787993856	alethe-reconstructed	-	-	133555083		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|27|5928940248694370277	withdrawSessionNonDet_correct	5928940248694370277	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	162895375		
+cashmere	smt-only	1	CaseStudies/Cashmere/Cashmere.lean|28|12566989642252477834	withdrawSessionNonDet_correct	12566989642252477834	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	161035125		
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|1|9427426964918022923	withdrawSessionAngelic_correct	9427426964918022923	alethe-reconstructed	-	-	242782125		
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|2|1587904245978985587	withdrawSessionAngelic_correct	1587904245978985587	alethe-reconstructed	-	-	200241917		
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|3|12290697138917920290	withdrawSessionAngelic_correct	12290697138917920290	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	180512500		
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|4|6449264834289021715	withdrawSessionAngelic_correct	6449264834289021715	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	172523500		
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|5|11664442347342473650	withdrawSessionAngelic_correct	11664442347342473650	alethe-reconstructed	-	-	158657959		
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|6|6579164554781296205	withdrawSessionAngelic_correct	6579164554781296205	alethe-reconstructed	-	-	158807541		
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|7|7126761714196821540	withdrawSessionAngelic_correct	7126761714196821540	alethe-reconstructed	-	-	165780084		
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|8|2232656262363782188	withdrawSessionAngelic_correct	2232656262363782188	alethe-reconstructed	-	-	68987625		
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|9|15183118018364320695	withdrawSessionAngelic_correct	15183118018364320695	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	46562292		
+cashmere	smt-only	1	CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean|10|12346872860079934512	withdrawSessionAngelic_correct	12346872860079934512	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	187717000		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|1|4325354716326072573	decodeStr'_correct	4325354716326072573	alethe-reconstructed	-	-	277939500		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|2|3233717574493770211	decodeStr'_correct	3233717574493770211	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	200478667		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|3|14557075163885871591	decodeStr'_correct	14557075163885871591	alethe-reconstructed	-	-	112563584		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|4|6384732382134649439	decodeStr'_correct	6384732382134649439	alethe-reconstructed	-	-	108553917		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|5|13851523499043008614	decodeStr'_correct	13851523499043008614	alethe-reconstructed	-	-	111958125		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|6|8816666150414203262	decodeStr'_correct	8816666150414203262	alethe-reconstructed	-	-	58170917		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|7|7432640679462075544	decodeStr'_correct	7432640679462075544	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	69706500		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|8|9639754685172097330	decodeStr'_correct	9639754685172097330	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	135995500		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|9|10203002127808532242	encodeStr_correct	10203002127808532242	alethe-reconstructed	-	-	257601542		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|10|15527439877898811686	encodeStr_correct	15527439877898811686	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	226726500		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|11|4253526900314070824	encodeStr_correct	4253526900314070824	alethe-reconstructed	-	-	210961875		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|12|17087698223479619887	encodeStr_correct	17087698223479619887	alethe-reconstructed	-	-	249061792		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|13|13168721855841554394	encodeStr_correct	13168721855841554394	alethe-reconstructed	-	-	219062833		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|14|8050235650381385355	encodeStr_correct	8050235650381385355	alethe-reconstructed	-	-	124722583		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|15|3874562368415809942	encodeStr_correct	3874562368415809942	alethe-reconstructed	-	-	151937208		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|16|16403843650363689650	encodeStr_correct	16403843650363689650	alethe-reconstructed	-	-	212400167		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|17|17528322019345720798	encodeStr_correct	17528322019345720798	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	229359166		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|18|14846570717984605519	encodeStr_correct	14846570717984605519	reconstruction-failed	replay-exception	Monomorphization failed because currently the procedure cannot deal with expression `(cifvar_8 cifvar_9     (cifvar_10 (cifvar_11 cifvar_12 cifvar_13) (cifvar_14 cifvar_15 cifvar_13)))[i✝]`. This is because it has subterms possessing at least one of the following features · Type argument with bound variables, e.g. `@Fin.add (n + 2) a b` where `n` is a bound variable · λ binders whose type contain bound variables, e.g. `fun (x : a) => x` where `a` is a bound variable · Other (TODO) `set_option auto.mono.ignoreNonQuasiHigherOrder true` will instruct Lean-auto to ignore all the `LemmaInst`s which contain expressions that cannot be handled by the current procedure	92218333		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|19|17345521196864181404	encodeStr_correct	17345521196864181404	alethe-reconstructed	-	-	99517833		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|20|4720720642953332999	encodeStr_correct	4720720642953332999	alethe-reconstructed	-	-	99365542		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|21|16873295595722686018	encodeStr_correct	16873295595722686018	reconstruction-failed	replay-exception	Monomorphization failed because currently the procedure cannot deal with expression `cifvar_8[i✝]`. This is because it has subterms possessing at least one of the following features · Type argument with bound variables, e.g. `@Fin.add (n + 2) a b` where `n` is a bound variable · λ binders whose type contain bound variables, e.g. `fun (x : a) => x` where `a` is a bound variable · Other (TODO) `set_option auto.mono.ignoreNonQuasiHigherOrder true` will instruct Lean-auto to ignore all the `LemmaInst`s which contain expressions that cannot be handled by the current procedure	39160250		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|22|5769627519083430677	encodeStr_correct	5769627519083430677	alethe-reconstructed	-	-	92527167		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|23|15630242782200619292	encodeStr_correct	15630242782200619292	alethe-reconstructed	-	-	31019417		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|24|4390242841053229048	encodeStr_correct	4390242841053229048	sat	-	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).	48026625		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|25|4098508629850130765	encodeStr_correct	4098508629850130765	reconstruction-failed	replay-exception	Monomorphization failed because currently the procedure cannot deal with expression `(cifvar_8 cifvar_9)[i✝]`. This is because it has subterms possessing at least one of the following features · Type argument with bound variables, e.g. `@Fin.add (n + 2) a b` where `n` is a bound variable · λ binders whose type contain bound variables, e.g. `fun (x : a) => x` where `a` is a bound variable · Other (TODO) `set_option auto.mono.ignoreNonQuasiHigherOrder true` will instruct Lean-auto to ignore all the `LemmaInst`s which contain expressions that cannot be handled by the current procedure	11646208		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|26|6449688271898666716	encodeStr_correct	6449688271898666716	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	126965583		
+velvet	smt-only	1	Velvet/Examples/EncodeDecodeStr.lean|27|3108445719328028112	encodeStr_correct	3108445719328028112	reconstruction-failed	replay-exception	Monomorphization failed because currently the procedure cannot deal with expression `cifvar_8[i✝]`. This is because it has subterms possessing at least one of the following features · Type argument with bound variables, e.g. `@Fin.add (n + 2) a b` where `n` is a bound variable · λ binders whose type contain bound variables, e.g. `fun (x : a) => x` where `a` is a bound variable · Other (TODO) `set_option auto.mono.ignoreNonQuasiHigherOrder true` will instruct Lean-auto to ignore all the `LemmaInst`s which contain expressions that cannot be handled by the current procedure	56375000		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|1|6162910358734672275	insertionSort_correct	6162910358734672275	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	951288292		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|2|1066791641437412485	insertionSort_correct	1066791641437412485	alethe-reconstructed	-	-	255220750		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|3|9866248891257573647	insertionSort_correct	9866248891257573647	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	1910728167		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|4|18360837223612973524	insertionSort_correct	18360837223612973524	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	698168875		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|5|5794584936190196715	insertionSort_correct	5794584936190196715	alethe-reconstructed	-	-	234004000		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|6|1066791641437412485	insertionSort_correct	1066791641437412485	alethe-reconstructed	-	-	249291542		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|7|14825588553610653054	insertionSort_correct	14825588553610653054	alethe-reconstructed	-	-	387974250		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|8|15257391885382474665	insertionSort_correct	15257391885382474665	alethe-reconstructed	-	-	211298500		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|9|5794584936190196715	insertionSort_correct	5794584936190196715	alethe-reconstructed	-	-	215286416		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|10|12031026870814429192	insertionSort_correct	12031026870814429192	alethe-reconstructed	-	-	221959666		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|11|16465886849738339639	insertionSort_correct	16465886849738339639	alethe-reconstructed	-	-	294164250		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|12|15257391885382474665	insertionSort_correct	15257391885382474665	alethe-reconstructed	-	-	210995750		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|13|2438232962388206336	insertionSort_correct	2438232962388206336	alethe-reconstructed	-	-	211538000		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|14|5964899400721509044	insertionSort_correct	5964899400721509044	alethe-reconstructed	-	-	150968958		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|15|12155028420956038391	insertionSort_correct	12155028420956038391	alethe-reconstructed	-	-	153484958		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|16|14852526092468225565	insertionSort_correct	14852526092468225565	alethe-reconstructed	-	-	245021042		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|17|17117294935281830098	insertionSort_correct	17117294935281830098	alethe-reconstructed	-	-	149821667		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|18|5288706169439222084	insertionSort_correct	5288706169439222084	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	316678417		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|19|12688677688377801211	insertionSort_correct	12688677688377801211	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	304461000		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|20|7903702650473013145	insertionSort_correct	7903702650473013145	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	420544625		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|21|8905801618567038615	insertionSort_correct	8905801618567038615	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	312744667		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|22|5964899400721509044	insertionSort_correct	5964899400721509044	alethe-reconstructed	-	-	149592333		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|23|5379360585891885096	insertionSort_correct	5379360585891885096	alethe-reconstructed	-	-	161922458		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|24|11248877774576345437	insertionSort_correct	11248877774576345437	alethe-reconstructed	-	-	226490334		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|25|17117294935281830098	insertionSort_correct	17117294935281830098	alethe-reconstructed	-	-	146131667		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|26|11532741708565178815	insertionSort_correct	11532741708565178815	alethe-reconstructed	-	-	144629959		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|27|13894794097547967513	insertionSort_correct	13894794097547967513	alethe-reconstructed	-	-	39259291		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|28|11235314628722112900	insertionSort_correct	11235314628722112900	alethe-reconstructed	-	-	105236375		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|29|8905801618567038615	insertionSort_correct	8905801618567038615	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	248176333		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|30|18214290959922115111	insertionSort_correct	18214290959922115111	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	353592833		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|31|17119794831572106230	sqrt_correct	17119794831572106230	alethe-reconstructed	-	-	94107208		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|32|16395326812896940336	sqrt_correct	16395326812896940336	alethe-reconstructed	-	-	95529916		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|33|4559485301326837329	sqrt_correct	4559485301326837329	alethe-reconstructed	-	-	86983042		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|34|15833581759277421577	sqrt_correct	15833581759277421577	alethe-reconstructed	-	-	195364500		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|35|7228731597997214785	sqrt_correct	7228731597997214785	unknown	-	unable to prove goal. Try providing more hints. Reason: TIMEOUT	5110385083		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|36|17256355208408803011	sqrt_correct	17256355208408803011	alethe-reconstructed	-	-	111706375		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|37|13635698331308129878	sqrt_correct	13635698331308129878	alethe-reconstructed	-	-	99728500		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|38|10800841518550636949	sqrt_correct	10800841518550636949	alethe-reconstructed	-	-	224610708		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|39|12457966505053151830	sqrt_correct	12457966505053151830	alethe-reconstructed	-	-	433708042		
+velvet	smt-only	1	Velvet/Examples/Examples.lean|40|17578352201394481400	sqrt_correct	17578352201394481400	alethe-reconstructed	-	-	171974625		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|1|6162910358734672275	insertionSort_total_correct	6162910358734672275	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	947355666		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|2|1066791641437412485	insertionSort_total_correct	1066791641437412485	alethe-reconstructed	-	-	257909083		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|3|9866248891257573647	insertionSort_total_correct	9866248891257573647	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	1908128375		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|4|18360837223612973524	insertionSort_total_correct	18360837223612973524	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	701099042		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|5|11568103068982921353	insertionSort_total_correct	11568103068982921353	alethe-reconstructed	-	-	243963250		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|6|5794584936190196715	insertionSort_total_correct	5794584936190196715	alethe-reconstructed	-	-	237774375		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|7|1066791641437412485	insertionSort_total_correct	1066791641437412485	alethe-reconstructed	-	-	241871625		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|8|14825588553610653054	insertionSort_total_correct	14825588553610653054	alethe-reconstructed	-	-	381483667		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|9|15257391885382474665	insertionSort_total_correct	15257391885382474665	alethe-reconstructed	-	-	217136042		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|10|11568103068982921353	insertionSort_total_correct	11568103068982921353	alethe-reconstructed	-	-	234150500		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|11|5794584936190196715	insertionSort_total_correct	5794584936190196715	alethe-reconstructed	-	-	215782541		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|12|12031026870814429192	insertionSort_total_correct	12031026870814429192	alethe-reconstructed	-	-	223571708		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|13|16465886849738339639	insertionSort_total_correct	16465886849738339639	alethe-reconstructed	-	-	297001167		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|14|15257391885382474665	insertionSort_total_correct	15257391885382474665	alethe-reconstructed	-	-	215245083		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|15|5918835836158453730	insertionSort_total_correct	5918835836158453730	alethe-reconstructed	-	-	215937167		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|16|5964899400721509044	insertionSort_total_correct	5964899400721509044	alethe-reconstructed	-	-	150486500		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|17|12155028420956038391	insertionSort_total_correct	12155028420956038391	alethe-reconstructed	-	-	152025708		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|18|14852526092468225565	insertionSort_total_correct	14852526092468225565	alethe-reconstructed	-	-	243985709		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|19|17117294935281830098	insertionSort_total_correct	17117294935281830098	alethe-reconstructed	-	-	153533625		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|20|5288706169439222084	insertionSort_total_correct	5288706169439222084	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	533822125		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|21|12688677688377801211	insertionSort_total_correct	12688677688377801211	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	441344834		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|22|7903702650473013145	insertionSort_total_correct	7903702650473013145	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	758531250		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|23|8905801618567038615	insertionSort_total_correct	8905801618567038615	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	628847250		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|24|18088860687919872176	insertionSort_total_correct	18088860687919872176	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	1741132125		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|25|5964899400721509044	insertionSort_total_correct	5964899400721509044	alethe-reconstructed	-	-	152732000		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|26|5379360585891885096	insertionSort_total_correct	5379360585891885096	alethe-reconstructed	-	-	165579833		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|27|11248877774576345437	insertionSort_total_correct	11248877774576345437	alethe-reconstructed	-	-	244807500		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|28|17117294935281830098	insertionSort_total_correct	17117294935281830098	alethe-reconstructed	-	-	152698083		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|29|6709257883257101731	insertionSort_total_correct	6709257883257101731	alethe-reconstructed	-	-	153335709		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|30|13894794097547967513	insertionSort_total_correct	13894794097547967513	alethe-reconstructed	-	-	39037417		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|31|11235314628722112900	insertionSort_total_correct	11235314628722112900	alethe-reconstructed	-	-	110256292		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|32|891049678225498279	insertionSort_total_correct	891049678225498279	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	248157542		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|33|18214290959922115111	insertionSort_total_correct	18214290959922115111	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	590442917		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|34|17119794831572106230	sqrt_total_correct	17119794831572106230	alethe-reconstructed	-	-	43836292		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|35|16395326812896940336	sqrt_total_correct	16395326812896940336	alethe-reconstructed	-	-	41729458		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|36|4559485301326837329	sqrt_total_correct	4559485301326837329	alethe-reconstructed	-	-	27611583		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|37|15833581759277421577	sqrt_total_correct	15833581759277421577	alethe-reconstructed	-	-	152320834		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|38|17892696244691966181	sqrt_total_correct	17892696244691966181	alethe-reconstructed	-	-	231511833		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|39|7228731597997214785	sqrt_total_correct	7228731597997214785	unknown	-	unable to prove goal. Try providing more hints. Reason: TIMEOUT	5066529708		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|40|13073343856082995605	sqrt_total_correct	13073343856082995605	alethe-reconstructed	-	-	86298667		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|41|13635698331308129878	sqrt_total_correct	13635698331308129878	alethe-reconstructed	-	-	56161791		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|42|10800841518550636949	sqrt_total_correct	10800841518550636949	alethe-reconstructed	-	-	181556166		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|43|12457966505053151830	sqrt_total_correct	12457966505053151830	alethe-reconstructed	-	-	248342708		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|44|17578352201394481400	sqrt_total_correct	17578352201394481400	alethe-reconstructed	-	-	152484459		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|45|628191952620585962	cbrt_correct	628191952620585962	alethe-reconstructed	-	-	40389667		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|46|5408980950461060684	cbrt_correct	5408980950461060684	alethe-reconstructed	-	-	42493125		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|47|17796805544787031687	cbrt_correct	17796805544787031687	alethe-reconstructed	-	-	27625875		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|48|12597585967811959528	cbrt_correct	12597585967811959528	alethe-reconstructed	-	-	205951625		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|49|17892696244691966181	cbrt_correct	17892696244691966181	alethe-reconstructed	-	-	233199834		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|50|11504389341422214604	cbrt_correct	11504389341422214604	unknown	-	unable to prove goal. Try providing more hints. Reason: TIMEOUT	5069225833		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|51|1828175149019549874	cbrt_correct	1828175149019549874	alethe-reconstructed	-	-	71001417		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|52|8027176826117333927	cbrt_correct	8027176826117333927	alethe-reconstructed	-	-	54294041		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|53|8642365996124661698	cbrt_correct	8642365996124661698	alethe-reconstructed	-	-	251742292		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|54|1031468476226669362	cbrt_correct	1031468476226669362	alethe-reconstructed	-	-	610602291		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|55|9859620190106577091	cbrt_correct	9859620190106577091	alethe-reconstructed	-	-	220238250		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|56|7745518040588453633	sqrt_bn_correct	7745518040588453633	reconstruction-failed	rule-gap	1 replayed step(s) left as open goals	138485125		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|57|7275559839122250210	sqrt_bn_correct	7275559839122250210	alethe-reconstructed	-	-	130825792		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|58|17809363630590163151	sqrt_bn_correct	17809363630590163151	reconstruction-failed	rule-gap	10 replayed step(s) left as open goals	258361459		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|59|3756677303263535492	sqrt_bn_correct	3756677303263535492	reconstruction-failed	term-gap	Failed to reconstruct term (< (+ (to_real (* (- 1) (+ |f✝²| (* (- 1) @purify_3) (* (- 1) @purify_4)))) (* (/ (- 1) 2) (to_real @purify_2)) (* (/ 1 2) (to_real (+ |f✝²| (* (- 1) |f✝¹|) (* (- 1) @purify_2)))) (to_real (+ @purify_2 (* (- 1) @purify_3))) (* (/ 1 2) (to_real (+ |f✝²| |f✝¹| (* (- 2) @purify_4))))) (+ (to_real (* (- 1) 0)) (* (/ (- 1) 2) 2.0) (* (/ 1 2) 0.0) 0.0 (* (/ 1 2) 2.0))) with kind LT	134830666		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|60|4049183095434299843	sqrt_bn_correct	4049183095434299843	alethe-reconstructed	-	-	125973584		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|61|845228717509319176	sqrt_bn_correct	845228717509319176	reconstruction-failed	rule-gap	1 replayed step(s) left as open goals	132338541		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|62|14080923781397173690	sqrt_bn_correct	14080923781397173690	alethe-reconstructed	-	-	221937083		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|63|2013384436827156188	sqrt_bn_correct	2013384436827156188	reconstruction-failed	term-gap	Failed to reconstruct term (<= (+ (to_real (* (- 1) (+ |f✝¹| (* (- 1) @purify_4)))) (* (/ 1 2) (to_real (+ |f✝²| |f✝¹| (* (- 2) @purify_4)))) (* (/ (- 1) 2) (to_real (+ |f✝²| (* (- 1) |f✝¹|) (* (- 1) @purify_2)))) (* (/ (- 1) 2) (to_real @purify_2))) (+ (to_real (* (- 1) 1)) (* (/ 1 2) 1.0) (* (/ (- 1) 2) 0.0) (* (/ (- 1) 2) 2.0))) with kind LEQ	154776583		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|64|4049183095434299843	sqrt_bn_correct	4049183095434299843	alethe-reconstructed	-	-	93943084		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|65|7275559839122250210	sqrt_bn_correct	7275559839122250210	alethe-reconstructed	-	-	98372708		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|66|14080923781397173690	sqrt_bn_correct	14080923781397173690	alethe-reconstructed	-	-	190608292		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|67|5112937323286018014	sqrt_bn_correct	5112937323286018014	alethe-reconstructed	-	-	98169209		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|68|4559485301326837329	sqrt_bn_correct	4559485301326837329	alethe-reconstructed	-	-	49164459		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|69|6911359079999020658	sqrt_bn_correct	6911359079999020658	alethe-reconstructed	-	-	31157917		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|70|16395326812896940336	sqrt_bn_correct	16395326812896940336	alethe-reconstructed	-	-	67624209		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|71|18362062349273978007	sqrt_bn_correct	18362062349273978007	sat	-	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).	149169834		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|72|8802921734925604215	sqrt_bn_correct	8802921734925604215	sat	-	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).	130501542		
+velvet	smt-only	1	Velvet/Examples/Examples_Total.lean|73|8723303018838369810	sqrt_bn_correct	8723303018838369810	sat	-	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).	123979042		
+velvet	smt-only	1	Velvet/Examples/GCD.lean|1|4384199359441751320	gcd_correct	4384199359441751320	alethe-reconstructed	-	-	82074000		
+velvet	smt-only	1	Velvet/Examples/GCD.lean|2|9601099415740649235	gcd_correct	9601099415740649235	alethe-reconstructed	-	-	38931625		
+velvet	smt-only	1	Velvet/Examples/GCD.lean|3|1185000637665826843	gcd_correct	1185000637665826843	alethe-reconstructed	-	-	39421916		
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|1|3150397294412475763	IsNonPrime_correct	3150397294412475763	sat	-	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).	62373250		
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|2|8498703091421742660	IsNonPrime_correct	8498703091421742660	alethe-reconstructed	-	-	197311292		
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|3|15405612526479945524	IsNonPrime_correct	15405612526479945524	reconstruction-failed	rule-gap	1 replayed step(s) left as open goals	194956833		
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|4|3635621084297233985	IsNonPrime_correct	3635621084297233985	alethe-reconstructed	-	-	189565750		
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|5|8498703091421742660	IsNonPrime_correct	8498703091421742660	alethe-reconstructed	-	-	166311291		
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|6|15497101072354692966	IsNonPrime_correct	15497101072354692966	unknown	-	unable to prove goal. Try providing more hints. Reason: TIMEOUT	5153943416		
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|7|3635621084297233985	IsNonPrime_correct	3635621084297233985	alethe-reconstructed	-	-	186544584		
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|8|8419734978408419013	IsNonPrime_correct	8419734978408419013	alethe-reconstructed	-	-	149169959		
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|9|18150307703072330979	IsNonPrime_correct	18150307703072330979	alethe-reconstructed	-	-	167825416		
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|10|1456886557593529150	IsNonPrime_correct	1456886557593529150	alethe-reconstructed	-	-	156333625		
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|11|16017810969246570786	IsNonPrime_correct	16017810969246570786	alethe-reconstructed	-	-	154532125		
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|12|12543135627460772462	IsNonPrime_correct	12543135627460772462	alethe-reconstructed	-	-	28387917		
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|13|1572539502098385654	IsNonPrime_correct	1572539502098385654	alethe-reconstructed	-	-	81654500		
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|14|11076373139303988464	IsNonPrime_correct	11076373139303988464	alethe-reconstructed	-	-	45755292		
+velvet	smt-only	1	Velvet/Examples/IsNonPrime.lean|15|15559572021364972958	IsNonPrime_correct	15559572021364972958	sat	-	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).	316816125		
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|1|11207960766534651515	IsSorted_correct	11207960766534651515	alethe-reconstructed	-	-	323976375		
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|2|4413675682266163545	IsSorted_correct	4413675682266163545	alethe-reconstructed	-	-	248480583		
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|3|9518487208184120090	IsSorted_correct	9518487208184120090	alethe-reconstructed	-	-	272923167		
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|4|11207960766534651515	IsSorted_correct	11207960766534651515	alethe-reconstructed	-	-	252685833		
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|5|16465854614385299804	IsSorted_correct	16465854614385299804	alethe-reconstructed	-	-	293644500		
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|6|1749803822950348457	IsSorted_correct	1749803822950348457	alethe-reconstructed	-	-	231115917		
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|7|6461838523585744673	IsSorted_correct	6461838523585744673	alethe-reconstructed	-	-	219490500		
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|8|5698263445699273715	IsSorted_correct	5698263445699273715	alethe-reconstructed	-	-	258660084		
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|9|1749803822950348457	IsSorted_correct	1749803822950348457	alethe-reconstructed	-	-	234902333		
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|10|16458001095677251802	IsSorted_correct	16458001095677251802	alethe-reconstructed	-	-	235509458		
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|11|11716511832970583731	IsSorted_correct	11716511832970583731	alethe-reconstructed	-	-	86155791		
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|12|13412663338101939313	IsSorted_correct	13412663338101939313	alethe-reconstructed	-	-	81815458		
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|13|10877051663303345536	IsSorted_correct	10877051663303345536	alethe-reconstructed	-	-	129365959		
+velvet	smt-only	1	Velvet/Examples/IsSorted.lean|14|2102916384874846137	IsSorted_correct	2102916384874846137	unknown	-	unable to prove goal. Try providing more hints. Reason: TIMEOUT	5335537166		
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|1|6189042491608852705	maxElem_correct	6189042491608852705	alethe-reconstructed	-	-	220486417		
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|2|13979591039540523316	maxElem_correct	13979591039540523316	alethe-reconstructed	-	-	184694167		
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|3|6189042491608852705	maxElem_correct	6189042491608852705	alethe-reconstructed	-	-	160425167		
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|4|3496913807798796367	maxElem_correct	3496913807798796367	alethe-reconstructed	-	-	178892166		
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|5|13935834157065255340	maxElem_correct	13935834157065255340	alethe-reconstructed	-	-	93931625		
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|6|10716558625718226994	maxElem_correct	10716558625718226994	alethe-reconstructed	-	-	109860875		
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|7|12429897440204793908	maxElem_correct	12429897440204793908	alethe-reconstructed	-	-	96600500		
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|8|6662270672118944889	maxElem_correct	6662270672118944889	alethe-reconstructed	-	-	68417000		
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|9|10294878435885712953	maxElem_correct	10294878435885712953	alethe-reconstructed	-	-	66502625		
+velvet	smt-only	1	Velvet/Examples/MaxElem.lean|10|15821608085576758365	maxElem_correct	15821608085576758365	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	121638208		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|1|633235845480694220	mem_alloc_correct	633235845480694220	translation-failed	-	cannot translate fun eb!_0 => decide (f✝ ≤ f eb!_0), SMT-LIB does not support lambdas	184953958		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|2|12262280732602434251	mem_alloc_correct	12262280732602434251	translation-failed	-	cannot translate fun eb!_0 => decide (f✝ ≤ f eb!_0), SMT-LIB does not support lambdas	103090792		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|3|5395433166570123997	mem_alloc_correct	5395433166570123997	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	147728458		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|4|7858921023181799469	mem_alloc_correct	7858921023181799469	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	145369209		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|5|12307778664191690486	mem_alloc_correct	12307778664191690486	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	141211167		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|6|14651957694487509304	mem_alloc_correct	14651957694487509304	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	142356333		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|7|5395433166570123997	mem_alloc_correct	5395433166570123997	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	136726625		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|8|12933711973000179377	mem_alloc_correct	12933711973000179377	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	149792334		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|9|1502598827083788742	mem_alloc_correct	1502598827083788742	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	129412334		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|10|5948121399058639032	mem_alloc_correct	5948121399058639032	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	150268458		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|11|7320909626913503829	mem_alloc_correct	7320909626913503829	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	141201917		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|12|13680370559755953061	mem_alloc_correct	13680370559755953061	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	142964250		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|13|5395433166570123997	mem_alloc_correct	5395433166570123997	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	56975667		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|14|9725332222063365643	mem_alloc_correct	9725332222063365643	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	86482500		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|15|400422252958227942	mem_alloc_correct	400422252958227942	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	58030708		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|16|880346177993498408	mem_alloc_correct	880346177993498408	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	48996541		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|17|15369885961681168000	mem_alloc_correct	15369885961681168000	translation-failed	-	cannot translate fun eb!_0 => decide (f✝ ≤ f eb!_0), SMT-LIB does not support lambdas	196966708		
+velvet	smt-only	1	Velvet/Examples/MemAlloc.lean|18|633235845480694220	mem_alloc_correct	633235845480694220	translation-failed	-	cannot translate fun eb!_0 => decide (f✝ ≤ f eb!_0), SMT-LIB does not support lambdas	188824250		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|1|9632926918213658529	simple_recursion_correct	9632926918213658529	alethe-reconstructed	-	-	74891250		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|2|16321134497628070328	simple_recursion_correct	16321134497628070328	alethe-reconstructed	-	-	60353334		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|3|15399959404188881270	pickGreater_correct	15399959404188881270	alethe-reconstructed	-	-	56283042		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|4|6729724634728447689	pickGreater_correct	6729724634728447689	alethe-reconstructed	-	-	47659583		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|5|6331840417009367668	pickGreaterN_correct	6331840417009367668	alethe-reconstructed	-	-	29394333		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|6|928177310960349346	pickGreaterN_correct	928177310960349346	alethe-reconstructed	-	-	166960000		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|7|14502607232842720358	calc_fact_correct	14502607232842720358	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	27407792		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|8|5360899794933563671	calc_fact_correct	5360899794933563671	alethe-reconstructed	-	-	85787750		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|9|16083086069592683677	calc_fact_correct	16083086069592683677	alethe-reconstructed	-	-	100869916		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|10|17426933449823366573	calc_fact_correct	17426933449823366573	alethe-reconstructed	-	-	105995042		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|11|8436330743851721663	calc_fact_correct	8436330743851721663	alethe-reconstructed	-	-	74992834		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|12|5516634396000359850	calc_fact_correct	5516634396000359850	alethe-reconstructed	-	-	83981417		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|13|3040060259141493307	calc_fact_correct	3040060259141493307	alethe-reconstructed	-	-	72876292		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|14|8843960039229350233	calc_fact_correct	8843960039229350233	alethe-reconstructed	-	-	31076167		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|15|414362943496193222	calc_fact_correct	414362943496193222	alethe-reconstructed	-	-	45577667		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|16|17682712502848666117	calc_fact_correct	17682712502848666117	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	115996958		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|17|10153057550358142642	SimpleOption_correct	10153057550358142642	alethe-reconstructed	-	-	19357542		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|18|1511426402368662420	SimpleOption_correct	1511426402368662420	alethe-reconstructed	-	-	33547875		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|19|12303175613740643342	SimpleList_correct	12303175613740643342	alethe-reconstructed	-	-	48900209		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|20|10153057550358142642	SimpleList_correct	10153057550358142642	alethe-reconstructed	-	-	26257250		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|21|419217539048902517	insertTree_correct	419217539048902517	alethe-reconstructed	-	-	30949291		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|22|785945476856620183	insertTree_correct	785945476856620183	alethe-reconstructed	-	-	21530875		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|23|14100858011260313832	insertTree_correct	14100858011260313832	alethe-reconstructed	-	-	41596792		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|24|5439148242694091386	insertTree_correct	5439148242694091386	alethe-reconstructed	-	-	55467292		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|25|13358020527010658417	insertTree_correct	13358020527010658417	alethe-reconstructed	-	-	34379542		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|26|8603391761408256204	insertTree_correct	8603391761408256204	alethe-reconstructed	-	-	42007458		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|27|403261720200322615	insertTree_correct	403261720200322615	alethe-reconstructed	-	-	56496416		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|28|13334821868243949956	insertTree_correct	13334821868243949956	alethe-reconstructed	-	-	33792625		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|29|10034441991535992553	insertTree_correct	10034441991535992553	alethe-reconstructed	-	-	27911833		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|30|8410732340261024813	insertTree_correct	8410732340261024813	alethe-reconstructed	-	-	88065292		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|31|13887296291903300382	insertTree_correct	13887296291903300382	alethe-reconstructed	-	-	82246333		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|32|6517665507579609563	insertTree_correct	6517665507579609563	alethe-reconstructed	-	-	69767042		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|33|1926823926199498616	insertTree_correct	1926823926199498616	alethe-reconstructed	-	-	63762042		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|34|4691160922418792609	insertTree_correct	4691160922418792609	alethe-reconstructed	-	-	124961667		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|35|5459752633259142580	insertTree_correct	5459752633259142580	alethe-reconstructed	-	-	142966000		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|36|14235806948139691359	insertTree_correct	14235806948139691359	alethe-reconstructed	-	-	93924416		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|37|275146994291977655	insertTree_correct	275146994291977655	alethe-reconstructed	-	-	63743750		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|38|7037529583856086989	insertTree_correct	7037529583856086989	alethe-reconstructed	-	-	124107958		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|39|5348143843544294657	insertTree_correct	5348143843544294657	alethe-reconstructed	-	-	140966083		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|40|11865403806314311412	insertTree_correct	11865403806314311412	alethe-reconstructed	-	-	94342334		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|41|4528940613904177901	complex_measure_binsearch_correct	4528940613904177901	alethe-reconstructed	-	-	136632542		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|42|4049183095434299843	complex_measure_binsearch_correct	4049183095434299843	alethe-reconstructed	-	-	73454834		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|43|7275559839122250210	complex_measure_binsearch_correct	7275559839122250210	alethe-reconstructed	-	-	101280375		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|44|7360868690920052366	complex_measure_binsearch_correct	7360868690920052366	reconstruction-failed	rule-gap	1 replayed step(s) left as open goals	111239792		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|45|4851910658932930142	complex_measure_binsearch_correct	4851910658932930142	alethe-reconstructed	-	-	123184667		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|46|7656706852135243209	complex_measure_binsearch_correct	7656706852135243209	alethe-reconstructed	-	-	123798833		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|47|9897963110172432531	complex_measure_binsearch_correct	9897963110172432531	reconstruction-failed	rule-gap	1 replayed step(s) left as open goals	108731708		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|48|4049183095434299843	complex_measure_binsearch_correct	4049183095434299843	alethe-reconstructed	-	-	99322084		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|49|4851910658932930142	complex_measure_binsearch_correct	4851910658932930142	alethe-reconstructed	-	-	119302208		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|50|7656706852135243209	complex_measure_binsearch_correct	7656706852135243209	alethe-reconstructed	-	-	119999167		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|51|5804668677648722939	pow2_correct	5804668677648722939	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	39991750		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|52|5360899794933563671	pow2_correct	5360899794933563671	alethe-reconstructed	-	-	86914125		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|53|2669204144888843361	pow2_correct	2669204144888843361	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	136279667		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|54|17426933449823366573	pow2_correct	17426933449823366573	alethe-reconstructed	-	-	111187042		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|55|8436330743851721663	pow2_correct	8436330743851721663	alethe-reconstructed	-	-	73623958		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|56|50664709297785488	pow2_correct	50664709297785488	alethe-reconstructed	-	-	76936542		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|57|3040060259141493307	pow2_correct	3040060259141493307	alethe-reconstructed	-	-	71561000		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|58|8843960039229350233	pow2_correct	8843960039229350233	alethe-reconstructed	-	-	24163250		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|59|11033618788013063028	pow2_correct	11033618788013063028	alethe-reconstructed	-	-	44263208		
+velvet	smt-only	1	Velvet/Examples/Recursion.lean|60|12960500676855313787	pow2_correct	12960500676855313787	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	114731750		
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|1|15016508801900672495	LeftmostMaximalDigit_correct	15016508801900672495	unknown	-	unable to prove goal. Try providing more hints. Reason: TIMEOUT	5681714625		
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|2|15016508801900672495	LeftmostMaximalDigit_correct	15016508801900672495	unknown	-	unable to prove goal. Try providing more hints. Reason: TIMEOUT	5628171042		
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|3|2028202278093280602	LeftmostMaximalDigit_correct	2028202278093280602	alethe-reconstructed	-	-	1151692500		
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|4|15016508801900672495	LeftmostMaximalDigit_correct	15016508801900672495	alethe-reconstructed	-	-	1730178375		
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|5|15016508801900672495	LeftmostMaximalDigit_correct	15016508801900672495	alethe-reconstructed	-	-	1704665083		
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|6|3737123472131748703	LeftmostMaximalDigit_correct	3737123472131748703	alethe-reconstructed	-	-	1928813833		
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|7|7513237505621560861	LeftmostMaximalDigit_correct	7513237505621560861	alethe-reconstructed	-	-	212131792		
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|8|8096766621563827002	LeftmostMaximalDigit_correct	8096766621563827002	alethe-reconstructed	-	-	206629792		
+velvet	smt-only	1	Velvet/Examples/SmallHeartBeats.lean|9|18343663110535115658	LeftmostMaximalDigit_correct	18343663110535115658	unknown	-	unable to prove goal. Try providing more hints. Reason: TIMEOUT	5936080250		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|1|1967192165379400567	VSpV_correct	1967192165379400567	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	251214875		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|2|8738685113314976701	VSpV_correct	8738685113314976701	alethe-reconstructed	-	-	128491208		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|3|3203096880704497577	VSpV_correct	3203096880704497577	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	246627750		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|4|13561229236986007424	VSpV_correct	13561229236986007424	alethe-reconstructed	-	-	102345292		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|5|4023749508134620518	VSpV_correct	4023749508134620518	alethe-reconstructed	-	-	105258458		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|6|6516497319029947851	VSpV_correct	6516497319029947851	alethe-reconstructed	-	-	107907833		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|7|6511268073169614694	VSpV_correct	6511268073169614694	alethe-reconstructed	-	-	99333208		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|8|3467184461832131134	VSpV_correct	3467184461832131134	alethe-reconstructed	-	-	39081958		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|9|975338514235632457	VSpV_correct	975338514235632457	alethe-reconstructed	-	-	27474167		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|10|12341185047943028706	VSpV_correct	12341185047943028706	alethe-reconstructed	-	-	61563875		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|11|17907350532264535304	VSpV_correct	17907350532264535304	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	140628542		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|12|6948348975417913427	VSpV_correct	6948348975417913427	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	127546583		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|13|2560064229450187973	spmv_correct	2560064229450187973	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	374110375		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|14|11268031057524734514	spmv_correct	11268031057524734514	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	499824291		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|15|10035930273513517515	spmv_correct	10035930273513517515	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	414725542		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|16|4828757563640441921	spmv_correct	4828757563640441921	unknown	-	unable to prove goal. Try providing more hints. Reason: TIMEOUT	5552564334		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|17|11230331504797547582	spmv_correct	11230331504797547582	alethe-reconstructed	-	-	203813042		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|18|17578923063843270768	spmv_correct	17578923063843270768	alethe-reconstructed	-	-	205178958		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|19|9723121325275610683	spmv_correct	9723121325275610683	alethe-reconstructed	-	-	237777708		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|20|17138153512408342530	spmv_correct	17138153512408342530	alethe-reconstructed	-	-	252785708		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|21|1779879977175361606	spmv_correct	1779879977175361606	alethe-reconstructed	-	-	255092000		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|22|1927473323286999035	spmv_correct	1927473323286999035	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	44315125		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|23|1927473323286999035	spmv_correct	1927473323286999035	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	43879833		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|24|3184815126966959579	spmv_correct	3184815126966959579	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	105809959		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|25|1119395027554635835	spmv_correct	1119395027554635835	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	131149459		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|26|2867453267844152322	spmv_correct	2867453267844152322	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	405727125		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|27|16615537408723427288	spmv_correct	16615537408723427288	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	279275541		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|28|7752079179715214779	SpVSpV_correct	7752079179715214779	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	242849709		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|29|12365816836206760017	SpVSpV_correct	12365816836206760017	alethe-reconstructed	-	-	207867375		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|30|14837198768818932204	SpVSpV_correct	14837198768818932204	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	315425792		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|31|13561229236986007424	SpVSpV_correct	13561229236986007424	alethe-reconstructed	-	-	185775791		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|32|15323100967004739210	SpVSpV_correct	15323100967004739210	alethe-reconstructed	-	-	207679667		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|33|10656169208955874266	SpVSpV_correct	10656169208955874266	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	228673083		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|34|13561229236986007424	SpVSpV_correct	13561229236986007424	alethe-reconstructed	-	-	186723708		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|35|9762937465648280212	SpVSpV_correct	9762937465648280212	alethe-reconstructed	-	-	204757458		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|36|2195194365498566470	SpVSpV_correct	2195194365498566470	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	221173167		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|37|13561229236986007424	SpVSpV_correct	13561229236986007424	alethe-reconstructed	-	-	123016167		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|38|11853401597336712609	SpVSpV_correct	11853401597336712609	alethe-reconstructed	-	-	131062625		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|39|8906564304959696025	SpVSpV_correct	8906564304959696025	alethe-reconstructed	-	-	136002458		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|40|2836632441074815746	SpVSpV_correct	2836632441074815746	alethe-reconstructed	-	-	129894542		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|41|3467184461832131134	SpVSpV_correct	3467184461832131134	alethe-reconstructed	-	-	36626125		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|42|9157999431728333977	SpVSpV_correct	9157999431728333977	alethe-reconstructed	-	-	31774792		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|43|12484676100150332319	SpVSpV_correct	12484676100150332319	sat	-	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).	64129250		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|44|6547543738413559297	SpVSpV_correct	6547543738413559297	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	190204750		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|45|4428589781148415831	SpVSpV_correct	4428589781148415831	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	179963834		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|46|10600388612998636634	SpMSpV_correct	10600388612998636634	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	2391264666		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|47|12568830336983413194	SpMSpV_correct	12568830336983413194	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	2372435459		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|48|326977185203169709	SpMSpV_correct	326977185203169709	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	2791585459		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|49|16599719904663808863	SpMSpV_correct	16599719904663808863	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	2596507166		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|50|9413868035314052637	SpMSpV_correct	9413868035314052637	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	2512727917		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|51|11331147013392176036	SpMSpV_correct	11331147013392176036	unknown	-	unable to prove goal. Try providing more hints. Reason: TIMEOUT	5431318500		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|52|3439126561156933339	SpMSpV_correct	3439126561156933339	alethe-reconstructed	-	-	415638708		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|53|12568830336983413194	SpMSpV_correct	12568830336983413194	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	2630138542		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|54|17578923063843270768	SpMSpV_correct	17578923063843270768	alethe-reconstructed	-	-	425158750		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|55|16599719904663808863	SpMSpV_correct	16599719904663808863	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	2661417583		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|56|14915918579342464454	SpMSpV_correct	14915918579342464454	alethe-reconstructed	-	-	416009709		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|57|9290686424640906065	SpMSpV_correct	9290686424640906065	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	2023921958		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|58|10600388612998636634	SpMSpV_correct	10600388612998636634	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	2412636750		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|59|4457183463164791376	SpMSpV_correct	4457183463164791376	alethe-reconstructed	-	-	400357750		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|60|17578923063843270768	SpMSpV_correct	17578923063843270768	alethe-reconstructed	-	-	402404666		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|61|4823872097887552574	SpMSpV_correct	4823872097887552574	alethe-reconstructed	-	-	420096084		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|62|9413868035314052637	SpMSpV_correct	9413868035314052637	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	2211178041		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|63|4033875047981720732	SpMSpV_correct	4033875047981720732	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	1143836125		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|64|3439126561156933339	SpMSpV_correct	3439126561156933339	alethe-reconstructed	-	-	280868292		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|65|4457183463164791376	SpMSpV_correct	4457183463164791376	alethe-reconstructed	-	-	274883917		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|66|17578923063843270768	SpMSpV_correct	17578923063843270768	alethe-reconstructed	-	-	274515458		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|67|4823872097887552574	SpMSpV_correct	4823872097887552574	alethe-reconstructed	-	-	313388625		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|68|14915918579342464454	SpMSpV_correct	14915918579342464454	alethe-reconstructed	-	-	313793084		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|69|10972595422634862877	SpMSpV_correct	10972595422634862877	alethe-reconstructed	-	-	325853208		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|70|8550776788309984180	SpMSpV_correct	8550776788309984180	alethe-reconstructed	-	-	386667958		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|71|1927473323286999035	SpMSpV_correct	1927473323286999035	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	44676042		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|72|1927473323286999035	SpMSpV_correct	1927473323286999035	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	44611208		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|73|1927473323286999035	SpMSpV_correct	1927473323286999035	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	42987916		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|74|3184815126966959579	SpMSpV_correct	3184815126966959579	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	108374584		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|75|5592904318722155373	SpMSpV_correct	5592904318722155373	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	107002667		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|76|9139246173028146264	SpMSpV_correct	9139246173028146264	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	129242834		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|77|1600226093076966364	SpMSpV_correct	1600226093076966364	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	735402291		
+velvet	smt-only	1	Velvet/Examples/SpMSpV_Example.lean|78|16615823506960250981	SpMSpV_correct	16615823506960250981	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	539365208		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|1|18217664312208415458	SubstringSearch_correct	18217664312208415458	alethe-reconstructed	-	-	149788750		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|2|14717207787831772510	SubstringSearch_correct	14717207787831772510	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	225702458		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|3|10323933724704776680	SubstringSearch_correct	10323933724704776680	translation-failed	-	cannot translate fun a₁ => decide (f✝ a₁), SMT-LIB does not support lambdas	55298041		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|4|8391554914672281118	SubstringSearch_correct	8391554914672281118	alethe-reconstructed	-	-	40373500		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|5|6640297411548399355	SubstringSearch_correct	6640297411548399355	alethe-reconstructed	-	-	35418500		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|6|4492008039209323302	SubstringSearch_correct	4492008039209323302	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	223133041		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|7|16506446102682745284	SubstringSearch_correct	16506446102682745284	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	219398042		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|8|4056255141881592010	SubstringSearch_correct	4056255141881592010	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	225231042		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|9|10653939026877543916	SubstringSearch_correct	10653939026877543916	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	228866834		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|10|11759649870705798849	SubstringSearch_correct	11759649870705798849	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	222593625		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|11|18143633401136980304	SubstringSearch_correct	18143633401136980304	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	227106542		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|12|16856248441874989194	SubstringSearch_correct	16856248441874989194	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	227072792		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|13|1598574868652780333	SubstringSearch_correct	1598574868652780333	translation-failed	-	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas	236915708		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|14|6083540873046640352	SubstringSearch_correct	6083540873046640352	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	381452791		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|15|18314524564682266162	SubstringSearch_correct	18314524564682266162	translation-failed	-	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas	227144333		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|16|14859665284842375974	SubstringSearch_correct	14859665284842375974	translation-failed	-	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas	236119333		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|17|16859604855349517182	SubstringSearch_correct	16859604855349517182	alethe-reconstructed	-	-	585169000		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|18|12762377925475098934	SubstringSearch_correct	12762377925475098934	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	231498334		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|19|4492008039209323302	SubstringSearch_correct	4492008039209323302	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	226689792		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|20|16506446102682745284	SubstringSearch_correct	16506446102682745284	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	228959625		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|21|4056255141881592010	SubstringSearch_correct	4056255141881592010	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	230356333		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|22|18313498382677451279	SubstringSearch_correct	18313498382677451279	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	224096959		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|23|5902668824617064985	SubstringSearch_correct	5902668824617064985	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	225058500		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|24|18214680451177329292	SubstringSearch_correct	18214680451177329292	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	223247792		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|25|4587180649363296126	SubstringSearch_correct	4587180649363296126	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	226440750		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|26|1598574868652780333	SubstringSearch_correct	1598574868652780333	translation-failed	-	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas	239293250		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|27|7138545743425854663	SubstringSearch_correct	7138545743425854663	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	367957375		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|28|4681422515724674825	SubstringSearch_correct	4681422515724674825	translation-failed	-	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas	229031542		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|29|14859665284842375974	SubstringSearch_correct	14859665284842375974	translation-failed	-	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas	236297584		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|30|15621397202025328223	SubstringSearch_correct	15621397202025328223	alethe-reconstructed	-	-	564946708		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|31|12762377925475098934	SubstringSearch_correct	12762377925475098934	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	232366041		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|32|6640297411548399355	SubstringSearch_correct	6640297411548399355	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	223389958		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|33|12035722151280848636	SubstringSearch_correct	12035722151280848636	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	226967209		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|34|4056255141881592010	SubstringSearch_correct	4056255141881592010	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	228288208		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|35|18313498382677451279	SubstringSearch_correct	18313498382677451279	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	222163041		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|36|5902668824617064985	SubstringSearch_correct	5902668824617064985	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	225794583		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|37|11007454110672083430	SubstringSearch_correct	11007454110672083430	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	223898583		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|38|4587180649363296126	SubstringSearch_correct	4587180649363296126	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	228222167		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|39|4995387128902807839	SubstringSearch_correct	4995387128902807839	translation-failed	-	cannot translate fun a₁ => decide (f✝⁶ a₁), SMT-LIB does not support lambdas	244976708		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|40|7138545743425854663	SubstringSearch_correct	7138545743425854663	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	367497667		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|41|4681422515724674825	SubstringSearch_correct	4681422515724674825	translation-failed	-	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas	228168291		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|42|9257442500105266102	SubstringSearch_correct	9257442500105266102	translation-failed	-	cannot translate fun a₁ => decide (f✝⁶ a₁), SMT-LIB does not support lambdas	239282916		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|43|15621397202025328223	SubstringSearch_correct	15621397202025328223	unknown	-	unable to prove goal. Try providing more hints. Reason: TIMEOUT	5324801792		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|44|12762377925475098934	SubstringSearch_correct	12762377925475098934	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	241449167		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|45|14757371069243260877	SubstringSearch_correct	14757371069243260877	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	228930833		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|46|10355523733004803458	SubstringSearch_correct	10355523733004803458	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	228467250		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|47|802985032057732284	SubstringSearch_correct	802985032057732284	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	232373916		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|48|18313498382677451279	SubstringSearch_correct	18313498382677451279	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	226599209		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|49|5902668824617064985	SubstringSearch_correct	5902668824617064985	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	229118916		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|50|6469834297383728061	SubstringSearch_correct	6469834297383728061	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	223974916		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|51|529893491977289627	SubstringSearch_correct	529893491977289627	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	223608667		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|52|7110337632391962636	SubstringSearch_correct	7110337632391962636	translation-failed	-	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas	227605959		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|53|7138545743425854663	SubstringSearch_correct	7138545743425854663	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	367479458		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|54|12240785285064077065	SubstringSearch_correct	12240785285064077065	translation-failed	-	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas	223140708		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|55|8901178409804151575	SubstringSearch_correct	8901178409804151575	translation-failed	-	cannot translate fun a₁ => decide (f✝⁵ a₁), SMT-LIB does not support lambdas	229070584		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|56|8890844706151052704	SubstringSearch_correct	8890844706151052704	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	392320708		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|57|8801584380004644131	SubstringSearch_correct	8801584380004644131	translation-failed	-	cannot translate fun a₁ => decide (f✝¹ a₁), SMT-LIB does not support lambdas	227079875		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|58|6640297411548399355	SubstringSearch_correct	6640297411548399355	alethe-reconstructed	-	-	34496459		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|59|6640297411548399355	SubstringSearch_correct	6640297411548399355	alethe-reconstructed	-	-	35329583		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|60|17707774690084689736	SubstringSearch_correct	17707774690084689736	alethe-reconstructed	-	-	34259917		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|61|6640297411548399355	SubstringSearch_correct	6640297411548399355	alethe-reconstructed	-	-	35262209		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|62|4974301628068507188	SubstringSearch_correct	4974301628068507188	alethe-reconstructed	-	-	39029041		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|63|6640297411548399355	SubstringSearch_correct	6640297411548399355	alethe-reconstructed	-	-	36083375		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|64|6640297411548399355	SubstringSearch_correct	6640297411548399355	alethe-reconstructed	-	-	35827791		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|65|577474350103851300	SubstringSearch_correct	577474350103851300	alethe-reconstructed	-	-	123470416		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|66|12819951545662893426	SubstringSearch_correct	12819951545662893426	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	207696791		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|67|16471188947338966842	SubstringSearch_correct	16471188947338966842	alethe-reconstructed	-	-	88974333		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|68|9975741777879173881	SubstringSearch_correct	9975741777879173881	alethe-reconstructed	-	-	91784250		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|69|88332911118243609	SubstringSearch_correct	88332911118243609	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	232359500		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|70|4316548289593557355	SubstringSearch_correct	4316548289593557355	translation-failed	-	cannot translate fun a₁ => decide (f✝¹⁵ a₁), SMT-LIB does not support lambdas	286325500		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|71|1800578837535211584	SubstringSearch_correct	1800578837535211584	translation-failed	-	cannot translate fun a₁ => decide (f✝¹⁷ a₁), SMT-LIB does not support lambdas	300670959		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|72|10230862668540398183	SubstringSearch_correct	10230862668540398183	translation-failed	-	cannot translate fun a₁ => decide (f✝¹⁵ a₁), SMT-LIB does not support lambdas	292839000		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|73|16982021311738439252	SubstringSearch_correct	16982021311738439252	translation-failed	-	cannot translate fun a₁ => decide (f✝¹⁰ a₁), SMT-LIB does not support lambdas	295559083		
+velvet	smt-only	1	Velvet/Examples/SubstringSearch.lean|74|2906785913913327379	SubstringSearch_correct	2906785913913327379	translation-failed	-	cannot translate fun a₁ => decide (f✝⁹ a₁), SMT-LIB does not support lambdas	294405750		
+velvet	smt-only	1	Velvet/Examples/SumOfDigits.lean|1|4887343456502517186	SumOfDigits_correct	4887343456502517186	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	169033625		
+velvet	smt-only	1	Velvet/Examples/SumOfDigits.lean|2|5431800701729144158	SumOfDigits_correct	5431800701729144158	reconstruction-failed	rule-gap	3 replayed step(s) left as open goals	151889041		
+velvet	smt-only	1	Velvet/Examples/SumOfDigits.lean|3|3012699503639543524	SumOfDigits_correct	3012699503639543524	alethe-reconstructed	-	-	65228292		
+velvet	smt-only	1	Velvet/Examples/SumOfDigits.lean|4|12835711844832851839	SumOfDigits_correct	12835711844832851839	alethe-reconstructed	-	-	61778708		
+velvet	smt-only	1	Velvet/Examples/SumOfDigits.lean|5|7475080825861972690	SumOfDigits_correct	7475080825861972690	alethe-reconstructed	-	-	71519500		
+velvet	smt-only	1	Velvet/Examples/SumOfDigits.lean|6|15970435702129902192	SumOfDigits_correct	15970435702129902192	alethe-reconstructed	-	-	32130833		
+velvet	smt-only	1	Velvet/Examples/SumOfDigits.lean|7|6640297411548399355	SumOfDigits_correct	6640297411548399355	alethe-reconstructed	-	-	19040500		
+velvet	smt-only	1	Velvet/Examples/SumOfDigits.lean|8|3871074223281074707	SumOfDigits_correct	3871074223281074707	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	71808792		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|1|4791612905070682933	test1_correct	4791612905070682933	alethe-reconstructed	-	-	114431250		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|2|4635955882467741603	test1_correct	4635955882467741603	alethe-reconstructed	-	-	56414750		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|3|4791612905070682933	test1_correct	4791612905070682933	alethe-reconstructed	-	-	59190959		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|4|8037191589732674397	test1_correct	8037191589732674397	alethe-reconstructed	-	-	36627125		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|5|4982008840348523404	test1_correct	4982008840348523404	alethe-reconstructed	-	-	48927209		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|6|14929476196725773389	test1_correct	14929476196725773389	alethe-reconstructed	-	-	29552333		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|7|2311107858308393802	test1_correct	2311107858308393802	sat	-	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).	64633250		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|8|8037191589732674397	test2_correct	8037191589732674397	alethe-reconstructed	-	-	54890958		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|9|4791612905070682933	test2_correct	4791612905070682933	alethe-reconstructed	-	-	72633250		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|10|8037191589732674397	test2_correct	8037191589732674397	alethe-reconstructed	-	-	36714334		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|11|817407402121334710	test2_correct	817407402121334710	alethe-reconstructed	-	-	43405167		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|12|14929476196725773389	test2_correct	14929476196725773389	alethe-reconstructed	-	-	28217750		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|13|2311107858308393802	test2_correct	2311107858308393802	sat	-	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).	75025541		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|14|8140981983620881888	sum_even_correct	8140981983620881888	alethe-reconstructed	-	-	252730250		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|15|13972406881857011341	sum_even_correct	13972406881857011341	translation-failed	-	cannot translate fun eb!_0 => decide (↑eb!_0 % 2 = 0), SMT-LIB does not support lambdas	500060750		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|16|8140981983620881888	sum_even_correct	8140981983620881888	alethe-reconstructed	-	-	252371292		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|17|2763434902891560151	sum_even_correct	2763434902891560151	translation-failed	-	cannot translate fun eb!_0 => decide (↑eb!_0 % 2 = 0), SMT-LIB does not support lambdas	600729667		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|18|9560710549938607088	sum_even_correct	9560710549938607088	alethe-reconstructed	-	-	180527458		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|19|4016036276427276962	sum_even_correct	4016036276427276962	translation-failed	-	cannot translate fun eb!_0 => decide (↑eb!_0 % 2 = 0), SMT-LIB does not support lambdas	257359125		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|20|12910903814107581038	sum_even_correct	12910903814107581038	translation-failed	-	cannot translate fun eb!_0 => decide (↑eb!_0 % 2 = 0), SMT-LIB does not support lambdas	283014958		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|21|8811351339800985865	sum_even_correct	8811351339800985865	alethe-reconstructed	-	-	27816250		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|22|8466542615974342579	sum_even_correct	8466542615974342579	translation-failed	-	cannot translate fun eb!_0 => decide (↑eb!_0 % 2 = 0), SMT-LIB does not support lambdas	151101791		
+velvet	smt-only	1	Velvet/Examples/TestLoopControl.lean|23|10603200310498800727	sum_even_correct	10603200310498800727	translation-failed	-	cannot translate fun eb!_0 => decide (↑eb!_0 % 2 = 0), SMT-LIB does not support lambdas	412310750		
+velvet	smt-only	1	Velvet/Examples/TestMatch.lean|1|7475080825861972690	test1_correct	7475080825861972690	alethe-reconstructed	-	-	67656375		
+velvet	smt-only	1	Velvet/Examples/TestMatch.lean|2|12712313322610564863	test1_correct	12712313322610564863	alethe-reconstructed	-	-	30403292		
+velvet	smt-only	1	Velvet/Examples/TestMatch.lean|3|10112861571242978892	test2_correct	10112861571242978892	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	38399042		
+velvet	smt-only	1	Velvet/Examples/TestMatch.lean|4|9817662802794804509	test2_correct	9817662802794804509	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	50687375		
+velvet	smt-only	1	Velvet/Examples/TestMatch.lean|5|18226621409008708882	test2_correct	18226621409008708882	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	55260667		
+velvet	smt-only	1	Velvet/Examples/TestMatch.lean|6|12313593517213863317	test3_correct	12313593517213863317	alethe-reconstructed	-	-	33495917		
+velvet	smt-only	1	Velvet/Examples/TestMatch.lean|7|5915416142655103160	test3_correct	5915416142655103160	alethe-reconstructed	-	-	72293709		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|1|1993702872115081742	insertionSort_part_correct	1993702872115081742	alethe-reconstructed	-	-	169812375		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|2|8793228589483947084	insertionSort_part_correct	8793228589483947084	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	1224878792		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|3|1066791641437412485	insertionSort_part_correct	1066791641437412485	alethe-reconstructed	-	-	267608209		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|4|8472930623785656869	insertionSort_part_correct	8472930623785656869	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	1908430541		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|5|2816846931760221370	insertionSort_part_correct	2816846931760221370	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	1031756416		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|6|5794584936190196715	insertionSort_part_correct	5794584936190196715	alethe-reconstructed	-	-	245416291		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|7|1066791641437412485	insertionSort_part_correct	1066791641437412485	alethe-reconstructed	-	-	271271458		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|8|14825588553610653054	insertionSort_part_correct	14825588553610653054	alethe-reconstructed	-	-	378760292		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|9|15257391885382474665	insertionSort_part_correct	15257391885382474665	alethe-reconstructed	-	-	246963750		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|10|5794584936190196715	insertionSort_part_correct	5794584936190196715	alethe-reconstructed	-	-	200878625		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|11|12031026870814429192	insertionSort_part_correct	12031026870814429192	alethe-reconstructed	-	-	206264792		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|12|16465886849738339639	insertionSort_part_correct	16465886849738339639	alethe-reconstructed	-	-	292944250		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|13|15257391885382474665	insertionSort_part_correct	15257391885382474665	alethe-reconstructed	-	-	200845000		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|14|5918835836158453730	insertionSort_part_correct	5918835836158453730	alethe-reconstructed	-	-	201924958		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|15|5964899400721509044	insertionSort_part_correct	5964899400721509044	alethe-reconstructed	-	-	138133667		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|16|12155028420956038391	insertionSort_part_correct	12155028420956038391	alethe-reconstructed	-	-	138717250		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|17|14852526092468225565	insertionSort_part_correct	14852526092468225565	alethe-reconstructed	-	-	238385000		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|18|17117294935281830098	insertionSort_part_correct	17117294935281830098	alethe-reconstructed	-	-	138340875		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|19|5288706169439222084	insertionSort_part_correct	5288706169439222084	unknown	-	unable to prove goal. Try providing more hints. Reason: TIMEOUT	5232304750		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|20|4477598582358312981	insertionSort_part_correct	4477598582358312981	unknown	-	unable to prove goal. Try providing more hints. Reason: TIMEOUT	5221205375		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|21|7903702650473013145	insertionSort_part_correct	7903702650473013145	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	1159259500		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|22|8905801618567038615	insertionSort_part_correct	8905801618567038615	unknown	-	unable to prove goal. Try providing more hints. Reason: TIMEOUT	5221072834		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|23|5964899400721509044	insertionSort_part_correct	5964899400721509044	alethe-reconstructed	-	-	130237125		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|24|16800718018059787263	insertionSort_part_correct	16800718018059787263	alethe-reconstructed	-	-	134434125		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|25|11248877774576345437	insertionSort_part_correct	11248877774576345437	alethe-reconstructed	-	-	217811708		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|26|17117294935281830098	insertionSort_part_correct	17117294935281830098	alethe-reconstructed	-	-	132466292		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|27|6709257883257101731	insertionSort_part_correct	6709257883257101731	alethe-reconstructed	-	-	134995334		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|28|16576486626369642801	insertionSort_part_correct	16576486626369642801	alethe-reconstructed	-	-	42311000		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|29|11235314628722112900	insertionSort_part_correct	11235314628722112900	alethe-reconstructed	-	-	101343375		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|30|8905801618567038615	insertionSort_part_correct	8905801618567038615	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	216668625		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|31|18214290959922115111	insertionSort_part_correct	18214290959922115111	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	516956750		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|32|8793228589483947084	insertionSort_termination_correct	8793228589483947084	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	194528916		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|33|11568103068982921353	insertionSort_termination_correct	11568103068982921353	alethe-reconstructed	-	-	133381833		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|34|5794584936190196715	insertionSort_termination_correct	5794584936190196715	alethe-reconstructed	-	-	113825417		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|35|11568103068982921353	insertionSort_termination_correct	11568103068982921353	alethe-reconstructed	-	-	134124083		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|36|5794584936190196715	insertionSort_termination_correct	5794584936190196715	alethe-reconstructed	-	-	67737042		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|37|5918835836158453730	insertionSort_termination_correct	5918835836158453730	alethe-reconstructed	-	-	65848459		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|38|5964899400721509044	insertionSort_termination_correct	5964899400721509044	alethe-reconstructed	-	-	53306000		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|39|5288706169439222084	insertionSort_termination_correct	5288706169439222084	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	88839500		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|40|4477598582358312981	insertionSort_termination_correct	4477598582358312981	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	97925667		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|41|18088860687919872176	insertionSort_termination_correct	18088860687919872176	unknown	-	unable to prove goal. Try providing more hints. Reason: INCOMPLETE	128867250		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|42|5964899400721509044	insertionSort_termination_correct	5964899400721509044	alethe-reconstructed	-	-	52862167		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|43|16800718018059787263	insertionSort_termination_correct	16800718018059787263	alethe-reconstructed	-	-	52567208		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|44|6709257883257101731	insertionSort_termination_correct	6709257883257101731	alethe-reconstructed	-	-	52147750		
+velvet	smt-only	1	Velvet/Examples/Total_Partial_example.lean|45|16576486626369642801	insertionSort_termination_correct	16576486626369642801	alethe-reconstructed	-	-	44711250		

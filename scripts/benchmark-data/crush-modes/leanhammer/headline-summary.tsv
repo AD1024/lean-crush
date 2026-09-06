@@ -1,0 +1,2 @@
+suite	backend	lane	total_vcs	attempted_vcs	solved_vcs	failed_vcs	missing_vcs	pass_pct	total_ms	mean_ms	min_ms	max_ms
+leanhammer	crush	crush-verify	20	20	19	1	0	95.0	11570.000	578.500	3.000	5416.000

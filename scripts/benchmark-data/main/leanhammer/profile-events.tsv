@@ -19,3 +19,23 @@ leanhammer	crush-verify	1	17_empty	_example	12691728585980739137	pre-reconstruct
 leanhammer	crush-verify	1	18_church_tower	_example	6721340688294025215	unknown	not-attempted	solver exited without a verdict	5066158790	collect=570958,pre-reconstruct=1782291,normalize=346584,monomorphize=116375,instantiate=2105958,translate=11809708,solve=5049426916	
 leanhammer	crush-verify	1	19_polymorphic	_example	11123243248953317070	verified	not-requested	solver returned unsat; closed under the trust policy	73601374	collect=568625,pre-reconstruct=1652875,normalize=214125,monomorphize=3054208,instantiate=1937916,translate=8899208,solve=57274417	
 leanhammer	crush-verify	1	20_irrelevant_quantifier	_example	4448659579059324382	verified	not-requested	solver returned unsat; closed under the trust policy	64923958	collect=704542,pre-reconstruct=1697375,normalize=1422458,monomorphize=106916,instantiate=236959,translate=8135375,solve=52620333	
+leanhammer	smt-only	1	01_prop_chain	_example	11123243248953317070	alethe-reconstructed	-	-	121881083		
+leanhammer	smt-only	1	02_congruence	_example	279573633531776402	alethe-reconstructed	-	-	75812375		
+leanhammer	smt-only	1	03_quantified	_example	14959605540875900206	alethe-reconstructed	-	-	77649250		
+leanhammer	smt-only	1	04_existential	_example	5809042887845469087	alethe-reconstructed	-	-	83519125		
+leanhammer	smt-only	1	05_skolemization	_example	8038905789831935057	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	59484500		
+leanhammer	smt-only	1	06_funext	_example	15429862447878520333	alethe-reconstructed	-	-	68969167		
+leanhammer	smt-only	1	07_higher_order	_example	18230155485502954271	alethe-reconstructed	-	-	81292417		
+leanhammer	smt-only	1	08_int_linear	_example	17180512830172195838	alethe-reconstructed	-	-	130143417		
+leanhammer	smt-only	1	09_nat_sub	_example	12946856521511558778	alethe-reconstructed	-	-	112729167		
+leanhammer	smt-only	1	10_option_injective	_example	12691728585980739137	sat	-	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).	65004459		
+leanhammer	smt-only	1	11_enum_pigeonhole	_example	4067093190232795073	sat	-	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).	67453250		
+leanhammer	smt-only	1	12_list_assoc	_example	10221796591054424584	alethe-reconstructed	-	-	99014541		
+leanhammer	smt-only	1	13_composition	_example	14566638326826310022	translation-failed	-	cannot translate fun eb!_0 => e!_1✝ (e!_2✝ (e!_3✝ eb!_0)), SMT-LIB does not support lambdas	111508791		
+leanhammer	smt-only	1	14_bool_mixed	_example	10856869809457570186	alethe-reconstructed	-	-	144874709		
+leanhammer	smt-only	1	15_bitvec	_example	13385681149719954638	translation-failed	-	bitvector type   BitVec n has variable width	64593666		
+leanhammer	smt-only	1	16_string	_example	8850707782385884523	sat	-	unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).	100157583		
+leanhammer	smt-only	1	17_empty	_example	12691728585980739137	translation-failed	-	cvc5.Error.error   "invalid datatype declaration in 'dtypedecls' at index 0, expected a datatype declaration with at least one constructor"	50423875		
+leanhammer	smt-only	1	18_church_tower	_example	6721340688294025215	translation-failed	-	cvc5.Error.error "Symbol '->' not declared as a type"	132894833		
+leanhammer	smt-only	1	19_polymorphic	_example	11123243248953317070	alethe-reconstructed	-	-	114815958		
+leanhammer	smt-only	1	20_irrelevant_quantifier	_example	4448659579059324382	alethe-reconstructed	-	-	121089333		

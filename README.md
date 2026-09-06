@@ -432,6 +432,20 @@ For example, run trusted Crush across all four case studies:
 bash benchmark.sh --case_study all --with crush
 ```
 
+[lean-smt](https://github.com/ufmg-smite/lean-smt) is a fifth backend. Only
+the pinned LeanHammer tree requires it already; for the other corpora the
+harness applies a recorded patch from
+[`scripts/patches`](scripts/patches) that adds the dependency to the pinned
+revision, then verifies that resolving it moved nothing else:
+
+```sh
+bash benchmark.sh --case_study all --with lean-smt \
+  --smt_trees BenchmarkResults/trees
+```
+
+A lean-smt tree carries its corpus's Mathlib build plus lean-smt's, so
+`--smt_trees` names a directory to keep them in between runs.
+
 Run the trusted verification, Core reconstruction, Alethe reconstruction, and
 portfolio comparison together with:
 
@@ -439,9 +453,17 @@ portfolio comparison together with:
 bash benchmark-crush-modes.sh --case_study all
 ```
 
-Both entry points fetch cached Lake artifacts when available and write their
-normalized reports and figures under `BenchmarkResults/`. Regenerate only the
-figures and tables from an existing result directory with:
+Compare checked proof reconstruction between lean-smt, Crush's strict Alethe
+replay, and Crush's reconstruction portfolio with:
+
+```sh
+bash benchmark-reconstruction.sh --case_study all \
+  --smt_trees BenchmarkResults/trees
+```
+
+All three entry points fetch cached Lake artifacts when available and write
+their normalized reports and figures under `BenchmarkResults/`. Regenerate
+only the figures and tables from an existing result directory with:
 
 ```sh
 bash benchmark.sh \
@@ -449,6 +471,9 @@ bash benchmark.sh \
 
 bash benchmark-crush-modes.sh \
   --plot_only BenchmarkResults/crush-modes-<timestamp>
+
+bash benchmark-reconstruction.sh \
+  --plot_only BenchmarkResults/reconstruction-<timestamp>
 ```
 
 Benchmark cases are checkpointed after all of their result and profiling rows
@@ -464,14 +489,34 @@ bash benchmark.sh \
 bash benchmark-crush-modes.sh \
   --case_study all \
   --resume BenchmarkResults/crush-modes-<timestamp>
+
+bash benchmark-reconstruction.sh \
+  --case_study LeanHammer \
+  --resume BenchmarkResults/reconstruction-<timestamp>
 ```
 
 Completed cases are skipped; interrupted and truncated cases are replaced and
 rerun.
 
+Plot closed and reconstructed VCs against time with matplotlib, from any
+completed result directory:
+
+```sh
+python3 -m pip install matplotlib
+
+python3 scripts/plot-time-coverage.py \
+  BenchmarkResults/reproduction-<timestamp>-<backend>/leanhammer \
+  --out-dir BenchmarkResults/figures
+```
+
+Every other script uses only the Python standard library, and no harness calls
+this one.
+
 The harnesses clone and build pinned source revisions, check them out in
 temporary worktrees, and overlay the local lean-crush build. Set
-`Z3_BIN`/`CVC5_BIN` when the solvers are not on `PATH`. Exact settings and
+`Z3_BIN`/`CVC5_BIN` when the solvers are not on `PATH`; the lean-smt lane is
+the exception, since it drives cvc5 through the in-process bindings its own
+Lake package links. Exact settings and
 output definitions are in the [benchmark script guide](scripts/README.md). See
 [`BENCHMARKS.md`](BENCHMARKS.md) for the latest recorded comparison.
 The user manual also presents the

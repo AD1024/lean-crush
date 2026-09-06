@@ -79,3 +79,23 @@ leanhammer	crush-verify	1	17_empty	pass	-	2	-
 leanhammer	crush-verify	1	18_church_tower	fail	unknown	5070	-
 leanhammer	crush-verify	1	19_polymorphic	pass	-	75	-
 leanhammer	crush-verify	1	20_irrelevant_quantifier	pass	-	67	-
+leanhammer	smt-only	1	01_prop_chain	pass	-	121	-
+leanhammer	smt-only	1	02_congruence	pass	-	75	-
+leanhammer	smt-only	1	03_quantified	pass	-	77	-
+leanhammer	smt-only	1	04_existential	pass	-	83	-
+leanhammer	smt-only	1	05_skolemization	fail	translation	59	SMT_PROFILE 1 _example 8038905789831935057 translation-failed - cvc5.Error.error "Symbol '->' not declared as a type" 59484500  
+leanhammer	smt-only	1	06_funext	pass	-	68	-
+leanhammer	smt-only	1	07_higher_order	pass	-	81	-
+leanhammer	smt-only	1	08_int_linear	pass	-	130	-
+leanhammer	smt-only	1	09_nat_sub	pass	-	112	-
+leanhammer	smt-only	1	10_option_injective	fail	sat	65	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/leanhammer-lean-smt-20260903/leanhammer/generated/smt-only/10_option_injective.lean:109:2: error: unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).
+leanhammer	smt-only	1	11_enum_pigeonhole	fail	sat	67	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/leanhammer-lean-smt-20260903/leanhammer/generated/smt-only/11_enum_pigeonhole.lean:114:2: error: unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).
+leanhammer	smt-only	1	12_list_assoc	pass	-	99	-
+leanhammer	smt-only	1	13_composition	fail	translation	111	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/leanhammer-lean-smt-20260903/leanhammer/generated/smt-only/13_composition.lean:110:2: error: cannot translate fun eb!_0 => e!_1✝ (e!_2✝ (e!_3✝ eb!_0)), SMT-LIB does not support lambdas
+leanhammer	smt-only	1	14_bool_mixed	pass	-	144	-
+leanhammer	smt-only	1	15_bitvec	fail	translation	64	SMT_PROFILE 1 _example 13385681149719954638 translation-failed - bitvector type   BitVec n has variable width 64593666  
+leanhammer	smt-only	1	16_string	fail	sat	100	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/leanhammer-lean-smt-20260903/leanhammer/generated/smt-only/16_string.lean:108:2: error: unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).
+leanhammer	smt-only	1	17_empty	fail	translation	50	SMT_PROFILE 1 _example 12691728585980739137 translation-failed - cvc5.Error.error   "invalid datatype declaration in 'dtypedecls' at index 0, expected a datatype declaration with at least one constructor" 50423875  
+leanhammer	smt-only	1	18_church_tower	fail	translation	132	SMT_PROFILE 1 _example 6721340688294025215 translation-failed - cvc5.Error.error "Symbol '->' not declared as a type" 132894833  
+leanhammer	smt-only	1	19_polymorphic	pass	-	114	-
+leanhammer	smt-only	1	20_irrelevant_quantifier	pass	-	121	-

@@ -11,7 +11,32 @@ Usage:
     --with <crush|auto|duper|grind>
   bash benchmark.sh --case_study <all|LeanHammer|Velvet|Cashmere|PLean> \
     --with <crush|auto|duper|grind> --resume <result-directory>
-  bash benchmark.sh --plot_only <result-directory>
+  bash benchmark.sh --case_study <all|LeanHammer|Velvet|Cashmere|PLean> \
+    --with lean-smt [--smt_trees <directory>]
+  bash benchmark.sh --case_study <LeanHammer|Velvet|Cashmere|PLean> \
+    --with <backend> --cases "<file> <file> ..."
+  bash benchmark.sh --plot_only <result-directory> \
+    [--exclude_suite <corpus>]
+
+--with lean-smt measures ufmg-smite/lean-smt. Only the pinned LeanHammer tree
+requires it already; for Velvet, Cashmere, and PLean the harness applies a
+recorded patch from scripts/patches that adds the dependency (and, for PLean,
+substitutes the backend inside its tactic module), then resolves it with
+`lake update Smt` and verifies that no revision the corpus already pinned
+moved. Each lean-smt tree carries its corpus's Mathlib build plus lean-smt's,
+so --smt_trees names a directory to keep them in between runs; without it they
+are temporary checkouts, rebuilt from the pinned revision every run.
+
+--exclude_suite omits a corpus from every table and figure; repeat it to omit
+several. The published figures pass --exclude_suite loom, whose four VCs are
+too few for a coverage bar or a curve to say anything. The recorded TSVs always
+keep every corpus.
+
+--cases restricts the run to the named case-study files, relative to the corpus
+root (for example: --cases "Examples/PingPongTrivial.lean"). It needs a single
+--case_study, since the file names are per corpus. Use it to validate a lane
+before committing to a full run; the result is a subset, not the published
+measurement.
 EOF
 }
 
@@ -25,6 +50,9 @@ case_study=""
 backend=""
 plot_only=""
 resume_dir=""
+smt_trees=""
+cases=""
+exclude_suites=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -52,6 +80,23 @@ while [[ $# -gt 0 ]]; do
       resume_dir="$2"
       shift 2
       ;;
+    --smt_trees)
+      [[ $# -ge 2 ]] || die "--smt_trees requires a directory"
+      [[ -z "$smt_trees" ]] || die "--smt_trees may only be specified once"
+      smt_trees="$2"
+      shift 2
+      ;;
+    --exclude_suite)
+      [[ $# -ge 2 ]] || die "--exclude_suite requires a corpus name"
+      exclude_suites+=(--exclude-suite "$2")
+      shift 2
+      ;;
+    --cases)
+      [[ $# -ge 2 ]] || die "--cases requires a space-separated list of files"
+      [[ -z "$cases" ]] || die "--cases may only be specified once"
+      cases="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -67,14 +112,30 @@ plot_results() {
   python3 "$ROOT/scripts/plot-benchmarks.py" \
     "${result_dirs[@]}" \
     --out-dir "$output_root/artifacts" \
+    ${exclude_suites[@]+"${exclude_suites[@]}"} \
     --only tables \
     --only coverage \
     --only outcomes
+  # The time-versus-coverage figure needs matplotlib, which the other
+  # renderers deliberately do not require. Skip it rather than failing the
+  # whole plot step.
+  if python3 -c "import matplotlib" >/dev/null 2>&1; then
+    python3 "$ROOT/scripts/plot-time-coverage.py" \
+      "${result_dirs[@]}" \
+      --out-dir "$output_root/artifacts" \
+      ${exclude_suites[@]+"${exclude_suites[@]}"} \
+      --only main
+  else
+    printf 'warning: matplotlib is unavailable; skipping the time figure\n' >&2
+    printf 'install it with: python3 -m pip install matplotlib\n' >&2
+  fi
 }
 
 if [[ -n "$plot_only" ]]; then
   [[ -z "$case_study" && -z "$backend" && -z "$resume_dir" ]] ||
     die "--plot_only cannot be combined with --case_study, --with, or --resume"
+  [[ -z "$smt_trees" ]] || die "--plot_only cannot be combined with --smt_trees"
+  [[ -z "$cases" ]] || die "--plot_only cannot be combined with --cases"
   [[ -d "$plot_only" ]] || die "result directory not found: $plot_only"
   plot_only="$(cd "$plot_only" && pwd)"
   result_dirs=()
@@ -108,14 +169,29 @@ run_auto=false
 run_duper=false
 run_crush=false
 run_grind=false
+run_smt=false
 case "$backend" in
   auto) run_auto=true; leanhammer_profile="auto-duper" ;;
   duper) run_duper=true; leanhammer_profile="duper-only" ;;
   crush) run_crush=true; leanhammer_profile="crush-verify" ;;
   grind) run_grind=true; leanhammer_profile="grind-only" ;;
+  lean-smt|smt)
+    backend="lean-smt"
+    run_smt=true
+    leanhammer_profile="smt-only"
+    ;;
   "") die "--with is required" ;;
   *) die "unknown backend: $backend" ;;
 esac
+if [[ -n "$smt_trees" ]]; then
+  [[ "$backend" == "lean-smt" ]] ||
+    die "--smt_trees only applies to --with lean-smt"
+  mkdir -p "$smt_trees"
+  smt_trees="$(cd "$smt_trees" && pwd)"
+fi
+if [[ -n "$cases" && "$case_study" == "all" ]]; then
+  die "--cases needs a single --case_study; the file names are per corpus"
+fi
 
 resume=false
 if [[ -n "$resume_dir" ]]; then
@@ -132,9 +208,12 @@ result_dirs=()
 run_leanhammer() {
   local out="$result_root/leanhammer"
   PROFILES="$leanhammer_profile" \
+  HAMMER_CASES="$cases" \
   REPEATS=1 \
   SOLVER=cvc5 \
   TIMEOUT=5 \
+  SMT_TIMEOUT=5 \
+  SMT_MONO=true \
   DUPER_TIMEOUT=5 \
   MAX_HEARTBEATS=1000000 \
   MAX_RECURSION_DEPTH=1000000 \
@@ -151,14 +230,30 @@ run_corpora() {
   local run_velvet="$2"
   local out_name="$3"
   local out="$result_root/$out_name"
+  # --cases names files in one corpus, and it already required a single
+  # --case_study, so at most one of these is non-empty.
+  local cashmere_cases=""
+  local velvet_cases=""
+  if [[ "$run_cashmere" == "true" ]]; then
+    cashmere_cases="$cases"
+  fi
+  if [[ "$run_velvet" == "true" ]]; then
+    velvet_cases="$cases"
+  fi
   RUN_LEANHAMMER=false \
   RUN_LOOM=false \
   RUN_CASHMERE="$run_cashmere" \
   RUN_VELVET="$run_velvet" \
+  CASHMERE_CASES="$cashmere_cases" \
+  VELVET_CASES="$velvet_cases" \
   RUN_AUTO="$run_auto" \
   RUN_DUPER="$run_duper" \
   RUN_CRUSH="$run_crush" \
   RUN_GRIND="$run_grind" \
+  RUN_SMT="$run_smt" \
+  SMT_TREE_ROOT="$smt_trees" \
+  SMT_TIMEOUT=5 \
+  SMT_MONO=true \
   REPEATS=1 \
   SOLVER=cvc5 \
   TIMEOUT=5 \
@@ -176,10 +271,15 @@ run_corpora() {
 
 run_plean() {
   local out="$result_root/plean"
+  PLEAN_CASES="$cases" \
   RUN_AUTO="$run_auto" \
   RUN_DUPER="$run_duper" \
   RUN_CRUSH="$run_crush" \
   RUN_GRIND="$run_grind" \
+  RUN_SMT="$run_smt" \
+  SMT_TREE_ROOT="$smt_trees" \
+  SMT_TIMEOUT=5 \
+  SMT_MONO=true \
   PREPARE_TREES=true \
   REPEATS=1 \
   SOLVER=cvc5 \

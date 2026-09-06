@@ -1,7 +1,5 @@
-suite	lane	attempted_vcs	solved_vcs	failed_vcs	pass_pct	total_ms	mean_ms	min_ms	max_ms
-leanhammer	crush-alethe	20	13	7	65.0	14063.000	703.150	46.000	5058.000
-leanhammer	crush-core	20	19	1	95.0	6056.000	302.800	3.000	5089.000
-leanhammer	crush-only	20	20	0	100.0	863.000	43.150	6.000	138.000
-leanhammer	crush-portfolio	20	19	1	95.0	9833.000	491.650	3.000	5052.000
-leanhammer	crush-verify	20	19	1	95.0	6113.000	305.650	4.000	5045.000
-leanhammer	grind-only	20	16	4	80.0	67.000	3.350	1.000	10.000
+suite	lane	total_vcs	attempted_vcs	solved_vcs	failed_vcs	missing_vcs	pass_pct	total_ms	mean_ms	min_ms	max_ms
+leanhammer	crush-alethe	20	20	13	7	0	65.0	14951.000	747.550	376.000	5392.000
+leanhammer	crush-core	20	20	19	1	0	95.0	9870.000	493.500	3.000	5393.000
+leanhammer	crush-portfolio	20	20	19	1	0	95.0	11470.000	573.500	3.000	5424.000
+leanhammer	crush-verify	20	20	19	1	0	95.0	11570.000	578.500	3.000	5416.000
