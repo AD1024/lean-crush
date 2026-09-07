@@ -234,7 +234,71 @@ crush_map Nat.add => "+"
 crush_map_sort Nat => "Int"
 ```
 
-For full control, register a metaprogram that runs at elaboration time:
+For pattern-based rules, use the same registration style as proof replay:
+
+```lean
+register_lowering term <<
+  (Int.sign (term x)) =>
+    (smt| (ite (> $x 0) 1 (ite (= $x 0) 0 (- 1))))
+>>
+```
+
+The three forms share one pattern language and the existing attribute registries:
+
+| Command | Matches | Registry | RHS value |
+|---|---|---|---|
+| `register_lowering term` | The Lean expression | `crush_lower` | `SMT.Term` |
+| `register_lowering result-type` | Its complete inferred type | `crush_lower_result` | `SMT.Term` |
+| `register_lowering sort` | The Lean type being translated | `crush_translate_sort` | `SMT.SSort` |
+
+A bare argument `x` binds the original `Lean.Expr`. `(term x)` calls
+`ctx.emitTerm` and binds an `SMT.Term`; `(sort α)` calls `ctx.emitSort` and
+binds an `SMT.SSort`. `_` ignores one argument, and `(Constant patterns...)`
+matches a nested constant application; `(Int)` therefore matches the exact
+constant `Int`. `(term x : Int)` additionally matches the captured expression's
+inferred type against the structural pattern `Int`.
+
+Patterns match exact elaborated arities, including implicit type, instance, and
+proof arguments. They do not insert implicit arguments or unfold definitions.
+Capture names must be distinct; `ctx` is reserved for the original
+`TranslationCtx`. Result-type patterns inspect the complete inferred type,
+without peeling dependent function binders. Use an attribute handler for more
+complex matching. Each registration contains one pattern; multiple registrations
+can share a head. Add `high`, `low`, or a numeric priority after the command kind.
+General `crush_translate` handlers still run before these term lowerings.
+
+The RHS may also be a pure helper call, a `TranslateM` computation, or a helper
+returning `TranslateM (Option ...)` to decline with `none`:
+
+```lean
+register_lowering term <<
+  (Int.sign x) => do
+    let sx ← ctx.emitTerm x
+    return (smt| (ite (> $sx 0) 1 (ite (= $sx 0) 0 (- 1))))
+>>
+```
+
+Sort quotations use the expected `SMT.SSort` type, including inside helper
+functions. For example, a parameterized map representation can use:
+
+```lean
+structure TotalMap (key value : Type) where
+  get : key → value
+
+register_lowering sort <<
+  (TotalMap (sort key) (sort value)) => (smt| (Array $key $value))
+>>
+```
+
+Result-type rules use a type pattern on the left and produce a *term* on the
+right. The RHS can inspect `ctx.fn` and `ctx.args` to distinguish the original
+expressions sharing that type. As with attribute handlers, operation lowerings
+must agree with the chosen sort representation and check overloaded dictionaries
+before assigning built-in semantics. Registrations supply translations, not
+proofs of their correctness. The `<< ... >>` fence reserves `>>`; put helpers
+using that token in named definitions.
+
+The original attributes remain available for full control:
 
 ```lean
 @[crush_lower Int.sign]

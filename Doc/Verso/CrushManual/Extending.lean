@@ -40,14 +40,15 @@ Choose the least powerful mechanism that represents the missing semantics:
 2. Use `crush_map` when a Lean constant is exactly an existing SMT operator, or
    `crush_map_sort` when a monomorphic Lean type is exactly an existing nullary
    SMT sort.
-3. Use `@[crush_lower f]` when one stable application head needs a
-   shape-sensitive encoding.
-4. Use `@[crush_lower_result T]` when applications have unstable heads but a
-   stable result-family head, including dependent function results.
+3. Use `register_lowering term` when one stable application head needs a
+   pattern-based encoding, or `@[crush_lower f]` for a full handler.
+4. Use `register_lowering result-type` when applications have unstable heads
+   but a stable result-family head. Use `@[crush_lower_result T]` for a full
+   handler, including dependent function results.
 5. Use `@[crush_translate]` only when dispatch spans several heads or
    intentionally overrides head-indexed and built-in translation.
-6. Use `@[crush_translate_sort]` for a parameterized or
-   representation-sensitive sort.
+6. Use `register_lowering sort` for a parameterized sort, or
+   `@[crush_translate_sort]` for a full sort handler.
 
 Equation support is the safest starting point because Lean already proves the
 equations and reconstruction can reuse them.
@@ -188,6 +189,91 @@ These commands are therefore appropriate only for solver theory symbols or
 sorts already declared elsewhere.
 Use a full handler when a fresh declaration is required.
 
+# Pattern-Based Lowerings
+%%%
+tag := "extending-patterns"
+%%%
+
+`register_lowering` pairs a structural Lean expression pattern with an SMT
+quotation or a Lean metaprogram. Like replay registrations, each rule is
+enclosed in `<< ... >>`:
+
+```lean
+open Crush
+
+def loweringAddThree (x : Int) : Int := x + 3
+
+register_lowering term <<
+  (loweringAddThree (term x)) => (smt| (+ $x 3))
+>>
+
+example (x : Int) : loweringAddThree x = x + 3 := by crush
+```
+
+There are three registration kinds:
+
+* `register_lowering term` matches the translated Lean expression and registers
+  a `crush_lower` handler indexed by the pattern's head constant.
+* `register_lowering result-type` matches the expression's inferred type and
+  registers a `crush_lower_result` handler indexed by the type-family head.
+  The right-hand side still produces an SMT term for the original expression.
+* `register_lowering sort` matches the Lean type being translated and registers
+  a `crush_translate_sort` handler. Its right-hand side produces an SMT sort.
+
+At the root, use a constant such as `Int` or an application such as
+`(loweringAddThree (term x))`. Within an application:
+
+* `_` ignores an argument.
+* `x` binds the original `Lean.Expr` to `x`.
+* `(term x)` calls `ctx.emitTerm` on the captured expression and binds the
+  resulting `Crush.SMT.Term` to `x`.
+* `(sort α)` checks that the captured expression is a type, calls `ctx.emitSort`,
+  and binds the resulting `Crush.SMT.SSort` to `α`.
+* `(Constant ...)` matches a nested constant application. Use `(Int)` to match
+  the constant `Int` as an argument; a bare argument `Int` would capture it.
+* `(term x : Int)` additionally matches the captured expression's inferred
+  type. A parameterized type pattern such as `(Family α)` can capture its
+  arguments too.
+
+Patterns match exact elaborated application spines, including implicit type
+and instance arguments. They do not unfold definitions or compare by
+definitional equality. The optional type pattern follows the same structural
+rules, with a bare constant interpreted as a nullary type. Captures must have
+distinct names, and `ctx` is reserved for the original `TranslationCtx`.
+All pattern checks finish before any capture is recursively translated.
+
+The right-hand side can return a pure `SMT.Term`, a `TranslateM SMT.Term`, or a
+`TranslateM (Option SMT.Term)` to explicitly decline with `none`. Sort rules
+accept the corresponding forms with `SMT.SSort`. Helpers and `do` blocks have
+access to the captured values, and `ctx` exposes the original head, arguments,
+recursive translation callbacks, and declaration callback:
+
+```lean
+def loweringAddFour (x : Int) : Int := x + 4
+
+def loweringAddFourTemplate (x : SMT.Term) : SMT.Term :=
+  (smt| (+ $x 4))
+
+register_lowering term high <<
+  (loweringAddFour x) => do
+    let x ← ctx.emitTerm x
+    return loweringAddFourTemplate x
+>>
+
+example (x : Int) : loweringAddFour x = x + 4 := by crush
+```
+
+An optional numeric priority or `high`/`low` comes before `<<`. Each command
+registers one pattern; use multiple commands for alternatives. Generated
+handlers use the existing attribute registries and their ordering, including
+the precedence of general `crush_translate` handlers. Constants and helper
+names are resolved when the command is elaborated, and registrations persist
+across imports.
+
+The fence reserves `>>` inside the right-hand side. Put code that needs that
+operator in a named helper. These rules provide concise handler definitions;
+they do not prove that the encoding preserves the Lean operation's semantics.
+
 # Targeted Lowerings
 %%%
 tag := "extending-targeted"
@@ -280,31 +366,32 @@ structure IndexedInt (index : Int) where
 def indexedInt (index : Int) : IndexedInt index :=
   ⟨index⟩
 
-@[crush_translate_sort]
-def translateIndexedIntSort : SortHandler := fun ctx => do
-  let .const ``IndexedInt _ := ctx.fn
-    | return none
-  let #[_] := ctx.args | return none
-  return some (.app (.symb "Int") #[])
+register_lowering sort << (IndexedInt _) => (smt| Int) >>
 
-@[crush_lower_result IndexedInt]
-def lowerIndexedInt : LoweringHandler := fun ctx => do
-  let .const ``indexedInt _ := ctx.fn
-    | return none
-  let #[index] := ctx.args | return none
-  return some (← ctx.emitTerm index)
+register_lowering result-type <<
+  (IndexedInt (term index)) => do
+    unless ctx.fn.isConstOf ``indexedInt &&
+        ctx.args.size == 1 do
+      return none
+    return some index
+>>
 
-@[crush_lower IndexedInt.value]
-def lowerIndexedIntValue : LoweringHandler := fun ctx => do
-  let #[_, value] := ctx.args | return none
-  return some (← ctx.emitTerm value)
+register_lowering term <<
+  (IndexedInt.value _ (term value)) => (smt| $value)
+>>
 
 example (index : Int) :
     (indexedInt index).value = index := by
   crush
 ```
 
-The built-in `Decidable` encoding uses this path.
+The result pattern captures the index from the inferred type. The metaprogram
+then accepts only the named constructor function `indexedInt`: an arbitrary
+value of `IndexedInt index` need not contain `index`. The pattern syntax matches
+the complete inferred type; use the attribute API when a handler needs to open
+dependent function binders or reduce the type before matching.
+
+The built-in `Decidable` encoding uses result dispatch.
 `Decidable p` and dependent functions ending in it are represented by an
 axiomatized singleton SMT sort, matching Lean's proof-irrelevant subsingleton.
 Concretely, the lowering emits the equivalent of:
@@ -405,6 +492,11 @@ A total Lean map is exactly the model provided by SMT Array theory.
 The sort handler maps `TotalMap key value` to `(Array key value)`, while term
 handlers map lookup and update to `select` and `store`:
 
+In a sort rule, `(smt| ...)` constructs an `SMT.SSort` and `$key` splices a
+sort. This also works in helpers with an expected `SMT.SSort` type, including
+indexed sorts such as `(smt| (_ BitVec 8))`. Without an expected sort type,
+quotations continue to construct `SMT.Term` values.
+
 ```lean
 open Crush
 
@@ -424,15 +516,10 @@ def set {κ ν : Type} [DecidableEq κ]
 
 end TotalMap
 
-@[crush_translate_sort]
-def translateTotalMapSort : SortHandler := fun ctx => do
-  let .const ``TotalMap _ := ctx.fn
-    | return none
-  let #[key, value] := ctx.args | return none
-  let keySort ← ctx.emitSort key
-  let valueSort ← ctx.emitSort value
-  return some (.app (.symb "Array")
-    #[keySort, valueSort])
+register_lowering sort <<
+  (TotalMap (sort key) (sort value)) =>
+    (smt| (Array $key $value))
+>>
 
 @[crush_lower TotalMap.get]
 def translateTotalMapGet :

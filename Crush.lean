@@ -8,6 +8,7 @@ import Crush.Frontend.Config
 import Crush.Reify.Collect
 import Crush.Translation.Monad
 import Crush.Translation.Attr
+import Crush.Translation.LoweringSyntax
 import Crush.Translation.Unfold
 import Crush.Translation.Preprocess
 import Crush.Translation.Builtins
@@ -29,6 +30,8 @@ a user-extensible, metaprogrammed translation layer.
 This root module re-exports the public API. `import Crush` gives you:
 
 * the `crush` tactic (`Crush.Frontend.Tactic`),
+* `register_lowering term`, `register_lowering result-type`, and
+  `register_lowering sort` pattern registrations (`Crush.Translation.LoweringSyntax`),
 * the `@[crush_translate]` and `@[crush_lower]` attributes, `(smt| ...)` quotations,
   and `crush_map`/`crush_map_sort` sugar
   (`Crush.Translation.Attr`, `Crush.SMT.Quote`, `Crush.Translation.Builtins`),

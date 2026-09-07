@@ -2,7 +2,7 @@ import Lean
 import Crush.SMT.Print
 
 /-!
-# SMT-LIB term quotations
+# SMT-LIB term and sort quotations
 
 `(smt| ...)` is a shallow embedding of the first-order SMT-LIB term syntax into
 `Crush.SMT.Term`. It supports symbols, applications, natural-number, Boolean, and
@@ -13,8 +13,16 @@ let x : SMT.Term := .const "x"
 let t : SMT.Term := (smt| (ite (> $x 0) 1 (- 1)))
 ```
 
-The quotation expands to ordinary `SMT.Term` constructors at compile time. It does
-not parse or retain an untyped SMT string.
+When the expected type is `SMT.SSort`, the same quotation constructs a sort:
+
+```lean
+let key : SMT.SSort := (smt| Int)
+let map : SMT.SSort := (smt| (Array $key (_ BitVec 8)))
+```
+
+Sort quotations support symbols, applications, indexed identifiers, and `SSort`
+splices. Without an expected sort type, the quotation constructs an `SMT.Term`.
+Both forms elaborate to ordinary constructors, never unchecked SMT strings.
 -/
 
 namespace Crush.SMT
@@ -69,8 +77,8 @@ syntax (name := smtIdent) ident : smtTerm
 syntax (name := smtSymbol) Parser.symbol : smtTerm
 syntax (name := smtApp) "(" Parser.symbol smtTerm* ")" : smtTerm
 
-/-- Shallow SMT-LIB term quotation. Use `$t` to splice a Lean expression of type
-`SMT.Term`. -/
+/-- Shallow SMT-LIB quotation. Defaults to `SMT.Term`; an expected `SMT.SSort`
+selects the sort grammar. Splices must have the corresponding type. -/
 syntax (name := smtQuot) "(smt|" smtTerm ")" : term
 
 open Lean Macro
@@ -108,7 +116,42 @@ private partial def expandTerm (stx : Syntax) : MacroM Syntax := do
   else
     Macro.throwErrorAt stx s!"unsupported SMT-LIB term syntax ({stx.getKind}): {stx}"
 
-macro_rules
-  | `(term| (smt| $term:smtTerm)) => expandTerm term
+private def sortSymbolString (stx : Syntax) : MacroM String := do
+  if stx.isOfKind ``smtIdent then return stx[0].getId.toString
+  if stx.isOfKind ``smtSymbol then return ← symbolString stx[0]
+  Macro.throwErrorAt stx "expected an SMT sort symbol"
+
+private partial def expandSort (stx : Syntax) : MacroM Syntax := do
+  if stx.isAntiquot then return stx.getAntiquotTerm
+  if stx.isOfKind ``smtIdent || stx.isOfKind ``smtSymbol then
+    return ← `(SMT.SSort.app (.symb $(quote (← sortSymbolString stx))) #[])
+  if stx.isOfKind ``smtApp then
+    let symbol ← symbolString stx[1]
+    let args := stx[2].getArgs
+    if symbol == "_" then
+      unless args.size >= 2 do
+        Macro.throwErrorAt stx "an indexed SMT sort needs a symbol and at least one index"
+      let name ← sortSymbolString args[0]!
+      let indices : Array (TSyntax `term) ← args[1:].toArray.mapM fun index => do
+        if index.isOfKind ``smtNumeral then
+          return ← `(Sum.inr $(quote (index[0].isNatLit?.getD 0)))
+        if index.isOfKind ``smtIdent || index.isOfKind ``smtSymbol then
+          return ← `(Sum.inl $(quote (← sortSymbolString index)))
+        Macro.throwErrorAt index "an SMT sort index must be a numeral or symbol"
+      return ← `(SMT.SSort.app (.indexed $(quote name) #[$[$indices],*]) #[])
+    let args : Array (TSyntax `term) := (← args.mapM expandSort).map (⟨·⟩)
+    return ← `(SMT.SSort.app (.symb $(quote symbol)) #[$[$args],*])
+  Macro.throwErrorAt stx "expected an SMT sort, not a term literal"
+
+/-- The expected type selects sort construction; unannotated quotations remain terms. -/
+@[term_elab smtQuot]
+def elabSmtQuot : Elab.Term.TermElab := fun stx expectedType? => do
+  let mut isSort := false
+  if let some type := expectedType? then
+    let type ← Meta.whnf type
+    isSort := type.isConstOf ``SSort
+  let expanded ← Elab.liftMacroM <|
+    if isSort then expandSort stx[1] else expandTerm stx[1]
+  Elab.Term.elabTerm expanded expectedType?
 
 end Crush.SMT
