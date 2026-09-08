@@ -112,9 +112,10 @@ example (x y : Int) (hxy : x = y) (hy : y = 3) : x = 3 := by
   crush
 ```
 
-The distinction is visible with `#print axioms`.
-A theorem closed under the default policy lists `Crush.crushSorry`; a
-successfully reconstructed theorem does not.
+Inspect `#print axioms` to see which route a theorem used. A trusted SMT
+discharge lists `Crush.crushSorry`. An early checked proof can avoid the solver
+and that axiom even under the default policy; selecting `"reconstruct"`
+requires a checked proof when SMT is needed too.
 
 # A Practical Starting Point
 
@@ -124,6 +125,6 @@ If it does not close the goal:
 1. Check that the proposition really follows from the available hypotheses.
 2. Add a relevant lemma with `crush [*, lemmaName]`.
 3. Expose a hidden definition with `u[definition]` or `@[crush_unfold]`.
-4. Inspect the generated query with the `crush.trace.script`, `crush.save`, or
-   `crush.backend` option set to `"none"`.
+4. Inspect the query with `crush.trace.script true` or `crush.save "query.smt2"`.
+   Set `crush.backend "none"` to force script emission without solving.
 5. Increase bounds only after identifying the phase that exhausted its budget.

@@ -27,21 +27,30 @@ For installation, solver requirements, and a first proof, continue to
 {ref "getting-started"}[Getting Started].
 
 # What Happens During `crush`
+%%%
+tag := "overview-pipeline"
+%%%
 
 A tactic invocation passes through the following stages:
 
 1. *Collect facts.* Select local hypotheses, explicit lemmas, unfolding
    equations, and optionally library premises.
-2. *Normalize.* Apply proof-producing rewrites that expose supported
+2. *Try a checked proof.* Close simple cases directly from selected facts or
+   bounded Lean reasoning before translating them.
+3. *Normalize.* Apply proof-producing rewrites that expose supported
    operations and constructor structure.
-3. *Specialize.* Monomorphize polymorphic facts and generate bounded ground
+4. *Specialize.* Monomorphize polymorphic facts and generate bounded ground
    instances of quantified facts.
-4. *Translate.* Lower Lean terms to SMT sorts, terms, declarations, and
+5. *Translate.* Lower Lean terms to SMT sorts, terms, declarations, and
    axioms. Unsupported functions remain uninterpreted.
-5. *Solve.* Ask Z3, cvc5, or Bitwuzla whether the facts and negated goal are
+6. *Solve.* Ask Z3, cvc5, or Bitwuzla whether the facts and negated goal are
    inconsistent.
-6. *Discharge.* Trust the `unsat` result, replay a cvc5 Alethe certificate, or
+7. *Discharge.* Trust the `unsat` result, replay a cvc5 Alethe certificate, or
    reconstruct a proof from the unsat core.
+
+An early checked proof skips the remaining stages, even under the default
+trust policy. Backend `"none"` skips this shortcut so it always emits the query.
+Alethe-only checked reconstruction also skips it so success exercises replay.
 
 This separation matters when diagnosing a failure.
 A missing equation is a collection or translation problem; an `unknown` result
@@ -223,19 +232,9 @@ example (x y : Int) (hxy : x = y) (hy : y = 4) :
   crush
 ```
 
-`crush.reconstruct` selects a reconstruction algorithm only when the trust
-policy requests reconstruction:
-
-* `"alethe"` replays cvc5's certificate step by step.
-* `"core"` asks Lean tactics to re-prove the result from an SMT unsat core,
-  available from Z3 and cvc5 but not currently from Bitwuzla.
-* `"auto"` tries Alethe first and then core reconstruction.
-
-These are separate choices.
-Under `crush.trust "trust"`, `"auto"` and `"core"` do not change how the goal is
-discharged because no checked proof is requested.
-The stricter `"alethe"` setting is still validated and therefore still requires
-the cvc5 backend.
+For checked proofs, `crush.reconstruct` selects cvc5 Alethe replay (`"alethe"`),
+unsat-core reconstruction (`"core"`), or replay followed by core reconstruction
+when needed (`"auto"`, the default).
 See {ref "using-crush-proof-policy"}[Choosing a Proof Policy] for the user
 workflow, {ref "configuration-reconstruction"}[Trust and Reconstruction] for
 the complete option semantics, and
@@ -248,10 +247,11 @@ Different extension points affect different pipeline stages:
 
 * Use `u[f]`, `d[f]`, `@[crush_unfold]`, or `@[crush_defeq]` when ordinary Lean
   equations are enough.
-* Use `crush_map`, `@[crush_lower]`, or `@[crush_translate]` when the solver
-  should see a custom SMT operation.
-* Use `crush_map_sort` or `@[crush_translate_sort]` when a Lean type itself
-  should use an SMT theory sort.
+* Use `crush_map` or `register_lowering term` when a Lean operation should map
+  to an SMT operation. Use `register_lowering result-type` when dispatch depends
+  on the result family instead of the operation's name.
+* Use `crush_map_sort` or `register_lowering sort` when a Lean type should use
+  an SMT theory sort.
 * Use `with [...]`, `using`, or `@[crush_reconstruct]` when solving succeeds but
   checked core reconstruction needs Lean-specific help.
 * Use `register_crush_replay` when a custom encoding introduces certificate
@@ -274,14 +274,10 @@ operator.
 Reconstruction extensions do not change the SMT query, while translation
 extensions do.
 Start with {ref "extending-choose"}[Choosing an Extension Point].
-The detailed sections cover {ref "extending-equations"}[equation-based support],
-{ref "extending-mappings"}[direct symbol mappings],
-{ref "extending-targeted"}[targeted],
-{ref "extending-result"}[result-indexed], and
-{ref "extending-general"}[general term handlers],
-{ref "extending-sorts"}[sort handlers],
-{ref "extending-arrays"}[finite-array extensions],
-{ref "extending-reconstruction"}[core reconstruction rules], and
+For a custom encoding, start with
+{ref "extending-patterns"}[Pattern-Based Lowerings]. The attribute APIs remain
+available for full handlers. For checked proofs, see
+{ref "extending-reconstruction"}[core reconstruction rules] and
 {ref "extending-alethe"}[Alethe replay extensions].
 
 # Recommended Workflow

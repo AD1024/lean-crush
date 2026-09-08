@@ -10,6 +10,7 @@ open Lean Elab Command
 registered through the existing lowering attributes. Patterns inspect complete
 elaborated application spines without unfolding. Matching finishes before any
 capture is translated, so a declined pattern emits no declarations.
+An optional `with ctx` explicitly binds the original `TranslationCtx` for the RHS.
 -/
 
 namespace Crush
@@ -39,7 +40,8 @@ syntax (priority := high) "(" LoweringParser.sortKeyword ident ")" : crushLoweri
 
 /-- Register a structural Lean pattern with an SMT term or sort template. -/
 syntax (name := registerLowering)
-  "register_lowering" ppSpace crushLoweringKind (ppSpace prio)? ppSpace
+  "register_lowering" ppSpace crushLoweringKind (ppSpace prio)?
+  (ppSpace "with " ident)? ppSpace
   "<<" ppLine crushLoweringPattern ppSpace "=>" ppSpace
   LoweringParser.fencedRhs ppLine ">>" : command
 
@@ -88,8 +90,6 @@ private partial def compilePattern (pattern : TSyntax `crushLoweringPattern)
 where
   addCapture (code : PatternCode) (name : Ident) (kind : CaptureKind) :
       CommandElabM PatternCode := do
-    if name.getId == `ctx then
-      throwErrorAt name "`ctx` is reserved for the lowering TranslationCtx"
     if code.captures.any (·.name.getId == name.getId) then
       throwErrorAt name "duplicate lowering capture `{name}`; each capture must occur once"
     return { code with captures := code.captures.push { name, value, kind } }
@@ -126,14 +126,21 @@ def elabLoweringRhs : Term.TermElab := fun stx expectedType? => do
 
 elab_rules : command
   | `(register_lowering $kind:crushLoweringKind $[$priority:prio]?
+      $[with $contextName:ident]?
       << $pattern:crushLoweringPattern => $rhs:term >>) => do
     let head ← patternHead pattern
     let headName ← liftCoreM <| realizeGlobalConstNoOverloadWithInfo head
     let head := mkIdentFrom head headName
-    let ctx := mkIdentFrom rhs `ctx
+    let ctx ← match contextName with
+      | some name => pure name
+      | none => freshIdent
     let value ← freshIdent
     let name ← freshIdent
     let code ← compilePattern pattern value (headOnly := true)
+    if let some contextName := contextName then
+      if code.captures.any (·.name.getId == contextName.getId) then
+        throwErrorAt contextName
+          "lowering context binder `{contextName}` conflicts with a pattern capture"
     let mut bindings : Array (TSyntax `doElem) := #[]
     for capture in code.captures do
       let captureName := capture.name

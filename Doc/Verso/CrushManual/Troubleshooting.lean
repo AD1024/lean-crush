@@ -40,8 +40,10 @@ set_option crush.profile true
 ```
 
 For a capability failure, compare a local trusted run with a reconstructing run.
-If `"trust"` closes the goal and `"reconstruct"` does not, the gap is strictly
-in proof recovery.
+If both runs reach SMT and return `unsat`, but only `"trust"` closes the goal,
+focus on proof recovery. Check the profiler or `trace.crush.result` first:
+early checked proofs can bypass SMT, and requesting a certificate can change
+the solver's behavior.
 Use `crush.backend "none"` only to inspect translation; it never solves or
 closes the goal.
 
@@ -59,7 +61,7 @@ Otherwise check these causes in order:
 2. An explicit `crush [...]` list accidentally omitted a local hypothesis because
    it did not contain `*`.
 3. A relevant function remained uninterpreted.
-4. The Lean statement is genuinely false.
+4. The Lean statement is false.
 
 If a definition is the issue, add `u[f]`, `d[f]`, an unfolding attribute, or a
 custom lowering.
@@ -110,8 +112,11 @@ Use `crush.save` to write the final query:
 set_option crush.save "query.smt2"
 ```
 
+If `crush` closes the goal before translation, no script is written. An existing
+file at that path may therefore belong to an earlier run.
+
 Use backend `"none"` to test collection and translation without starting a
-solver:
+solver or taking an early proof shortcut:
 
 ```
 set_option crush.backend "none"
@@ -135,10 +140,10 @@ tag := "troubleshooting-reconstruction"
 Solving and proof reconstruction have different capabilities.
 SMT can prove datatype cardinality, finite-array, native higher-order, or long
 theory combinations that the current replay and finisher set cannot reproduce.
-cvc5 1.3 does not emit Alethe certificates for the first three classes, so
-`crush.reconstruct "auto"` must use the core-directed path for them.
-It also rejects Alethe certificates containing signed bitvector-to-`Int`
-conversion.
+The tested cvc5 1.3.4 backend has certificate gaps for datatype cardinality,
+finite-array encodings, native higher-order solving, and signed
+bitvector-to-`Int` conversion. When it cannot emit a certificate,
+`crush.reconstruct "auto"` can still try core-directed reconstruction.
 
 Available choices are:
 

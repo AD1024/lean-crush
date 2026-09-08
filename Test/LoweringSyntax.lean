@@ -29,7 +29,7 @@ register_lowering sort <<
   (Indexed _) => (smt| Int)
 >>
 
-register_lowering result-type <<
+register_lowering result-type with ctx <<
   (Indexed (term index)) => do
     unless ctx.fn.isConstOf ``indexedValue && ctx.args.size == 1 do return none
     return some (smt| $index)
@@ -69,7 +69,7 @@ register_lowering term << (bumpPure (term x)) => pureTemplate x >>
 
 def bumpDo (x : Int) : Int := x + 6
 
-register_lowering term <<
+register_lowering term with ctx <<
   (bumpDo x) => do
     let x ← ctx.emitTerm x
     return (smt| (+ $x 6))
@@ -142,7 +142,11 @@ register_lowering sort << SortViaHelper => intSort >>
 structure SortViaDo where
   value : Int
 
-register_lowering sort << SortViaDo => do return (smt| Int) >>
+register_lowering sort high with source <<
+  SortViaDo => do
+    unless source.fn.isConstOf ``SortViaDo do return none
+    return some (smt| Int)
+>>
 
 run_meta do
   for (name, expected) in #[(``Byte, "(_ BitVec 8)"),
@@ -161,11 +165,11 @@ register_lowering sort << (Family (sort α)) => (smt| $α) >>
 
 def familyValue (x : Int) : Family Int := ⟨x⟩
 
-register_lowering result-type <<
+register_lowering result-type with source <<
   (Family (Int)) => do
-    let #[x] := ctx.args | return none
-    unless ctx.fn.isConstOf ``familyValue do return none
-    return some (← ctx.emitTerm x)
+    let #[x] := source.args | return none
+    unless source.fn.isConstOf ``familyValue do return none
+    return some (← source.emitTerm x)
 >>
 
 run_meta do
@@ -190,9 +194,20 @@ register_lowering term << (nested x (term x)) => (smt| 0) >>
 #guard_msgs(error, substring := true) in
 register_lowering term << _ => (smt| 0) >>
 
-/-- error: `ctx` is reserved -/
+/-- error: lowering context binder `ctx` conflicts with a pattern capture -/
 #guard_msgs(error, substring := true) in
-register_lowering term << (bump ctx) => (smt| 0) >>
+register_lowering term with ctx << (bump ctx) => (smt| 0) >>
+
+/-- error: Unknown identifier -/
+#guard_msgs(error, substring := true) in
+register_lowering term << (bump x) => ctx.emitTerm x >>
+
+-- Without a context binder, ctx is an ordinary capture name.
+def bumpCapturedCtx (x : Int) : Int := x + 7
+register_lowering term << (bumpCapturedCtx (term ctx)) => (smt| (+ $ctx 7)) >>
+
+run_meta do
+  checkTerm (mkApp (mkConst ``bumpCapturedCtx) (mkIntLit 2)) "(+ 2 7)"
 
 /-- error: Unknown constant -/
 #guard_msgs(error, substring := true) in

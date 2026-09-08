@@ -11,6 +11,10 @@ The benchmark harness separates solver verification from checked proof
 reconstruction. This distinction prevents a reconstruction limitation from
 being reported as a translation or solver failure.
 
+The figures below are recorded snapshots, not a live benchmark of the current
+commit. The headline and reconstruction studies use different Velvet workloads;
+compare strategies within a study rather than combining their totals.
+
 The complete numeric tables, tested revisions, machine configuration, and
 interpretation notes are in
 [BENCHMARKS.md](https://github.com/AD1024/lean-crush/blob/main/BENCHMARKS.md).
@@ -23,7 +27,9 @@ regenerate these exact figures and retain the per-VC baseline records.
 # Headline Comparison
 
 The headline figure compares Auto, Duper, trusted Crush, and `grind` on one
-fixed set of VC occurrences for each corpus. Trusted Crush sets
+fixed set of verification-condition (VC) occurrences for each corpus. The newer
+lean-smt rows in `BENCHMARKS.md` are not shown in this four-backend figure.
+Trusted Crush sets
 `crush.trust = "trust"`: it measures collection, specialization, translation,
 and SMT solving without requiring post-solver proof reconstruction. The other
 backends retain their normal proof and trust policies, so the table reports
@@ -95,7 +101,7 @@ the tables in
 
 # Comparing Reconstruction With lean-smt
 
-The plots above compare Crush's own strategies. The harnesses also measure
+The reconstruction plots above compare Crush's own strategies. The harnesses also measure
 [lean-smt](https://github.com/ufmg-smite/lean-smt), which translates a goal,
 calls cvc5, and replays the Alethe certificate in Lean, against Crush's strict
 Alethe lane and its reconstruction portfolio. Because no tool controls the

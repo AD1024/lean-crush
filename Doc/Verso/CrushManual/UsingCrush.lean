@@ -16,7 +16,7 @@ tag := "using-crush"
 tag := "using-crush-syntax"
 %%%
 
-The full tactic grammar is:
+The tactic accepts these clauses, in the order shown:
 
 ```
 crush [h₁, lemma, *] u[f, g] d[h] with [r₁, r₂] using (tactic₁; tactic₂)
@@ -214,6 +214,8 @@ the `with [...]` hints in its local context.
 It cannot accidentally use unrelated hypotheses that the solver did not use.
 Its result, including any auxiliary declarations it creates, is checked by
 Lean's kernel before assignment.
+If an early checked proof or Alethe replay already closes the goal, the core
+finisher is not run.
 
 Use these mechanisms at different scales:
 
@@ -318,7 +320,8 @@ When reconstruction is requested, `crush.reconstruct` chooses the algorithm:
 * `"core"` ignores certificates and asks Lean tactics to prove the original
   goal from the unsat-core facts. Z3 and cvc5 provide these cores; Bitwuzla
   currently does not. The Lean tactics must rediscover the argument.
-* `"auto"` tries Alethe first and then core reconstruction.
+* `"auto"` tries Alethe first when a certificate is available, then core
+  reconstruction if needed.
 
 `crush.trust` and `crush.reconstruct` are independent.
 Under `"trust"`, selecting `"auto"` or `"core"` does not change discharge
@@ -327,6 +330,9 @@ Selecting `"alethe"` is still validated and therefore requires cvc5, even under
 a trusting policy.
 The `with [...]`, `using`, and `@[crush_reconstruct]` mechanisms customize only
 the core path.
+For the complete option semantics, including early checked proofs and optional
+native decision procedures, see
+{ref "configuration-reconstruction"}[Trust and Reconstruction].
 
 # Complete Integrations
 

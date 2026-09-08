@@ -129,11 +129,11 @@ register_option crush.timeout : Nat := {
 register_option crush.trust : TrustMode := {
   defValue := TrustMode.trust
   descr := "How to discharge the goal on `unsat`: trust (default), reconstruct, or \
-            reconstructOrTrust. The default closes the goal with the `crushSorry` axiom, \
-            trusting the solver and the translation. Set `reconstruct` to demand a kernel-checked \
-            proof and error if none is found (so no axiom is ever used), or \
-            `reconstructOrTrust` to try that first and fall back with a warning. Any \
-            theorem closed under `trust` names `crushSorry` in `#print axioms`."
+            reconstructOrTrust. On solver `unsat`, trust closes with `Crush.crushSorry`, \
+            trusting the solver and translation. Reconstruct requires a checked proof and \
+            fails if none is found; reconstructOrTrust allows a warned trusted fallback. \
+            A trusted discharge records `Crush.crushSorry` in `#print axioms`. Checked \
+            proofs found before SMT do not use this fallback, even under trust."
 }
 
 register_option crush.ho.mode : HOMode := {

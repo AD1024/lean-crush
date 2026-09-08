@@ -19,9 +19,9 @@ shortTitle := "lean-crush"
 %%%
 
 lean-crush is an SMT hammer for Lean 4.
-It translates the local proof context and the negated goal to SMT-LIB, asks an
-external solver whether they are inconsistent, and reports a model, an unknown
-result, or discharges the Lean goal.
+It selects Lean facts, translates them and the negated goal to SMT-LIB, and asks
+an external solver whether they are inconsistent. Successful calls either
+construct a checked Lean proof or use an explicit solver-trust policy.
 
 The overview explains the complete pipeline and when to use each major feature.
 The remaining chapters cover installation, tactic usage, options, extension

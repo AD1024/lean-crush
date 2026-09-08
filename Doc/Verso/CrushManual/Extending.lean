@@ -138,8 +138,8 @@ example (x y : Int) : addInt x y = y + x := by
 This command is appropriate only when every elaborated application of the Lean
 constant has the same SMT meaning.
 It provides no argument-shape or typeclass-instance guard.
-Use `@[crush_lower]` instead for overloaded operations, partial support, or
-encodings that need to inspect types.
+Use `register_lowering term` for structural argument and type checks, or a full
+`@[crush_lower]` handler for overloaded operations and dynamic guards.
 
 `crush_map_sort` maps a Lean type constructor to an existing nullary SMT sort.
 The Lean type and SMT sort must represent the same values.
@@ -162,16 +162,13 @@ end MappedInt
 
 crush_map_sort MappedInt => "Int"
 
-@[crush_lower MappedInt.value]
-def lowerMappedIntValue : LoweringHandler := fun ctx => do
-  let #[x] := ctx.args | return none
-  return some (← ctx.emitTerm x)
+register_lowering term <<
+  (MappedInt.value (term x)) => (smt| $x)
+>>
 
-@[crush_lower MappedInt.next]
-def lowerMappedIntNext : LoweringHandler := fun ctx => do
-  let #[x] := ctx.args | return none
-  let sx ← ctx.emitTerm x
-  return some (smt| (+ $sx 1))
+register_lowering term <<
+  (MappedInt.next (term x)) => (smt| (+ $x 1))
+>>
 
 example (x : MappedInt) :
     (MappedInt.next x).value = x.value + 1 := by
@@ -210,6 +207,11 @@ register_lowering term <<
 example (x : Int) : loweringAddThree x = x + 3 := by crush
 ```
 
+`(smt| ...)` constructs a structured SMT term from symbols, applications,
+numerals, Booleans, and strings. `$x` splices an existing `SMT.Term`.
+When an `SMT.SSort` is expected, the same quotation constructs a sort and its
+splices must be sorts. The final SMT script is sort-checked before solving.
+
 There are three registration kinds:
 
 * `register_lowering term` matches the translated Lean expression and registers
@@ -239,14 +241,19 @@ Patterns match exact elaborated application spines, including implicit type
 and instance arguments. They do not unfold definitions or compare by
 definitional equality. The optional type pattern follows the same structural
 rules, with a bare constant interpreted as a nullary type. Captures must have
-distinct names, and `ctx` is reserved for the original `TranslationCtx`.
+distinct names.
 All pattern checks finish before any capture is recursively translated.
 
 The right-hand side can return a pure `SMT.Term`, a `TranslateM SMT.Term`, or a
 `TranslateM (Option SMT.Term)` to explicitly decline with `none`. Sort rules
 accept the corresponding forms with `SMT.SSort`. Helpers and `do` blocks have
-access to the captured values, and `ctx` exposes the original head, arguments,
-recursive translation callbacks, and declaration callback:
+access to the captured values. All three kinds (`term`, `result-type`, and
+`sort`) support an optional `with ctx` before `<<` to explicitly bind the
+original `TranslationCtx`, exposing its head, arguments, recursive translation
+callbacks, and declaration callback. Use it when the RHS refers to the context;
+automatic `(term x)` and `(sort α)` captures do not require it. The binder can
+have any name distinct from the pattern captures; no context name is introduced
+implicitly:
 
 ```lean
 def loweringAddFour (x : Int) : Int := x + 4
@@ -254,7 +261,7 @@ def loweringAddFour (x : Int) : Int := x + 4
 def loweringAddFourTemplate (x : SMT.Term) : SMT.Term :=
   (smt| (+ $x 4))
 
-register_lowering term high <<
+register_lowering term high with ctx <<
   (loweringAddFour x) => do
     let x ← ctx.emitTerm x
     return loweringAddFourTemplate x
@@ -263,9 +270,10 @@ register_lowering term high <<
 example (x : Int) : loweringAddFour x = x + 4 := by crush
 ```
 
-An optional numeric priority or `high`/`low` comes before `<<`. Each command
-registers one pattern; use multiple commands for alternatives. Generated
-handlers use the existing attribute registries and their ordering, including
+An optional numeric priority or `high`/`low` comes after the registration kind,
+before any `with` binder. Each command registers one pattern; use multiple
+commands for alternatives. Generated handlers use the existing attribute
+registries and their ordering, including
 the precedence of general `crush_translate` handlers. Constants and helper
 names are resolved when the command is elaborated, and registrations persist
 across imports.
@@ -303,13 +311,6 @@ example (x : Int) (hx : 0 ≤ x) :
     clampNonnegative x = x := by
   crush
 ```
-
-The `(smt| ...)` quotation is a shallow embedding of SMT-LIB terms.
-Symbols, numerals, strings, and applications use SMT-LIB syntax.
-`$term` splices an existing `Crush.SMT.Term`.
-The quotation constructs a structured `Crush.SMT.Term`; it does not insert an
-unchecked command string. lean-crush validates the sorts of the final script
-before invoking a solver.
 
 Multiple handlers may target the same declaration.
 As shown by `lowerClampNonnegative`, a numeric priority or `high`/`low` controls
@@ -368,7 +369,7 @@ def indexedInt (index : Int) : IndexedInt index :=
 
 register_lowering sort << (IndexedInt _) => (smt| Int) >>
 
-register_lowering result-type <<
+register_lowering result-type with ctx <<
   (IndexedInt (term index)) => do
     unless ctx.fn.isConstOf ``indexedInt &&
         ctx.args.size == 1 do
@@ -426,16 +427,22 @@ open Crush
 def translatedSuccessor (x : Int) : Int :=
   x + 1
 
+def translatedPredecessor (x : Int) : Int :=
+  x - 1
+
 @[crush_translate]
-def translateSuccessor : TranslationHandler := fun ctx => do
-  let .const ``translatedSuccessor _ := ctx.fn
-    | return none
+def translateNeighbor : TranslationHandler := fun ctx => do
+  let successor := ctx.fn.isConstOf ``translatedSuccessor
+  let predecessor :=
+    ctx.fn.isConstOf ``translatedPredecessor
+  unless successor || predecessor do return none
   let #[x] := ctx.args | return none
   let sx ← ctx.emitTerm x
-  return some (smt| (+ $sx 1))
+  return some <| if successor then (smt| (+ $sx 1))
+    else (smt| (- $sx 1))
 
 example (x : Int) :
-    translatedSuccessor x = x + 1 := by
+    translatedPredecessor (translatedSuccessor x) = x := by
   crush
 ```
 
@@ -490,7 +497,7 @@ guards, or requires declarations.
 
 A total Lean map is exactly the model provided by SMT Array theory.
 The sort handler maps `TotalMap key value` to `(Array key value)`, while term
-handlers map lookup and update to `select` and `store`:
+handlers map lookup and update to `select` and `store`.
 
 In a sort rule, `(smt| ...)` constructs an `SMT.SSort` and `$key` splices a
 sort. This also works in helpers with an expected `SMT.SSort` type, including
@@ -691,8 +698,9 @@ Alethe replay has two extension layers:
 
 The `register_crush_replay term` and `register_crush_replay rule` commands
 extend these layers without requiring Lean metaprogramming.
-Trust mode does not replay a certificate, but checked reconstruction must
-decode every relevant term and construct a proof for every inference.
+Trust mode does not replay a certificate. Alethe reconstruction must decode
+every relevant certificate term and construct a proof for every inference;
+core reconstruction does not use these registrations.
 
 A term registration is an inverse translation: use it when a custom lowering
 introduces an SMT operator that may appear in the certificate.
@@ -702,9 +710,10 @@ Adding one does not substitute for the other.
 
 ## Replay DSL Syntax
 
-The registration commands have the following EBNF.
-`lean-term`, `lean-type`, and `tactic-sequence` are ordinary Lean syntax;
-`priority` is `low`, `high`, or a natural number.
+The command forms are shown below. Square brackets denote optional syntax,
+braces denote repetition, and quoted tokens are literal. `lean-term` and
+`tactic-sequence` are ordinary Lean syntax; `priority` is `low`, `high`, or a
+natural number.
 
 ```
 term-registration ::=
@@ -724,28 +733,6 @@ term-pattern ::=
 
 rule-pattern ::= "(" symbol {sexp-pattern} ")"
 symbol       ::= identifier | string-literal
-
-expr-pattern ::=
-    "_"
-  | ".."
-  | "(term" identifier [":" lean-type] ")"
-
-sexp-pattern ::=
-    "_"
-  | ".."
-  | identifier
-  | natural
-  | string-literal
-  | "(atom" string-literal ")"
-  | "(sexp" identifier ")"
-  | "(term" identifier [":" lean-type] ")"
-  | "(nat" identifier ")"
-  | "(int" identifier ")"
-  | "(string" identifier ")"
-  | "(atom" identifier ")"
-  | "(sort" identifier ")"
-  | "(prop" identifier ")"
-  | "(" {sexp-pattern} ")"
 ```
 
 An ordinary term pattern matches an SMT operator whose arguments have already
@@ -753,6 +740,9 @@ been decoded to Lean expressions.
 The `(_ operator indices...)` form additionally matches an indexed SMT
 identifier, while a rule pattern matches an Alethe rule name and its raw
 `:args`.
+Decoded argument patterns (`expr-pattern`) are `_`, `..`, `(term x)`, or
+`(term x : T)`. Raw patterns (`sexp-pattern`) also support literal matches,
+nested lists, and the metadata captures described below.
 `..` is permitted only as the final pattern in an argument list.
 Every capture name must occur once per alternative, and all `|` alternatives
 must bind the same names.
@@ -789,13 +779,7 @@ register_crush_replay term <<
 >>
 ```
 
-An ordinary pattern has the form `(operator arguments...)`.
-An indexed pattern has the form
-`((_ operator indices...) arguments...)`.
-Indices are raw S-expressions; ordinary arguments have already been decoded to
-Lean expressions.
-
-The pattern language provides:
+The raw pattern language provides:
 
 * `_` for one ignored item and a final `..` for the remaining items;
 * bare symbols, numerals, and strings for exact matches;
@@ -806,14 +790,16 @@ The pattern language provides:
 * `(nat x)`, `(int x)`, `(string x)`, and `(atom x)` for parsed raw values;
 * `(sort x)` for a decoded SMT sort and `(prop x)` for a decoded proposition.
 
+Unlike lowering patterns, a bare symbol here is an exact match, not an
+expression capture. Type annotations are Lean types checked by definitional
+equality, rather than the structural type patterns used by `register_lowering`.
+
 `nat` and `int` parse certificate metadata directly.
 They are not abbreviations for typed `term` captures.
 For example, `(nat width)` parses a raw decimal width as a Lean `Nat`, whereas
 `(term width : Nat)` asks the certificate term decoder to reconstruct a
 Nat-valued SMT term.
 
-Alternatives separated by `|` must bind the same names, though their concrete
-certificate shapes may differ.
 Built-in term decoding runs before custom registrations.
 Use `register_crush_replay term high`, `low`, or a numeric priority when
 multiple custom registrations can match the same operator.
@@ -821,6 +807,25 @@ The right-hand side is type-checked, but Crush cannot infer whether it is the
 intended inverse of a custom lowering.
 An inaccurate inverse causes source-assumption bridging or later replay steps
 to fail; it is never accepted in place of a kernel-checked proof.
+
+### Parametric Type Guards
+
+A replay type guard can use a hole to accept any bitwidth:
+
+```lean
+def replayBitwiseAnd {n : Nat}
+    (x y : BitVec n) : BitVec n := x &&& y
+
+register_crush_replay term <<
+  (docs_bvand (term x : BitVec _) (term y : BitVec _)) =>
+    replayBitwiseAnd x y
+>>
+```
+
+The two holes are independent; RHS elaboration enforces equal widths through
+the helper's type. `BitVec n` does not introduce a new capture named `n`: that
+name must already be in scope, for example from an earlier `(nat n)` index
+capture. A polymorphic helper makes the inferred width available in its body.
 
 ## Register an Inference Rule
 
@@ -995,7 +1000,9 @@ end
 The theorem must elaborate without `Crush.crushSorry` in the `#print axioms`
 output.
 Use symbolic operands and a property that depends on the custom operator;
-closed computations may be discharged before replay exercises the extension.
+the solver may simplify away operators on closed inputs. The Alethe-only policy
+above disables Lean's early proof shortcut, so a successful test must replay a
+certificate.
 
 The complete executable tests, including alternatives, priorities, context
 isolation, compatibility, and kernel rejection, are in

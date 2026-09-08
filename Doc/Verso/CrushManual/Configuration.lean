@@ -90,6 +90,8 @@ budget twice.
 If a quantified fallback is needed, the saved file contains the final query.
 With backend `"none"`, it contains the complete translated fact set because no
 solver verdict is available to justify omitting quantified fallbacks.
+An early checked proof produces no script and does not update this file; use
+`"none"` when script emission is required.
 
 {optionDocs crush.additionalArgs}
 
@@ -114,30 +116,23 @@ tag := "configuration-reconstruction"
 
 {optionDocs crush.trust}
 
-The values are:
-
-* `"trust"` closes with `Crush.crushSorry`.
-* `"reconstruct"` requires a kernel-checked proof and fails otherwise.
-* `"reconstructOrTrust"` tries reconstruction and emits a warning before any
-  trusted fallback.
+This policy applies to solver `unsat` results. It does not prevent
+{ref "overview-pipeline"}[an early checked proof] from closing the goal before
+SMT. Inspect `#print axioms` to audit the resulting theorem's dependencies.
 
 {optionDocs crush.reconstruct}
 
-The values are:
-
-* `"auto"` tries Alethe replay, then core-directed reconstruction.
-* `"alethe"` requires certificate replay and is primarily useful when developing
-  or auditing the replay implementation.
-* `"core"` ignores certificates and runs only the core-directed finisher ladder.
-
-Alethe replay requires cvc5 1.3 or newer.
+Use the cvc5 version listed in {ref "getting-started"}[Getting Started] for
+Alethe replay.
 The core path requires an unsat core, which Z3 and cvc5 provide, and one of
 Lean's finishers must be able to re-prove the result from those hypotheses.
 Bitwuzla does not currently return an unsat core or a proof certificate.
 
 Use `"auto"` for ordinary checked proofs.
 Use `"alethe"` when testing replay coverage, because a core fallback would hide
-an unsupported certificate step.
+an unsupported certificate step. With a reconstructing trust policy, this mode
+also bypasses early checked proofs and requires a certificate even for simple
+goals. It fails on replay errors even under `"reconstructOrTrust"`.
 Use `"core"` when comparing backends, when cvc5 emits no certificate for a
 theory, or when a short Lean proof is easier than replaying the solver's
 derivation.
@@ -173,6 +168,8 @@ Neither option changes the SMT query or the meaning of
 For example, core reconstruction can exhaust a finite symbolic domain:
 
 ```lean
+section
+
 set_option crush.backend "cvc5"
 set_option crush.trust "reconstruct"
 set_option crush.reconstruct "core"
@@ -181,6 +178,8 @@ set_option crush.reconstruct.trustNativeDecide true
 example (a b : BitVec 8) :
     (a &&& b) + (a ^^^ b) = a ||| b := by
   crush
+
+end
 ```
 
 # Higher-Order Translation

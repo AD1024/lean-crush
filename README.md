@@ -159,8 +159,9 @@ theorem checked (x y : Int) (h1 : x = y) (h2 : y = 3) : x = 3 := by crush
 -- 'checked' depends on axioms: [propext, Classical.choice, Quot.sound]
 ```
 
-Under the default policy that same command reports `[Crush.crushSorry]` instead, which is how
-you tell the two apart at a glance.
+A trusted SMT discharge records `Crush.crushSorry` in `#print axioms`. Some calls
+close with a checked proof before reaching SMT, even under the default policy;
+use `"reconstruct"` to require a checked proof when solving is needed too.
 
 If SMT can prove a domain-specific fact but checked reconstruction needs a bridge theorem,
 register that theorem for bounded reconstruction search:
@@ -260,8 +261,10 @@ inferred type against the structural pattern `Int`.
 
 Patterns match exact elaborated arities, including implicit type, instance, and
 proof arguments. They do not insert implicit arguments or unfold definitions.
-Capture names must be distinct; `ctx` is reserved for the original
-`TranslationCtx`. Result-type patterns inspect the complete inferred type,
+Capture names must be distinct. Add `with ctx` before `<<` to explicitly bind
+the original `TranslationCtx` on the RHS; any binder name may be used, provided
+it differs from the pattern captures. No context name is bound implicitly.
+Result-type patterns inspect the complete inferred type,
 without peeling dependent function binders. Use an attribute handler for more
 complex matching. Each registration contains one pattern; multiple registrations
 can share a head. Add `high`, `low`, or a numeric priority after the command kind.
@@ -271,7 +274,7 @@ The RHS may also be a pure helper call, a `TranslateM` computation, or a helper
 returning `TranslateM (Option ...)` to decline with `none`:
 
 ```lean
-register_lowering term <<
+register_lowering term with ctx <<
   (Int.sign x) => do
     let sx ← ctx.emitTerm x
     return (smt| (ite (> $sx 0) 1 (ite (= $sx 0) 0 (- 1))))
@@ -291,7 +294,8 @@ register_lowering sort <<
 ```
 
 Result-type rules use a type pattern on the left and produce a *term* on the
-right. The RHS can inspect `ctx.fn` and `ctx.args` to distinguish the original
+right. With `register_lowering result-type with ctx`, the RHS can inspect
+`ctx.fn` and `ctx.args` to distinguish the original
 expressions sharing that type. As with attribute handlers, operation lowerings
 must agree with the chosen sort representation and check overloaded dictionaries
 before assigning built-in semantics. Registrations supply translations, not
