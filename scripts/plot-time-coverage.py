@@ -669,9 +669,9 @@ def draw_suite(
         pad=8,
     )
     axis.set_xlabel(
-        "Total tactic-local time (s)"
+        "Time (s)"
         if mode == "cumulative"
-        else "Tactic-local time per VC (s)",
+        else "Time per VC (s)",
         color=style.MUTED,
         fontsize=10,
     )
@@ -809,7 +809,7 @@ def main() -> None:
                 args.format,
                 series,
                 totals,
-                "VCs closed",
+                "VCs proved",
                 args.mode,
                 args.time_axis,
             )
