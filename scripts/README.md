@@ -739,11 +739,40 @@ matplotlib is installed, also writes `coverage-over-time.svg`; it warns and
 skips that figure otherwise.
 
 The renderer reads `benchmark-data/main` for the all-backend comparison and
-`benchmark-data/crush-modes` for reconstruction, failure, phase, and replay-scaling
-measurements. Their workloads are intentionally separate because the
-reconstruction study predates the latest expanded Velvet workload. The
+`benchmark-data/crush-modes` for reconstruction, failure, phase, and
+replay-scaling measurements. Since the 2026-09-02 refresh both cover the same
+754 VC identities, so their denominators line up. The
 [benchmark-data README](benchmark-data/README.md)
 lists the direct `plot-benchmarks.py` inputs.
+
+### Rendering from your own run
+
+Nothing above requires the recorded data. `MAIN_ROOT` and `MODES_ROOT`
+override the two measurement roots, and a run directory already has the shape
+they expect — `benchmark.sh --case_study all` writes `corpora/`, `leanhammer/`
+and `plean/` under one timestamped directory, and `benchmark-crush-modes.sh`
+writes the same three for the ablation. So a full reproduction from scratch is:
+
+```sh
+bash benchmark.sh --case_study all --with lean-smt   # -> BenchmarkResults/<stamp-a>
+bash benchmark-crush-modes.sh                        # -> BenchmarkResults/<stamp-b>
+bash benchmark-reconstruction.sh --case_study Velvet --case_study Cashmere
+                                                     # -> BenchmarkResults/<stamp-c>
+
+MAIN_ROOT=BenchmarkResults/<stamp-a> \
+MODES_ROOT=BenchmarkResults/<stamp-b> \
+RECONSTRUCTION_ROOT=BenchmarkResults/<stamp-c> \
+  scripts/render-paper-artifacts.sh my-figures/
+```
+
+`RECONSTRUCTION_ROOT` is optional; without it the two
+`reconstruction-over-time-*` figures and `reconstruction-table.pdf` are
+skipped and the other twelve still render. Absolute counts will differ from
+the recorded numbers — timings especially, since the external solver call
+dominates and its cost is machine-specific — but coverage should land within a
+few VCs. Solver versions are not pinned — the harness takes whatever `cvc5`
+and `z3` are first on `PATH` — so record yours alongside any numbers you
+publish.
 
 ## Paper Artifacts
 

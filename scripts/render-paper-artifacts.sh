@@ -7,8 +7,13 @@ CRUSH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DATA_ROOT="${PAPER_DATA_ROOT:-scripts/benchmark-data}"
 OUT_DIR="${1:-BenchmarkResults/figures}"
 
-MAIN_ROOT="$DATA_ROOT/main"
-MODES_ROOT="$DATA_ROOT/crush-modes"
+# Each measurement's root is overridable so the figures can be rendered from a
+# fresh run without renaming anything: `benchmark.sh --case_study all` writes
+# `corpora/`, `leanhammer/` and `plean/` under one timestamped directory, which
+# is exactly the shape MAIN_ROOT wants, and `benchmark-crush-modes.sh` does the
+# same for MODES_ROOT.
+MAIN_ROOT="${MAIN_ROOT:-$DATA_ROOT/main}"
+MODES_ROOT="${MODES_ROOT:-$DATA_ROOT/crush-modes}"
 
 cd "$CRUSH_ROOT"
 
@@ -21,6 +26,10 @@ for directory in \
     "$MODES_ROOT/plean"; do
   if [[ ! -d "$directory" ]]; then
     printf 'error: paper artifact data not found: %s\n' "$directory" >&2
+    printf 'point MAIN_ROOT / MODES_ROOT at your own run directories, e.g.\n' >&2
+    printf '  MAIN_ROOT=BenchmarkResults/<main-run> \\\n' >&2
+    printf '  MODES_ROOT=BenchmarkResults/<crush-modes-run> \\\n' >&2
+    printf '  scripts/render-paper-artifacts.sh out/\n' >&2
     exit 1
   fi
 done
