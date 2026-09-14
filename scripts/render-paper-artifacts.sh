@@ -17,6 +17,26 @@ MODES_ROOT="${MODES_ROOT:-$DATA_ROOT/crush-modes}"
 
 cd "$CRUSH_ROOT"
 
+# The reconstruction comparison's inputs ship as a zip rather than ~40 loose
+# TSVs, so regenerating them is one binary change instead of a directory-wide
+# add/delete churn. Unpack to a scratch directory when the caller has not
+# pointed RECONSTRUCTION_ROOT at a run of their own.
+RECONSTRUCTION_ARCHIVE="${RECONSTRUCTION_ARCHIVE:-$DATA_ROOT/reconstruction.zip}"
+if [[ -z "${RECONSTRUCTION_ROOT:-}" && -f "$RECONSTRUCTION_ARCHIVE" ]]; then
+  if command -v unzip >/dev/null 2>&1; then
+    RECONSTRUCTION_UNPACKED="$(mktemp -d)"
+    trap 'rm -rf "$RECONSTRUCTION_UNPACKED"' EXIT
+    if unzip -q "$RECONSTRUCTION_ARCHIVE" -d "$RECONSTRUCTION_UNPACKED"; then
+      RECONSTRUCTION_ROOT="$RECONSTRUCTION_UNPACKED"
+    else
+      printf 'warning: could not unpack %s; skipping the reconstruction figures\n' \
+        "$RECONSTRUCTION_ARCHIVE" >&2
+    fi
+  else
+    printf 'warning: unzip not found; skipping the reconstruction figures\n' >&2
+  fi
+fi
+
 for directory in \
     "$MAIN_ROOT/corpora" \
     "$MAIN_ROOT/leanhammer" \

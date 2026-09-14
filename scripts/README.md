@@ -765,9 +765,15 @@ RECONSTRUCTION_ROOT=BenchmarkResults/<stamp-c> \
   scripts/render-paper-artifacts.sh my-figures/
 ```
 
-`RECONSTRUCTION_ROOT` is optional; without it the two
-`reconstruction-over-time-*` figures and `reconstruction-table.pdf` are
-skipped and the other twelve still render. Absolute counts will differ from
+`RECONSTRUCTION_ROOT` is optional. Without it the renderer falls back to
+`benchmark-data/reconstruction.zip`, the recorded Cashmere and Velvet
+reconstruction runs, unpacking them to a scratch directory it deletes on exit
+— so a bare `scripts/render-paper-artifacts.sh` reproduces all fifteen
+figures from a clean checkout. The inputs ship zipped rather than as ~40 loose
+TSVs so that refreshing them is one binary change instead of a directory-wide
+add/delete. Set `RECONSTRUCTION_ARCHIVE` to point at a different one, or
+`RECONSTRUCTION_ROOT` to use an unpacked run of your own, which always wins
+over the archive. Absolute counts will differ from
 the recorded numbers — timings especially, since the external solver call
 dominates and its cost is machine-specific — but coverage should land within a
 few VCs. Solver versions are not pinned — the harness takes whatever `cvc5`
