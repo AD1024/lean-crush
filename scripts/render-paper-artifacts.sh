@@ -107,7 +107,6 @@ if python3 -c "import matplotlib" >/dev/null 2>&1; then
     "$MAIN_ROOT/plean" \
     --out-dir "$OUT_DIR" \
     "${EXCLUDE[@]}" \
-    --mode cumulative \
     --only main \
     --only coverage-table
 
@@ -119,7 +118,6 @@ if python3 -c "import matplotlib" >/dev/null 2>&1; then
       "$RECONSTRUCTION_ROOT"/* \
       --out-dir "$OUT_DIR" \
       "${EXCLUDE[@]}" \
-      --mode cumulative \
       --only reconstruction \
       --only reconstruction-table
   fi
