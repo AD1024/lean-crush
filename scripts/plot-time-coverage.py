@@ -556,10 +556,13 @@ def draw_reconstruction_table(
             "Replayed/Total",
             "Common (ms)",
         ),
-        (0.012, 0.20, 0.50, 0.645, 0.83, 0.988),
+        # Column positions and width are sized to the widest cell each column
+        # can hold -- the Tool column has to fit `Crush w/ UNSAT Core+Alethe`
+        # in bold without running into the right-aligned `Checked proof`.
+        (0.012, 0.193, 0.583, 0.687, 0.835, 0.975),
         ("left", "left", "right", "right", "right", "right"),
         rendered,
-        width=7.8,
+        width=9.3,
     )
 
 

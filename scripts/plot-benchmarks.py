@@ -24,7 +24,7 @@ LANE_LABELS = {
     "crush-verify": "Crush (trusted SMT)",
     "crush-core": "Crush w/ Core",
     "crush-alethe": "Crush w/ Alethe",
-    "crush-portfolio": "Crush w/ Portfolio",
+    "crush-portfolio": "Crush w/ UNSAT Core+Alethe",
     "smt-only": "lean-smt",
 }
 
