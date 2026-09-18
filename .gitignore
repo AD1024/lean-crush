@@ -6,3 +6,15 @@
 /build
 __pycache__/
 .DS_Store
+
+# latexmk artifacts beside the metatheory write-up. They are inert for the Lean
+# build, but any untracked file makes `git status` dirty, and the benchmark
+# harness stamps that into every run's metadata as `crush_dirty=true` -- which
+# marks the run as not reconstructible from a commit. Scoped to this directory
+# so the patterns cannot swallow a real file elsewhere.
+/Crush/Metatheory/Formalization/*.aux
+/Crush/Metatheory/Formalization/*.fdb_latexmk
+/Crush/Metatheory/Formalization/*.fls
+/Crush/Metatheory/Formalization/*.log
+/Crush/Metatheory/Formalization/*.out
+/Crush/Metatheory/Formalization/*.toc
