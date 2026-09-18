@@ -61,6 +61,25 @@ is the `crush-portfolio` lane, which returns a Lean proof the kernel accepted
 or nothing at all. Both come from one run, so the gap between them is the cost
 of producing a proof rather than a difference between machines.
 
+On LeanHammer and Cashmere the kernel-checked lane is *faster* than the
+trusted one even at equal coverage — 11.1s against 11.5s on LeanHammer at
+19/20 each, and 15.9s against 18.7s on Cashmere at 38/38 each. This is real,
+not a measurement error. Before translating a goal Crush tries a few cheap
+Lean tactics that may close it outright, and the kernel-checked lane runs one
+more of them than the trusted lane: a bounded search over the selected rules.
+When that search succeeds it costs a few milliseconds and skips the solver
+entirely, where the trusted lane pays a full cvc5 call. So the two lanes are
+not "the same work, one does more" — they take different routes, and the
+cheaper route happens to belong to the stronger guarantee.
+
+The trusted lane leaves that search out on purpose. Running it in both lanes
+was measured: LeanHammer improved (11.5s to 9.5s at the same 19/20), but PLean
+lost 9 VCs and 103 seconds (174/192 in 353s, to 165/192 in 456s), because a
+search that fails still consumes the budget the goal needed. A time limit on
+the search does not rescue it either, since successful searches run as long as
+failed ones. Given that, the trusted lane keeps the restriction and the timing
+columns are read per lane rather than as one subtracted from the other.
+
 `Auto` is the host project's lean-auto backend. In LeanHammer, its lane is the
 Auto translation and monomorphization pipeline feeding Duper. `Duper` invokes
 Duper directly after host preprocessing. PLean bounds Duper at one second of
