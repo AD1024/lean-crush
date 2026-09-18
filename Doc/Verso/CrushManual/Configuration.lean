@@ -120,6 +120,21 @@ This policy applies to solver `unsat` results. It does not prevent
 {ref "overview-pipeline"}[an early checked proof] from closing the goal before
 SMT. Inspect `#print axioms` to audit the resulting theorem's dependencies.
 
+{optionDocs crush.preReconstruct.ruleSearch}
+
+The pre-SMT pass runs under every trust policy and can close a goal without any
+solver call. What this option controls is one step of it: taking a selected fact
+as a backward rule and discharging the premises that application generates. That
+search is off by default, so a trusting and a reconstructing run execute the same
+stages up to the solver and their times are comparable. With it off the pass still
+applies a selected universal rule that closes the goal outright, still eliminates
+locals of empty inductive types, and still supplies existential witnesses — the
+cases where the encoding cannot see that the goal is true.
+
+Enable it when goals follow from one backward application of a hypothesis or hint,
+which is faster than a solver call. A search that fails still costs time the solver
+would otherwise have had.
+
 {optionDocs crush.reconstruct}
 
 Use the cvc5 version listed in {ref "getting-started"}[Getting Started] for

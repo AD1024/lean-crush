@@ -198,6 +198,19 @@ register_option crush.autoUnfold : Bool := {
             definitions reachable from the goal into each query (like always-on u[…]/d[…])."
 }
 
+register_option crush.preReconstruct.ruleSearch : Bool := {
+  defValue := false
+  descr := "In the pre-SMT pass, search the selected facts for a backward rule that \
+            closes the goal, discharging the premises it generates with bounded Lean \
+            automation. Disabled by default: the pass then applies only a selected \
+            universal rule that closes the goal outright, generating no premises. The \
+            rest of the pass — empty-inductive elimination, existential witnesses, the \
+            datatype split — runs either way. Both settings apply under every trust \
+            policy, so the stages up to the solver call do not depend on whether a \
+            kernel-checked proof is required. Enabling it closes goals the solver would \
+            otherwise have to reach, and spends time on searches that fail."
+}
+
 register_option crush.reconstruct : ReconstructMode := {
   defValue := ReconstructMode.auto
   descr := "Which reconstruction path to use when `crush.trust` asks for one: auto \
@@ -274,6 +287,7 @@ structure Config where
   logic          : Option String := none
   traceScript    : Bool      := false
   autoUnfold     : Bool      := true
+  preRuleSearch  : Bool      := false
   reconstruct    : ReconstructMode := .auto
   trustBvDecide  : Bool      := false
   trustNativeDecide : Bool   := false
@@ -304,6 +318,7 @@ def Config.ofOptions (opts : Options) : Config :=
     logic          := if logicStr.isEmpty then none else some logicStr
     traceScript    := crush.trace.script.get opts
     autoUnfold     := crush.autoUnfold.get opts
+    preRuleSearch  := crush.preReconstruct.ruleSearch.get opts
     reconstruct    := crush.reconstruct.get opts
     trustBvDecide  := crush.reconstruct.trustBvDecide.get opts
     trustNativeDecide := crush.reconstruct.trustNativeDecide.get opts

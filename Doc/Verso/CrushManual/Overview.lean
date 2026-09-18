@@ -36,7 +36,9 @@ A tactic invocation passes through the following stages:
 1. *Collect facts.* Select local hypotheses, explicit lemmas, unfolding
    equations, and optionally library premises.
 2. *Try a checked proof.* Close simple cases directly from selected facts or
-   bounded Lean reasoning before translating them.
+   bounded Lean reasoning before translating them. See
+   {ref "configuration-reconstruction"}[`crush.preReconstruct.ruleSearch`] for how
+   far this reasoning goes.
 3. *Normalize.* Apply proof-producing rewrites that expose supported
    operations and constructor structure.
 4. *Specialize.* Monomorphize polymorphic facts and generate bounded ground
@@ -51,6 +53,8 @@ A tactic invocation passes through the following stages:
 An early checked proof skips the remaining stages, even under the default
 trust policy. Backend `"none"` skips this shortcut so it always emits the query.
 Alethe-only checked reconstruction also skips it so success exercises replay.
+Stage 2 is otherwise the same work under every trust policy, so the cost of
+requiring a proof is confined to stage 7.
 
 This separation matters when diagnosing a failure.
 A missing equation is a collection or translation problem; an `unknown` result

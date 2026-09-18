@@ -291,8 +291,10 @@ theorem linear_arith (x y : Int) (h : x ≤ y) : x < y + 1 := by crush
 #guard_msgs in
 #print axioms linear_arith
 
+-- Closed through the solver: applying `hpq` leaves the premise `p`, and discharging a
+-- generated premise before SMT needs `crush.preReconstruct.ruleSearch`.
 theorem propositional (p q : Prop) (hp : p) (hpq : p → q) : q := by crush
-/-- info: 'propositional' does not depend on any axioms -/
+/-- info: 'propositional' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms propositional
 

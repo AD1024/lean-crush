@@ -452,9 +452,12 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
       reportRunProfile cfg prof profileContext? "selected-fact" "not-attempted"
         "closed from a selected Lean fact"
       return
+    -- The pass itself is policy-independent, and so is the rule-search setting: the
+    -- stages up to the solver call must not depend on whether a kernel-checked proof is
+    -- required, or the two policies are not measuring the same pipeline.
     let closed ←
       prof.time "pre-reconstruct"
-        (tryPreReconstruct goal collected.facts (selectedRuleSearch := cfg.trust != .trust))
+        (tryPreReconstruct goal collected.facts (selectedRuleSearch := cfg.preRuleSearch))
     if closed then
       trace[crush.result] "pre-translation checked proof succeeded; skipped SMT"
       reportRunProfile cfg prof profileContext? "pre-reconstructed" "not-attempted"

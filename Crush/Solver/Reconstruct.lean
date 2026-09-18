@@ -1283,9 +1283,10 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
 /-- Try the checked Lean cases required before SMT for sound-but-incomplete encodings.
 
 First eliminate locals of empty inductive types: SMT sorts are nonempty, so translating
-such a context can produce a spurious `sat`. Explicitly selected theorem templates then get
-a bounded backward-application attempt; quantified local invariants receive the same
-non-recursive direct-reuse check first. Any top-level existential receives the cheap,
+such a context can produce a spurious `sat`. Under `selectedRuleSearch`, explicitly
+selected theorem templates then get a bounded backward-application attempt; without it,
+only a quantified local invariant that closes the goal outright is reused, which generates
+no premises to discharge. Any top-level existential receives the cheap,
 constructor-guided witness pass. Small logically structured targets get one bounded datatype
 split, exposing concrete recursive equations without asserting them as universal SMT axioms.
 Function-valued existential goals finally get the full bounded reconstruction attempt
@@ -1343,8 +1344,8 @@ def tryPreReconstruct (goal : MVarId) (facts : Array Fact)
     if ← trySelectedFactRules snapshot goal selectedProofs explicitCandidateIndices 0 then
       return true
   else
-    -- Trust mode avoids speculative premise search, but direct reuse of a local
-    -- universal invariant is bounded and creates no proof obligations.
+    -- With the search off there is no speculative premise discharge, but direct reuse of
+    -- a local universal invariant is bounded and creates no proof obligations.
     if ← trySelectedFactRulesOnce snapshot goal selectedProofs localCandidateIndices 0
         (premiseFreeOnly := true) then return true
   if ← trySelectedExistentialWitness snapshot goal selectedProofs then return true
