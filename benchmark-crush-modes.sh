@@ -118,7 +118,13 @@ result_dirs=()
 
 run_leanhammer() {
   local out="$result_root/leanhammer"
-  PROFILES="crush-verify crush-core crush-alethe crush-portfolio" \
+  # Same lane selection as the corpora and PLean legs, spelled the way
+  # benchmark-leanhammer.sh names its profiles. Unquoted on purpose: CRUSH_MODES is a
+  # space-separated list and each word becomes one profile.
+  local profiles
+  # shellcheck disable=SC2086
+  profiles="$(printf 'crush-%s ' $CRUSH_MODES)"
+  PROFILES="${profiles% }" \
   REPEATS=1 \
   SOLVER=cvc5 \
   TIMEOUT=5 \
