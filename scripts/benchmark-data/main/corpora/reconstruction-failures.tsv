@@ -1,1 +1,3 @@
 suite	lane	failure_mode	vcs
+velvet	crush-portfolio	certificate-error+core-failed	3
+velvet	crush-portfolio	timeout	2

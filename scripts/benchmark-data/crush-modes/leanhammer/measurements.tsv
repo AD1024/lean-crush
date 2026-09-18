@@ -1,81 +1,61 @@
 suite	lane	repeat	vc_key	status	category	milliseconds	message
-leanhammer	crush-verify	1	01_prop_chain	pass	-	428	-
-leanhammer	crush-verify	1	02_congruence	pass	-	375	-
-leanhammer	crush-verify	1	03_quantified	pass	-	388	-
-leanhammer	crush-verify	1	04_existential	pass	-	389	-
-leanhammer	crush-verify	1	05_skolemization	pass	-	7	-
-leanhammer	crush-verify	1	06_funext	pass	-	414	-
-leanhammer	crush-verify	1	07_higher_order	pass	-	4	-
-leanhammer	crush-verify	1	08_int_linear	pass	-	447	-
-leanhammer	crush-verify	1	09_nat_sub	pass	-	413	-
+leanhammer	crush-verify	1	01_prop_chain	pass	-	615	-
+leanhammer	crush-verify	1	02_congruence	pass	-	376	-
+leanhammer	crush-verify	1	03_quantified	pass	-	377	-
+leanhammer	crush-verify	1	04_existential	pass	-	386	-
+leanhammer	crush-verify	1	05_skolemization	pass	-	6	-
+leanhammer	crush-verify	1	06_funext	pass	-	409	-
+leanhammer	crush-verify	1	07_higher_order	pass	-	5	-
+leanhammer	crush-verify	1	08_int_linear	pass	-	392	-
+leanhammer	crush-verify	1	09_nat_sub	pass	-	405	-
 leanhammer	crush-verify	1	10_option_injective	pass	-	382	-
-leanhammer	crush-verify	1	11_enum_pigeonhole	pass	-	400	-
-leanhammer	crush-verify	1	12_list_assoc	pass	-	409	-
-leanhammer	crush-verify	1	13_composition	pass	-	439	-
+leanhammer	crush-verify	1	11_enum_pigeonhole	pass	-	390	-
+leanhammer	crush-verify	1	12_list_assoc	pass	-	397	-
+leanhammer	crush-verify	1	13_composition	pass	-	433	-
 leanhammer	crush-verify	1	14_bool_mixed	pass	-	17	-
-leanhammer	crush-verify	1	15_bitvec	pass	-	446	-
-leanhammer	crush-verify	1	16_string	pass	-	395	-
+leanhammer	crush-verify	1	15_bitvec	pass	-	392	-
+leanhammer	crush-verify	1	16_string	pass	-	390	-
 leanhammer	crush-verify	1	17_empty	pass	-	3	-
-leanhammer	crush-verify	1	18_church_tower	fail	timeout	5416	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260902-181232/leanhammer/generated/crush-verify/18_church_tower.lean:58:2: error: crush: solver returned `unknown` (solver exited without a verdict: cvc5 interrupted by timeout.). Try increasing `crush.timeout` or adding hypotheses.
-leanhammer	crush-verify	1	19_polymorphic	pass	-	414	-
-leanhammer	crush-verify	1	20_irrelevant_quantifier	pass	-	384	-
-leanhammer	crush-core	1	01_prop_chain	pass	-	5	-
-leanhammer	crush-core	1	02_congruence	pass	-	442	-
-leanhammer	crush-core	1	03_quantified	pass	-	4	-
-leanhammer	crush-core	1	04_existential	pass	-	4	-
-leanhammer	crush-core	1	05_skolemization	pass	-	6	-
-leanhammer	crush-core	1	06_funext	pass	-	473	-
-leanhammer	crush-core	1	07_higher_order	pass	-	5	-
-leanhammer	crush-core	1	08_int_linear	pass	-	468	-
-leanhammer	crush-core	1	09_nat_sub	pass	-	424	-
-leanhammer	crush-core	1	10_option_injective	pass	-	394	-
-leanhammer	crush-core	1	11_enum_pigeonhole	pass	-	471	-
-leanhammer	crush-core	1	12_list_assoc	pass	-	5	-
-leanhammer	crush-core	1	13_composition	pass	-	435	-
-leanhammer	crush-core	1	14_bool_mixed	pass	-	17	-
-leanhammer	crush-core	1	15_bitvec	pass	-	463	-
-leanhammer	crush-core	1	16_string	pass	-	390	-
-leanhammer	crush-core	1	17_empty	pass	-	3	-
-leanhammer	crush-core	1	18_church_tower	fail	timeout	5393	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260902-181232/leanhammer/generated/crush-core/18_church_tower.lean:58:2: error: crush: solver returned `unknown` (solver exited without a verdict: cvc5 interrupted by timeout.). Try increasing `crush.timeout` or adding hypotheses.
-leanhammer	crush-core	1	19_polymorphic	pass	-	4	-
-leanhammer	crush-core	1	20_irrelevant_quantifier	pass	-	464	-
-leanhammer	crush-alethe	1	01_prop_chain	pass	-	441	-
-leanhammer	crush-alethe	1	02_congruence	pass	-	394	-
-leanhammer	crush-alethe	1	03_quantified	pass	-	424	-
-leanhammer	crush-alethe	1	04_existential	pass	-	469	-
-leanhammer	crush-alethe	1	05_skolemization	fail	unknown	376	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260902-181232/leanhammer/generated/crush-alethe/05_skolemization.lean:47:2: error: crush: solver returned `unknown` (no reason given). Try increasing `crush.timeout` or adding hypotheses.
-leanhammer	crush-alethe	1	06_funext	pass	-	758	-
-leanhammer	crush-alethe	1	07_higher_order	pass	-	510	-
-leanhammer	crush-alethe	1	08_int_linear	pass	-	659	-
-leanhammer	crush-alethe	1	09_nat_sub	pass	-	1362	-
-leanhammer	crush-alethe	1	10_option_injective	pass	-	380	-
-leanhammer	crush-alethe	1	11_enum_pigeonhole	fail	translation	390	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260902-181232/leanhammer/generated/crush-alethe/11_enum_pigeonhole.lean:52:2: error: crush: cvc5 did not emit an Alethe certificate: Proof unsupported by Alethe: contains operator DUMMY_SKOLEM. Set `crush.reconstruct` to "auto" to use core-directed reconstruction instead.
-leanhammer	crush-alethe	1	12_list_assoc	pass	-	404	-
-leanhammer	crush-alethe	1	13_composition	fail	reconstruction-failed	463	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260902-181232/leanhammer/generated/crush-alethe/13_composition.lean:48:2: error: crush: Alethe replay failed with rule-gap at step `crush_fact_0`: decoded SMT assumption was not derivable from its Lean source fact; certificate term: (not (= (p_0 clo_8) (p_0 clo_45))). Set `crush.reconstruct` to "auto" to fall back to the core-directed finishers.
-leanhammer	crush-alethe	1	14_bool_mixed	pass	-	484	-
-leanhammer	crush-alethe	1	15_bitvec	pass	-	458	-
-leanhammer	crush-alethe	1	16_string	pass	-	414	-
-leanhammer	crush-alethe	1	17_empty	fail	sat	385	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260902-181232/leanhammer/generated/crush-alethe/17_empty.lean:46:2: error: crush: could not prove the goal — the solver found a model:
-leanhammer	crush-alethe	1	18_church_tower	fail	timeout	5392	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260902-181232/leanhammer/generated/crush-alethe/18_church_tower.lean:58:2: error: crush: solver returned `unknown` (solver exited without a verdict: cvc5 interrupted by timeout.). Try increasing `crush.timeout` or adding hypotheses.
-leanhammer	crush-alethe	1	19_polymorphic	fail	reconstruction-failed	405	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260902-181232/leanhammer/generated/crush-alethe/19_polymorphic.lean:50:2: error: crush: Alethe replay failed with term-gap at step `crush_fact_0`: selected SMT assumption could not be decoded; certificate term: (p_0 xs_5). Set `crush.reconstruct` to "auto" to fall back to the core-directed finishers.
-leanhammer	crush-alethe	1	20_irrelevant_quantifier	fail	translation	383	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260902-181232/leanhammer/generated/crush-alethe/20_irrelevant_quantifier.lean:48:2: error: crush: cvc5 did not emit an Alethe certificate: Proof unsupported by Alethe: contains operator DUMMY_SKOLEM. Set `crush.reconstruct` to "auto" to use core-directed reconstruction instead.
+leanhammer	crush-verify	1	18_church_tower	fail	timeout	5394	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260917-203328/leanhammer/generated/crush-verify/18_church_tower.lean:58:2: error: crush: solver returned `unknown` (solver exited without a verdict: cvc5 interrupted by timeout.). Try increasing `crush.timeout` or adding hypotheses.
+leanhammer	crush-verify	1	19_polymorphic	pass	-	392	-
+leanhammer	crush-verify	1	20_irrelevant_quantifier	pass	-	382	-
+leanhammer	crush-alethe	1	01_prop_chain	pass	-	453	-
+leanhammer	crush-alethe	1	02_congruence	pass	-	398	-
+leanhammer	crush-alethe	1	03_quantified	pass	-	420	-
+leanhammer	crush-alethe	1	04_existential	pass	-	467	-
+leanhammer	crush-alethe	1	05_skolemization	fail	unknown	377	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260917-203328/leanhammer/generated/crush-alethe/05_skolemization.lean:47:2: error: crush: solver returned `unknown` (no reason given). Try increasing `crush.timeout` or adding hypotheses.
+leanhammer	crush-alethe	1	06_funext	pass	-	748	-
+leanhammer	crush-alethe	1	07_higher_order	pass	-	514	-
+leanhammer	crush-alethe	1	08_int_linear	pass	-	658	-
+leanhammer	crush-alethe	1	09_nat_sub	pass	-	1311	-
+leanhammer	crush-alethe	1	10_option_injective	pass	-	384	-
+leanhammer	crush-alethe	1	11_enum_pigeonhole	fail	translation	393	"/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260917-203328/leanhammer/generated/crush-alethe/11_enum_pigeonhole.lean:52:2: error: crush: cvc5 did not emit an Alethe certificate: Proof unsupported by Alethe: contains operator DUMMY_SKOLEM. Set `crush.reconstruct` to ""auto"" to use core-directed reconstruction instead."
+leanhammer	crush-alethe	1	12_list_assoc	pass	-	397	-
+leanhammer	crush-alethe	1	13_composition	fail	reconstruction-failed	453	"/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260917-203328/leanhammer/generated/crush-alethe/13_composition.lean:48:2: error: crush: Alethe replay failed with rule-gap at step `crush_fact_0`: decoded SMT assumption was not derivable from its Lean source fact; certificate term: (not (= (p_0 clo_8) (p_0 clo_45))). Set `crush.reconstruct` to ""auto"" to fall back to the core-directed finishers."
+leanhammer	crush-alethe	1	14_bool_mixed	pass	-	496	-
+leanhammer	crush-alethe	1	15_bitvec	pass	-	426	-
+leanhammer	crush-alethe	1	16_string	pass	-	412	-
+leanhammer	crush-alethe	1	17_empty	fail	sat	380	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260917-203328/leanhammer/generated/crush-alethe/17_empty.lean:46:2: error: crush: could not prove the goal — the solver found a model:
+leanhammer	crush-alethe	1	18_church_tower	fail	timeout	5404	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260917-203328/leanhammer/generated/crush-alethe/18_church_tower.lean:58:2: error: crush: solver returned `unknown` (solver exited without a verdict: cvc5 interrupted by timeout.). Try increasing `crush.timeout` or adding hypotheses.
+leanhammer	crush-alethe	1	19_polymorphic	fail	reconstruction-failed	408	"/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260917-203328/leanhammer/generated/crush-alethe/19_polymorphic.lean:50:2: error: crush: Alethe replay failed with term-gap at step `crush_fact_0`: selected SMT assumption could not be decoded; certificate term: (p_0 xs_5). Set `crush.reconstruct` to ""auto"" to fall back to the core-directed finishers."
+leanhammer	crush-alethe	1	20_irrelevant_quantifier	fail	translation	384	"/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260917-203328/leanhammer/generated/crush-alethe/20_irrelevant_quantifier.lean:48:2: error: crush: cvc5 did not emit an Alethe certificate: Proof unsupported by Alethe: contains operator DUMMY_SKOLEM. Set `crush.reconstruct` to ""auto"" to use core-directed reconstruction instead."
 leanhammer	crush-portfolio	1	01_prop_chain	pass	-	5	-
-leanhammer	crush-portfolio	1	02_congruence	pass	-	459	-
+leanhammer	crush-portfolio	1	02_congruence	pass	-	390	-
 leanhammer	crush-portfolio	1	03_quantified	pass	-	4	-
 leanhammer	crush-portfolio	1	04_existential	pass	-	4	-
 leanhammer	crush-portfolio	1	05_skolemization	pass	-	6	-
-leanhammer	crush-portfolio	1	06_funext	pass	-	800	-
-leanhammer	crush-portfolio	1	07_higher_order	pass	-	5	-
-leanhammer	crush-portfolio	1	08_int_linear	pass	-	705	-
-leanhammer	crush-portfolio	1	09_nat_sub	pass	-	1324	-
-leanhammer	crush-portfolio	1	10_option_injective	pass	-	395	-
-leanhammer	crush-portfolio	1	11_enum_pigeonhole	pass	-	479	-
+leanhammer	crush-portfolio	1	06_funext	pass	-	747	-
+leanhammer	crush-portfolio	1	07_higher_order	pass	-	4	-
+leanhammer	crush-portfolio	1	08_int_linear	pass	-	638	-
+leanhammer	crush-portfolio	1	09_nat_sub	pass	-	1309	-
+leanhammer	crush-portfolio	1	10_option_injective	pass	-	386	-
+leanhammer	crush-portfolio	1	11_enum_pigeonhole	pass	-	467	-
 leanhammer	crush-portfolio	1	12_list_assoc	pass	-	5	-
-leanhammer	crush-portfolio	1	13_composition	pass	-	534	-
+leanhammer	crush-portfolio	1	13_composition	pass	-	456	-
 leanhammer	crush-portfolio	1	14_bool_mixed	pass	-	16	-
-leanhammer	crush-portfolio	1	15_bitvec	pass	-	481	-
-leanhammer	crush-portfolio	1	16_string	pass	-	414	-
+leanhammer	crush-portfolio	1	15_bitvec	pass	-	483	-
+leanhammer	crush-portfolio	1	16_string	pass	-	418	-
 leanhammer	crush-portfolio	1	17_empty	pass	-	3	-
-leanhammer	crush-portfolio	1	18_church_tower	fail	timeout	5424	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260902-181232/leanhammer/generated/crush-portfolio/18_church_tower.lean:58:2: error: crush: solver returned `unknown` (solver exited without a verdict: cvc5 interrupted by timeout.). Try increasing `crush.timeout` or adding hypotheses.
+leanhammer	crush-portfolio	1	18_church_tower	fail	timeout	5394	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260917-203328/leanhammer/generated/crush-portfolio/18_church_tower.lean:58:2: error: crush: solver returned `unknown` (solver exited without a verdict: cvc5 interrupted by timeout.). Try increasing `crush.timeout` or adding hypotheses.
 leanhammer	crush-portfolio	1	19_polymorphic	pass	-	4	-
-leanhammer	crush-portfolio	1	20_irrelevant_quantifier	pass	-	403	-
+leanhammer	crush-portfolio	1	20_irrelevant_quantifier	pass	-	398	-

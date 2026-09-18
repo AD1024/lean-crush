@@ -745,6 +745,34 @@ replay-scaling measurements. Since the 2026-09-02 refresh both cover the same
 [benchmark-data README](benchmark-data/README.md)
 lists the direct `plot-benchmarks.py` inputs.
 
+### Both Crush series
+
+The coverage comparison measures Crush twice, because it answers two different
+questions, and folds both into the same TSVs:
+
+| Headline backend | Lane | Meaning |
+|---|---|---|
+| `crush` | `crush-verify` | trusts the solver's verdict, builds no proof term |
+| `crush-checked` | `crush-portfolio` | returns a Lean proof the kernel accepted, or nothing |
+
+`benchmark.sh` runs both by default; `CRUSH_LANES` narrows it, e.g.
+`CRUSH_LANES=verify` to halve the Crush work. `benchmark-report.py` emits the
+second series whenever a run measured `crush-portfolio`, so no post-processing
+is needed. Recorded data whose Crush lane predates this — where the trusted and
+checked series would otherwise come from different machines — can be brought
+onto one run with:
+
+```sh
+python3 scripts/fold-crush-series.py \
+  --target scripts/benchmark-data/main/corpora \
+  --donor  BenchmarkResults/<reconstruction-run>/corpora \
+  --report scripts/benchmark-report.py
+```
+
+It swaps the trusted rows for the donor's and adds the portfolio rows beside
+them, then regenerates every derived TSV from the combined raw inputs. Suites
+the donor did not measure keep what they had.
+
 ### Rendering from your own run
 
 Nothing above requires the recorded data. `MAIN_ROOT` and `MODES_ROOT`

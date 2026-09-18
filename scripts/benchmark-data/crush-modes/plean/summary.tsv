@@ -1,5 +1,4 @@
 suite	backend	attempted	passed	failed	pass_pct	total_ms	mean_ms	min_ms	max_ms
-plean	crush-verify	192	174	18	90.6	351963.9	1833.1	0.0	26672.6
-plean	crush-alethe	192	8	184	4.2	201106.2	1047.4	0.0	4459.8
-plean	crush-portfolio	192	157	35	81.8	466865.8	2431.6	0.0	33833.5
-plean	crush-core	192	157	35	81.8	470034.9	2448.1	0.0	35061.7
+plean	crush-verify	192	174	18	90.6	353007.4	1838.6	0.0	26914.6
+plean	crush-alethe	192	8	184	4.2	204501.6	1065.1	0.0	4469.1
+plean	crush-portfolio	192	157	35	81.8	467485.4	2434.8	0.0	34201.9

@@ -1,1 +1,3 @@
 suite	total_vcs	verify_solved_vcs	smt_verified_vcs	core_reconstructed	alethe_reconstructed	portfolio_reconstructed	core_checked	alethe_checked	portfolio_checked
+cashmere	38	38	23	0	0	23	0	0	38
+velvet	504	477	292	0	0	287	0	0	473

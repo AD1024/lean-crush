@@ -141,6 +141,40 @@ class ReconstructionFieldTests(unittest.TestCase):
         self.assertGreater(int(row["portfolio_checked"]), int(row["smt_verified_vcs"]))
 
 
+class CrushSeriesTests(unittest.TestCase):
+    def test_both_crush_series_are_labelled_and_distinct(self) -> None:
+        self.assertEqual(
+            plot_benchmarks.label_backend("crush"), "Crush (SMT trusted)"
+        )
+        self.assertEqual(
+            plot_benchmarks.label_backend("crush-checked"),
+            "Crush (kernel-checked)",
+        )
+
+    def test_kernel_checked_sorts_directly_after_trusted(self) -> None:
+        order = sorted(
+            ["grind", "crush-checked", "auto", "crush", "lean-smt", "duper"],
+            key=plot_benchmarks.backend_sort_key,
+        )
+
+        self.assertEqual(
+            order,
+            ["auto", "duper", "lean-smt", "crush", "crush-checked", "grind"],
+        )
+
+    def test_the_two_crush_series_do_not_share_a_colour(self) -> None:
+        self.assertNotEqual(
+            plot_benchmarks.BACKEND_COLORS["crush"],
+            plot_benchmarks.BACKEND_COLORS["crush-checked"],
+        )
+
+    def test_every_ordered_backend_has_a_colour_and_label(self) -> None:
+        for backend in plot_benchmarks.BACKEND_ORDER:
+            with self.subTest(backend=backend):
+                self.assertIn(backend, plot_benchmarks.BACKEND_COLORS)
+                self.assertIn(backend, plot_benchmarks.BACKEND_LABELS)
+
+
 class FailureModeTests(unittest.TestCase):
     def test_every_ordered_mode_has_a_color(self) -> None:
         missing = [

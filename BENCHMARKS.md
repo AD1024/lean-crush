@@ -29,27 +29,37 @@ and figures.
 | LeanHammer | Auto | 8 / 20 | 40.0% | 3.240 | 162.0 | 2.0 | 1,317.0 |
 | LeanHammer | Duper | 12 / 20 | 60.0% | 19.348 | 967.4 | 43.0 | 15,745.0 |
 | LeanHammer | lean-smt | 12 / 20 | 60.0% | 1.873 | 93.7 | 50.0 | 144.0 |
-| **LeanHammer** | **Crush** | **19 / 20** | **95.0%** | **6.133** | **306.7** | **2.0** | **5,070.0** |
+| **LeanHammer** | **Crush (SMT trusted)** | **19 / 20** | **95.0%** | **11.543** | **577.1** | **3.0** | **5,394.0** |
+| **LeanHammer** | **Crush (kernel-checked)** | **19 / 20** | **95.0%** | **11.137** | **556.9** | **3.0** | **5,394.0** |
 | LeanHammer | `grind` | 16 / 20 | 80.0% | 0.074 | 3.7 | 0.0 | 13.0 |
-| Loom | Auto | 4 / 4 | 100.0% | 0.974 | 243.5 | 44.0 | 607.0 |
+| **Loom** | **Auto** | **4 / 4** | **100.0%** | **0.974** | **243.5** | **44.0** | **607.0** |
 | Loom | Duper | 1 / 4 | 25.0% | 0.454 | 113.5 | 36.0 | 174.0 |
-| Loom | Crush | 4 / 4 | 100.0% | 0.418 | 104.5 | 53.0 | 139.0 |
+| **Loom** | **Crush (SMT trusted)** | **4 / 4** | **100.0%** | **0.418** | **104.5** | **53.0** | **139.0** |
 | **Loom** | **`grind`** | **4 / 4** | **100.0%** | **0.048** | **12.0** | **7.0** | **17.0** |
 | Cashmere | Auto | 18 / 38 | 47.4% | 5.379 | 141.6 | 2.0 | 631.0 |
 | Cashmere | Duper | 21 / 38 | 55.3% | 65.087 | 1,712.8 | 1.0 | 40,739.0 |
 | Cashmere | lean-smt | 17 / 38 | 44.7% | 5.547 | 146.0 | 41.0 | 244.0 |
-| **Cashmere** | **Crush** | **38 / 38** | **100.0%** | **6.307** | **166.0** | **1.0** | **566.0** |
+| **Cashmere** | **Crush (SMT trusted)** | **38 / 38** | **100.0%** | **18.739** | **493.1** | **2.0** | **1,185.0** |
+| **Cashmere** | **Crush (kernel-checked)** | **38 / 38** | **100.0%** | **15.905** | **418.6** | **2.0** | **1,259.0** |
 | Cashmere | `grind` | 19 / 38 | 50.0% | 0.289 | 7.6 | 4.0 | 13.0 |
 | Velvet | Auto | 415 / 504 | 82.3% | 344.974 | 684.5 | 11.0 | 12,866.0 |
 | Velvet | Duper | 292 / 504 | 57.9% | 1,039.652 | 2,062.8 | 0.0 | 15,077.0 |
 | Velvet | lean-smt | 302 / 504 | 59.9% | 201.514 | 399.8 | 14.0 | 5,942.0 |
-| **Velvet** | **Crush** | **484 / 504** | **96.0%** | **171.406** | **340.1** | **0.0** | **10,386.0** |
+| **Velvet** | **Crush (SMT trusted)** | **477 / 504** | **94.6%** | **356.922** | **708.2** | **1.0** | **11,462.0** |
+| Velvet | Crush (kernel-checked) | 473 / 504 | 93.8% | 552.495 | 1,096.2 | 0.0 | 73,734.0 |
 | Velvet | `grind` | 444 / 504 | 88.1% | 21.409 | 42.5 | 0.0 | 3,000.0 |
 | PLean | Auto | 168 / 192 | 87.5% | 301.027 | 1,567.9 | 0.0 | 17,280.7 |
 | PLean | Duper | 71 / 192 | 37.0% | 81.281 | 423.3 | 0.0 | 2,174.6 |
 | PLean | lean-smt | 96 / 192 | 50.0% | 272.561 | 1,419.6 | 0.0 | 16,704.4 |
-| **PLean** | **Crush** | **174 / 192** | **90.6%** | **1,378.833** | **7,181.4** | **0.0** | **301,768.7** |
+| **PLean** | **Crush (SMT trusted)** | **174 / 192** | **90.6%** | **353.007** | **1,838.6** | **0.0** | **26,914.6** |
+| PLean | Crush (kernel-checked) | 157 / 192 | 81.8% | 467.485 | 2,434.8 | 0.0 | 34,201.9 |
 | PLean | `grind` | 155 / 192 | 80.7% | 76.005 | 395.9 | 0.0 | 3,859.6 |
+
+Crush appears twice. `Crush (SMT trusted)` is the `crush-verify` lane, which
+accepts the solver's verdict and builds no proof term; `Crush (kernel-checked)`
+is the `crush-portfolio` lane, which returns a Lean proof the kernel accepted
+or nothing at all. Both come from one run, so the gap between them is the cost
+of producing a proof rather than a difference between machines.
 
 `Auto` is the host project's lean-auto backend. In LeanHammer, its lane is the
 Auto translation and monomorphization pipeline feeding Duper. `Duper` invokes

@@ -32,12 +32,13 @@ BACKEND_LABELS = {
     "auto": "Auto",
     "duper": "Duper",
     "lean-smt": "lean-smt",
-    "crush": "Crush",
+    "crush": "Crush (SMT trusted)",
+    "crush-checked": "Crush (kernel-checked)",
     "grind": "grind",
 }
 
 # Column order for every headline table and figure.
-BACKEND_ORDER = ("auto", "duper", "lean-smt", "crush", "grind")
+BACKEND_ORDER = ("auto", "duper", "lean-smt", "crush", "crush-checked", "grind")
 
 SUITE_LABELS = {
     "leanhammer": "LeanHammer",
@@ -63,6 +64,8 @@ BACKEND_COLORS = {
     "duper": "#CC79A7",
     "lean-smt": "#009E73",
     "crush": "#0072B2",
+    # Okabe-Ito sky blue: same family as trusted Crush, still distinct.
+    "crush-checked": "#56B4E9",
     "grind": "#3A3A3A",
 }
 
@@ -294,6 +297,22 @@ def reconstruction_fields(rows: list[dict[str, str]]) -> tuple[tuple[str, ...], 
     if rows and all(CHECKED_FIELDS[-1] in row for row in rows):
         return CHECKED_FIELDS, True
     return REPLAY_FIELDS, False
+
+
+def measured_fields(
+    rows: list[dict[str, str]], names: tuple[str, ...]
+) -> tuple[int, ...]:
+    """Indices of the lanes some suite actually measured.
+
+    `reconstruction-summary.tsv` writes "-" for a lane the run skipped, so a
+    series that is "-" everywhere is dropped rather than drawn as a row of
+    0% bars.
+    """
+    return tuple(
+        index
+        for index, name in enumerate(names)
+        if any(row.get(name, "-") != "-" for row in rows)
+    )
 
 
 def drop_suites(
@@ -703,11 +722,10 @@ def plot_reconstruction(rows: list[dict[str, str]], path: Path) -> None:
     names, checked = reconstruction_fields(rows)
     # Named from LANE_LABELS so the reconstruction figures, the tables, and
     # the comparison agree on what each mode is called.
+    lanes = ("crush-core", "crush-alethe", "crush-portfolio")
+    keep = measured_fields(rows, names)
     fields = tuple(
-        (name, LANE_LABELS[lane], LANE_COLORS[lane])
-        for name, lane in zip(
-            names, ("crush-core", "crush-alethe", "crush-portfolio")
-        )
+        (names[i], LANE_LABELS[lanes[i]], LANE_COLORS[lanes[i]]) for i in keep
     )
     if checked:
         title = "Checked proof coverage"
@@ -749,7 +767,10 @@ def plot_reconstruction(rows: list[dict[str, str]], path: Path) -> None:
         bars_width = len(fields) * bar_width + (len(fields) - 1) * 8
         group_start = left + suite_index * group_width + (group_width - bars_width) / 2
         for field_index, (field, _, color) in enumerate(fields):
-            count = int(row[field])
+            raw = row.get(field, "-")
+            if raw == "-":
+                continue
+            count = int(raw)
             percentage = 100.0 * count / denominator if denominator else 0.0
             x = group_start + field_index * (bar_width + 8)
             y = top + chart_height * (1.0 - percentage / 100.0)
@@ -1358,8 +1379,13 @@ def write_tables(
             stream.write("\n## Backend Comparison\n\n")
             stream.write(
                 "Each corpus has one fixed total for every backend. "
-                "`Crush` is the `crush-verify` lane, which trusts the SMT "
-                "verdict and does not reconstruct a Lean proof. `Attempted` "
+                "Crush appears twice because it answers two questions: "
+                "`Crush (SMT trusted)` is the `crush-verify` lane, which "
+                "trusts the solver's verdict and builds no proof term, "
+                "while `Crush (kernel-checked)` is the `crush-portfolio` "
+                "lane, which returns a Lean proof the kernel accepted or "
+                "nothing. The gap between them is the cost of producing a "
+                "proof. `Attempted` "
                 "counts VCs with a complete backend record; `Failed` counts "
                 "attempted but unsolved VCs; and `Missing` counts corpus VCs "
                 "without a complete attempt record. Missing VCs count as "

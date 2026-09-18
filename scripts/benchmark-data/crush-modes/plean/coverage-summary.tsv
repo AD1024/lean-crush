@@ -1,5 +1,4 @@
 suite	lane	total_vcs	attempted_vcs	solved_vcs	failed_vcs	missing_vcs	pass_pct	total_ms	mean_ms	min_ms	max_ms
-plean	crush-alethe	192	192	8	184	0	4.2	201106.203	1047.428	0.000	4459.823
-plean	crush-core	192	192	157	35	0	81.8	470034.854	2448.098	0.000	35061.749
-plean	crush-portfolio	192	192	157	35	0	81.8	466865.783	2431.593	0.000	33833.512
-plean	crush-verify	192	192	174	18	0	90.6	351963.950	1833.146	0.000	26672.565
+plean	crush-alethe	192	192	8	184	0	4.2	204501.565	1065.112	0.000	4469.107
+plean	crush-portfolio	192	192	157	35	0	81.8	467485.368	2434.820	0.000	34201.882
+plean	crush-verify	192	192	174	18	0	90.6	353007.406	1838.580	0.000	26914.583

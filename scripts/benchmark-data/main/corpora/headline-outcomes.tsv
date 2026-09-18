@@ -3,6 +3,7 @@ cashmere	auto	auto	38	18	0	0	20
 cashmere	duper	duper	38	21	0	1	16
 cashmere	lean-smt	smt-only	38	17	0	0	21
 cashmere	crush	crush-verify	38	38	0	0	0
+cashmere	crush-checked	crush-portfolio	38	38	0	0	0
 cashmere	grind	grind	38	19	0	0	19
 loom	auto	auto	4	4	0	0	0
 loom	duper	duper	4	1	0	0	3
@@ -11,5 +12,6 @@ loom	grind	grind	4	4	0	0	0
 velvet	auto	auto	504	415	0	0	89
 velvet	duper	duper	504	292	0	133	79
 velvet	lean-smt	smt-only	504	302	82	0	120
-velvet	crush	crush-verify	504	484	0	14	6
+velvet	crush	crush-verify	504	477	0	21	6
+velvet	crush-checked	crush-portfolio	504	473	0	19	12
 velvet	grind	grind	504	444	0	0	60

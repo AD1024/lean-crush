@@ -294,6 +294,13 @@ def headline_lane_map(suite: str, lanes: set[str]) -> list[tuple[str, str]]:
     crush_lane = canonical_crush_lane(lanes)
     if crush_lane is not None:
         selected.append(("crush", crush_lane))
+    # The portfolio lane answers a different question from the trusted lane --
+    # it returns a kernel-checked proof or nothing -- so it earns its own
+    # headline series rather than being folded into `crush`. Emitted whenever
+    # the run measured it, so a reconstruction run produces both series
+    # without any post-processing.
+    if "crush-portfolio" in lanes:
+        selected.append(("crush-checked", "crush-portfolio"))
     if grind_lane in lanes:
         selected.append(("grind", grind_lane))
     return selected
@@ -452,7 +459,9 @@ def comparison_rows(
         if crush_lane is None:
             continue
         for backend, baseline_lane in headline_lane_map(suite, lanes):
-            if backend == "crush":
+            # Both Crush series are the subject of this table, not baselines
+            # to compare against, so neither gets a row of its own.
+            if backend.startswith("crush"):
                 continue
             baseline = vcs_by_lane[(suite, baseline_lane)]
             crush = vcs_by_lane[(suite, crush_lane)]
@@ -541,6 +550,14 @@ def reconstruction_rows(
         counts = []
         checked = []
         for lane in RECONSTRUCTION_LANES:
+            # A lane the run never measured is absent, not zero. Emitting "-"
+            # keeps a figure from drawing a 0% bar for work nobody did.
+            if not any(
+                (suite, lane, vc) in attempts for vc in verify_vcs
+            ):
+                counts.append("-")
+                checked.append("-")
+                continue
             counts.append(
                 sum(
                     vc in smt_verified

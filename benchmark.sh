@@ -165,6 +165,14 @@ case "$case_study" in
   *) die "unknown case study: $case_study" ;;
 esac
 
+# Crush answers two different questions, so the coverage comparison measures
+# both and folds them into the same TSVs: `verify` trusts the solver's verdict,
+# `portfolio` returns a kernel-checked Lean proof or nothing (Alethe replay
+# first, then core-directed reconstruction). They surface as the `crush` and
+# `crush-checked` headline backends. Narrow it to one mode to halve the Crush
+# work, e.g. CRUSH_LANES=verify.
+CRUSH_LANES="${CRUSH_LANES:-verify portfolio}"
+
 run_auto=false
 run_duper=false
 run_crush=false
@@ -173,7 +181,12 @@ run_smt=false
 case "$backend" in
   auto) run_auto=true; leanhammer_profile="auto-duper" ;;
   duper) run_duper=true; leanhammer_profile="duper-only" ;;
-  crush) run_crush=true; leanhammer_profile="crush-verify" ;;
+  crush)
+    run_crush=true
+    # LeanHammer names lanes where the others name modes.
+    leanhammer_profile="$(printf 'crush-%s ' $CRUSH_LANES)"
+    leanhammer_profile="${leanhammer_profile% }"
+    ;;
   grind) run_grind=true; leanhammer_profile="grind-only" ;;
   lean-smt|smt)
     backend="lean-smt"
@@ -258,7 +271,7 @@ run_corpora() {
   SOLVER=cvc5 \
   TIMEOUT=5 \
   DUPER_TIMEOUT=5 \
-  CRUSH_MODES=verify \
+  CRUSH_MODES="$CRUSH_LANES" \
   MAX_HEARTBEATS=1000000 \
   MAX_RECURSION_DEPTH=1000000 \
   CRUSH_PROFILE=true \
@@ -284,7 +297,7 @@ run_plean() {
   REPEATS=1 \
   SOLVER=cvc5 \
   TIMEOUT=5 \
-  CRUSH_MODES=verify \
+  CRUSH_MODES="$CRUSH_LANES" \
   MAX_HEARTBEATS=1000000 \
   MAX_RECURSION_DEPTH=1000000 \
   CRUSH_INST_FUEL=0 \

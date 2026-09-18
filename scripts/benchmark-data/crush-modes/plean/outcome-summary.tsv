@@ -1,11 +1,6 @@
 suite	lane	outcome	replay	events
 plean	crush-alethe	reconstruction-failed	certificate-error	1236
 plean	crush-alethe	unknown	not-attempted	114
-plean	crush-core	core-reconstructed	not-attempted	428
-plean	crush-core	pre-reconstructed	not-attempted	220
-plean	crush-core	reconstruction-failed	not-attempted	11
-plean	crush-core	selected-fact	not-attempted	81
-plean	crush-core	unknown	not-attempted	219
 plean	crush-portfolio	core-reconstructed	certificate-error	428
 plean	crush-portfolio	pre-reconstructed	not-attempted	220
 plean	crush-portfolio	reconstruction-failed	certificate-error	11

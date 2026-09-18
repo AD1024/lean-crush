@@ -1,3 +1,3 @@
 suite	lane	matched_vcs	checked_proof_vcs	failed_vcs	pass_pct	common_checked_proof_vcs	mean_ms	common_mean_ms	verify_smt_cohort_vcs	cohort_reconstructed_vcs
-leanhammer	smt-only	20	12	8	60.0	12	102.083	102.083	15	10
-leanhammer	crush-portfolio	20	19	1	95.0	12	302.263	293.667	15	15
+plean	crush-alethe	192	1	191	0.5	1	0.000	0.000	172	0
+plean	crush-portfolio	192	153	39	79.7	1	2090.720	0.000	172	151

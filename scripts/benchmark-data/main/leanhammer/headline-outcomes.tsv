@@ -3,4 +3,5 @@ leanhammer	auto	auto-duper	20	8	1	0	11
 leanhammer	duper	duper-only	20	12	0	1	7
 leanhammer	lean-smt	smt-only	20	12	5	0	3
 leanhammer	crush	crush-verify	20	19	0	1	0
+leanhammer	crush-checked	crush-portfolio	20	19	0	1	0
 leanhammer	grind	grind-only	20	16	0	0	4

@@ -1,1 +1,8 @@
 suite	lane	repeat	vc_key	declaration	goal_hash	commands	assumes	steps	anchors	sexp_nodes	certificate_bytes	replay_nanos	replay_ms	nanos_per_command	nanos_per_step
+leanhammer	crush-portfolio	1	02_congruence	_example	279573633531776402	15	2	13	0	226	950	11934917	11.935	795661.1	918070.5
+leanhammer	crush-portfolio	1	06_funext	_example	15429862447878520333	170	18	143	9	3012	14370	336015166	336.015	1976559.8	2349756.4
+leanhammer	crush-portfolio	1	08_int_linear	_example	17180512830172195838	127	7	118	2	2067	9613	241503792	241.504	1901604.7	2046642.3
+leanhammer	crush-portfolio	1	09_nat_sub	_example	12946856521511558778	231	13	215	3	3460	16743	903228541	903.229	3910080.3	4201063.0
+leanhammer	crush-portfolio	1	10_option_injective	_example	12691728585980739137	3	2	1	0	33	170	4547542	4.548	1515847.3	4547542.0
+leanhammer	crush-portfolio	1	15_bitvec	_example	13385681149719954638	14	1	13	0	220	935	38738166	38.738	2767011.9	2979858.9
+leanhammer	crush-portfolio	1	16_string	_example	8850707782385884523	17	1	16	0	308	1337	22768291	22.768	1339311.2	1423018.2

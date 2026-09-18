@@ -332,5 +332,40 @@ class ReconstructionCheckedProofTests(unittest.TestCase):
         self.assertEqual(row[8], 0)
 
 
+class HeadlineSeriesTests(unittest.TestCase):
+    """The portfolio lane earns its own headline backend, `crush-checked`."""
+
+    def test_portfolio_becomes_its_own_backend(self) -> None:
+        pairs = benchmark_report.headline_lane_map(
+            "velvet", {"auto", "grind", "crush-verify", "crush-portfolio"}
+        )
+
+        self.assertIn(("crush", "crush-verify"), pairs)
+        self.assertIn(("crush-checked", "crush-portfolio"), pairs)
+
+    def test_a_run_without_the_portfolio_lane_is_unchanged(self) -> None:
+        pairs = benchmark_report.headline_lane_map(
+            "velvet", {"auto", "grind", "crush-verify"}
+        )
+
+        self.assertEqual(
+            [b for b, _ in pairs if b.startswith("crush")], ["crush"]
+        )
+
+    def test_neither_crush_series_is_compared_against_itself(self) -> None:
+        # The pairwise table compares Crush with the baselines; both Crush
+        # series are the subject, so neither may appear as a baseline row.
+        measurements = [
+            measurement("crush-verify", "a", "pass"),
+            measurement("crush-portfolio", "a", "pass"),
+            measurement("auto", "a", "fail"),
+        ]
+        attempts = benchmark_report.grouped_attempts(measurements)
+
+        rows = benchmark_report.comparison_rows(attempts)
+
+        self.assertEqual([r[1] for r in rows], ["auto"])
+
+
 if __name__ == "__main__":
     unittest.main()

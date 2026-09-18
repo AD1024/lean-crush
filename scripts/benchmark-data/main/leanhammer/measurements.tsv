@@ -59,31 +59,11 @@ leanhammer	grind-only	1	17_empty	pass	-	1	-
 leanhammer	grind-only	1	18_church_tower	fail	tactic	0	/Users/mikedh/Documents/lean-crush/BenchmarkResults/comparison-20260820/final/leanhammer-outcomes-baselines-v4/generated/grind-only/18_church_tower.lean:40:20: error: redundant parameter `hadd`, `grind` uses local hypotheses automatically
 leanhammer	grind-only	1	19_polymorphic	fail	tactic	0	/Users/mikedh/Documents/lean-crush/BenchmarkResults/comparison-20260820/final/leanhammer-outcomes-baselines-v4/generated/grind-only/19_polymorphic.lean:32:20: error: redundant parameter `combine`, `grind` uses local hypotheses automatically
 leanhammer	grind-only	1	20_irrelevant_quantifier	pass	-	7	-
-leanhammer	crush-verify	1	01_prop_chain	pass	-	97	-
-leanhammer	crush-verify	1	02_congruence	pass	-	66	-
-leanhammer	crush-verify	1	03_quantified	pass	-	42	-
-leanhammer	crush-verify	1	04_existential	pass	-	51	-
-leanhammer	crush-verify	1	05_skolemization	pass	-	6	-
-leanhammer	crush-verify	1	06_funext	pass	-	66	-
-leanhammer	crush-verify	1	07_higher_order	pass	-	5	-
-leanhammer	crush-verify	1	08_int_linear	pass	-	57	-
-leanhammer	crush-verify	1	09_nat_sub	pass	-	89	-
-leanhammer	crush-verify	1	10_option_injective	pass	-	69	-
-leanhammer	crush-verify	1	11_enum_pigeonhole	pass	-	74	-
-leanhammer	crush-verify	1	12_list_assoc	pass	-	78	-
-leanhammer	crush-verify	1	13_composition	pass	-	97	-
-leanhammer	crush-verify	1	14_bool_mixed	pass	-	15	-
-leanhammer	crush-verify	1	15_bitvec	pass	-	50	-
-leanhammer	crush-verify	1	16_string	pass	-	57	-
-leanhammer	crush-verify	1	17_empty	pass	-	2	-
-leanhammer	crush-verify	1	18_church_tower	fail	unknown	5070	-
-leanhammer	crush-verify	1	19_polymorphic	pass	-	75	-
-leanhammer	crush-verify	1	20_irrelevant_quantifier	pass	-	67	-
 leanhammer	smt-only	1	01_prop_chain	pass	-	121	-
 leanhammer	smt-only	1	02_congruence	pass	-	75	-
 leanhammer	smt-only	1	03_quantified	pass	-	77	-
 leanhammer	smt-only	1	04_existential	pass	-	83	-
-leanhammer	smt-only	1	05_skolemization	fail	translation	59	SMT_PROFILE 1 _example 8038905789831935057 translation-failed - cvc5.Error.error "Symbol '->' not declared as a type" 59484500  
+leanhammer	smt-only	1	05_skolemization	fail	translation	59	"SMT_PROFILE 1 _example 8038905789831935057 translation-failed - cvc5.Error.error ""Symbol '->' not declared as a type"" 59484500  "
 leanhammer	smt-only	1	06_funext	pass	-	68	-
 leanhammer	smt-only	1	07_higher_order	pass	-	81	-
 leanhammer	smt-only	1	08_int_linear	pass	-	130	-
@@ -95,7 +75,47 @@ leanhammer	smt-only	1	13_composition	fail	translation	111	/Users/mikehe/Document
 leanhammer	smt-only	1	14_bool_mixed	pass	-	144	-
 leanhammer	smt-only	1	15_bitvec	fail	translation	64	SMT_PROFILE 1 _example 13385681149719954638 translation-failed - bitvector type   BitVec n has variable width 64593666  
 leanhammer	smt-only	1	16_string	fail	sat	100	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/leanhammer-lean-smt-20260903/leanhammer/generated/smt-only/16_string.lean:108:2: error: unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).
-leanhammer	smt-only	1	17_empty	fail	translation	50	SMT_PROFILE 1 _example 12691728585980739137 translation-failed - cvc5.Error.error   "invalid datatype declaration in 'dtypedecls' at index 0, expected a datatype declaration with at least one constructor" 50423875  
-leanhammer	smt-only	1	18_church_tower	fail	translation	132	SMT_PROFILE 1 _example 6721340688294025215 translation-failed - cvc5.Error.error "Symbol '->' not declared as a type" 132894833  
+leanhammer	smt-only	1	17_empty	fail	translation	50	"SMT_PROFILE 1 _example 12691728585980739137 translation-failed - cvc5.Error.error   ""invalid datatype declaration in 'dtypedecls' at index 0, expected a datatype declaration with at least one constructor"" 50423875  "
+leanhammer	smt-only	1	18_church_tower	fail	translation	132	"SMT_PROFILE 1 _example 6721340688294025215 translation-failed - cvc5.Error.error ""Symbol '->' not declared as a type"" 132894833  "
 leanhammer	smt-only	1	19_polymorphic	pass	-	114	-
 leanhammer	smt-only	1	20_irrelevant_quantifier	pass	-	121	-
+leanhammer	crush-verify	1	01_prop_chain	pass	-	615	-
+leanhammer	crush-verify	1	02_congruence	pass	-	376	-
+leanhammer	crush-verify	1	03_quantified	pass	-	377	-
+leanhammer	crush-verify	1	04_existential	pass	-	386	-
+leanhammer	crush-verify	1	05_skolemization	pass	-	6	-
+leanhammer	crush-verify	1	06_funext	pass	-	409	-
+leanhammer	crush-verify	1	07_higher_order	pass	-	5	-
+leanhammer	crush-verify	1	08_int_linear	pass	-	392	-
+leanhammer	crush-verify	1	09_nat_sub	pass	-	405	-
+leanhammer	crush-verify	1	10_option_injective	pass	-	382	-
+leanhammer	crush-verify	1	11_enum_pigeonhole	pass	-	390	-
+leanhammer	crush-verify	1	12_list_assoc	pass	-	397	-
+leanhammer	crush-verify	1	13_composition	pass	-	433	-
+leanhammer	crush-verify	1	14_bool_mixed	pass	-	17	-
+leanhammer	crush-verify	1	15_bitvec	pass	-	392	-
+leanhammer	crush-verify	1	16_string	pass	-	390	-
+leanhammer	crush-verify	1	17_empty	pass	-	3	-
+leanhammer	crush-verify	1	18_church_tower	fail	timeout	5394	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260917-203328/leanhammer/generated/crush-verify/18_church_tower.lean:58:2: error: crush: solver returned `unknown` (solver exited without a verdict: cvc5 interrupted by timeout.). Try increasing `crush.timeout` or adding hypotheses.
+leanhammer	crush-verify	1	19_polymorphic	pass	-	392	-
+leanhammer	crush-verify	1	20_irrelevant_quantifier	pass	-	382	-
+leanhammer	crush-portfolio	1	01_prop_chain	pass	-	5	-
+leanhammer	crush-portfolio	1	02_congruence	pass	-	390	-
+leanhammer	crush-portfolio	1	03_quantified	pass	-	4	-
+leanhammer	crush-portfolio	1	04_existential	pass	-	4	-
+leanhammer	crush-portfolio	1	05_skolemization	pass	-	6	-
+leanhammer	crush-portfolio	1	06_funext	pass	-	747	-
+leanhammer	crush-portfolio	1	07_higher_order	pass	-	4	-
+leanhammer	crush-portfolio	1	08_int_linear	pass	-	638	-
+leanhammer	crush-portfolio	1	09_nat_sub	pass	-	1309	-
+leanhammer	crush-portfolio	1	10_option_injective	pass	-	386	-
+leanhammer	crush-portfolio	1	11_enum_pigeonhole	pass	-	467	-
+leanhammer	crush-portfolio	1	12_list_assoc	pass	-	5	-
+leanhammer	crush-portfolio	1	13_composition	pass	-	456	-
+leanhammer	crush-portfolio	1	14_bool_mixed	pass	-	16	-
+leanhammer	crush-portfolio	1	15_bitvec	pass	-	483	-
+leanhammer	crush-portfolio	1	16_string	pass	-	418	-
+leanhammer	crush-portfolio	1	17_empty	pass	-	3	-
+leanhammer	crush-portfolio	1	18_church_tower	fail	timeout	5394	/Users/mikehe/Documents/Princeton/lean-crush/BenchmarkResults/crush-modes-20260917-203328/leanhammer/generated/crush-portfolio/18_church_tower.lean:58:2: error: crush: solver returned `unknown` (solver exited without a verdict: cvc5 interrupted by timeout.). Try increasing `crush.timeout` or adding hypotheses.
+leanhammer	crush-portfolio	1	19_polymorphic	pass	-	4	-
+leanhammer	crush-portfolio	1	20_irrelevant_quantifier	pass	-	398	-
