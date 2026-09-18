@@ -22,6 +22,11 @@ die() {
   exit 2
 }
 
+# Which Crush reconstruction lanes to measure. All four by default; narrow it
+# to skip lanes a particular study does not need, e.g.
+#   CRUSH_MODES="verify alethe portfolio" bash benchmark-crush-modes.sh ...
+CRUSH_MODES="${CRUSH_MODES:-verify core alethe portfolio}"
+
 case_study=""
 plot_only=""
 resume_dir=""
@@ -143,7 +148,7 @@ run_corpora() {
   REPEATS=1 \
   SOLVER=cvc5 \
   TIMEOUT=5 \
-  CRUSH_MODES="verify core alethe portfolio" \
+  CRUSH_MODES="$CRUSH_MODES" \
   MAX_HEARTBEATS=1000000 \
   MAX_RECURSION_DEPTH=1000000 \
   CRUSH_PROFILE=true \
@@ -164,7 +169,7 @@ run_plean() {
   REPEATS=1 \
   SOLVER=cvc5 \
   TIMEOUT=5 \
-  CRUSH_MODES="verify core alethe portfolio" \
+  CRUSH_MODES="$CRUSH_MODES" \
   MAX_HEARTBEATS=1000000 \
   MAX_RECURSION_DEPTH=1000000 \
   CRUSH_INST_FUEL=0 \
