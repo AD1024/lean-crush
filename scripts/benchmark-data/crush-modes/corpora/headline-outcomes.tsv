@@ -1,5 +1,5 @@
 suite	backend	lane	total_vcs	success	translation_error	timeout	failed_to_prove
 cashmere	crush	crush-verify	38	38	0	0	0
 cashmere	crush-checked	crush-portfolio	38	38	0	0	0
-velvet	crush	crush-verify	504	477	0	21	6
-velvet	crush-checked	crush-portfolio	504	473	0	19	12
+velvet	crush	crush-verify	504	478	0	20	6
+velvet	crush-checked	crush-portfolio	504	472	0	20	12

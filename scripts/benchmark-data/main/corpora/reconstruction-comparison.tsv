@@ -1,5 +1,5 @@
 suite	lane	matched_vcs	checked_proof_vcs	failed_vcs	pass_pct	common_checked_proof_vcs	mean_ms	common_mean_ms	verify_smt_cohort_vcs	cohort_reconstructed_vcs
 cashmere	smt-only	38	17	21	44.7	17	137.059	137.059	23	3
-cashmere	crush-portfolio	38	38	0	100.0	17	418.553	150.235	23	23
-velvet	smt-only	504	302	202	59.9	293	167.258	148.362	292	180
-velvet	crush-portfolio	504	473	31	93.8	293	447.230	383.519	292	287
+cashmere	crush-portfolio	38	38	0	100.0	17	520.263	153.765	23	23
+velvet	smt-only	504	302	202	59.9	292	167.258	142.253	293	181
+velvet	crush-portfolio	504	472	32	93.7	292	485.996	425.445	293	287

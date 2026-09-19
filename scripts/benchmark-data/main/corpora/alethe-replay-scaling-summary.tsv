@@ -1,2 +1,2 @@
 suite	lane	vcs	samples	min_commands	max_commands	min_replay_ms	mean_replay_ms	max_replay_ms	commands_pearson_r	commands_r_squared	ms_per_100_commands	bytes_pearson_r	bytes_r_squared	ms_per_kib
-velvet	crush-portfolio	26	26	10	275	24.090	332.151	1332.192	0.6820	0.4651	344.344819	0.7296	0.5323	51.812646
+velvet	crush-portfolio	26	26	10	275	25.037	333.428	1296.167	0.6949	0.4829	347.623705	0.7418	0.5503	52.196823

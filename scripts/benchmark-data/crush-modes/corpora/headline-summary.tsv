@@ -1,5 +1,5 @@
 suite	backend	lane	total_vcs	attempted_vcs	solved_vcs	failed_vcs	missing_vcs	pass_pct	total_ms	mean_ms	min_ms	max_ms
-cashmere	crush	crush-verify	38	38	38	0	0	100.0	18739.000	493.132	2.000	1185.000
-cashmere	crush-checked	crush-portfolio	38	38	38	0	0	100.0	15905.000	418.553	2.000	1259.000
-velvet	crush	crush-verify	504	504	477	27	0	94.6	356922.000	708.179	1.000	11462.000
-velvet	crush-checked	crush-portfolio	504	504	473	31	0	93.8	552495.000	1096.220	0.000	73734.000
+cashmere	crush	crush-verify	38	38	38	0	0	100.0	18920.000	497.895	1.000	1207.000
+cashmere	crush-checked	crush-portfolio	38	38	38	0	0	100.0	19770.000	520.263	2.000	1301.000
+velvet	crush	crush-verify	504	504	478	26	0	94.8	356946.000	708.226	0.000	11485.000
+velvet	crush-checked	crush-portfolio	504	504	472	32	0	93.7	578785.000	1148.383	0.000	73377.000

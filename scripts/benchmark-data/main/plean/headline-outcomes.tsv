@@ -3,5 +3,5 @@ plean	auto	auto	192	168	6	0	18
 plean	duper	duper	192	71	0	19	102
 plean	lean-smt	smt-only	192	96	1	0	95
 plean	crush	crush-verify	192	174	0	16	2
-plean	crush-checked	crush-portfolio	192	157	0	15	20
+plean	crush-checked	crush-portfolio	192	163	0	17	12
 plean	grind	grind	192	155	0	0	37

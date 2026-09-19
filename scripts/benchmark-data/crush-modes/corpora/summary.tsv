@@ -1,7 +1,7 @@
 suite	backend	attempted	passed	failed	pass_pct	total_ms	mean_ms	min_ms	max_ms	successful_mean_ms
-cashmere	crush-verify	38	38	0	100.0	18739.0	493.1	2.0	1185.0	493.1
-cashmere	crush-alethe	38	9	29	23.7	22728.0	598.1	2.0	1201.0	2.8
-velvet	crush-portfolio	504	473	31	93.8	552495.0	1096.2	0.0	73734.0	447.2
-cashmere	crush-portfolio	38	38	0	100.0	15905.0	418.6	2.0	1259.0	418.6
-velvet	crush-verify	504	477	27	94.6	356922.0	708.2	1.0	11462.0	440.7
-velvet	crush-alethe	504	172	332	34.1	390235.0	774.3	0.0	11399.0	151.4
+cashmere	crush-verify	38	38	0	100.0	18920.0	497.9	1.0	1207.0	497.9
+cashmere	crush-alethe	38	9	29	23.7	23586.0	620.7	2.0	1221.0	3.0
+cashmere	crush-portfolio	38	38	0	100.0	19770.0	520.3	2.0	1301.0	520.3
+velvet	crush-portfolio	504	472	32	93.7	578785.0	1148.4	0.0	73377.0	486.0
+velvet	crush-verify	504	478	26	94.8	356946.0	708.2	0.0	11485.0	450.7
+velvet	crush-alethe	504	172	332	34.1	392484.0	778.7	0.0	11392.0	152.7

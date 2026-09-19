@@ -12,6 +12,6 @@ loom	grind	grind	4	4	0	0	0
 velvet	auto	auto	504	415	0	0	89
 velvet	duper	duper	504	292	0	133	79
 velvet	lean-smt	smt-only	504	302	82	0	120
-velvet	crush	crush-verify	504	477	0	21	6
-velvet	crush-checked	crush-portfolio	504	473	0	19	12
+velvet	crush	crush-verify	504	478	0	20	6
+velvet	crush-checked	crush-portfolio	504	472	0	20	12
 velvet	grind	grind	504	444	0	0	60

@@ -1,5 +1,5 @@
 suite	lane	matched_vcs	checked_proof_vcs	failed_vcs	pass_pct	common_checked_proof_vcs	mean_ms	common_mean_ms	verify_smt_cohort_vcs	cohort_reconstructed_vcs
-cashmere	crush-alethe	38	9	29	23.7	9	2.778	2.778	23	0
-cashmere	crush-portfolio	38	38	0	100.0	9	418.553	2.778	23	23
-velvet	crush-alethe	504	172	332	34.1	172	151.366	151.366	292	26
-velvet	crush-portfolio	504	473	31	93.8	172	447.230	139.773	292	287
+cashmere	crush-alethe	38	9	29	23.7	9	3.000	3.000	23	0
+cashmere	crush-portfolio	38	38	0	100.0	9	520.263	3.000	23	23
+velvet	crush-alethe	504	172	332	34.1	172	152.680	152.680	293	26
+velvet	crush-portfolio	504	472	32	93.7	172	485.996	142.157	293	287

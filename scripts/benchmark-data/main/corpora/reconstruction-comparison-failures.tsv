@@ -2,7 +2,7 @@ suite	lane	failure_mode	vcs
 cashmere	smt-only	solver-unknown	21
 velvet	crush-portfolio	certificate-error+core-failed	6
 velvet	crush-portfolio	solver-sat	1
-velvet	crush-portfolio	solver-unknown	22
+velvet	crush-portfolio	solver-unknown	23
 velvet	crush-portfolio	timeout	2
 velvet	smt-only	replay-exception	4
 velvet	smt-only	rule-gap	7

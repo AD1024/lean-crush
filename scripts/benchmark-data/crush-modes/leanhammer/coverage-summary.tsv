@@ -1,4 +1,4 @@
 suite	lane	total_vcs	attempted_vcs	solved_vcs	failed_vcs	missing_vcs	pass_pct	total_ms	mean_ms	min_ms	max_ms
-leanhammer	crush-alethe	20	20	13	7	0	65.0	14883.000	744.150	377.000	5404.000
-leanhammer	crush-portfolio	20	20	19	1	0	95.0	11137.000	556.850	3.000	5394.000
-leanhammer	crush-verify	20	20	19	1	0	95.0	11543.000	577.150	3.000	5394.000
+leanhammer	crush-alethe	20	20	13	7	0	65.0	15249.000	762.450	389.000	5419.000
+leanhammer	crush-portfolio	20	20	19	1	0	95.0	13754.000	687.700	3.000	5451.000
+leanhammer	crush-verify	20	20	19	1	0	95.0	11568.000	578.400	3.000	5399.000

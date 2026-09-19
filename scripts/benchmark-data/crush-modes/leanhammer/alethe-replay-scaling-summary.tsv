@@ -1,3 +1,3 @@
 suite	lane	vcs	samples	min_commands	max_commands	min_replay_ms	mean_replay_ms	max_replay_ms	commands_pearson_r	commands_r_squared	ms_per_100_commands	bytes_pearson_r	bytes_r_squared	ms_per_kib
-leanhammer	crush-alethe	13	13	3	231	4.905	148.197	905.488	0.9207	0.8477	313.946017	0.8909	0.7938	40.538224
-leanhammer	crush-portfolio	7	7	3	231	4.548	222.677	903.229	0.9293	0.8636	328.000962	0.8955	0.8019	42.091452
+leanhammer	crush-alethe	13	13	3	231	4.898	150.012	951.442	0.9141	0.8356	326.382435	0.8830	0.7796	42.067892
+leanhammer	crush-portfolio	11	11	3	231	4.790	158.709	953.440	0.9343	0.8729	339.778130	0.9011	0.8120	43.706179
