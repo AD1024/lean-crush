@@ -43,7 +43,10 @@ RESOLUTION_SECONDS = 1e-3
 # where several curves plateau on top of one another. The other series are
 # slightly thinner and marginally translucent so the emphasis reads without
 # resorting to dash patterns, which proved hard to tell apart.
-EMPHASIS = frozenset({"crush", "crush-portfolio"})
+# `crush-portfolio` is the lane name the reconstruction figures use; the main
+# comparison names the same series `crush-checked`. Both belong here, or the
+# kernel-checked curve loses its emphasis and its place at the legend's foot.
+EMPHASIS = frozenset({"crush", "crush-checked", "crush-portfolio"})
 
 
 def legend_order(keys: list[str]) -> list[int]:
@@ -60,6 +63,7 @@ OUTPUTS = (
     "scaling",
     "coverage-table",
     "reconstruction-table",
+    "failures-table",
 )
 
 
@@ -566,6 +570,86 @@ def draw_reconstruction_table(
     )
 
 
+def failure_table_rows(
+    result_dirs: list[Path],
+) -> list[tuple[str, int, list[tuple[str, str, int, float]]]]:
+    """Per-suite reconstruction failures grouped for a multirow table.
+
+    The two lanes fail in disjoint ways -- the portfolio only reports a mode
+    after Alethe replay and core reconstruction have both declined -- so the
+    modes are listed down the rows rather than across lane columns, which would
+    leave every cell but one empty in each row.
+    """
+    failures = read_tsv(result_dirs, "reconstruction-failures.tsv")
+    totals = {
+        row["suite"]: int(row["total_vcs"])
+        for row in read_tsv(result_dirs, "reconstruction-summary.tsv")
+    }
+    grouped: dict[str, list[tuple[str, str, int, float]]] = defaultdict(list)
+    for row in failures:
+        suite = row["suite"]
+        if suite in EXCLUDED_SUITES:
+            continue
+        total = totals.get(suite, 0)
+        vcs = int(row["vcs"])
+        grouped[suite].append(
+            (
+                style.label_lane(row["lane"]),
+                row["failure_mode"].replace("+", " + ").replace("-", " "),
+                vcs,
+                100.0 * vcs / total if total else 0.0,
+            )
+        )
+    # Lane order first so a suite's Alethe rows stay together, then the biggest
+    # bucket first: the point of the table is which gap dominates.
+    for suite in grouped:
+        grouped[suite].sort(key=lambda item: (item[0], -item[2]))
+    return [
+        (suite, totals.get(suite, 0), grouped[suite])
+        for suite in sorted(grouped, key=style.suite_sort_key)
+    ]
+
+
+def draw_failure_table(
+    pyplot,
+    path: Path,
+    groups: list[tuple[str, int, list[tuple[str, str, int, float]]]],
+) -> None:
+    rendered: list[tuple[str, str, list[tuple[tuple[str, ...], tuple[str, ...]]]]]
+    rendered = []
+    for suite, total, entries in groups:
+        worst = max(vcs for _, _, vcs, _ in entries)
+        rows = []
+        previous_lane = None
+        for lane, mode, vcs, pct in entries:
+            weight = "bold" if vcs == worst else "normal"
+            # A lane spans its consecutive modes; repeating the label on every
+            # row reads as four separate lanes rather than one with four gaps.
+            shown = "" if lane == previous_lane else lane
+            previous_lane = lane
+            rows.append(
+                (
+                    (shown, mode, f"{vcs}", f"{pct:.1f}%"),
+                    ("normal", weight, weight, weight),
+                )
+            )
+        rendered.append(
+            (style.label_suite(suite), f"{total} VCs", rows)
+        )
+    draw_table(
+        pyplot,
+        path,
+        ("Benchmark", "Lane", "Failure mode", "VCs", "Share"),
+        # The lane column has to clear `Crush w/ UNSAT Core+Alethe` before the
+        # mode column starts, and the mode column holds `certificate error +
+        # core failed`; at a narrower width the two collide.
+        (0.012, 0.140, 0.430, 0.880, 0.975),
+        ("left", "left", "left", "right", "right"),
+        rendered,
+        width=9.6,
+    )
+
+
 def write_points(
     path: Path,
     series: dict[str, list[dict[str, object]]],
@@ -862,6 +946,13 @@ def main() -> None:
         if groups:
             path = args.out_dir / f"reconstruction-table.{args.format}"
             draw_reconstruction_table(pyplot, path, groups)
+            generated.append(path)
+
+    if "failures-table" in selected:
+        groups = failure_table_rows(args.result_dirs)
+        if groups:
+            path = args.out_dir / f"reconstruction-failures-table.{args.format}"
+            draw_failure_table(pyplot, path, groups)
             generated.append(path)
 
     if not generated:

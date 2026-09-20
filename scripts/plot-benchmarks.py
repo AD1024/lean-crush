@@ -37,8 +37,10 @@ BACKEND_LABELS = {
     "grind": "grind",
 }
 
-# Column order for every headline table and figure.
-BACKEND_ORDER = ("auto", "duper", "lean-smt", "crush", "crush-checked", "grind")
+# Column order for every headline table and figure. The kernel-checked Crush
+# series sits last so it reads below grind, the strongest proof-producing
+# baseline it is the one to compare against.
+BACKEND_ORDER = ("auto", "duper", "lean-smt", "crush", "grind", "crush-checked")
 
 SUITE_LABELS = {
     "leanhammer": "LeanHammer",

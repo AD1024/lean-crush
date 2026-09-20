@@ -151,7 +151,8 @@ class CrushSeriesTests(unittest.TestCase):
             "Crush (kernel-checked)",
         )
 
-    def test_kernel_checked_sorts_directly_after_trusted(self) -> None:
+    def test_kernel_checked_sorts_after_grind(self) -> None:
+        """The kernel-checked series reads below grind, the baseline it answers."""
         order = sorted(
             ["grind", "crush-checked", "auto", "crush", "lean-smt", "duper"],
             key=plot_benchmarks.backend_sort_key,
@@ -159,7 +160,7 @@ class CrushSeriesTests(unittest.TestCase):
 
         self.assertEqual(
             order,
-            ["auto", "duper", "lean-smt", "crush", "crush-checked", "grind"],
+            ["auto", "duper", "lean-smt", "crush", "grind", "crush-checked"],
         )
 
     def test_the_two_crush_series_do_not_share_a_colour(self) -> None:
