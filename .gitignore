@@ -18,3 +18,11 @@ __pycache__/
 /Crush/Metatheory/Formalization/*.log
 /Crush/Metatheory/Formalization/*.out
 /Crush/Metatheory/Formalization/*.toc
+
+# Benchmark run output. Every run writes a timestamped directory here, so
+# leaving these unignored means running the benchmark dirties the tree and the
+# next run stamps `crush_dirty=true` into its own metadata -- measuring makes
+# the next measurement look unreconstructible. The recorded archive is tracked
+# and stays; tracked files ignore these patterns regardless.
+/BenchmarkResults/*
+!/BenchmarkResults/recorded/

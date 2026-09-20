@@ -486,7 +486,31 @@ Complete downstream integrations are available in the
 They show lean-crush wired into verification-condition generation and used on
 real array, arithmetic, and quantified proof obligations.
 
-Run a headline benchmark for one backend and case study with:
+To reproduce the coverage comparison end to end -- every backend measured into
+one directory, then the figures drawn from it -- run:
+
+```sh
+bash benchmark-coverage.sh --case_study all
+```
+
+That writes `BenchmarkResults/coverage-<timestamp>/`, with one subdirectory per
+case study and the figures under `figures/`. Crush is measured in both lanes, so
+the result carries the `Crush (SMT trusted)` and `Crush (kernel-checked)` series
+together. Set `BACKENDS` to narrow it (the default is
+`crush auto duper grind lean-smt`), and pass `--figures_only <directory>` to
+redraw a finished run without measuring anything. Check the whole path first on
+a single file, which takes minutes rather than hours:
+
+```sh
+BACKENDS=grind bash benchmark-coverage.sh --case_study Cashmere \
+  --cases "CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean"
+```
+
+The figures come from the same renderer that produced the published ones, so a
+reproduction and the committed artifacts cannot drift apart. Timings depend on
+the host and will not match ours; coverage should.
+
+To measure one backend and case study on its own:
 
 ```sh
 bash benchmark.sh \

@@ -114,8 +114,13 @@ plot_results() {
       ${exclude_suites[@]+"${exclude_suites[@]}"} \
       --only reconstruction
   else
-    printf 'warning: matplotlib is unavailable; skipping the time figure\n' >&2
-    printf 'install it with: python3 -m pip install matplotlib\n' >&2
+    # Name the interpreter: matplotlib is easily present in one python3 and
+    # absent from another, and a bare `python3 -m pip install` then installs
+    # into the wrong one and changes nothing.
+    printf 'warning: %s cannot import matplotlib; skipping the time figure\n' \
+      "$(command -v python3)" >&2
+    printf 'install it for that interpreter: %s -m pip install matplotlib\n' \
+      "$(command -v python3)" >&2
   fi
 }
 
