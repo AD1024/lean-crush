@@ -1,4 +1,0 @@
-profile	attempted	passed	failed	pass_pct	total_ms	mean_ms	min_ms	max_ms
-crush-verify	20	19	1	95.0	11568.0	578.4	3.0	5399.0
-crush-alethe	20	13	7	65.0	15249.0	762.5	389.0	5419.0
-crush-portfolio	20	19	1	95.0	13754.0	687.7	3.0	5451.0

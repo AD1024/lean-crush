@@ -1,3 +1,0 @@
-suite	backend	lane	total_vcs	success	translation_error	timeout	failed_to_prove
-leanhammer	crush	crush-verify	20	19	0	1	0
-leanhammer	crush-checked	crush-portfolio	20	19	0	1	0

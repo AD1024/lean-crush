@@ -1,3 +1,0 @@
-suite	backend	lane	total_vcs	success	translation_error	timeout	failed_to_prove
-plean	crush	crush-verify	192	174	0	16	2
-plean	crush-checked	crush-portfolio	192	163	0	17	12

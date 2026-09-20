@@ -1,42 +1,50 @@
 # Paper Artifact Data
 
-This directory contains every machine-readable input used to draw the published
-benchmark tables and figures. It is split into two internally consistent
-measurements because the latest all-backend comparison and the earlier
-reconstruction study use different Velvet workloads.
+`eval-data.zip` holds every machine-readable input behind the benchmark tables
+and figures. One archive rather than several hundred loose TSVs, so refreshing a
+measurement is a single binary change instead of a repo-wide add and delete.
 
-| Directory | Measurement |
+| Directory in the archive | Measurement |
 |---|---|
-| `main/` | Fixed-workload Auto, Duper, trusted Crush, and `grind` comparison |
-| `crush-modes/` | Trusted verification, Core, Alethe, and portfolio reconstruction |
+| `main/` | Coverage comparison: Auto, Duper, lean-smt, trusted Crush, kernel-checked Crush, `grind` |
+| `crush-modes/` | Crush's own lanes: trusted verification, strict Alethe replay, portfolio |
+| `reconstruction/` | Cross-tool: lean-smt beside Crush's Alethe and portfolio lanes |
 
-Each measurement has `corpora`, `leanhammer`, and `plean` directories containing
-normalized TSV reports. The per-VC measurements and profiler events needed to
-audit or regenerate those reports are retained alongside them.
+Each holds `corpora/`, `leanhammer/` and `plean/` with normalized TSV reports,
+per-VC measurements, and profiler events. `corpora/` carries Cashmere and Velvet
+together, distinguished by the `suite` column; `main/` also retains Loom's four
+historical VCs, which the paper renderer excludes.
 
-From the repository root, redraw all paper tables and figures into
-`BenchmarkResults/figures` with:
+The three studies cover the same 754 paper VC identities: LeanHammer (20),
+Cashmere (38), Velvet (504), PLean (192).
+
+## Reading it
+
+The renderer unpacks the archive itself:
 
 ```sh
-scripts/render-paper-artifacts.sh
+bash scripts/render-paper-artifacts.sh
 ```
 
-Pass a different output directory as the first argument:
+To inspect the data directly, or to render from loose directories:
 
 ```sh
-scripts/render-paper-artifacts.sh /tmp/lean-crush-paper-artifacts
+mkdir -p /tmp/eval && unzip -q scripts/benchmark-data/eval-data.zip -d /tmp/eval
+PAPER_DATA_ROOT=/tmp/eval bash scripts/render-paper-artifacts.sh
 ```
 
-The renderer uses only Python's standard library. It rejects conflicting
-aggregate rows, inconsistent corpus totals, and incomplete outcome partitions.
-The benchmark reporter generated the retained main inputs with
-`--require-uniform-headline`, which separately verified exact VC identities.
+`MAIN_ROOT`, `MODES_ROOT`, and `RECONSTRUCTION_ROOT` override one study each,
+which is how a fresh run is drawn without touching the archive. See the
+[script guide](../README.md) for the harnesses that produce these runs and for
+rebuilding the archive from one.
 
-The `main` comparison uses trusted Crush (`crush.trust = "trust"`). Its
-LeanHammer and PLean directories combine baseline measurements with retained
-trusted-Crush measurements only after exact VC-identity validation. The
-corpus and LeanHammer trusted-Crush lanes use lean-crush commit
-`dac5f9357388a7ee5bb81501410866ec3fa14038`; PLean reuses the trusted lane from
-the reconstruction run. The `crush-modes` measurement uses lean-crush commit
-`08a4eb091e94a369dc8eb77b70cacffe7f0138ff`; exact downstream revisions and
-options are in each measurement's metadata.
+## Provenance
+
+Every row records its own origin. `metadata.tsv` in each suite directory names
+the corpus revision, toolchain, solver, timeout, the lean-crush commit, and
+whether its working tree was dirty. A suite measured in more than one run keeps
+one row per run.
+
+Timings are only comparable within a single run on a single host: the external
+solver call is the part that moves most, and VCs near the 5s cvc5 cap can flip
+between runs on the same machine. Coverage reproduces; times do not.

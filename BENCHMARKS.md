@@ -1,26 +1,22 @@
 # Benchmarks
 
-The headline comparison evaluates Auto, Duper, trusted Crush, and `grind` on
-one fixed set of verification-condition identities per corpus. Trusted Crush
-uses `crush.trust = "trust"` and measures collection, specialization,
-translation, and SMT solving without proof reconstruction. Checked
-reconstruction is measured separately below.
+The headline comparison evaluates Auto, Duper,
+[lean-smt](https://github.com/ufmg-smite/lean-smt), trusted Crush,
+kernel-checked Crush, and `grind` on one fixed set of verification-condition
+identities per corpus. The detailed [reconstruction study](#reconstruction)
+separates whole-VC successes from reconstruction within the SMT-`unsat` cohort.
 
-The harnesses also support [lean-smt](https://github.com/ufmg-smite/lean-smt)
-as a fifth LeanHammer backend and as a third checked-reconstruction lane. The
-main and reconstruction tables on this page predate that lane and contain no
-lean-smt rows; its own measurement is in
-[lean-smt](#lean-smt) below.
-
-The [Verso benchmark chapter](https://ad1024.github.io/lean-crush/Benchmarks/)
-publishes the figures. Machine-readable inputs are retained under
+Machine-readable inputs are retained under
 [`scripts/benchmark-data`](scripts/benchmark-data),
-and [`scripts/README.md`](scripts/README.md#paper-artifacts) gives
+and [`scripts/README.md`](scripts/README.md) gives
 self-contained reproduction commands.
 The values below are the latest normalized comparison in
-`scripts/benchmark-data/main`;
-run `scripts/render-paper-artifacts.sh` to regenerate the machine-derived table
-and figures.
+`main/` inside `scripts/benchmark-data/eval-data.zip`;
+run `scripts/render-paper-artifacts.sh` to regenerate tables and figures under
+`BenchmarkResults/figures`. The
+[Verso benchmark chapter](https://ad1024.github.io/lean-crush/Benchmarks/)
+embeds separate snapshots from `Doc/Verso/figures`; those assets have not yet
+been refreshed to this measurement.
 
 ## Main Comparison
 
@@ -29,56 +25,48 @@ and figures.
 | LeanHammer | Auto | 8 / 20 | 40.0% | 3.240 | 162.0 | 2.0 | 1,317.0 |
 | LeanHammer | Duper | 12 / 20 | 60.0% | 19.348 | 967.4 | 43.0 | 15,745.0 |
 | LeanHammer | lean-smt | 12 / 20 | 60.0% | 1.873 | 93.7 | 50.0 | 144.0 |
-| **LeanHammer** | **Crush (SMT trusted)** | **19 / 20** | **95.0%** | **11.543** | **577.1** | **3.0** | **5,394.0** |
-| **LeanHammer** | **Crush (kernel-checked)** | **19 / 20** | **95.0%** | **11.137** | **556.9** | **3.0** | **5,394.0** |
+| LeanHammer | Crush (SMT trusted) | 19 / 20 | 95.0% | 11.568 | 578.4 | 3.0 | 5,399.0 |
+| LeanHammer | Crush (kernel-checked) | 19 / 20 | 95.0% | 13.754 | 687.7 | 3.0 | 5,451.0 |
 | LeanHammer | `grind` | 16 / 20 | 80.0% | 0.074 | 3.7 | 0.0 | 13.0 |
-| **Loom** | **Auto** | **4 / 4** | **100.0%** | **0.974** | **243.5** | **44.0** | **607.0** |
+| Loom | Auto | 4 / 4 | 100.0% | 0.974 | 243.5 | 44.0 | 607.0 |
 | Loom | Duper | 1 / 4 | 25.0% | 0.454 | 113.5 | 36.0 | 174.0 |
-| **Loom** | **Crush (SMT trusted)** | **4 / 4** | **100.0%** | **0.418** | **104.5** | **53.0** | **139.0** |
-| **Loom** | **`grind`** | **4 / 4** | **100.0%** | **0.048** | **12.0** | **7.0** | **17.0** |
+| Loom | Crush (SMT trusted) | 4 / 4 | 100.0% | 0.418 | 104.5 | 53.0 | 139.0 |
+| Loom | `grind` | 4 / 4 | 100.0% | 0.048 | 12.0 | 7.0 | 17.0 |
 | Cashmere | Auto | 18 / 38 | 47.4% | 5.379 | 141.6 | 2.0 | 631.0 |
 | Cashmere | Duper | 21 / 38 | 55.3% | 65.087 | 1,712.8 | 1.0 | 40,739.0 |
 | Cashmere | lean-smt | 17 / 38 | 44.7% | 5.547 | 146.0 | 41.0 | 244.0 |
-| **Cashmere** | **Crush (SMT trusted)** | **38 / 38** | **100.0%** | **18.739** | **493.1** | **2.0** | **1,185.0** |
-| **Cashmere** | **Crush (kernel-checked)** | **38 / 38** | **100.0%** | **15.905** | **418.6** | **2.0** | **1,259.0** |
+| Cashmere | Crush (SMT trusted) | 38 / 38 | 100.0% | 18.920 | 497.9 | 1.0 | 1,207.0 |
+| Cashmere | Crush (kernel-checked) | 38 / 38 | 100.0% | 19.770 | 520.3 | 2.0 | 1,301.0 |
 | Cashmere | `grind` | 19 / 38 | 50.0% | 0.289 | 7.6 | 4.0 | 13.0 |
 | Velvet | Auto | 415 / 504 | 82.3% | 344.974 | 684.5 | 11.0 | 12,866.0 |
 | Velvet | Duper | 292 / 504 | 57.9% | 1,039.652 | 2,062.8 | 0.0 | 15,077.0 |
 | Velvet | lean-smt | 302 / 504 | 59.9% | 201.514 | 399.8 | 14.0 | 5,942.0 |
-| **Velvet** | **Crush (SMT trusted)** | **477 / 504** | **94.6%** | **356.922** | **708.2** | **1.0** | **11,462.0** |
-| Velvet | Crush (kernel-checked) | 473 / 504 | 93.8% | 552.495 | 1,096.2 | 0.0 | 73,734.0 |
+| Velvet | Crush (SMT trusted) | 478 / 504 | 94.8% | 356.946 | 708.2 | 0.0 | 11,485.0 |
+| Velvet | Crush (kernel-checked) | 472 / 504 | 93.7% | 578.785 | 1,148.4 | 0.0 | 73,377.0 |
 | Velvet | `grind` | 444 / 504 | 88.1% | 21.409 | 42.5 | 0.0 | 3,000.0 |
 | PLean | Auto | 168 / 192 | 87.5% | 301.027 | 1,567.9 | 0.0 | 17,280.7 |
 | PLean | Duper | 71 / 192 | 37.0% | 81.281 | 423.3 | 0.0 | 2,174.6 |
 | PLean | lean-smt | 96 / 192 | 50.0% | 272.561 | 1,419.6 | 0.0 | 16,704.4 |
-| **PLean** | **Crush (SMT trusted)** | **174 / 192** | **90.6%** | **353.007** | **1,838.6** | **0.0** | **26,914.6** |
-| PLean | Crush (kernel-checked) | 157 / 192 | 81.8% | 467.485 | 2,434.8 | 0.0 | 34,201.9 |
+| PLean | Crush (SMT trusted) | 174 / 192 | 90.6% | 357.689 | 1,863.0 | 0.0 | 26,883.9 |
+| PLean | Crush (kernel-checked) | 163 / 192 | 84.9% | 472.147 | 2,459.1 | 0.0 | 26,783.3 |
 | PLean | `grind` | 155 / 192 | 80.7% | 76.005 | 395.9 | 0.0 | 3,859.6 |
 
 Crush appears twice. `Crush (SMT trusted)` is the `crush-verify` lane, which
-accepts the solver's verdict and builds no proof term; `Crush (kernel-checked)`
-is the `crush-portfolio` lane, which returns a Lean proof the kernel accepted
-or nothing at all. Both come from one run, so the gap between them is the cost
-of producing a proof rather than a difference between machines.
+may accept SMT `unsat` without a checked proof. `Crush (kernel-checked)` is the
+`crush-portfolio` lane, which requires a kernel-checked Lean proof. Both lanes
+can close goals from selected facts or checked pre-SMT reasoning without
+calling the solver. The optional backward rule search is controlled by
+`crush.preReconstruct.ruleSearch`, defaults to `false`, and has the same
+setting in both lanes. Strict Alethe replay skips these early closures inside
+Crush so that successful tactic calls exercise certificate replay.
 
-On LeanHammer and Cashmere the kernel-checked lane is *faster* than the
-trusted one even at equal coverage — 11.1s against 11.5s on LeanHammer at
-19/20 each, and 15.9s against 18.7s on Cashmere at 38/38 each. This is real,
-not a measurement error. Before translating a goal Crush tries a few cheap
-Lean tactics that may close it outright, and the kernel-checked lane runs one
-more of them than the trusted lane: a bounded search over the selected rules.
-When that search succeeds it costs a few milliseconds and skips the solver
-entirely, where the trusted lane pays a full cvc5 call. So the two lanes are
-not "the same work, one does more" — they take different routes, and the
-cheaper route happens to belong to the stronger guarantee.
-
-The trusted lane leaves that search out on purpose. Running it in both lanes
-was measured: LeanHammer improved (11.5s to 9.5s at the same 19/20), but PLean
-lost 9 VCs and 103 seconds (174/192 in 353s, to 165/192 in 456s), because a
-search that fails still consumes the budget the goal needed. A time limit on
-the search does not rescue it either, since successful searches run as long as
-failed ones. Given that, the trusted lane keeps the restriction and the timing
-columns are read per lane rather than as one subtracted from the other.
+On the four paper corpora (754 VCs, excluding Loom), the headline totals are
+Auto **609 (80.8%)**, Duper **396 (52.5%)**, lean-smt **427 (56.6%)**,
+`grind` **634 (84.1%)**, trusted Crush **709 (94.0%)**, and kernel-checked
+Crush **692 (91.8%)**. The last number counts successful whole-VC attempts;
+the [reconstruction report](#reconstruction) currently applies an additional
+profiler-outcome filter and reports 688. The four-VC discrepancy is explained
+there.
 
 `Auto` is the host project's lean-auto backend. In LeanHammer, its lane is the
 Auto translation and monomorphization pipeline feeding Duper. `Duper` invokes
@@ -92,12 +80,19 @@ Every lane in a corpus is measured on the same verification conditions: the
 lean-smt lanes were added on 2026-09-04 and their VC identities were diffed
 against the recorded Crush lanes and found identical (20, 38, 504, and 192
 respectively), so the `Solved / total` and `Coverage` columns are directly
-comparable. The timing columns are not measured in the same session — the
-lean-smt rows come from the 2026-09-03/04 runs and the other rows from the
-recorded runs — so read per-lane times as indicative rather than as a
-controlled head-to-head. Coverage was confirmed to reproduce: re-running
-Cashmere and LeanHammer reproduced every lane's solved set exactly, with zero
-per-VC status disagreements.
+comparable. Both Crush lanes on the four paper corpora come from the
+2026-09-18 study on one host. The baseline lanes retain earlier measurements,
+including the 2026-09-03/04 lean-smt runs; Loom also retains its older Crush
+measurement. Cross-backend timings therefore span sessions, while the paired
+trusted and checked Crush measurements share a host and run configuration.
+
+The preceding 2026-09-17 run reported 708 trusted and 687 portfolio successes;
+the new run reports 709 and 692. The portfolio change is +6 on PLean and -1
+on Velvet. The older 715 trusted total used a separate Velvet measurement of
+484 successes; it is not the before-change result from this paired study.
+Commit `c4cb643` leaves the default trusted pre-SMT behavior unchanged.
+Differences between single runs near the solver time cap should not be
+attributed to that change alone.
 
 Across the 250 VCs where the two lanes were compared directly on LeanHammer,
 Cashmere, and PLean, there is no VC that lean-smt closes and Crush does not;
@@ -111,16 +106,14 @@ and PLean. The tables above and the recorded TSVs keep all five corpora; pass
 Every backend has zero missing attempts. `Solved / total` therefore uses the
 same denominator and exact VC identities within a corpus. `Total` sums
 tactic-local attempt time; `Avg`, `Min`, and `Max` describe individual
-attempts. Bold rows compare coverage first and average time when coverage ties.
-The runs use one repeat, and some baseline and trusted-Crush lanes were
-measured separately. Treat timings as reproducible regression measurements,
-not statistically stable performance claims.
+attempts. The runs use one repeat. Treat timings as individual regression
+measurements, not statistically stable performance claims.
 
 `plot-time-coverage.py` plots the same measurements as coverage against time,
 one curve per backend and one panel per corpus, so a backend that closes fewer
 VCs but closes them sooner is visible rather than averaged away. It needs
-matplotlib and no harness invokes it; the
-[script guide](scripts/README.md#7-time-versus-coverage-figures-from-recorded-data)
+matplotlib; the
+[script guide](scripts/README.md#2-draw-the-figures)
 gives a self-contained command sequence that draws both time figures from the
 retained inputs in `scripts/benchmark-data`.
 
@@ -131,26 +124,30 @@ retained inputs in `scripts/benchmark-data`.
 | LeanHammer | Auto | 8 | 1 | 0 | 11 | 20 |
 | LeanHammer | Duper | 12 | 0 | 1 | 7 | 20 |
 | LeanHammer | lean-smt | 12 | 5 | 0 | 3 | 20 |
-| LeanHammer | Crush | 19 | 0 | 1 | 0 | 20 |
+| LeanHammer | Crush (SMT trusted) | 19 | 0 | 1 | 0 | 20 |
+| LeanHammer | Crush (kernel-checked) | 19 | 0 | 1 | 0 | 20 |
 | LeanHammer | `grind` | 16 | 0 | 0 | 4 | 20 |
 | Loom | Auto | 4 | 0 | 0 | 0 | 4 |
 | Loom | Duper | 1 | 0 | 0 | 3 | 4 |
-| Loom | Crush | 4 | 0 | 0 | 0 | 4 |
+| Loom | Crush (SMT trusted) | 4 | 0 | 0 | 0 | 4 |
 | Loom | `grind` | 4 | 0 | 0 | 0 | 4 |
 | Cashmere | Auto | 18 | 0 | 0 | 20 | 38 |
 | Cashmere | Duper | 21 | 0 | 1 | 16 | 38 |
 | Cashmere | lean-smt | 17 | 0 | 0 | 21 | 38 |
-| Cashmere | Crush | 38 | 0 | 0 | 0 | 38 |
+| Cashmere | Crush (SMT trusted) | 38 | 0 | 0 | 0 | 38 |
+| Cashmere | Crush (kernel-checked) | 38 | 0 | 0 | 0 | 38 |
 | Cashmere | `grind` | 19 | 0 | 0 | 19 | 38 |
 | Velvet | Auto | 415 | 0 | 0 | 89 | 504 |
 | Velvet | Duper | 292 | 0 | 133 | 79 | 504 |
 | Velvet | lean-smt | 302 | 82 | 0 | 120 | 504 |
-| Velvet | Crush | 484 | 0 | 14 | 6 | 504 |
+| Velvet | Crush (SMT trusted) | 478 | 0 | 20 | 6 | 504 |
+| Velvet | Crush (kernel-checked) | 472 | 0 | 20 | 12 | 504 |
 | Velvet | `grind` | 444 | 0 | 0 | 60 | 504 |
 | PLean | Auto | 168 | 6 | 0 | 18 | 192 |
 | PLean | Duper | 71 | 0 | 19 | 102 | 192 |
 | PLean | lean-smt | 96 | 1 | 0 | 95 | 192 |
-| PLean | Crush | 174 | 0 | 16 | 2 | 192 |
+| PLean | Crush (SMT trusted) | 174 | 0 | 16 | 2 | 192 |
+| PLean | Crush (kernel-checked) | 163 | 0 | 17 | 12 | 192 |
 | PLean | `grind` | 155 | 0 | 0 | 37 | 192 |
 
 The four outcome columns partition each backend's fixed workload. `Success`
@@ -164,21 +161,25 @@ exhausted proof search, reconstruction failure, and other tactic errors.
 
 | Corpus | Baseline | Matched | Baseline only | Crush only | Both | Neither | Baseline avg (ms) | Crush avg (ms) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| LeanHammer | Auto | 20 | 0 | 11 | 8 | 1 | 293.6 | 62.9 |
-| LeanHammer | Duper | 20 | 1 | 8 | 11 | 0 | 76.9 | 59.3 |
-| LeanHammer | `grind` | 20 | 0 | 3 | 16 | 1 | 4.4 | 56.8 |
+| LeanHammer | Auto | 20 | 0 | 11 | 8 | 1 | 293.6 | 363.4 |
+| LeanHammer | Duper | 20 | 1 | 8 | 11 | 0 | 76.9 | 338.3 |
+| LeanHammer | lean-smt | 20 | 0 | 7 | 12 | 1 | 102.1 | 342.3 |
+| LeanHammer | `grind` | 20 | 0 | 3 | 16 | 1 | 4.4 | 333.8 |
 | Loom | Auto | 4 | 0 | 0 | 4 | 0 | 243.5 | 104.5 |
 | Loom | Duper | 4 | 0 | 3 | 1 | 0 | 36.0 | 53.0 |
 | Loom | `grind` | 4 | 0 | 0 | 4 | 0 | 12.0 | 104.5 |
-| Cashmere | Auto | 38 | 0 | 20 | 18 | 0 | 101.1 | 73.1 |
-| Cashmere | Duper | 38 | 0 | 17 | 21 | 0 | 98.5 | 82.8 |
-| Cashmere | `grind` | 38 | 0 | 19 | 19 | 0 | 7.2 | 69.4 |
-| Velvet | Auto | 504 | 5 | 74 | 410 | 15 | 181.0 | 134.3 |
-| Velvet | Duper | 504 | 2 | 194 | 290 | 18 | 210.8 | 60.2 |
-| Velvet | `grind` | 504 | 6 | 46 | 438 | 14 | 20.9 | 101.6 |
-| PLean | Auto | 192 | 0 | 6 | 168 | 18 | 885.8 | 2,181.4 |
-| PLean | Duper | 192 | 0 | 103 | 71 | 18 | 428.3 | 225.2 |
-| PLean | `grind` | 192 | 0 | 19 | 155 | 18 | 208.3 | 7,306.7 |
+| Cashmere | Auto | 38 | 0 | 20 | 18 | 0 | 101.1 | 222.1 |
+| Cashmere | Duper | 38 | 0 | 17 | 21 | 0 | 98.5 | 238.7 |
+| Cashmere | lean-smt | 38 | 0 | 21 | 17 | 0 | 137.1 | 148.4 |
+| Cashmere | `grind` | 38 | 0 | 19 | 19 | 0 | 7.2 | 210.5 |
+| Velvet | Auto | 504 | 10 | 73 | 405 | 16 | 178.8 | 418.7 |
+| Velvet | Duper | 504 | 3 | 189 | 289 | 23 | 198.7 | 246.6 |
+| Velvet | lean-smt | 504 | 9 | 185 | 293 | 17 | 145.7 | 400.6 |
+| Velvet | `grind` | 504 | 9 | 43 | 435 | 17 | 18.9 | 370.4 |
+| PLean | Auto | 192 | 0 | 6 | 168 | 18 | 885.8 | 1,183.0 |
+| PLean | Duper | 192 | 0 | 103 | 71 | 18 | 428.2 | 530.8 |
+| PLean | lean-smt | 192 | 0 | 78 | 96 | 18 | 733.5 | 578.4 |
+| PLean | `grind` | 192 | 0 | 19 | 155 | 18 | 208.3 | 1,130.9 |
 
 Each row compares trusted Crush with one baseline. `Matched` is the exact
 VC-identity intersection. `Baseline only`, `Crush only`, `Both`, and `Neither`
@@ -188,69 +189,72 @@ two baselines with each other.
 
 ## Reconstruction
 
-The checked reconstruction measurement covers the same 754 VC identities as
-the headline workload, so its denominators line up with the [Main
-Comparison](#main-comparison). It compares trusted verification, Core
-reconstruction, strict Alethe replay, and the reconstruction portfolio on the
-same recorded Crush inputs. Loom is absent because the run measures only the
-corpora the figures report.
+The reconstruction measurement in `crush-modes/` inside `scripts/benchmark-data/eval-data.zip`
+covers the same 754 VC identities as the [Main Comparison](#main-comparison).
+It measures trusted verification, strict Alethe replay, and the reconstruction
+portfolio. **Core was not measured** in this run; a dash means unavailable,
+not zero. Loom is absent.
 
-| Corpus | Verify solved / total | Checked proof / total | SMT cohort / verify solved | Core / SMT cohort | Alethe / SMT cohort | Portfolio / SMT cohort |
+| Corpus | Verify solved / total | Portfolio checked (reported) / total | SMT cohort / verify solved | Core / SMT cohort | Alethe / SMT cohort | Portfolio / SMT cohort |
 |---|---:|---:|---:|---:|---:|---:|
-| LeanHammer | 19 / 20 | 19 / 20 | 15 / 19 | 15 / 15 | 11 / 15 | 15 / 15 |
-| Cashmere | 38 / 38 | 38 / 38 | 23 / 38 | 23 / 23 | 0 / 23 | 23 / 23 |
-| Velvet | 481 / 504 | 473 / 504 | 296 / 481 | 287 / 296 | 26 / 296 | 287 / 296 |
-| PLean | 174 / 192 | 153 / 192 | 172 / 174 | 151 / 172 | 0 / 172 | 151 / 172 |
-| **Total** | **712 / 754** | **683 / 754** | **506 / 712** | **476 / 506** | **37 / 506** | **476 / 506** |
+| LeanHammer | 19 / 20 | 19 / 20 | 15 / 19 | — | 11 / 15 | 15 / 15 |
+| Cashmere | 38 / 38 | 38 / 38 | 23 / 38 | — | 0 / 23 | 23 / 23 |
+| Velvet | 478 / 504 | 472 / 504 | 293 / 478 | — | 26 / 293 | 287 / 293 |
+| PLean | 174 / 192 | 159 / 192 | 172 / 174 | — | 0 / 172 | 157 / 172 |
+| **Total** | **709 / 754** | **688 / 754** | **503 / 709** | — | **37 / 503** | **482 / 503** |
 
-These are three different questions, and only the second one counts proofs.
+`Verify solved` counts all trusted-lane successes, including selected facts
+and early checked closures. `SMT cohort` includes only those successes with a
+verify-lane profiler event recording SMT `unsat`. Its 503 VCs form the
+denominator of the last three columns. Portfolio success within this cohort
+may use either certificate replay or core-directed reconstruction; it is not
+a certificate-replay count alone.
 
-`Verify solved` is the trusted lane: Crush accepted the solver's verdict, and
-no proof term was built. `Checked proof` is the portfolio lane's count of VCs
-closed with a Lean proof term the kernel accepted, **by whichever route** —
-certificate replay, core-directed reconstruction, a selected Lean fact, or
-checked pre-SMT reconstruction all count. This is the number to quote for how
-many proofs Crush produces: **683 of 754 (90.6%)**.
+`Portfolio checked (reported)` reproduces `portfolio_checked` from
+`reconstruction-summary.tsv`: **688 / 754 (91.2%)**. The current reporter
+requires a passing VC and, when profiler events exist, accepts it only if
+every event has a checked-success outcome. Four passing PLean VCs contain
+both successful reconstruction events and `unknown` events, so this filter
+counts 159 while headline coverage counts 163. Consequently, the reports
+disagree by four even though they use the same measurements. This is a
+reporting discrepancy, not evidence of four invalid proofs; it must be
+resolved before the two measures can be used interchangeably.
 
-`reconstruction.svg` plots the `Checked proof` measure for all three lanes
-over every VC: Core 684 / 754, Alethe 195 / 754, Portfolio 683 / 754. Core
-edges out Portfolio by one VC, since the portfolio tries Alethe replay first
-and can fail where core-directed reconstruction alone succeeds.
+For comparison, the preceding run reported 687 portfolio successes and 683
+profiler-filtered checked VCs. The changes are therefore **687 → 692** for
+headline coverage and **683 → 688** for the reconstruction report, each +5.
 
-The last three columns answer the narrower question of certificate replay, and
-their denominator is the `SMT cohort`: verify-lane successes whose profile
-records that SMT actually returned `unsat`. Pre-SMT closures are excluded from
-both numerator and denominator by construction, so `Portfolio / SMT cohort`
-(476 / 506) is a replay rate, **not** a proof count — it omits 207 VCs that
-Crush closes with a kernel-checked proof without the solver ever returning
-`unsat`. Quoting 476 as the number of proofs understates the result.
+The current `reconstruction.svg` renderer uses reported checked coverage over
+all VCs: **Alethe 195 / 754**, **Portfolio 688 / 754**, and no Core result.
+The portfolio's **482 / 503** cohort count answers a narrower question and
+must not replace whole-VC coverage. A VC outside the trusted lane's SMT cohort
+need not have followed the same route in the checked lane.
 
 ### Reconstruction Gaps
 
-| Corpus | Lane | Failure mode | SMT-cohort VCs |
+| Corpus | Lane | Reported failure mode | SMT-cohort VCs |
 |---|---|---|---:|
-| LeanHammer | Alethe | certificate error | 2 |
-| LeanHammer | Alethe | assumption/rule gap | 1 |
-| LeanHammer | Alethe | term decoder gap | 1 |
-| Cashmere | Alethe | certificate error | 23 |
-| Velvet | Core | reconstruction failed | 6 |
-| Velvet | Core | timeout | 3 |
-| Velvet | Alethe | certificate error | 239 |
-| Velvet | Alethe | assumption/rule gap | 22 |
-| Velvet | Alethe | term decoder gap | 9 |
-| Velvet | Portfolio | Alethe certificate error + Core failed | 6 |
-| Velvet | Portfolio | timeout | 3 |
-| PLean | Core | reconstruction failed | 5 |
-| PLean | Core | solver `unknown` | 4 |
-| PLean | Core | host tactic failed | 12 |
-| PLean | Alethe | certificate error | 172 |
-| PLean | Portfolio | Alethe certificate error + Core failed | 5 |
-| PLean | Portfolio | solver `unknown` | 4 |
-| PLean | Portfolio | host tactic failed | 12 |
+| LeanHammer | Alethe | `certificate-error` | 2 |
+| LeanHammer | Alethe | `rule-gap` | 1 |
+| LeanHammer | Alethe | `term-gap` | 1 |
+| Cashmere | Alethe | `certificate-error` | 23 |
+| Velvet | Alethe | `certificate-error` | 236 |
+| Velvet | Alethe | `rule-gap` | 22 |
+| Velvet | Alethe | `term-gap` | 9 |
+| Velvet | Portfolio | `certificate-error+core-failed` | 4 |
+| Velvet | Portfolio | `timeout` | 2 |
+| PLean | Alethe | `certificate-error` | 172 |
+| PLean | Portfolio | `certificate-error+core-failed` | 8 |
+| PLean | Portfolio | `solver-unknown` | 4 |
+| PLean | Portfolio | `tactic` | 3 |
 
-Certificate errors in this run are cvc5 proof-output failures involving
-`DUMMY_SKOLEM`. Rule and term gaps are replay coverage limitations. No VC is
-skipped for file termination: every lane reached all 754 VCs.
+These counts reproduce `reconstruction-failures.tsv` and use the same
+profiler filter as the table above. In particular, PLean's four portfolio
+`solver-unknown` records include the four passing VCs discussed above; they
+should not be read as four failed whole-VC attempts. Certificate errors in
+this run involve cvc5's `DUMMY_SKOLEM` proof-output limitation. Rule and term
+gaps are replay coverage limitations. Every measured lane attempted all
+754 VCs.
 
 ### Reconstruction Comparison
 
@@ -268,15 +272,23 @@ bash benchmark-reconstruction.sh --case_study LeanHammer
 It reports two distinct measures per lane. `Checked proof / matched` counts
 matched VCs closed with a Lean proof term the kernel accepted by whichever
 route the lane took, so a goal Crush closed by checked pre-SMT reconstruction
-counts even though no certificate was replayed. `Certificate replay / SMT
+counts even though no certificate was replayed. `Reconstruction / SMT
 cohort` asks the narrower question over the matched VCs whose trusted Crush
 lane recorded an SMT `unsat`, using each lane's own accept set, so its
-`Alethe` and `Portfolio` values agree with the table above whenever the
-matched set covers the whole cohort.
+`Alethe` and `Portfolio` values agree with the table above when the reports
+use the same run and the matched set covers the whole cohort. The same
+profiler filtering caveat applies to `Checked proof / matched`.
+
+The renderer's default cross-tool inputs, `reconstruction/` inside `scripts/benchmark-data/eval-data.zip`,
+retain the earlier Cashmere and Velvet comparison. That archive has not been
+refreshed to the 2026-09-18 Crush study. Cross-tool figures and tables drawn
+from it must remain labeled as that separate snapshot; refreshing
+`crush-modes` does not update the archive.
 
 Three properties of lean-smt shape how its rows read. It closes a goal only
-when it also replays cvc5's Alethe certificate, so it is never comparable with
-the trusted-Crush headline row. It reports an Alethe rule it cannot replay by
+when it also replays cvc5's Alethe certificate, so its proof guarantee matches
+the checked Crush lanes. Headline coverage can still compare all lanes with
+their trust policies stated. It reports an Alethe rule it cannot replay by
 leaving that step as an open goal rather than by failing, so the harness checks
 the goal list itself and records those VCs as `rule-gap` instead of counting
 them solved. And it drives cvc5 through the in-process `lean-cvc5` bindings
@@ -297,7 +309,7 @@ revision the corpus already pinned moved, so every lane measures one Mathlib
 closure. All four corpora measure one lean-smt revision, lean-smt's
 `no_mathlib` branch: its `main` branch requires Mathlib v4.33.0 while every
 corpus here pins v4.32.2. The exact commands are in the
-[script guide](scripts/README.md#6-lean-smt-across-every-corpus).
+[script guide](scripts/README.md#3-the-other-studies).
 
 ### lean-smt
 
@@ -317,11 +329,10 @@ reproduces the recorded LeanHammer numbers exactly (8, 12, 19, and 16 of 20).
 | **Crush** | **19 / 20** | **95.0%** | **548.6** | **3.0** | **5,384.0** |
 | `grind` | 16 / 20 | 80.0% | 4.6 | 0.0 | 13.0 |
 
-The Crush row trusts the SMT verdict, so it is not comparable with lean-smt,
-which returns a checked proof or nothing. The reconstruction table below is the
-comparable one.
+This historical Crush row permits trusting the SMT verdict. For a comparison
+requiring checked proofs from every lane, use the reconstruction table below.
 
-| Lane | Checked proof / matched | Coverage | Common | Avg (ms) | Common avg (ms) | Certificate replay / SMT cohort |
+| Lane | Checked proof / matched | Coverage | Common | Avg (ms) | Common avg (ms) | Reconstruction / SMT cohort |
 |---|---:|---:|---:|---:|---:|---:|
 | lean-smt | 12 / 20 | 60.0% | 10 | 102.1 | 99.0 | 10 / 15 |
 | Alethe | 13 / 20 | 65.0% | 10 | 533.2 | 574.7 | 11 / 15 |
@@ -356,22 +367,18 @@ scaling or phase tables.
 
 | Corpus | Lane | Accounted (s) | Largest profiler phases |
 |---|---|---:|---|
-| LeanHammer | Verify | 11.520 | solve 97.7%, translate 1.2% |
-| LeanHammer | Core | 9.816 | solve 96.6%, reconstruct 1.7% |
-| LeanHammer | Alethe | 14.887 | solve 85.3%, replay 13.5% |
-| LeanHammer | Portfolio | 11.414 | solve 83.7%, replay 14.0% |
-| Cashmere | Verify | 18.645 | solve 66.8%, instantiate 29.7%, translate 2.4% |
-| Cashmere | Core | 15.928 | solve 64.7%, instantiate 28.0%, reconstruct 3.6% |
-| Cashmere | Alethe | 23.473 | solve 67.8%, instantiate 29.6%, translate 2.3% |
-| Cashmere | Portfolio | 16.501 | solve 64.3%, instantiate 28.5%, reconstruct 3.5% |
-| Velvet | Verify | 344.132 | solve 83.3%, fallback solve 6.5%, instantiate 5.4% |
-| Velvet | Core | 398.484 | solve 64.0%, reconstruct 23.5%, fallback solve 5.6% |
-| Velvet | Alethe | 373.200 | solve 81.4%, fallback solve 6.0%, instantiate 5.3% |
-| Velvet | Portfolio | 419.274 | solve 61.2%, reconstruct 23.2%, fallback solve 5.4% |
-| PLean | Verify | 1,670.468 | solve 97.4%, translate 1.8% |
-| PLean | Core | 1,842.069 | solve 71.2%, pre-reconstruct 20.1%, reconstruct 7.6% |
-| PLean | Alethe | 1,150.854 | solve 94.7%, translate 4.2% |
-| PLean | Portfolio | 1,830.347 | solve 71.9%, pre-reconstruct 19.7%, reconstruct 7.3% |
+| LeanHammer | Verify | 11.519 | solve 98.0%, translate 1.0%, pre-reconstruct 0.6% |
+| LeanHammer | Alethe | 15.184 | solve 85.5%, replay 13.1%, translate 0.9% |
+| LeanHammer | Portfolio | 13.693 | solve 84.7%, replay 13.0%, translate 0.8% |
+| Cashmere | Verify | 18.686 | solve 67.5%, instantiate 29.0%, translate 2.3% |
+| Cashmere | Alethe | 23.356 | solve 69.9%, instantiate 27.6%, translate 2.2% |
+| Cashmere | Portfolio | 19.540 | solve 65.1%, instantiate 28.6%, reconstruct 3.0% |
+| Velvet | Verify | 350.451 | solve 84.2%, solve-fallback 6.5%, instantiate 4.9% |
+| Velvet | Alethe | 387.058 | solve 82.7%, solve-fallback 5.9%, instantiate 4.7% |
+| Velvet | Portfolio | 446.514 | solve 63.8%, reconstruct 21.0%, solve-fallback 5.1% |
+| PLean | Verify | 1,686.745 | solve 97.4%, translate 1.8%, normalize 0.4% |
+| PLean | Alethe | 1,159.880 | solve 94.9%, translate 4.1%, normalize 0.9% |
+| PLean | Portfolio | 2,064.561 | solve 82.7%, reconstruct 14.9%, translate 1.7% |
 
 `Accounted` sums profiler events rather than process wall time. One host VC may
 invoke Crush more than once. `phase-summary.tsv` records event count, total,
@@ -381,8 +388,8 @@ mean, minimum, maximum, and percentage for every phase.
 
 | Corpus | Replayed VCs | Commands | Replay time (ms) | Pearson r | R-squared | ms / 100 commands |
 |---|---:|---:|---:|---:|---:|---:|
-| LeanHammer | 13 | 3-231 | 5.0-948.7 | 0.9170 | 0.8408 | 327.4 |
-| Velvet | 27 | 10-275 | 25.8-1,393.6 | 0.6686 | 0.4470 | 343.8 |
+| LeanHammer | 13 | 3-231 | 4.9-951.4 | 0.9141 | 0.8356 | 326.4 |
+| Velvet | 27 | 10-275 | 23.6-1,335.2 | 0.7110 | 0.5055 | 351.5 |
 
 Each point is one successful strict Alethe replay, averaged by VC across
 repeats. Script length is the parsed Alethe command count. Replay time includes
@@ -412,7 +419,11 @@ the recorded pure-`grind` patch and guards against invoking an external
 solver. Exact options, toolchains, dirty-state hashes, and per-file wall times
 are in the recorded metadata and run files.
 
-The reconstruction measurement uses lean-crush commit
-`08a4eb091e94a369dc8eb77b70cacffe7f0138ff`. No implementation source under
-`Crush/`, `Test/`, or `MathlibTest/` changed between that commit and the
-headline harness checkpoints.
+The refreshed Crush measurements record lean-crush commit
+`c183f06eb81f82823d50b9695a492e48d29eca95` with a dirty working tree. Their
+provenance is retained in `crush-modes/*/metadata.tsv` inside `scripts/benchmark-data/eval-data.zip`.
+The fold into `main` replaces measurement and profiler rows but does not
+replace metadata, so older `main` metadata must not be used to identify the
+refreshed Crush build. Baselines, Loom, and the archived cross-tool comparison
+retain their original revisions; see the
+[dataset README](scripts/benchmark-data/README.md) for the source mapping.

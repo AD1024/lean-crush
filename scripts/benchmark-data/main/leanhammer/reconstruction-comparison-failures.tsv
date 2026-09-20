@@ -1,4 +1,0 @@
-suite	lane	failure_mode	vcs
-leanhammer	crush-portfolio	solver-unknown	1
-leanhammer	smt-only	solver-sat	3
-leanhammer	smt-only	translation-failed	5

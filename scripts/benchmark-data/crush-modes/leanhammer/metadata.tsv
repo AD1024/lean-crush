@@ -1,3 +1,0 @@
-hammer_commit	toolchain	duper_commit	duper_timeout	solver	timeout	max_heartbeats	max_rec_depth	crush_profile	crush_commit	crush_dirty	crush_root	smt_commit	smt_timeout	smt_mono
-df4dd13671412591d678eada250b04c030fd4d40	leanprover/lean4:v4.32.2	ca7c5862bee2e62e019e6a1b70ce95612b6b6365	5	cvc5	5	1000000	1000000	true	c183f06eb81f82823d50b9695a492e48d29eca95	true	/Users/mikehe/Documents/Princeton/lean-crush	e50256657e5d213241005bcf353f28d13f3e6ea7	5	true
-df4dd13671412591d678eada250b04c030fd4d40	leanprover/lean4:v4.32.2	ca7c5862bee2e62e019e6a1b70ce95612b6b6365	5	cvc5	5	1000000	1000000	true	c183f06eb81f82823d50b9695a492e48d29eca95	true	/Users/mikehe/Documents/Princeton/lean-crush	e50256657e5d213241005bcf353f28d13f3e6ea7	5	true
