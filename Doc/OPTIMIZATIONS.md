@@ -139,6 +139,18 @@ Alethe clauses retain their top-level literal boundaries; Boolean `or` inside on
 literal is not flattened into the enclosing clause. Replay validates each named source
 assumption before derived steps can consume it.
 
+Source-assumption bridges also dispatch through `register_crush_replay rule` with
+the rule name `assume`. The built-in bridge normalizes Nat-to-Int quantifier and
+arithmetic guards using proved equivalences, then uses `grind (ematch := 0) only`.
+It receives only the source fact; unrelated assumptions cannot help justify an
+incorrect decoding. Rational certificate arithmetic uses registered term and rule
+handlers, with closed numeric evaluations checked by the kernel.
+
+Integer square signs and absolute-value comparisons use registered handlers backed
+by proved arithmetic lemmas. Subproof discharge also consults registered handlers:
+absolute-value comparisons are normalized to match expanded sign tests before
+propositional discharge, using only the replayed implication and enclosing scope.
+
 Structural proof construction runs before tactic search for resolution, weakening,
 transitivity, excluded-middle clauses, conjunction projection, and `Iff` implication
 clauses. Wide or multiply referenced resolution results are shared through checked

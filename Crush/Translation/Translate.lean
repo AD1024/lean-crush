@@ -516,6 +516,7 @@ def withFiniteArray (ctx : TranslationCtx) (elem arr : Expr)
 
 private structure DefaultAppArgs where
   values    : Array Expr := #[]
+  valuePositions : Array Nat := #[]
   types     : Array Expr := #[]
   instances : Array Expr := #[]
 
@@ -530,7 +531,8 @@ private def partitionDefaultAppArgs (fn : Expr) (args : Array Expr) :
   let mut fnType ← inferType fn
   let mut out : DefaultAppArgs := {}
   let boundVars := (← get).boundVars
-  for arg in args do
+  for index in [:args.size] do
+    let arg := args[index]!
     let fnTypeWhnf ← whnf fnType
     let binderInfo? :=
       match fnTypeWhnf with
@@ -545,17 +547,33 @@ private def partitionDefaultAppArgs (fn : Expr) (args : Array Expr) :
       let dependsOnBound :=
         (Lean.collectFVars {} arg).fvarIds.any boundVars.contains
       if dependsOnBound then
-        out := { out with values := out.values.push arg }
+        out := { out with values := out.values.push arg
+                          valuePositions := out.valuePositions.push index }
       else
         out := { out with instances := out.instances.push arg }
     else
-      out := { out with values := out.values.push arg }
+      out := { out with values := out.values.push arg
+                        valuePositions := out.valuePositions.push index }
     applied := mkApp applied arg
     fnType ←
       match fnTypeWhnf with
       | .forallE _ _ body _ => pure (body.instantiate1 arg)
       | _ => inferType applied
   return out
+
+/-- Replay takes only SMT value arguments. Keep the erased types, instances, and
+proofs in the recorded function instead of asking the decoder to infer them again. -/
+private def defaultReplayHead (fn : Expr) (args : Array Expr)
+    (positions : Array Nat) : MetaM Expr := do
+  if positions.size == args.size then return fn
+  go positions.toList args #[]
+where
+  go (positions : List Nat) (args : Array Expr) (locals : Array Expr) : MetaM Expr := do
+    match positions with
+    | [] => mkLambdaFVars locals (mkAppN fn args)
+    | position :: rest =>
+      withLocalDeclD `arg (← inferType args[position]!) fun arg =>
+        go rest (args.set! position arg) (locals.push arg)
 
 mutual
   /-- Sort translation. Interpreted Lean types map to SMT theory sorts; supported
@@ -620,7 +638,9 @@ mutual
     -- instantiation `(n, typeArgs)` keys a distinct SMT sort per element type, so
     -- `Option Int` and `Option Bool` never share a sort.
     match ← supportedDatatypeType? e with
-    | some (n, typeArgs) => return .app (.symb (← declareDatatype n typeArgs)) #[]
+    | some (n, typeArgs) =>
+      let name ← declareDatatype n typeArgs (some e)
+      return .app (.symb name) #[]
     | none => declareUninterpretedSort e
 
   /-- Declare the `Fn` sort and `app` symbol for an arrow type `σ₁ → … → τ`, once.
@@ -975,7 +995,8 @@ mutual
     which the solver derives `False`. We therefore emit a well-formedness predicate
     `wf_T` characterizing the image of the Lean type, and *guard every quantifier
     over `T`* with it (see `quantifier`/`guardSort`). -/
-  partial def declareDatatype (n : Name) (typeArgs : Array Expr := #[]) :
+  partial def declareDatatype (n : Name) (typeArgs : Array Expr := #[])
+      (sourceType? : Option Expr := none) :
       TranslateM String := do
     -- Key structurally on the head and its instantiation, so `Option Int` and
     -- `Option Bool` get distinct sorts, constructors, and selectors.
@@ -997,6 +1018,12 @@ mutual
         tag := "datatype", name := m, typeExprs := typeArgs
       }
       let mSort ← TranslateM.symbolForStructural memberKey (nameHint m)
+      -- Record concrete universe levels before recursive field-sort emission can
+      -- encounter the declaration's uninstantiated universe parameters.
+      if let some sourceType := sourceType? then
+        let .const _ levels := sourceType.getAppFn
+          | throwError "crush: internal — expected a datatype application"
+        TranslateM.recordSymbolExpr mSort (mkAppN (mkConst m levels) typeArgs)
       markSortDeclared mSort
       memberSorts := memberSorts.push (m, mSort)
     let mut dtInfos : Array (String × Nat × DatatypeDecl) := #[]
@@ -1139,7 +1166,7 @@ mutual
       return some (.app (.symb wf) #[t])
     let some (n, typeArgs) ← supportedDatatypeType? ty | return none
     if !(← needsWFGuard ty) then return none
-    let sortName ← declareDatatype n typeArgs
+    let sortName ← declareDatatype n typeArgs (some ty)
     let wf ← reserveWfSymbol sortName
     return some (.app (.symb wf) #[t])
 
@@ -1397,7 +1424,7 @@ mutual
     let structTy ← whnf (← inferType structArg)
     if (← finiteArrayElem? structTy).isSome then return none
     let some (_, typeArgs) ← supportedDatatypeType? structTy | return none
-    let sortName ← declareDatatype info.ctorName.getPrefix typeArgs
+    let sortName ← declareDatatype info.ctorName.getPrefix typeArgs (some structTy)
     let sel ← reserveSelSymbol sortName info.ctorName info.i
     let extraArgs := args.extract (info.numParams + 1) args.size
     let sarg ← emitTerm structArg
@@ -1416,7 +1443,7 @@ mutual
     let resTy ← whnf (← inferType (mkAppN fn args))
     if (← finiteArrayElem? resTy).isSome then return none
     let some (_, typeArgs) ← supportedDatatypeType? resTy | return none
-    let sortName ← declareDatatype ci.induct typeArgs
+    let sortName ← declareDatatype ci.induct typeArgs (some resTy)
     -- Drop the leading type-parameter arguments; keep the value fields.
     let valueArgs := args.extract ci.numParams args.size
     let sargs ← valueArgs.mapM emitTerm
@@ -1847,10 +1874,9 @@ mutual
       typeExprs := partition.types ++ argTypes ++ #[resTy] }
     let hint ← headHint fn
     let name ← TranslateM.symbolForStructural key hint
-    -- Record the symbol → Lean-head correspondence for proof replay. Applications are
-    -- rebuilt from the head plus replayed arguments, so the *head* is what must be
-    -- remembered; for a nullary symbol the head is the whole term.
-    TranslateM.recordSymbolExpr name fn
+    unless (← get).nameToExpr.contains name do
+      TranslateM.recordSymbolExpr name
+        (← defaultReplayHead fn args partition.valuePositions)
     if !(← declaredFun name) then
       let argSorts ← valueArgs.mapM (fun a => do emitSort (← inferType a))
       let resSort ← emitSort resTy

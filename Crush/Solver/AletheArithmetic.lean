@@ -8,6 +8,27 @@ namespace Crush.Alethe
 
 open Crush SMT
 
+private def rationalTarget : ReplayConditionHandler := fun ctx =>
+  return (ctx.target.find? (·.isConstOf ``Rat)).isSome
+
+register_crush_replay rule low <<
+  (evaluate ..) if rationalTarget => by decide +kernel
+>>
+
+register_crush_replay rule low <<
+  (poly_simp_rel ..) if rationalTarget => by
+    simp_all (failIfUnchanged := false) only
+      [← Rat.intCast_le_intCast, ← Rat.intCast_lt_intCast]
+    <;> grind
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "arith-int-geq-tighten"
+    (term value : Int) (term bound : Rat) (term limit : Int)) => by
+    have rounded : bound.ceil = limit := by decide +kernel
+    simpa only [rounded] using (Rat.ceil_le_iff (x := bound) (y := value)).symm
+>>
+
 private structure RationalCoefficient where
   numerator : Int
   denominator : Nat

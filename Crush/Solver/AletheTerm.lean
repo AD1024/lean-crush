@@ -94,6 +94,32 @@ private partial def expandNamed? (ctx : TermCtx) (fuel : Nat) (term : Sexp) :
 in Alethe certificates. -/
 private def intLit? (s : String) : Option Int := s.toInt?
 
+/-- Alethe prints rational coefficients as fractions, including integral `n/1`. -/
+private def rationalLit? (s : String) : Option Rat := do
+  match s.splitOn "/" with
+  | [numerator, denominator] =>
+    let numerator ← numerator.toInt?
+    let denominator ← denominator.toNat?
+    if denominator == 0 then none else some (mkRat numerator denominator)
+  | _ => none
+
+register_crush_replay term low <<
+  (to_real (term value : Int)) => (value : Rat)
+>>
+
+@[crush_replay "to_int" low]
+private def replayToInt : ReplayTermHandler := fun ctx => do
+  let #[value] := ctx.args | return none
+  unless ctx.indices.isEmpty && (← whnf (← inferType value)).isConstOf ``Rat do
+    return none
+  if let some literal ← getRatValue? value then
+    return some (Lean.toExpr literal.floor)
+  return some (← mkAppM ``Rat.floor #[value])
+
+register_crush_replay term low <<
+  ("/" (term numerator : Rat) (term denominator : Rat)) => numerator / denominator
+>>
+
 /-- Parse an unsigned numeral in the given radix. -/
 private def parseRadix? (radix : Nat) (digits : String) : Option Nat := do
   let mut value := 0
@@ -220,6 +246,15 @@ private def alignNatNumerals (args : Array Expr) : MetaM (Array Expr) := do
     else
       aligned := aligned.push arg
   return aligned
+
+/-- SMT arithmetic numerals acquire the rational type of their other operands. -/
+private def alignRationalNumerals (args : Array Expr) : MetaM (Array Expr) := do
+  unless ← args.anyM (fun arg => return (← whnf (← inferType arg)).isConstOf ``Rat) do
+    return args
+  args.mapM fun arg => do
+    if let some value ← getIntValue? arg then
+      return Lean.toExpr (Rat.ofInt value)
+    return arg
 
 /-- Integer absolute value used by cvc5's nonlinear-arithmetic certificates. -/
 def intAbs (value : Int) : Int :=
@@ -465,6 +500,8 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
       return some (mkBitVecLit width value)
     else if let some i := intLit? a then
       return some (Lean.toExpr i)
+    else if let some r := rationalLit? a then
+      return some (Lean.toExpr r)
     else return none
   | .list xs =>
     if let some (Sexp.list ident) := xs[0]? then
@@ -553,6 +590,10 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
       return some out
     let some as ← mkArgs | return none
     let as ← alignNatNumerals as
+    let as ←
+      if ["+", "-", "*", "/", "=", "<", "<=", ">", ">=", "ite", "distinct"].contains head then
+        alignRationalNumerals as
+      else pure as
     -- Right-nested n-ary connective, matching how the translator flattens `∨`/`∧`. The
     -- operands sit in formula positions, so each is lifted to `Prop` first.
     let nary (c : Name) (unit : Expr) : MetaM Expr := do

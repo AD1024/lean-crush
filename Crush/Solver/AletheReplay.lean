@@ -1,5 +1,6 @@
 import Crush.Solver.Alethe
 import Crush.Solver.AletheArithmetic
+import Crush.Solver.AletheBridge
 import Crush.Solver.ReplayAttr
 import Crush.Solver.AletheTerm
 import Crush.Solver.KernelCheck
@@ -484,6 +485,31 @@ private theorem intAbsEq (left right : Int) :
   by_cases hl : left < 0 <;> by_cases hr : right < 0 <;>
     simp [hl, hr] <;> omega
 
+private theorem intAbsGt (left right : Int) :
+    intAbs left > intAbs right ↔
+      if left ≥ 0 then
+        if right ≥ 0 then left > right else left > -right
+      else
+        if right ≥ 0 then -left > right else -left > -right := by
+  unfold intAbs
+  split <;> split <;> split <;> split <;> omega
+
+private theorem intAbsNatCast (value : Int) : intAbs value = (value.natAbs : Int) := by
+  unfold intAbs
+  split
+  · exact (Int.ofNat_natAbs_of_nonpos (by omega)).symm
+  · exact (Int.natAbs_of_nonneg (by omega)).symm
+
+private theorem intAbsSquareLt (left right : Int) (h : intAbs left < intAbs right) :
+    intAbs (left * left) < intAbs (right * right) := by
+  simp only [intAbsNatCast, Int.natAbs_mul, Int.ofNat_lt] at *
+  exact Nat.mul_lt_mul_of_lt_of_lt h h
+
+private theorem intSquarePositive (value : Int) (h : value ≠ 0) : value * value > 0 := by
+  by_cases hn : value < 0
+  · exact Int.mul_pos_of_neg_of_neg hn hn
+  · exact Int.mul_pos (by omega) (by omega)
+
 private theorem iffTrueIff (predicate : Prop) : ((predicate ↔ True) ↔ predicate) := by
   simp
 
@@ -809,7 +835,32 @@ register_crush_replay rule low <<
 >>
 
 register_crush_replay rule low <<
-  (la_mult_abs_comparison ..) => by grind [intAbs]
+  (rare_rewrite "arith-abs-int-gt" (term left : Int) (term right : Int)) => by
+    exact intAbsGt left right
+>>
+
+register_crush_replay rule low <<
+  (la_mult_sign ..) => by exact intSquarePositive _ (by assumption)
+>>
+
+register_crush_replay rule low <<
+  (la_mult_abs_comparison ..) => by
+    first
+    | exact intAbsSquareLt _ _ ((intAbsGt _ _).mpr (by assumption))
+    | exact intAbsSquareLt _ _ (by assumption)
+    | grind [intAbs]
+>>
+
+private def hasIntAbsPremise : ReplayConditionHandler := fun ctx =>
+  return ctx.premises.any fun premise =>
+    (premise.clause.find? (·.isConstOf ``intAbs)).isSome
+
+-- Alethe closes these anchors with expanded sign tests, while their final
+-- arithmetic step still states the comparison using absolute values.
+register_crush_replay rule low <<
+  (subproof ..) if hasIntAbsPremise => by
+    simp only [← intAbsGt] at *
+    grind (ematch := 0) only
 >>
 
 register_crush_replay rule low <<
@@ -1183,6 +1234,23 @@ private abbrev ClauseProof := Crush.ReplayClause
 private def unitClauseProof (proof : Expr) : MetaM ClauseProof := do
   let clause ← instantiateMVars (← inferType proof)
   return { proof, clause, literals := #[clause] }
+
+private def proveRegisteredStep (ctx : TermCtx) (rules : ReplayRuleRegistry)
+    (id rule : String) (target : Expr) (premises : Array Expr)
+    (targetLiterals : Array Expr := #[target]) : TacticM (Option Expr) := do
+  let context : ReplayRuleContext := {
+    stepId := id
+    rule
+    target
+    targetLiterals
+    premises := ← premises.mapM fun proof => unitClauseProof proof
+    args := #[]
+    decodeTerm := toExpr? ctx 64
+    decodeSort := sortToType? ctx
+    toProp := replayToProp
+  }
+  if let some proof ← runReplayRuleHandlers rules context then return some proof
+  proveStep target premises rule
 
 private structure ResolutionCandidate where
   left : Nat
@@ -1912,7 +1980,7 @@ where
             if ← isDefEqGuarded sourceType target then
               pure (some sourceProof)
             else
-              proveStep target #[sourceProof] "assume"
+              proveRegisteredStep ctx replayRules id "assume" target #[sourceProof]
           let some proof := proof?
             | trace[crush.result] "alethe replay: assumption bridge failed at {id}; \
                 source: {sourceType}; target: {target}"
@@ -1929,7 +1997,7 @@ where
           | some target =>
             let target ← replayToProp target
             if let some proof ←
-                (proveStep target #[] "assume" : TacticM (Option Expr)) then
+                proveRegisteredStep ctx replayRules id "assume" target #[] then
               env := env.insert id (← unitClauseProof proof)
             else
               trace[crush.result] "alethe replay: skipped unproved encoding assumption {id}"
@@ -2243,7 +2311,8 @@ where
               | trace[crush.result] "alethe replay: declined (subproof {stepId} body)"
                 return none
             let implication ← mkLambdaFVars locals body
-            proveStep conclusion (#[implication] ++ scopedProofs) "subproof"
+            proveRegisteredStep ctx replayRules stepId "subproof" conclusion
+              (#[implication] ++ scopedProofs) conclusionLiterals
         bindAssumptions 0 env #[]
       else if closeRule == "bind" then
         unless assumptions.isEmpty && discharge.isEmpty do

@@ -113,7 +113,8 @@ structure TranslateState where
       (`Crush/Solver/AletheReplay.lean`) needs the real term: an Alethe proof mentions
       the emitted symbols, and each step has to be restated as a Lean proposition. This
       map is the inverse direction, populated where a symbol is allocated for a Lean
-      head (`defaultApp`). Absence is not an error — a symbol with no recorded term
+      head (`defaultApp`), specialized at its erased type and instance arguments.
+      Datatype sorts retain their instantiated Lean types. Absence is not an error — a symbol with no recorded term
       simply makes replay decline that step. -/
   nameToExpr : Std.HashMap String Expr := {}
   /-- Name-collision counter: how many times each sanitized base name is taken. -/

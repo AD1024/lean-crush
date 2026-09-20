@@ -159,7 +159,14 @@ def formatCounterexample (modelText : String) (st : TranslateState) :
     return m!"model (no assignments to report)"
   let labels ← entries.mapM fun entry =>
     match st.nameToExpr.get? entry.name with
-    | some origin => return toString (← ppExpr origin)
+    | some origin =>
+      -- Replay specializes erased arguments in a lambda; keep model labels at the
+      -- original head so distinct SMT instances still receive disambiguating names.
+      let origin :=
+        if (st.nameToAtom.getD entry.name "").startsWith "function-signature:" then
+          origin.getLambdaBody.getAppFn
+        else origin
+      return toString (← ppExpr origin)
     | none => return entry.name
   let mut labelCounts : Std.HashMap String Nat := {}
   for label in labels do
