@@ -240,8 +240,6 @@ need not have followed the same route in the checked lane.
 | Curated | Alethe | `term-gap` | 1 |
 | Cashmere | Alethe | `certificate-error` | 23 |
 | Velvet | Alethe | `certificate-error` | 236 |
-| Velvet | Alethe | `rule-gap` | 22 |
-| Velvet | Alethe | `term-gap` | 9 |
 | Velvet | Portfolio | `certificate-error+core-failed` | 4 |
 | Velvet | Portfolio | `timeout` | 2 |
 | PLean | Alethe | `certificate-error` | 172 |
@@ -252,10 +250,16 @@ need not have followed the same route in the checked lane.
 These counts reproduce `reconstruction-failures.tsv` and use the same
 profiler filter as the table above. In particular, PLean's four portfolio
 `solver-unknown` records include the four passing VCs discussed above; they
-should not be read as four failed whole-VC attempts. Certificate errors in
-this run involve cvc5's `DUMMY_SKOLEM` proof-output limitation. Rule and term
-gaps are replay coverage limitations. Every measured lane attempted all
-754 VCs.
+should not be read as four failed whole-VC attempts. Every measured lane
+attempted all 754 VCs.
+
+Almost every remaining failure is a `certificate-error`: cvc5's `DUMMY_SKOLEM`
+proof-output limitation, which no amount of replay coverage can reach because
+no usable certificate is emitted. Replay coverage itself now accounts for a
+single VC in the whole dataset -- one `term-gap` on Curated. Velvet's earlier
+22 `rule-gap` and 9 `term-gap` records are gone: the replay fixes closed them,
+and this run measures the Alethe lane once rather than in two studies whose
+copies had drifted apart.
 
 ### Reconstruction Comparison
 
