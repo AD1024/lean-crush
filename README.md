@@ -491,109 +491,49 @@ backend per branch.
 They show lean-crush wired into verification-condition generation and used on
 real array, arithmetic, and quantified proof obligations.
 
-To reproduce the coverage comparison end to end -- every backend measured into
-one directory, then the figures drawn from it -- run:
+To reproduce every published figure and table -- every backend measured on
+every case study into one dataset, then the figures drawn from it -- run:
 
 ```sh
-bash benchmark-coverage.sh --case_study all
+bash run-experiments.sh
 ```
 
-That writes `BenchmarkResults/coverage-<timestamp>/`, with one subdirectory per
-case study and the figures under `figures/`. Crush is measured in both lanes, so
-the result carries the `Crush (SMT trusted)` and `Crush (kernel-checked)` series
-together. Set `BACKENDS` to narrow it (the default is
-`crush auto duper grind lean-smt`), and pass `--figures_only <directory>` to
-redraw a finished run without measuring anything. Check the whole path first on
-a single file, which takes minutes rather than hours:
+That writes `BenchmarkResults/experiments-<timestamp>/`, holding `curated/`,
+`corpora/` and `plean/` beside the figures under `figures/`. Every lane the
+paper reports is measured in that one pass: Auto, Duper, `grind`,
+[lean-smt](https://github.com/ufmg-smite/lean-smt), and Crush's trusted,
+strict-Alethe and portfolio lanes.
+
+Measuring them together is deliberate. When the lanes were split across
+separate studies, a `(suite, lane)` could be measured in more than one of them,
+and the copies drifted apart; here each is measured once and the figures are
+drawn from that one dataset.
+
+The first run provisions every corpus and builds a Lake tree per backend, so
+budget hours for it. `--suites curated` narrows it to the smallest case study
+while checking the path, `--resume <dir>` continues an interrupted run in place,
+and `--figures_only <dir>` redraws a finished dataset without measuring:
 
 ```sh
-BACKENDS=grind bash benchmark-coverage.sh --case_study Cashmere \
-  --cases "CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean"
+bash run-experiments.sh --suites curated
+bash run-experiments.sh --resume BenchmarkResults/experiments-<timestamp>
+bash run-experiments.sh --figures_only BenchmarkResults/experiments-<timestamp>
 ```
+
+Completed cases are checkpointed once all of their result and profiling rows
+are written, so a resumed run skips them and replaces any that were truncated.
 
 The figures come from the same renderer that produced the published ones, so a
 reproduction and the committed artifacts cannot drift apart. Timings depend on
 the host and will not match ours; coverage should.
 
-To measure one backend and case study on its own:
-
-```sh
-bash benchmark.sh \
-  --case_study <all|Curated|Velvet|Cashmere|PLean> \
-  --with <crush|auto|duper|grind>
-```
-
-For example, run trusted Crush across all four case studies:
-
-```sh
-bash benchmark.sh --case_study all --with crush
-```
-
-[lean-smt](https://github.com/ufmg-smite/lean-smt) is a fifth backend. The
-Curated suite carries it on its own `lean-smt` branch; for the other corpora the
-harness applies a recorded patch from
+The Curated suite keeps one backend per branch of
+[Lean-SMT-Benchmarks](https://github.com/AD1024/Lean-SMT-Benchmarks). For
+Velvet, Cashmere and PLean the lean-smt lane applies a recorded patch from
 [`scripts/patches`](scripts/patches) that adds the dependency to the pinned
-revision, then verifies that resolving it moved nothing else:
-
-```sh
-bash benchmark.sh --case_study all --with lean-smt \
-  --smt_trees BenchmarkResults/trees
-```
-
-A lean-smt tree carries its corpus's Mathlib build plus lean-smt's, so
-`--smt_trees` names a directory to keep them in between runs.
-
-Run the trusted verification, Core reconstruction, Alethe reconstruction, and
-portfolio comparison together with:
-
-```sh
-bash benchmark-crush-modes.sh --case_study all
-```
-
-Compare checked proof reconstruction between lean-smt, Crush's strict Alethe
-replay, and Crush's reconstruction portfolio with:
-
-```sh
-bash benchmark-reconstruction.sh --case_study all \
-  --smt_trees BenchmarkResults/trees
-```
-
-All three entry points fetch cached Lake artifacts when available and write
-their normalized reports and figures under `BenchmarkResults/`. Regenerate
-only the figures and tables from an existing result directory with:
-
-```sh
-bash benchmark.sh \
-  --plot_only BenchmarkResults/reproduction-<timestamp>-<backend>
-
-bash benchmark-crush-modes.sh \
-  --plot_only BenchmarkResults/crush-modes-<timestamp>
-
-bash benchmark-reconstruction.sh \
-  --plot_only BenchmarkResults/reconstruction-<timestamp>
-```
-
-Benchmark cases are checkpointed after all of their result and profiling rows
-have been written. Resume an interrupted run in place with the same case-study
-and backend selection:
-
-```sh
-bash benchmark.sh \
-  --case_study all \
-  --with crush \
-  --resume BenchmarkResults/reproduction-<timestamp>-crush
-
-bash benchmark-crush-modes.sh \
-  --case_study all \
-  --resume BenchmarkResults/crush-modes-<timestamp>
-
-bash benchmark-reconstruction.sh \
-  --case_study Curated \
-  --resume BenchmarkResults/reconstruction-<timestamp>
-```
-
-Completed cases are skipped; interrupted and truncated cases are replaced and
-rerun.
+revision, then verifies that resolving it moved nothing else. See the
+[script guide](scripts/README.md) for the per-suite harnesses underneath and
+for every option.
 
 Plot closed and reconstructed VCs against time with matplotlib, from any
 completed result directory:
@@ -602,7 +542,7 @@ completed result directory:
 python3 -m pip install matplotlib
 
 python3 scripts/plot-time-coverage.py \
-  BenchmarkResults/reproduction-<timestamp>-<backend>/curated \
+  BenchmarkResults/experiments-<timestamp>/curated \
   --out-dir BenchmarkResults/figures
 ```
 

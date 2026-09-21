@@ -345,8 +345,17 @@ prepare_tree() {
   if is_true "$USE_MATHLIB_CACHE"; then
     printf 'Fetching cached dependencies for %s PLean tree\n' "$label"
     if ! benchmark_fetch_cache "$tree" "$OUT_DIR/cache-$label.log"; then
-      printf 'warning: Mathlib cache unavailable for %s PLean tree\n' \
-        "$label" >&2
+      printf '\n' >&2
+      printf '  ================================================================\n' >&2
+      printf '  Mathlib cache MISS for the %s PLean tree\n' "$label" >&2
+      printf '  This tree will build Mathlib from source, which takes hours.\n' >&2
+      printf '  See %s\n' "$OUT_DIR/cache-$label.log" >&2
+      printf '  Re-run with REQUIRE_MATHLIB_CACHE=true to stop here instead.\n' >&2
+      printf '  ================================================================\n\n' >&2
+      printf '%s\n' "$label" >> "$OUT_DIR/cache-misses.txt"
+      if is_true "${REQUIRE_MATHLIB_CACHE:-false}"; then
+        die "Mathlib cache unavailable for the $label PLean tree and REQUIRE_MATHLIB_CACHE is set"
+      fi
     fi
   fi
   if [[ "$label" == "crush" ]]; then

@@ -267,7 +267,7 @@ same matching rule the [Aligned VCs](#aligned-vcs) table uses. Produce it
 with:
 
 ```sh
-bash benchmark-reconstruction.sh --case_study Curated
+bash run-experiments.sh --suites curated
 ```
 
 It reports two distinct measures per lane. `Checked proof / matched` counts

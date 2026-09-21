@@ -3,7 +3,7 @@
 """Combine several benchmark run directories into one.
 
 A study that measures its suites separately writes one directory per suite --
-`benchmark-crush-modes.sh --case_study Cashmere` and `--case_study Velvet`
+`run-experiments.sh --suites corpora` run for Cashmere and for Velvet
 produce `cashmere/` and `velvet/` -- while the recorded datasets and the figure
 renderer expect the corpora suites together under `corpora/`. This joins them.
 

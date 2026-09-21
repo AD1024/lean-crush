@@ -19,6 +19,7 @@ checked before anything is written.
 import argparse
 import csv
 import importlib.util
+import statistics
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -65,6 +66,7 @@ OUTPUTS = (
     "reconstruction-table",
     "failures-table",
     "phase-breakdown",
+    "pairwise-time",
 )
 
 
@@ -809,6 +811,174 @@ def draw_phase_breakdown(
     pyplot.close(figure)
 
 
+def pairwise_time_rows(
+    result_dirs: list[Path],
+) -> list[tuple[str, str, int, float, float, float, float]]:
+    """Per-VC time for each baseline beside Crush, on the VCs both solved.
+
+    A time only exists for a VC a lane solved, so the mean is taken over the
+    VCs *both* lanes closed. Averaging over each lane's own solved set instead
+    would compare different workloads: a baseline that solves only the easy
+    obligations would look fast for that reason alone.
+
+    Crush is the reconstruction lane, matching the pairwise table: every
+    baseline here returns a proof term, so comparing against the trusted lane
+    would charge Crush none of the cost of producing one.
+    """
+    headline = read_tsv(result_dirs, "headline-summary.tsv")
+    attempts = report.grouped_attempts(read_tsv(result_dirs, "measurements.tsv"))
+
+    rows_by_lane: dict[tuple[str, str], dict[str, list[dict[str, str]]]]
+    rows_by_lane = defaultdict(dict)
+    lanes_by_suite: dict[str, set[str]] = defaultdict(set)
+    for (suite, lane, vc), rows in attempts.items():
+        rows_by_lane[(suite, lane)][vc] = rows
+        lanes_by_suite[suite].add(lane)
+
+    lane_of: dict[tuple[str, str], str] = {}
+    for row in headline:
+        lane_of[(row["suite"], row["backend"])] = row["lane"]
+
+    output: list[tuple[str, str, int, float, float, float, float]] = []
+    for suite in sorted(lanes_by_suite, key=style.suite_sort_key):
+        crush_lane = report.head_to_head_crush_lane(lanes_by_suite[suite])
+        if crush_lane is None:
+            continue
+        crush_vcs = rows_by_lane[(suite, crush_lane)]
+        backends = sorted(
+            {b for (s, b) in lane_of if s == suite and not b.startswith("crush")},
+            key=style.backend_sort_key,
+        )
+        for backend in backends:
+            base_vcs = rows_by_lane.get((suite, lane_of[(suite, backend)]))
+            if not base_vcs:
+                continue
+            base_ms: list[float] = []
+            crush_ms: list[float] = []
+            for vc in sorted(set(base_vcs) & set(crush_vcs)):
+                if report.all_pass(base_vcs[vc]) and report.all_pass(crush_vcs[vc]):
+                    base_ms.append(report.mean_milliseconds(base_vcs[vc]))
+                    crush_ms.append(report.mean_milliseconds(crush_vcs[vc]))
+            if not base_ms:
+                continue
+            output.append(
+                (
+                    suite,
+                    backend,
+                    len(base_ms),
+                    statistics.mean(base_ms),
+                    statistics.stdev(base_ms) if len(base_ms) > 1 else 0.0,
+                    statistics.mean(crush_ms),
+                    statistics.stdev(crush_ms) if len(crush_ms) > 1 else 0.0,
+                )
+            )
+    return output
+
+
+def draw_pairwise_time(
+    pyplot,
+    path: Path,
+    rows: list[tuple[str, str, int, float, float, float, float]],
+) -> None:
+    """Mean per-VC time, baseline beside Crush, over the VCs both solved.
+
+    One panel per corpus with its own x axis: the corpora differ by an order of
+    magnitude in per-VC cost, and a shared axis would flatten the small ones
+    into the baseline. Error bars are one standard deviation, clipped at zero
+    because a duration cannot be negative.
+    """
+    suites: list[str] = []
+    for suite, *_ in rows:
+        if suite not in suites:
+            suites.append(suite)
+    if not suites:
+        return
+
+    per_suite = {
+        suite: [row for row in rows if row[0] == suite] for suite in suites
+    }
+    tallest = max(len(v) for v in per_suite.values())
+    figure, axes = pyplot.subplots(
+        len(suites), 1,
+        figsize=(8.4, 1.15 + 0.52 * tallest * len(suites)),
+        squeeze=False,
+    )
+    figure.patch.set_facecolor(style.PAPER)
+
+    crush_color = style.BACKEND_COLORS.get("crush-checked", "#56B4E9")
+    bar = 0.34
+    for index, suite in enumerate(suites):
+        axis = axes[index][0]
+        axis.set_facecolor(style.PAPER)
+        entries = per_suite[suite]
+        positions = list(range(len(entries)))
+        for slot, (_, backend, n, b_mean, b_std, c_mean, c_std) in enumerate(entries):
+            for offset, value, deviation, color, key in (
+                (bar / 2, b_mean, b_std,
+                 style.BACKEND_COLORS.get(backend, "#66736F"), backend),
+                (-bar / 2, c_mean, c_std, crush_color, "crush-checked"),
+            ):
+                # A standard deviation wider than the mean would put the whisker
+                # below zero, which no duration can be.
+                lower = min(deviation, value)
+                axis.barh(
+                    slot + offset, value, height=bar, color=color,
+                    edgecolor=style.PAPER, linewidth=0.8,
+                    xerr=[[lower], [deviation]],
+                    error_kw={
+                        "ecolor": style.INK, "elinewidth": 1.1, "capsize": 3,
+                        "capthick": 1.1, "alpha": 0.75,
+                    },
+                    label=style.label_backend(key),
+                )
+        axis.set_yticks(positions)
+        axis.set_yticklabels(
+            [f"{style.label_backend(e[1])}  (n={e[2]})" for e in entries]
+        )
+        axis.invert_yaxis()
+        axis.set_xlim(left=0)
+        axis.set_title(
+            style.label_suite(suite),
+            color=style.INK, fontsize=13, fontweight="bold", pad=6, loc="left",
+        )
+        for spine in ("top", "right", "left"):
+            axis.spines[spine].set_visible(False)
+        axis.spines["bottom"].set_color(style.GRID)
+        axis.tick_params(colors=style.INK, labelsize=11, length=0)
+        axis.grid(True, axis="x", color=style.GRID, linewidth=0.7, alpha=0.9)
+        axis.set_axisbelow(True)
+        bold_tick_labels(axis)
+        if index == len(suites) - 1:
+            axis.set_xlabel(
+                "Mean tactic time per VC (ms), ±1 s.d.",
+                color=style.INK, fontsize=12, fontweight="bold",
+            )
+
+    # Every bar carries its backend's own hue, the one the coverage figures use,
+    # so the legend names each backend rather than an abstract "baseline" role
+    # in a colour no bar is drawn in.
+    backends = sorted(
+        {row[1] for row in rows}, key=style.backend_sort_key
+    ) + ["crush-checked"]
+    handles = [
+        pyplot.Rectangle(
+            (0, 0), 1, 1,
+            color=style.BACKEND_COLORS.get(backend, "#66736F"),
+        )
+        for backend in backends
+    ]
+    figure.legend(
+        handles, [style.label_backend(backend) for backend in backends],
+        loc="lower center", bbox_to_anchor=(0.5, -0.015),
+        ncol=min(5, len(backends)),
+        frameon=False, fontsize=11, labelcolor=style.INK, handlelength=1.6,
+        columnspacing=1.4,
+    )
+    figure.tight_layout(rect=(0, 0.02, 1, 1))
+    figure.savefig(path, facecolor=figure.get_facecolor(), bbox_inches="tight")
+    pyplot.close(figure)
+
+
 def write_points(
     path: Path,
     series: dict[str, list[dict[str, object]]],
@@ -1122,6 +1292,13 @@ def main() -> None:
         if groups:
             path = args.out_dir / f"phase-breakdown.{args.format}"
             draw_phase_breakdown(pyplot, path, groups)
+            generated.append(path)
+
+    if "pairwise-time" in selected:
+        pairs = pairwise_time_rows(args.result_dirs)
+        if pairs:
+            path = args.out_dir / f"pairwise-matched-time.{args.format}"
+            draw_pairwise_time(pyplot, path, pairs)
             generated.append(path)
 
     if not generated:

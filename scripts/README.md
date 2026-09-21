@@ -1,21 +1,31 @@
 # Benchmark Scripts
 
-How to re-run the experiments and draw the figures. Everything is written under
-`BenchmarkResults/`, which is gitignored apart from the recorded archive.
+Everything the paper's figures and tables need comes from one script:
 
-| Script | What it measures |
+```sh
+bash run-experiments.sh
+```
+
+It measures every lane on every case study into one dataset and draws every
+figure from it. Nothing is recorded in the repository that it did not produce,
+and there is no merge step afterwards -- which is the point. The lanes used to
+be split across three overlapping runs, and because a `(suite, lane)` could
+appear in more than one, the copies drifted: Velvet's Alethe rows were post-fix
+in one and pre-fix in another, so a figure said 239 checked VCs while the prose
+said 196. Measured once, a lane cannot disagree with itself.
+
+| Script | Role |
 |---|---|
-| `../benchmark-coverage.sh` | **Coverage comparison: every backend, then the figures** |
-| `../benchmark.sh` | One backend and case study |
-| `../benchmark-crush-modes.sh` | Crush's trusted, Core, Alethe, and portfolio lanes |
-| `../benchmark-reconstruction.sh` | lean-smt against Crush's Alethe and portfolio lanes |
-| `render-paper-artifacts.sh` | Draws every published figure from a dataset |
-| `merge-runs.py` | Combines run directories and regenerates their reports |
-| `fold-crush-series.py` | Replaces a dataset's Crush lanes from a mode study |
+| `../run-experiments.sh` | **Everything: measures all lanes, then draws all figures** |
+| `benchmark-curated.sh` | One suite: the curated obligations, one backend per branch |
+| `benchmark-corpora.sh` | One suite: Loom, Cashmere, Velvet |
+| `benchmark-plean.sh` | One suite: PLean |
+| `render-paper-artifacts.sh` | Draws every figure from a dataset |
+| `merge-runs.py` | Joins suites measured in separate runs |
 
-The recorded results are in [`BENCHMARKS.md`](../BENCHMARKS.md) and their inputs
-in [`benchmark-data`](benchmark-data). The 2026-08-20 snapshot is kept in
-[`BenchmarkResults/recorded/2026-08-20`](../BenchmarkResults/recorded/2026-08-20).
+The three per-suite harnesses are what `run-experiments.sh` calls. Run them
+directly when iterating on one corpus; run the top-level script when you want
+the dataset the paper uses.
 
 ## Prerequisites
 
@@ -40,7 +50,7 @@ Do not reorder `PATH` to fix a solver, because that can change which python3 you
 get. Pin the solvers by variable instead and leave `PATH` alone:
 
 ```sh
-Z3_BIN=/opt/homebrew/bin/z3 CVC5_BIN=/path/to/cvc5 bash benchmark-coverage.sh ...
+Z3_BIN=/opt/homebrew/bin/z3 CVC5_BIN=/path/to/cvc5 bash run-experiments.sh
 ```
 
 `find_solver` prefers those variables over `PATH`, so this picks the solver you
@@ -62,49 +72,90 @@ The lean-smt lane is the exception to all of this. It calls cvc5 through the
 in-process bindings its Lake package links, so it uses neither the `cvc5` on
 `PATH` nor `CVC5_BIN`, and it refuses to run under `SOLVER=z3`.
 
-## 1. Run the coverage comparison
+## 1. Run the experiments
 
 ```sh
-bash benchmark-coverage.sh --case_study all
+bash run-experiments.sh
 ```
 
-This is the whole path: it measures every backend into one directory and then
-draws the figures. `benchmark.sh` measures one backend per invocation into its
-own directory, which cannot produce a cross-backend figure.
+Writes `BenchmarkResults/experiments-<stamp>/` holding `curated/`, `corpora/`,
+`plean/` and `figures/`. Every lane the paper reports is measured: Auto, Duper,
+`grind`, lean-smt, and Crush's trusted, strict-Alethe and portfolio lanes.
 
-Output lands in `BenchmarkResults/coverage-<timestamp>/`, with one subdirectory
-per case study and the figures under `figures/`. Crush is measured in both
-lanes, so the run yields the `Crush (SMT trusted)` and `Crush (kernel-checked)`
-series together.
-
-Check the path on one file first
-
-```sh
-BACKENDS=grind bash benchmark-coverage.sh --case_study Cashmere \
-  --cases "CaseStudies/Cashmere/CashmereIncorrectnessLogic.lean"
-```
-
-| Argument | Meaning |
+| Option | Meaning |
 |---|---|
-| `--case_study <all\|Curated\|Velvet\|Cashmere\|PLean>` | Required |
-| `--cases "<file> ..."` | Restrict to named files; needs a single `--case_study` |
-| `--resume <dir>` | Continue into an existing run directory |
-| `--figures_only <dir>` | Redraw a finished run, measuring nothing |
+| `--out <dir>` | Write somewhere other than the timestamped default |
+| `--resume <dir>` | Continue into an existing dataset, skipping finished cases |
+| `--suites "<names>"` | Subset of `curated corpora plean` |
 | `--skip_figures` | Measure only |
+| `--figures_only <dir>` | Redraw a finished dataset, measuring nothing |
+| `--update_archive` | Also refresh `scripts/benchmark-data/eval-data.zip` |
 
-| Variable | Default |
-|---|---|
-| `BACKENDS` | `crush auto duper grind lean-smt` |
-| `CRUSH_LANES` | `verify portfolio` |
-| `SMT_TREES` | unset; names a directory to keep lean-smt worktrees between runs |
-| `CURATED_TREES` | `BenchmarkResults/curated-trees`; one build per Curated branch, kept between runs |
-| `Z3_BIN`, `CVC5_BIN` | resolved from `PATH` |
+| Variable | Default | Effect |
+|---|---|---|
+| `REPEATS` | `1` | Repeats per VC; one for every case study |
+| `SOLVER` | `cvc5` | lean-smt cannot run under z3, so the run refuses anything else |
+| `TIMEOUT` | `5` | Per-query solver seconds |
+| `CRUSH_MODES` | `verify alethe portfolio` | Add `core` to fill the Core column |
+| `CURATED_TREES` | `BenchmarkResults/curated-trees` | One Lake build per Curated branch |
+| `SMT_TREE_ROOT` | `BenchmarkResults/trees` | lean-smt worktrees, one per corpus |
+| `Z3_BIN`, `CVC5_BIN` | from `PATH` | Pin the solver binaries |
 
-Drop the slowest lane with `BACKENDS="crush auto duper grind"`. Each lean-smt
-tree carries its corpus's Mathlib build plus lean-smt's, so `SMT_TREES` is worth
-setting if you will run it more than once.
+Both tree variables are worth pointing at a stable path. Each directory holds a
+Lake build, and keeping them between runs is the difference between minutes and
+hours; deleting one forces that build again.
 
-The Curated suite keeps one backend per branch of
+A first run provisions every corpus and builds every tree, so budget hours for
+it. `--resume` makes an interrupted run cheap to continue, and `--suites`
+narrows it to one corpus while iterating.
+
+## 2. Draw the figures
+
+Step 1 already draws them. To redraw without measuring:
+
+```sh
+bash run-experiments.sh --figures_only BenchmarkResults/experiments-<stamp>
+```
+
+The renderer draws a figure when the lanes it needs are present and says what
+it skipped otherwise, so a dataset measured with `--suites` still renders what
+it covers.
+
+Coverage figures: `coverage.pdf`, `coverage-table.pdf`, `outcomes.pdf`,
+`coverage-over-time-<suite>.pdf`. Reconstruction figures: `reconstruction.pdf`,
+`reconstruction-table.pdf`, `reconstruction-failures{,-table}.pdf`,
+`reconstruction-over-time-<suite>.pdf`, `alethe-replay-scaling-<suite>.pdf`,
+`phase-breakdown.pdf`. Plus `tables.md`, from which the recorded tables in
+[`BENCHMARKS.md`](../BENCHMARKS.md) are taken.
+
+To draw from a dataset that is not a run directory -- the committed archive,
+say -- point the renderer at it:
+
+```sh
+mkdir -p /tmp/eval && unzip -q scripts/benchmark-data/eval-data.zip -d /tmp/eval
+MEASUREMENTS_ROOT=/tmp/eval bash scripts/render-paper-artifacts.sh out/
+```
+
+## 3. One suite at a time
+
+`run-experiments.sh` calls these; use them directly when iterating.
+
+```sh
+PROFILES="crush-verify crush-alethe crush-portfolio smt-only grind-only duper-only auto-smt" \
+OUT_DIR=<dir>/curated bash scripts/benchmark-curated.sh
+
+RUN_CURATED=false RUN_SMT=true CRUSH_MODES="verify alethe portfolio" \
+OUT_DIR=<dir>/corpora bash scripts/benchmark-corpora.sh
+
+RUN_SMT=true CRUSH_MODES="verify alethe portfolio" \
+OUT_DIR=<dir>/plean bash scripts/benchmark-plean.sh
+```
+
+Each writes one directory holding `measurements.tsv`, `profile-events.tsv` and
+the reports regenerated from them. A dataset is just those directories side by
+side, which is why no merge step exists.
+
+The curated suite keeps one backend per branch of
 [Lean-SMT-Benchmarks](https://github.com/AD1024/Lean-SMT-Benchmarks), so that no
 backend's dependencies reach another's environment:
 
@@ -116,179 +167,16 @@ backend's dependencies reach another's environment:
 | `lean-smt` | `smt-only` |
 | `crush` | `crush-verify`, `crush-core`, `crush-alethe`, `crush-portfolio` |
 
-Each branch needs its own Lake build. They are kept under `CURATED_TREES`
-between runs; delete that directory to force a rebuild. The harness clones over
-SSH; set `CURATED_REPO_URL` to the `https://` form to clone anonymously, or
-`CURATED_REPO` to a checkout you already have.
+Each branch needs its own Lake build, kept under `CURATED_TREES`. The harness
+clones over SSH; set `CURATED_REPO_URL` to the `https://` form to clone
+anonymously, or `CURATED_REPO` to a checkout you already have. The `lean-smt`
+branch fixes its solver configuration in its own harness, because lean-smt takes
+it as tactic syntax rather than as an option, so `SMT_TIMEOUT` and `SMT_MONO`
+must be left at 5 and `true` or the run refuses to start.
 
-`--case_study Curated` measures that suite as part of the comparison. The
-recorded headline rows came from driving its harness directly, which is the
-same measurement without the other three corpora:
-
-```sh
-# Settings shared by all three Curated studies. Five seconds of solver or
-# saturation budget per VC, one million Lean heartbeats, one repeat -- coverage
-# is deterministic, timings are not (see "What reproduces"). The suite pulls in
-# no Mathlib, so there is no build cache to fetch.
-export CURATED_TREES=BenchmarkResults/curated-trees
-export REPEATS=1 SOLVER=cvc5 TIMEOUT=5 SMT_TIMEOUT=5 SMT_MONO=true
-export DUPER_TIMEOUT=5 MAX_HEARTBEATS=1000000 MAX_RECURSION_DEPTH=1000000
-export CRUSH_PROFILE=true USE_MATHLIB_CACHE=false
-
-PROFILES="crush-verify crush-portfolio smt-only grind-only duper-only auto-smt" \
-OUT_DIR=BenchmarkResults/curated-main \
-  bash scripts/benchmark-curated.sh
-```
-
-The first Curated run builds a Lake tree per branch and takes roughly half an
-hour. Later runs reuse those trees and take minutes, which is what
-`CURATED_TREES` is for, so keep it pointed at the same directory. The lean-smt branch
-fixes its solver configuration in its own harness, because lean-smt takes it as
-tactic syntax rather than as an option, so `SMT_TIMEOUT` and `SMT_MONO` must be
-left at 5 and `true` or the run refuses to start.
-
-## 2. Draw the figures
-
-Step 1 already draws them. To redraw without measuring:
-
-```sh
-bash benchmark-coverage.sh --figures_only BenchmarkResults/coverage-<timestamp>
-```
-
-To draw from the recorded data instead of your own run:
-
-```sh
-bash scripts/render-paper-artifacts.sh            # into BenchmarkResults/figures
-bash scripts/render-paper-artifacts.sh out/       # or a directory you name
-```
-
-Every recorded measurement ships in one archive,
-[`benchmark-data/eval-data.zip`](benchmark-data/eval-data.zip), holding `main/`,
-`crush-modes/` and `reconstruction/`. The renderer unpacks it to a temporary
-directory, so refreshing the data is one binary change rather than several
-hundred file additions and deletions.
-
-| Variable | Default | Effect |
-|---|---|---|
-| `PAPER_DATA_ARCHIVE` | `scripts/benchmark-data/eval-data.zip` | The archive to unpack |
-| `PAPER_DATA_ROOT` | unset | Read loose directories instead of the archive |
-| `MAIN_ROOT` | `<data>/main` | Coverage comparison inputs |
-| `MODES_ROOT` | `<data>/crush-modes` | Crush-mode inputs |
-| `RECONSTRUCTION_ROOT` | `<data>/reconstruction` | Cross-tool inputs |
-
-Each root is scanned for subdirectories holding a `measurements.tsv`, so both a
-full `--case_study all` run and a single-case-study run render. Missing
-`MODES_ROOT` or archive data skips those figures rather than failing.
-
-Coverage figures: `coverage.pdf`, `coverage-table.pdf`, `outcomes.pdf`,
-`coverage-over-time-<suite>.pdf`, and `tables.md`. The reconstruction figures
-come from the studies in step 3 and are skipped by `benchmark-coverage.sh`,
-which draws only what its own run measured.
-
-## 3. The other studies
-
-Crush's reconstruction lanes against each other:
-
-```sh
-bash benchmark-crush-modes.sh --case_study all
-bash benchmark-crush-modes.sh --case_study all --resume <dir>
-bash benchmark-crush-modes.sh --plot_only <dir>
-```
-
-`CRUSH_MODES` selects lanes, default `verify core alethe portfolio`. The
-reconstruction table is computed against the trusted lane, so `verify` must be
-present or the report comes out empty.
-
-The recorded Curated rows for this study, with the shared settings exported in
-step 1:
-
-```sh
-PROFILES="crush-verify crush-alethe crush-portfolio" \
-OUT_DIR=BenchmarkResults/curated-crush-modes \
-  bash scripts/benchmark-curated.sh
-```
-
-Crush against lean-smt on checked reconstruction. This is the slowest study,
-because each corpus needs a lean-smt tree carrying its own Mathlib build plus
-lean-smt's, so `--smt_trees` is worth passing:
-
-```sh
-bash benchmark-reconstruction.sh --case_study all --smt_trees BenchmarkResults/trees
-bash benchmark-reconstruction.sh --case_study <one> --cases "<file> ..."
-bash benchmark-reconstruction.sh --plot_only <dir> [--exclude_suite <corpus>]
-```
-
-It produces `reconstruction-over-time-<suite>.pdf` and `reconstruction-table.pdf`,
-which no other study can produce: they need `smt-only` measured beside Crush's
-Alethe and portfolio lanes in one run, and the Crush-mode data has no lean-smt
-lane. Draw them from a run with:
-
-```sh
-RECONSTRUCTION_ROOT=BenchmarkResults/reconstruction-<timestamp> \
-  bash scripts/render-paper-artifacts.sh
-```
-
-The recorded Curated rows for this study. `crush-verify` is required here: it
-establishes the SMT-`unsat` cohort the replay columns are measured against.
-
-```sh
-PROFILES="crush-verify crush-alethe crush-portfolio smt-only" \
-OUT_DIR=BenchmarkResults/curated-reconstruction \
-  bash scripts/benchmark-curated.sh
-```
-
-To make a run the committed default, rebuild the archive with that study's
-directory replaced:
-
-```sh
-mkdir -p /tmp/eval && unzip -q scripts/benchmark-data/eval-data.zip -d /tmp/eval
-rm -rf /tmp/eval/reconstruction
-cp -R BenchmarkResults/reconstruction-<timestamp> /tmp/eval/reconstruction
-rm -f /tmp/eval/reconstruction/*/*.log
-(cd /tmp/eval && rm -f old.zip && \
-  zip -rq "$OLDPWD/scripts/benchmark-data/eval-data.zip" main crush-modes reconstruction)
-```
-
-Substitute `main` or `crush-modes` for the other two studies. Each holds suite
-directories at its top level; the renderer passes each to the plotter.
-
-One backend on its own:
-
-```sh
-bash benchmark.sh --case_study <all|Curated|Velvet|Cashmere|PLean> \
-  --with <crush|auto|duper|grind|lean-smt> [--smt_trees <dir>]
-bash benchmark.sh --case_study <one> --with <backend> --cases "<file> ..."
-bash benchmark.sh --case_study all --with crush --resume <dir>
-bash benchmark.sh --plot_only <dir> [--exclude_suite <corpus>]
-```
-
-`--exclude_suite` omits a corpus from tables and figures; repeat to omit
-several. The published figures exclude `loom`, whose four VCs are too few for a
-coverage bar to say anything. The recorded TSVs always keep every corpus.
-
-For Velvet, Cashmere, and PLean the lean-smt lane applies a recorded patch from
+For Velvet, Cashmere and PLean the lean-smt lane applies a recorded patch from
 [`patches`](patches) that adds the dependency to the pinned revision, then
 verifies that resolving it moved nothing else.
-
-## 4. Combining runs
-
-Suites measured separately live in separate directories. To join them — for
-example `cashmere/` and `velvet/` into the `corpora/` layout the datasets use:
-
-```sh
-python3 scripts/merge-runs.py <run>/cashmere <run>/velvet --out <dest>/corpora
-```
-
-Only raw inputs are concatenated; every derived TSV is regenerated from them, so
-no summary can disagree with its rows. Suites must be disjoint — `--replace`
-lets a later source supersede an earlier one's suites.
-
-To swap a dataset's Crush lanes for a newer run's:
-
-```sh
-python3 scripts/fold-crush-series.py --target <dataset>/<suite> \
-  --donor <run>/<suite> --report scripts/benchmark-report.py
-```
 
 ## What reproduces
 
@@ -296,6 +184,6 @@ Coverage reproduces across machines. **Timings do not.** The external solver
 call is the part that moves most, and VCs sitting near the 5s cvc5 cap can flip
 between runs on the same host. Compare per-VC times only within one run.
 
-To narrow a run before committing to a full one: `--cases` restricts to named
-files, `BACKENDS` drops lanes, and a single `--case_study` measures one corpus.
-Any of those gives a subset, not the published measurement.
+To narrow a run before committing to a full one: `--suites` measures one case
+study, and `CRUSH_MODES` drops Crush lanes. Either gives a subset, not the
+published measurement.

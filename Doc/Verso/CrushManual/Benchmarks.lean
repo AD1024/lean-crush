@@ -119,7 +119,7 @@ The comparison covers every corpus. Only the Curated suite's pinned revision
 already requires lean-smt; the others get it from a recorded patch that adds the
 dependency to the pinned revision, after which the harness checks that no
 revision the corpus already pinned moved. Run it with
-`benchmark-reconstruction.sh`; the
+`run-experiments.sh`; the
 [benchmark script guide](https://github.com/AD1024/lean-crush/blob/main/scripts/README.md)
 documents the reports it writes.
 

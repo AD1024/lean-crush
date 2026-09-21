@@ -32,13 +32,16 @@ if [[ -z "$DATA_ROOT" && -f "$DATA_ARCHIVE" ]]; then
 fi
 DATA_ROOT="${DATA_ROOT:-scripts/benchmark-data}"
 
-# Each study's root is overridable so the figures can be drawn from a fresh run
-# without renaming anything: `benchmark-coverage.sh` writes `corpora/`,
-# `curated/` and `plean/` under one directory, which is exactly the shape
-# MAIN_ROOT wants, and the other two harnesses do the same for their roots.
-MAIN_ROOT="${MAIN_ROOT:-$DATA_ROOT/main}"
-MODES_ROOT="${MODES_ROOT:-$DATA_ROOT/crush-modes}"
-RECONSTRUCTION_ROOT="${RECONSTRUCTION_ROOT:-$DATA_ROOT/reconstruction}"
+# One root, and every figure is drawn from it. There used to be three -- one
+# per study -- and because a (suite, lane) could sit in more than one of them,
+# the copies drifted: Velvet's Alethe rows were post-fix in one and pre-fix in
+# another, so the figure said 239 checked VCs while the prose said 196. With a
+# single root each (suite, lane) exists once and cannot disagree with itself.
+#
+# `run-experiments.sh` writes `corpora/`, `curated/` and `plean/` under one
+# directory, which is exactly the shape this wants, so a fresh run is drawn by
+# pointing MEASUREMENTS_ROOT at it.
+MEASUREMENTS_ROOT="${MEASUREMENTS_ROOT:-$DATA_ROOT}"
 
 # Which suite directories a run root holds depends on how it was measured: a
 # full `--case_study all` writes corpora/, curated/ and plean/, while a single
@@ -55,37 +58,47 @@ collect_run_dirs() {
   done
 }
 
-collect_run_dirs "$MAIN_ROOT"
-MAIN_DIRS=(${COLLECTED[@]+"${COLLECTED[@]}"})
-if [[ ${#MAIN_DIRS[@]} -eq 0 ]]; then
-  printf 'error: no measured suite directories under %s\n' "$MAIN_ROOT" >&2
-  printf 'each needs a measurements.tsv; point MAIN_ROOT / MODES_ROOT at your\n' >&2
-  printf 'own run directories, e.g.\n' >&2
-  printf '  MAIN_ROOT=BenchmarkResults/<main-run> \\\n' >&2
-  printf '  MODES_ROOT=BenchmarkResults/<crush-modes-run> \\\n' >&2
+collect_run_dirs "$MEASUREMENTS_ROOT"
+RUN_DIRS=(${COLLECTED[@]+"${COLLECTED[@]}"})
+if [[ ${#RUN_DIRS[@]} -eq 0 ]]; then
+  printf 'error: no measured suite directories under %s\n' "$MEASUREMENTS_ROOT" >&2
+  printf 'each needs a measurements.tsv; point MEASUREMENTS_ROOT at your own run,\n' >&2
+  printf 'e.g.\n' >&2
+  printf '  MEASUREMENTS_ROOT=BenchmarkResults/coverage-<stamp> \\\n' >&2
   printf '  scripts/render-paper-artifacts.sh out/\n' >&2
   exit 1
 fi
 
-# The Crush-mode study is a separate run, so a coverage-only render legitimately
-# has no MODES_ROOT. Skip its figures rather than refusing to draw the coverage
-# ones, the same way the time figures are skipped without matplotlib.
-collect_run_dirs "$MODES_ROOT"
-MODES_DIRS=(${COLLECTED[@]+"${COLLECTED[@]}"})
+# A figure is drawn when the lanes it needs were measured. A coverage-only run
+# has no `crush-alethe` rows, so its reconstruction figures are skipped rather
+# than drawn empty -- the same way the time figures are skipped without
+# matplotlib.
+lanes_present() {
+  local lane
+  for lane in "$@"; do
+    if awk -F '\t' -v want="$lane" \
+        'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "lane") c = i; next }
+         c && $c == want { found = 1 }
+         END { exit !found }' \
+        "${RUN_DIRS[@]/%//measurements.tsv}" 2>/dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 HAVE_MODES=true
-if [[ ${#MODES_DIRS[@]} -eq 0 ]]; then
+if ! lanes_present crush-alethe crush-core; then
   HAVE_MODES=false
-  printf 'note: no Crush-mode data under %s; skipping the reconstruction figures\n' \
-    "$MODES_ROOT" >&2
+  printf 'note: no Crush reconstruction lanes under %s; skipping those figures\n' \
+    "$MEASUREMENTS_ROOT" >&2
 fi
 
-collect_run_dirs "$RECONSTRUCTION_ROOT"
-RECON_DIRS=(${COLLECTED[@]+"${COLLECTED[@]}"})
 HAVE_RECON=true
-if [[ ${#RECON_DIRS[@]} -eq 0 ]]; then
+if ! lanes_present smt-only; then
   HAVE_RECON=false
-  printf 'note: no cross-tool data under %s; skipping the reconstruction curves\n' \
-    "$RECONSTRUCTION_ROOT" >&2
+  printf 'note: no lean-smt lane under %s; skipping the reconstruction curves\n' \
+    "$MEASUREMENTS_ROOT" >&2
 fi
 
 # Loom contributes four VCs, too few for a coverage bar or curve to say
@@ -113,7 +126,7 @@ svg_to_pdf() {
 }
 
 python3 "$SCRIPT_DIR/plot-benchmarks.py" \
-  "${MAIN_DIRS[@]}" \
+  "${RUN_DIRS[@]}" \
   --out-dir "$OUT_DIR" \
   "${EXCLUDE[@]}" \
   --only tables \
@@ -122,7 +135,7 @@ python3 "$SCRIPT_DIR/plot-benchmarks.py" \
 
 if [[ "$HAVE_MODES" == "true" ]]; then
   python3 "$SCRIPT_DIR/plot-benchmarks.py" \
-    "${MODES_DIRS[@]}" \
+    "${RUN_DIRS[@]}" \
     --out-dir "$OUT_DIR" \
     "${EXCLUDE[@]}" \
     --only reconstruction \
@@ -133,18 +146,18 @@ fi
 # not require. Skip them rather than failing the whole artifact render.
 if python3 -c "import matplotlib" >/dev/null 2>&1; then
   python3 "$SCRIPT_DIR/plot-time-coverage.py" \
-    "${MAIN_DIRS[@]}" \
+    "${RUN_DIRS[@]}" \
     --out-dir "$OUT_DIR" \
     "${EXCLUDE[@]}" \
     --only main \
     --only coverage-table
 
-  # The reconstruction comparison needs a run that measured lean-smt beside
-  # Crush's Alethe and portfolio lanes. RECONSTRUCTION_ROOT names it; the
-  # recorded crush-modes data cannot stand in, since it has no lean-smt lane.
+  # The reconstruction comparison needs lean-smt measured beside Crush's
+  # Alethe and portfolio lanes on the same VCs, which is what the lane check
+  # above established.
   if [[ "$HAVE_RECON" == "true" ]]; then
     python3 "$SCRIPT_DIR/plot-time-coverage.py" \
-      "${RECON_DIRS[@]}" \
+      "${RUN_DIRS[@]}" \
       --out-dir "$OUT_DIR" \
       "${EXCLUDE[@]}" \
       --only reconstruction \
@@ -155,12 +168,13 @@ if python3 -c "import matplotlib" >/dev/null 2>&1; then
   # by the matplotlib renderer so it shares the coverage figures' typeface.
   if [[ "$HAVE_MODES" == "true" ]]; then
     python3 "$SCRIPT_DIR/plot-time-coverage.py" \
-      "${MODES_DIRS[@]}" \
+      "${RUN_DIRS[@]}" \
       --out-dir "$OUT_DIR" \
       "${EXCLUDE[@]}" \
       --only scaling \
       --only failures-table \
-      --only phase-breakdown
+      --only phase-breakdown \
+      --only pairwise-time
   fi
 else
   # Name the interpreter. matplotlib is commonly installed into a different

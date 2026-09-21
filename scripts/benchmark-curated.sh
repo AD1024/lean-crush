@@ -166,21 +166,12 @@ provision_branch() {
       }
   else
     rm -rf "$tree"
-    # A branch the repository already has needs no network; one it does not is
-    # fetched by name. Resolving through origin/ only when the local name is
-    # absent keeps a provided local checkout usable before anything is pushed.
-    local resolved="$ref"
-    if ! git -C "$managed_repo" rev-parse --verify "$ref^{commit}" \
-        >/dev/null 2>&1; then
-      if git -C "$managed_repo" rev-parse --verify "origin/$ref^{commit}" \
-          >/dev/null 2>&1; then
-        resolved="origin/$ref"
-      else
-        git -C "$managed_repo" fetch --quiet origin "$ref" >/dev/null 2>&1 || {
-          printf 'error: branch %s is not in %s\n' "$ref" "$managed_repo" >&2
-          return 1
-        }
-        resolved="FETCH_HEAD"
+    local resolved
+    if ! resolved="$(benchmark_resolve_revision "$managed_repo" "$ref")"; then
+      git -C "$managed_repo" fetch --quiet origin "$ref" >/dev/null 2>&1 || true
+      if ! resolved="$(benchmark_resolve_revision "$managed_repo" "$ref")"; then
+        printf 'error: branch %s is not in %s\n' "$ref" "$managed_repo" >&2
+        return 1
       fi
     fi
     benchmark_add_worktree "$managed_repo" "$resolved" "$tree" >/dev/null ||

@@ -3,6 +3,7 @@
 import argparse
 import csv
 import math
+import statistics
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -125,6 +126,11 @@ def grouped_attempts(
 
 def all_pass(rows: list[dict[str, str]]) -> bool:
     return bool(rows) and all(row["status"] == "pass" for row in rows)
+
+
+def standard_deviation(values: list[float]) -> float:
+    """Sample standard deviation; zero when a single VC leaves none to speak of."""
+    return statistics.stdev(values) if len(values) > 1 else 0.0
 
 
 def mean_milliseconds(rows: list[dict[str, str]]) -> float:
@@ -270,6 +276,20 @@ def coverage_rows(
 
 def canonical_crush_lane(lanes: set[str]) -> Optional[str]:
     return "crush-verify" if "crush-verify" in lanes else None
+
+
+def head_to_head_crush_lane(lanes: set[str]) -> Optional[str]:
+    """The Crush lane a baseline is compared against, head to head.
+
+    The portfolio lane, because every baseline in this table returns a proof
+    term rather than trusting the solver, and comparing them against the
+    trusted lane would charge Crush none of the cost of producing one. Falls
+    back to the trusted lane only when reconstruction was not measured.
+    """
+    for lane in ("crush-portfolio", "crush-verify"):
+        if lane in lanes:
+            return lane
+    return None
 
 
 def headline_lane_map(suite: str, lanes: set[str]) -> list[tuple[str, str]]:
@@ -455,7 +475,7 @@ def comparison_rows(
 
     output: list[list[object]] = []
     for suite, lanes in sorted(lanes_by_suite.items()):
-        crush_lane = canonical_crush_lane(lanes)
+        crush_lane = head_to_head_crush_lane(lanes)
         if crush_lane is None:
             continue
         for backend, baseline_lane in headline_lane_map(suite, lanes):
@@ -468,23 +488,25 @@ def comparison_rows(
             matched = sorted(set(baseline) & set(crush))
             baseline_only = 0
             crush_only = 0
-            both = 0
             neither = 0
-            baseline_ms = 0.0
-            crush_ms = 0.0
+            # Per-VC times rather than a running sum: the spread is reported
+            # beside the mean, and these distributions are skewed enough that
+            # the mean alone hides it.
+            baseline_samples: list[float] = []
+            crush_samples: list[float] = []
             for vc in matched:
                 baseline_solved = all_pass(baseline[vc])
                 crush_solved = all_pass(crush[vc])
                 if baseline_solved and crush_solved:
-                    both += 1
-                    baseline_ms += mean_milliseconds(baseline[vc])
-                    crush_ms += mean_milliseconds(crush[vc])
+                    baseline_samples.append(mean_milliseconds(baseline[vc]))
+                    crush_samples.append(mean_milliseconds(crush[vc]))
                 elif baseline_solved:
                     baseline_only += 1
                 elif crush_solved:
                     crush_only += 1
                 else:
                     neither += 1
+            both = len(baseline_samples)
             output.append(
                 [
                     suite,
@@ -496,8 +518,10 @@ def comparison_rows(
                     crush_only,
                     both,
                     neither,
-                    f"{baseline_ms / both:.3f}" if both else "0.000",
-                    f"{crush_ms / both:.3f}" if both else "0.000",
+                    f"{statistics.mean(baseline_samples):.3f}" if both else "0.000",
+                    f"{standard_deviation(baseline_samples):.3f}",
+                    f"{statistics.mean(crush_samples):.3f}" if both else "0.000",
+                    f"{standard_deviation(crush_samples):.3f}",
                 ]
             )
     return output
@@ -959,7 +983,9 @@ def main() -> None:
             "both_solved",
             "neither_solved",
             "baseline_mean_ms",
+            "baseline_std_ms",
             "crush_mean_ms",
+            "crush_std_ms",
         ],
         comparison_rows(attempts),
     )

@@ -250,6 +250,13 @@ def lane_sort_key(lane: str) -> tuple[int, str]:
         return (len(LANE_ORDER), lane)
 
 
+def mean_with_deviation(mean: str, deviation: Optional[str]) -> str:
+    """`mean ± sd`, or the bare mean for a report written before sd existed."""
+    if not deviation:
+        return mean
+    return f"{float(mean):.3f} ± {float(deviation):.3f}"
+
+
 def label_lane(lane: str) -> str:
     return LANE_LABELS.get(lane, lane)
 
@@ -1492,10 +1499,16 @@ def write_tables(
             stream.write(
                 "`Matched` counts exact VC identities attempted by both the "
                 "named baseline and Crush. The four outcome columns partition "
-                "that matched set. Timing means include only VCs solved by "
-                "both lanes, so failures do not create artificial speedups. "
-                "Rows compare Crush with one baseline; baselines are not "
-                "compared with each other.\n\n"
+                "that matched set. Times are the mean and sample standard "
+                "deviation over the VCs in `Both`, the only ones where each "
+                "lane produced a time, so a lane that fails the hard "
+                "obligations cannot look fast for that reason. These "
+                "distributions are right-skewed, so the deviation often "
+                "exceeds the mean. Crush is the reconstruction lane here: "
+                "every baseline in this table returns a proof term, and "
+                "comparing them against the trusted lane would charge Crush "
+                "none of the cost of producing one. Rows compare Crush with "
+                "one baseline; baselines are not compared with each other.\n\n"
             )
             write_markdown_table(
                 stream,
@@ -1509,8 +1522,8 @@ def write_tables(
                     "Crush only",
                     "Both",
                     "Neither",
-                    "Baseline mean (ms)",
-                    "Crush mean (ms)",
+                    "Baseline mean ± sd (ms)",
+                    "Crush mean ± sd (ms)",
                 ],
                 (
                     [
@@ -1523,8 +1536,12 @@ def write_tables(
                         row["crush_only_solved"],
                         row["both_solved"],
                         row["neither_solved"],
-                        row["baseline_mean_ms"],
-                        row["crush_mean_ms"],
+                        mean_with_deviation(
+                            row["baseline_mean_ms"], row.get("baseline_std_ms")
+                        ),
+                        mean_with_deviation(
+                            row["crush_mean_ms"], row.get("crush_std_ms")
+                        ),
                     ]
                     for row in sorted(
                         comparisons,

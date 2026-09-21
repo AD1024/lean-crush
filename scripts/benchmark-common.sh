@@ -4,6 +4,27 @@ benchmark_is_git_repo() {
   git -C "$1" rev-parse --git-dir >/dev/null 2>&1
 }
 
+# A revision may be a commit, a tag, or a branch. A fresh clone keeps branches
+# only as remote-tracking refs, and `rev-parse <branch>` does not consult
+# `refs/remotes/origin/`, so a branch name looks unavailable unless it is tried
+# as `origin/<branch>` too. Echoes the form that resolves.
+benchmark_resolve_revision() {
+  local destination="$1"
+  local revision="$2"
+
+  if git -C "$destination" rev-parse --verify \
+      "${revision}^{commit}" >/dev/null 2>&1; then
+    printf '%s\n' "$revision"
+    return 0
+  fi
+  if git -C "$destination" rev-parse --verify \
+      "origin/${revision}^{commit}" >/dev/null 2>&1; then
+    printf '%s\n' "origin/${revision}"
+    return 0
+  fi
+  return 1
+}
+
 benchmark_ensure_repo() {
   local label="$1"
   local url="$2"
@@ -31,8 +52,7 @@ benchmark_ensure_repo() {
     fi
   fi
 
-  if ! git -C "$destination" rev-parse --verify \
-      "${revision}^{commit}" >/dev/null 2>&1; then
+  if ! benchmark_resolve_revision "$destination" "$revision" >/dev/null; then
     printf 'Fetching %s revision %s\n' "$label" "$revision" >&2
     if ! git -C "$destination" fetch --filter=blob:none origin \
         "$revision" >&2; then
@@ -41,8 +61,7 @@ benchmark_ensure_repo() {
     fi
   fi
 
-  if ! git -C "$destination" rev-parse --verify \
-      "${revision}^{commit}" >/dev/null 2>&1; then
+  if ! benchmark_resolve_revision "$destination" "$revision" >/dev/null; then
     printf 'error: revision %s is unavailable in %s\n' \
       "$revision" "$url" >&2
     return 1
@@ -85,23 +104,33 @@ benchmark_fetch_cache() {
   local mathlib="$project/.lake/packages/mathlib"
   local limit="$BENCHMARK_CACHE_TIMEOUT"
 
-  if (cd "$project" && benchmark_bounded "$limit" lake cache get) \
-      > "$log" 2>&1; then
-    return 0
-  fi
-  printf '\nNative Lake cache unavailable; trying the legacy cache executable.\n' \
-    >> "$log"
-  if (cd "$project" && benchmark_bounded "$limit" lake exe cache get) \
-      >> "$log" 2>&1; then
-    return 0
-  fi
+  # Mathlib's own cache tool first, whenever the corpus carries Mathlib. It is
+  # the one with artifacts for this workload: measured on Velvet at v4.32.2 it
+  # fetched 8275 oleans in 32s, while `lake cache get` searched Reservoir for
+  # 100 revisions over six minutes and reported "no outputs found" for Mathlib,
+  # Aesop, Batteries, Qq and the rest -- Reservoir simply has no build outputs
+  # for this platform and toolchain. Trying it first cost six wasted minutes on
+  # every tree, and there are several trees per corpus.
   if [[ -d "$mathlib" ]]; then
-    printf '\nRoot cache unavailable; trying Mathlib directly.\n' \
+    if (cd "$project" && benchmark_bounded "$limit" lake exe cache get) \
+        > "$log" 2>&1; then
+      return 0
+    fi
+    printf '\nRoot cache executable unavailable; trying Mathlib directly.\n' \
       >> "$log"
     if (cd "$mathlib" && benchmark_bounded "$limit" lake exe cache get) \
         >> "$log" 2>&1; then
       return 0
     fi
+    printf '\nMathlib cache unavailable; trying the native Lake cache.\n' \
+      >> "$log"
+  fi
+
+  # No Mathlib, or its cache is down. The native cache is the right tool for a
+  # corpus without Mathlib and the last resort for one with it.
+  if (cd "$project" && benchmark_bounded "$limit" lake cache get) \
+      >> "$log" 2>&1; then
+    return 0
   fi
   return 1
 }
