@@ -206,7 +206,7 @@ Module map (⟢ = built & tested, ▷ = designed, □ = todo):
 | `Crush/Solver/Process.lean` | process mgmt, hard timeout, `unknown` | ⟢ |
 | `Crush/SMT/Sexp.lean` | s-expression parser | ⟢ |
 | `Crush/SMT/Result.lean` | unsat-core + model parsing | ⟢ |
-| `Crush/Reify/Collect.lean` | hypothesis & goal collection | ⟢ |
+| `Crush/Frontend/Collect.lean` | hypothesis & goal collection | ⟢ |
 | `Crush/Translation/Preprocess.lean` | proof-producing selected-definition normalization | ⟢ |
 | `Crush/Translation/Monomorphize.lean` | poly *lemma* → ground instances, saturating (datatype mono is in `Translate.lean`) | ⟢ |
 | `Crush/Translation/HOEncoding.lean` | HO encoding helpers (defunc ⟢, native ⟢, combinators □) | ⟢ |
@@ -580,7 +580,7 @@ crush [h₁, …, hₙ, *] (u[c₁,…]) (d[c₁,…])
 - `d[c₁,…]` definitional equalities: add each constant's unfold equation
   (`getUnfoldEqnFor? (nonRec := true)`, the `f x = body` form).
 - Parsing/collection lives in `Crush/Frontend/Tactic.lean` (`parseHintList`,
-  `parseUOrDs`) and `Crush/Reify/Collect.lean` (`Hints`, `collectFacts`); tested in
+  `parseUOrDs`) and `Crush/Frontend/Collect.lean` (`Hints`, `collectFacts`); tested in
   `Test/Hints.lean`.
 - The tactic pipeline: collect → selected-definition normalize → monomorphize →
   bounded ground instantiate → HO-encode → translate (handlers) →

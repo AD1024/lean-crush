@@ -1,6 +1,6 @@
 import Lean
 import Lean.Meta.Injective
-import Crush.Reify.Collect
+import Crush.Frontend.Collect
 import Crush.Translation.Attr
 
 open Lean Meta

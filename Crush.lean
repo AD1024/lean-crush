@@ -5,7 +5,7 @@ import Crush.SMT.Check
 import Crush.SMT.Sexp
 import Crush.SMT.Result
 import Crush.Frontend.Config
-import Crush.Reify.Collect
+import Crush.Frontend.Collect
 import Crush.Translation.Monad
 import Crush.Translation.Attr
 import Crush.Translation.LoweringSyntax

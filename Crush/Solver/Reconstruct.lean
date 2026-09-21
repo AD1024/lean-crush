@@ -1,6 +1,6 @@
 import Lean
 import Crush.Frontend.Config
-import Crush.Reify.Collect
+import Crush.Frontend.Collect
 import Crush.SMT.Result
 import Crush.Solver.KernelCheck
 import Crush.Solver.ReconstructRules

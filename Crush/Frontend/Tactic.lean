@@ -1,6 +1,6 @@
 import Lean
 import Crush.Frontend.Config
-import Crush.Reify.Collect
+import Crush.Frontend.Collect
 import Crush.Translation.Preprocess
 import Crush.Translation.Monomorphize
 import Crush.Translation.Instantiate
