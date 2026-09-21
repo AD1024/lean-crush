@@ -53,20 +53,6 @@ RECONSTRUCTION_ACCEPTED_OUTCOMES = {
 # so a replay failure is the whole failure.
 ALETHE_ONLY_LANES = frozenset({"crush-alethe", SMT_LANE})
 
-# Outcomes that mean the lane handed back a Lean proof term the kernel
-# accepted, whichever route produced it. This is the cross-tool question of
-# whether a checked proof was obtained, so it is deliberately wider than the
-# per-lane sets above: a goal closed by checked pre-SMT reconstruction is a
-# checked proof even though no certificate was replayed.
-CHECKED_PROOF_OUTCOMES = frozenset(
-    {
-        "alethe-reconstructed",
-        "core-reconstructed",
-        "pre-reconstructed",
-        "selected-fact",
-    }
-)
-
 # One suite's comparison cohort: the compared lanes, their attempt rows keyed
 # by lane and VC, and the VC identities every compared lane attempted.
 ComparisonCohort = tuple[
@@ -173,16 +159,16 @@ def reconstruction_succeeded(
     return all(profile["outcome"] in accepted for profile in profiles)
 
 
-def checked_proof_succeeded(
-    rows: list[dict[str, str]], profiles: list[dict[str, str]]
-) -> bool:
-    """Whether the lane closed the VC with a kernel-checked Lean proof."""
-    if not all_pass(rows):
-        return False
-    if not profiles:
-        return True
-    return all(
-        profile["outcome"] in CHECKED_PROOF_OUTCOMES for profile in profiles
+def checked_proof_succeeded(rows: list[dict[str, str]]) -> bool:
+    """Count completed VCs in proof-producing lanes from the harness verdict.
+
+    Profiler events include failed branches later recovered by host proof
+    search (notably PLean's split-and-retry tactics). They describe attempts,
+    so requiring every event to succeed undercounts completed Lean proofs.
+    Route attribution in `reconstruction_succeeded` remains a separate measure.
+    """
+    return all_pass(rows) and all(
+        row["lane"] in RECONSTRUCTION_ACCEPTED_OUTCOMES for row in rows
     )
 
 
@@ -602,7 +588,6 @@ def reconstruction_rows(
                 sum(
                     checked_proof_succeeded(
                         attempts.get((suite, lane, vc), []),
-                        profile_groups.get((suite, lane, vc), []),
                     )
                     for vc in verify_vcs
                 )
@@ -702,10 +687,7 @@ def reconstruction_comparison_rows(
             lane: {
                 vc
                 for vc in matched
-                if checked_proof_succeeded(
-                    by_lane[lane][vc],
-                    profile_groups.get((suite, lane, vc), []),
-                )
+                if checked_proof_succeeded(by_lane[lane][vc])
             }
             for lane in selected
         }
@@ -767,7 +749,7 @@ def reconstruction_comparison_failure_rows(
             for vc in matched:
                 rows = by_lane[lane][vc]
                 vc_profiles = profile_groups.get((suite, lane, vc), [])
-                if checked_proof_succeeded(rows, vc_profiles):
+                if checked_proof_succeeded(rows):
                     continue
                 counts[(suite, lane, failure_mode(rows, vc_profiles, lane))] += 1
     return [

@@ -49,13 +49,8 @@ closes the goal.
 
 # The Goal Is Not Proved
 
-A `sat` result means the emitted facts admit a model. The model satisfies the
-encoding, which is weaker than the Lean statement wherever an operation stayed
-uninterpreted, so it need not be a Lean counterexample.
-First check whether the error reports a refused command: that is an unsupported
-emitted operator or a solver older than the encoding requires, and it makes the
-verdict a statement about the accepted fragment rather than about the goal.
-Otherwise check these causes in order:
+An SMT model need not be a Lean counterexample: uninterpreted operations can
+admit extra models. After ruling out refused commands, check these causes:
 
 1. A required premise is missing.
 2. An explicit `crush [...]` list accidentally omitted a local hypothesis because
@@ -63,16 +58,9 @@ Otherwise check these causes in order:
 3. A relevant function remained uninterpreted.
 4. The Lean statement is false.
 
-If a definition is the issue, add `u[f]`, `d[f]`, an unfolding attribute, or a
-custom lowering.
-If the model assigns surprising values to an unsupported function, that usually
-indicates missing semantics rather than a solver bug.
-
-Use the smallest change that establishes the missing semantics:
-
-* add a proposition with `crush [*, lemma]` when a theorem is missing;
-* add `u[f]` or `d[f]` when the implementation is already solver-friendly;
-* add a custom lowering when `f` has a direct SMT-theory representation.
+Add a missing premise with `crush [*, lemma]`; expose a definition with
+`u[f]`, `d[f]`, or an unfolding attribute; use a lowering for a direct SMT
+theory encoding. See {ref "extending-choose"}[Choosing an Extension Point].
 
 `with [lemma]` cannot fix `sat`: reconstruction-only hints are not sent to the
 solver.
@@ -145,27 +133,29 @@ finite-array encodings, native higher-order solving, and signed
 bitvector-to-`Int` conversion. When it cannot emit a certificate,
 `crush.reconstruct "auto"` can still try core-directed reconstruction.
 
-Available choices are:
+For the core path, add {ref "using-crush-reconstruction"}[`with [...]` facts
+or a `using` finisher], register a reusable `@[crush_reconstruct]` theorem, or
+split the goal into smaller steps. Core reconstruction needs an unsat core,
+available from Z3 and cvc5.
 
-* Add `with [lemma, h]` when core reconstruction needs a checked bridge fact
-  only during this invocation.
-* Add `using (tactics)` when the core facts support a short manual Lean proof.
-* Register a reusable bridge theorem with `@[crush_reconstruct]`.
-* Use cvc5 with `crush.reconstruct "auto"` to try Alethe before core
-  reconstruction.
-* Restructure the theorem into smaller kernel-checkable steps.
-* Use `"reconstructOrTrust"` for an explicit warning and trusted fallback.
-* Accept `"trust"` and audit the `Crush.crushSorry` dependency with
-  `#print axioms`.
+For Alethe replay, the first failure identifies the layer:
 
-Choose the extension according to the reported Alethe failure.
-A `term-gap` needs a term decoder, while a `rule-gap` needs an inference
-registration.
-If cvc5 did not emit a certificate, no replay extension can recover one; use
-core reconstruction, a manual `using` finisher, or a different proof
-decomposition.
-Core reconstruction requires an unsat core. Z3 and cvc5 provide one; Bitwuzla
-currently does not.
+* `term-gap`: a certificate term could not be decoded. A custom operator may
+  need `register_crush_replay term`; some terms also need evidence such as
+  nonemptiness of a Lean type.
+* `rule-gap`: the terms decoded, but Lean could not prove the inference or
+  validate a source assumption. Use `register_crush_replay rule`.
+* `certificate-error` or a missing-certificate message: cvc5 supplied no usable
+  proof. A replay registration cannot fix this; try `"auto"` or `"core"`.
+* `malformed-certificate`: the certificate's structure or premise references
+  could not be replayed.
+* `kernel-reject` or `replay-exception`: inspect the failing step and extension
+  for an invalid proof or implementation error.
+
+See {ref "extending-alethe"}[Extending Alethe Replay] for registration examples.
+If a trusted result is acceptable, choose an explicit
+{ref "using-crush-proof-policy"}[trust policy]; strict Alethe mode never takes
+the `"reconstructOrTrust"` fallback.
 
 Do not interpret reconstruction failure as evidence that the goal is false.
 It means only that lean-crush could not construct a checked Lean proof for the
@@ -201,8 +191,13 @@ Finite arrays support local reads and updates.
 Operations that transform a symbolic range, including `append`, `extract`,
 `map`, and `filter`, generally need quantified lemmas or custom lowerings.
 
-Native higher-order solving is cvc5-only and currently lacks Alethe
-certificates. Use defunctionalization for portable solving and replay.
+Bitvector theory requires a statically known width. A symbolic `BitVec n`
+uses an opaque sort even if the context proves `0 < n`.
+
+Native higher-order solving is cvc5-only and has certificate gaps.
+Defunctionalization supports more backends, but its encoded function sorts need
+not contain every Lean function. Function-existence goals may therefore need a
+Lean witness before invoking SMT.
 
 # Reporting a Minimal Failure
 

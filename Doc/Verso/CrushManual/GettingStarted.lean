@@ -25,14 +25,9 @@ It does require an SMT solver executable on `PATH`:
 * Bitwuzla can solve the quantifier-free bitvector, array, and uninterpreted
   function fragment, but does not provide unsat cores or proof certificates.
 
-The solver is a runtime dependency.
-Importing or compiling the library does not start a solver.
-Selecting a backend whose executable is missing is reported as a configuration
-error naming that executable and the installed alternatives; it is never reported
-as an `unknown` verdict.
-A `crush` invocation that reaches the solving stage starts one query under a
-wall-clock timeout. If a ground-only query returns `sat` or `unknown`, lean-crush
-may start a second query containing the retained quantified facts.
+Importing Crush does not start a solver. A missing executable produces a
+configuration error. Each query has a wall-clock timeout; a ground-only query
+that returns `sat` or `unknown` may retry with retained quantified facts.
 
 # Installation
 
@@ -117,14 +112,6 @@ discharge lists `Crush.crushSorry`. An early checked proof can avoid the solver
 and that axiom even under the default policy; selecting `"reconstruct"`
 requires a checked proof when SMT is needed too.
 
-# A Practical Starting Point
-
-Start with bare `crush`.
-If it does not close the goal:
-
-1. Check that the proposition really follows from the available hypotheses.
-2. Add a relevant lemma with `crush [*, lemmaName]`.
-3. Expose a hidden definition with `u[definition]` or `@[crush_unfold]`.
-4. Inspect the query with `crush.trace.script true` or `crush.save "query.smt2"`.
-   Set `crush.backend "none"` to force script emission without solving.
-5. Increase bounds only after identifying the phase that exhausted its budget.
+Continue with {ref "using-crush"}[Using the Tactic] for fact selection,
+unfolding, and reconstruction hints. If a proof fails, follow
+{ref "troubleshooting-classify"}[the diagnostic workflow].

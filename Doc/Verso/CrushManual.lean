@@ -23,9 +23,10 @@ It selects Lean facts, translates them and the negated goal to SMT-LIB, and asks
 an external solver whether they are inconsistent. Successful calls either
 construct a checked Lean proof or use an explicit solver-trust policy.
 
-The overview explains the complete pipeline and when to use each major feature.
-The remaining chapters cover installation, tactic usage, options, extension
-APIs, failure diagnosis, and benchmark results.
+Start with {ref "getting-started"}[Getting Started], then
+{ref "using-crush"}[Using the Tactic]. The overview describes the pipeline;
+the remaining chapters are references for options, extensions, diagnostics,
+and recorded benchmark results.
 
 {include 0 CrushManual.Overview}
 

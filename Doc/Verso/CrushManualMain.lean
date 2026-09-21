@@ -8,6 +8,14 @@ def config : Config where
   sourceLink := some "https://github.com/AD1024/lean-crush"
   issueLink := some "https://github.com/AD1024/lean-crush/issues"
   extraFiles := [("figures", "figures")]
+  extraCss := { CSS.mk r#"
+main img[src^="figures/"] {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+}
+"# }
   emitTeX := false
   emitHtmlSingle := .no
   emitHtmlMulti := .immediately

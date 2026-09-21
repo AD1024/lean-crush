@@ -376,6 +376,7 @@ def svg_open(width: int, height: int, title: str, description: str) -> list[str]
         ".axis { fill: #64716E; font-size: 12px; }",
         ".label { font-size: 13px; font-weight: 600; }",
         ".value { font-size: 11px; font-weight: 600; }",
+        ".on-dark { fill: #FFFFFF; }",
         ".legend { font-size: 12px; }",
         ".grid { stroke: #D9D5CB; stroke-width: 1; }",
         ".axis-line { stroke: #64716E; stroke-width: 1.2; }",
@@ -398,6 +399,19 @@ def text(
         f'<text x="{x:.2f}" y="{y:.2f}" text-anchor="{anchor}"'
         f"{class_attr}{transform_attr}>{xml(value)}</text>"
     )
+
+
+def value_class(background: str) -> str:
+    """Choose the more legible of the default text color and white."""
+    def luminance(color: str) -> float:
+        channels = [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+                  for c in channels]
+        return sum(c * weight for c, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
+
+    brightness = luminance(background) + 0.05
+    dark_contrast = brightness / (luminance("#1B2927") + 0.05)
+    return "value on-dark" if 1.05 / brightness > dark_contrast else "value"
 
 
 def rect(
@@ -509,7 +523,7 @@ def draw_legend(
 
 
 def plot_coverage(rows: list[dict[str, str]], path: Path) -> None:
-    suites = sorted({row["suite"] for row in rows})
+    suites = sorted({row["suite"] for row in rows}, key=suite_sort_key)
     is_headline = all(row.get("backend") for row in rows)
     if is_headline:
         series = sorted({row["backend"] for row in rows}, key=backend_sort_key)
@@ -542,7 +556,7 @@ def plot_coverage(rows: list[dict[str, str]], path: Path) -> None:
         text(
             42,
             66,
-            "Solved / all corpus VCs; Crush trusts SMT; failed and missing count unsolved",
+            "Solved / all corpus VCs; failed and missing count unsolved",
             "subtitle",
         )
     )
@@ -574,6 +588,8 @@ def plot_coverage(rows: list[dict[str, str]], path: Path) -> None:
             total_vcs = row.get("total_vcs", row["attempted_vcs"])
             x = group_start + entry_index * (bar_width + 5)
             y = top + chart_height * (1.0 - percentage / 100.0)
+            tooltip = f"{label_suite(suite)} / {labels[entry]}: {row['solved_vcs']} of {total_vcs} ({percentage:.1f}%)"
+            elements.append(f"<g><title>{xml(tooltip)}</title>")
             elements.append(
                 rect(
                     x,
@@ -588,13 +604,18 @@ def plot_coverage(rows: list[dict[str, str]], path: Path) -> None:
                 text(
                     x + bar_width / 2,
                     max(top - 5, y - 7),
-                    f'{row["solved_vcs"]}/{total_vcs}',
+                    row["solved_vcs"],
                     "value",
                     "middle",
                 )
             )
+            elements.append("</g>")
         center = left + (suite_index + 0.5) * group_width
-        elements.append(text(center, top + chart_height + 27, suite, "label", "middle"))
+        totals = {indexed[(suite, entry)].get("total_vcs", indexed[(suite, entry)]["attempted_vcs"])
+                  for entry in available}
+        total_label = f"{next(iter(totals))} VCs" if len(totals) == 1 else "Lane-specific workloads"
+        elements.append(text(center, top + chart_height + 27, label_suite(suite), "label", "middle"))
+        elements.append(text(center, top + chart_height + 47, total_label, "axis", "middle"))
     elements.append(
         text(
             width / 2,
@@ -629,12 +650,13 @@ def plot_outcomes(rows: list[dict[str, str]], path: Path) -> None:
                 f"{suite}: {sorted(totals)}"
             )
 
-    width = max(1180, 220 + len(suites) * 220)
-    height = 650
-    left, right, top, bottom = 82.0, 36.0, 142.0, 120.0
-    chart_width = width - left - right
-    chart_height = height - top - bottom
-    chart_bottom = top + chart_height
+    # Separate horizontal panels keep all six backend names readable.
+    width = 1260
+    columns = min(2, max(1, len(suites)))
+    panel_width = (width - 84.0) / columns
+    panel_height = 78.0 + len(backend_order) * 29
+    top = 132.0
+    height = int(top + math.ceil(len(suites) / columns) * panel_height + 20)
     elements = svg_open(
         width,
         height,
@@ -649,7 +671,7 @@ def plot_outcomes(rows: list[dict[str, str]], path: Path) -> None:
         text(
             42,
             66,
-            "Within each corpus, every bar uses the same VCs; Crush trusts SMT verdicts",
+            "Within each corpus, every bar uses the same VCs",
             "subtitle",
         )
     )
@@ -661,83 +683,67 @@ def plot_outcomes(rows: list[dict[str, str]], path: Path) -> None:
         width - 84,
     )
 
-    for value in (0, 25, 50, 75, 100):
-        y = chart_bottom - chart_height * value / 100.0
-        elements.append(line(left, y, width - right, y, "grid"))
-        elements.append(text(left - 12, y + 4, f"{value}%", "axis", "end"))
-
-    group_width = chart_width / max(len(suites), 1)
     for suite_index, suite in enumerate(suites):
         available = [
             backend
             for backend in backend_order
             if (suite, backend) in indexed
         ]
-        bar_width = min(42.0, group_width * 0.16)
-        gap = min(14.0, bar_width * 0.35)
-        bars_width = len(available) * bar_width + max(0, len(available) - 1) * gap
-        group_start = (
-            left
-            + suite_index * group_width
-            + (group_width - bars_width) / 2
-        )
+        panel_left = 42.0 + (suite_index % columns) * panel_width
+        panel_top = top + (suite_index // columns) * panel_height
+        left = panel_left + 175
+        chart_width = panel_width - 210
+        chart_top = panel_top + 47
+        total = int(indexed[(suite, available[0])]["total_vcs"])
+        elements.append(text(panel_left, panel_top + 5,
+                             f"{label_suite(suite)} · {total} VCs", "label"))
+        for value in (0, 25, 50, 75, 100):
+            x = left + chart_width * value / 100.0
+            elements.append(line(x, chart_top - 6, x, chart_top + len(available) * 29 - 4, "grid"))
+            elements.append(text(x, chart_top - 14, f"{value}%", "axis", "middle"))
         for backend_index, backend in enumerate(available):
             row = indexed[(suite, backend)]
             total = int(row["total_vcs"])
-            x = group_start + backend_index * (bar_width + gap)
-            cursor_y = chart_bottom
+            y = chart_top + backend_index * 29
+            cursor_x = left
             for field, label, color in OUTCOME_FIELDS:
                 count = int(row[field])
                 if count == 0:
                     continue
-                segment_height = chart_height * count / total
-                y = cursor_y - segment_height
+                segment_width = chart_width * count / total
                 tooltip = (
                     f"{label_suite(suite)} / {label_backend(backend)} / {label}: "
                     f"{count} of {total} ({100.0 * count / total:.1f}%)"
                 )
                 elements.append(
                     f"<g><title>{xml(tooltip)}</title>"
-                    f"{rect(x, y, bar_width, segment_height, color)}</g>"
+                    f"{rect(cursor_x, y, segment_width, 21, color)}</g>"
                 )
-                if segment_height >= 18:
+                if segment_width >= 28:
                     elements.append(
                         text(
-                            x + bar_width / 2,
-                            y + segment_height / 2 + 4,
+                            cursor_x + segment_width / 2,
+                            y + 14,
                             count,
-                            "value",
+                            value_class(color),
                             "middle",
                         )
                     )
-                cursor_y = y
+                cursor_x += segment_width
             elements.append(
                 text(
-                    x + bar_width / 2,
-                    chart_bottom + 22,
+                    left - 10,
+                    y + 14,
                     label_backend(backend),
                     "axis",
-                    "middle",
+                    "end",
                 )
-            )
-        center = left + (suite_index + 0.5) * group_width
-        total = int(indexed[(suite, available[0])]["total_vcs"])
-        elements.append(
-            text(center, chart_bottom + 50, label_suite(suite), "label", "middle")
-        )
-        elements.append(
-            text(center, chart_bottom + 69, f"{total} VCs", "axis", "middle")
-        )
-        if suite_index > 0:
-            separator = left + suite_index * group_width
-            elements.append(
-                line(separator, top, separator, chart_bottom + 74, stroke=GRID)
             )
     write_svg(path, elements)
 
 
 def plot_reconstruction(rows: list[dict[str, str]], path: Path) -> None:
-    suites = sorted(row["suite"] for row in rows)
+    suites = sorted((row["suite"] for row in rows), key=suite_sort_key)
     names, checked = reconstruction_fields(rows)
     # Named from LANE_LABELS so the reconstruction figures, the tables, and
     # the comparison agree on what each mode is called.
@@ -748,7 +754,7 @@ def plot_reconstruction(rows: list[dict[str, str]], path: Path) -> None:
     )
     if checked:
         title = "Checked proof coverage"
-        subtitle = "VCs closed with a kernel-checked proof / all VCs; higher is better"
+        subtitle = "Completed checked proofs / all VCs; higher is better"
         blurb = (
             "VCs closed with a kernel-checked Lean proof, over every "
             "verification condition in the corpus."
@@ -778,7 +784,7 @@ def plot_reconstruction(rows: list[dict[str, str]], path: Path) -> None:
         elements.append(text(left - 12, y + 4, f"{value}%", "axis", "end"))
 
     group_width = chart_width / max(len(rows), 1)
-    for suite_index, row in enumerate(sorted(rows, key=lambda item: item["suite"])):
+    for suite_index, row in enumerate(sorted(rows, key=lambda item: suite_sort_key(item["suite"]))):
         verify_solved, smt_verified = reconstruction_denominators(row)
         total_vcs = int(row["total_vcs"])
         denominator = total_vcs if checked else smt_verified
@@ -807,7 +813,7 @@ def plot_reconstruction(rows: list[dict[str, str]], path: Path) -> None:
             )
         center = left + (suite_index + 0.5) * group_width
         elements.append(
-            text(center, top + chart_height + 27, row["suite"], "label", "middle")
+            text(center, top + chart_height + 27, label_suite(row["suite"]), "label", "middle")
         )
         elements.append(
             text(
@@ -961,7 +967,7 @@ def plot_failures(
     reconstruction: list[dict[str, str]],
     path: Path,
 ) -> None:
-    suites = sorted(row["suite"] for row in reconstruction)
+    suites = sorted((row["suite"] for row in reconstruction), key=suite_sort_key)
     failure_modes = sorted(
         {row["failure_mode"] for row in rows},
         key=lambda mode: (
@@ -982,7 +988,7 @@ def plot_failures(
         counts[row["suite"]][row["failure_mode"]] += int(row["vcs"])
 
     width = 1260
-    columns = 3
+    columns = min(3, max(1, math.ceil(math.sqrt(len(suites)))))
     panel_rows = max(1, math.ceil(len(suites) / columns))
     legend_entries = [
         (mode.replace("+", " + ").replace("-", " "), colors[mode])
@@ -1008,7 +1014,7 @@ def plot_failures(
         text(
             42,
             66,
-            "One pie per corpus; slices aggregate Core, Alethe, and Portfolio records",
+            "One pie per corpus; slices aggregate the measured reconstruction lanes",
             "subtitle",
         )
     )
@@ -1025,7 +1031,7 @@ def plot_failures(
         center_y = panel_top + 126.0
         suite_counts = counts[suite]
         total = sum(suite_counts.values())
-        elements.append(text(center_x, panel_top + 18, suite, "label", "middle"))
+        elements.append(text(center_x, panel_top + 18, label_suite(suite), "label", "middle"))
 
         if total == 0:
             elements.append(
@@ -1066,7 +1072,7 @@ def plot_failures(
                             center_x + radius * 0.62 * math.cos(middle),
                             center_y + radius * 0.62 * math.sin(middle) + 4,
                             count,
-                            "value",
+                            value_class(colors[mode]),
                             "middle",
                         )
                     )
@@ -1095,7 +1101,7 @@ def plot_phases(rows: list[dict[str, str]], path: Path) -> None:
     grouped: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
     for row in rows:
         grouped[(row["suite"], row["lane"])].append(row)
-    keys = sorted(grouped, key=lambda key: (key[0], lane_sort_key(key[1])))
+    keys = sorted(grouped, key=lambda key: (suite_sort_key(key[0]), lane_sort_key(key[1])))
     phases = sorted({row["phase"] for row in rows}, key=phase_sort_key)
     phase_colors = {
         phase: PHASE_COLORS.get(
@@ -1158,13 +1164,13 @@ def plot_phases(rows: list[dict[str, str]], path: Path) -> None:
                         cursor + segment_width / 2,
                         y + 18,
                         f"{percentage:.0f}%",
-                        "value",
+                        value_class(phase_colors[phase]),
                         "middle",
                     )
                 )
             cursor += segment_width
         elements.append(
-            text(left - 14, y + 19, f"{suite} / {label_lane(lane)}", "label", "end")
+            text(left - 14, y + 19, f"{label_suite(suite)} / {label_lane(lane)}", "label", "end")
         )
     write_svg(path, elements)
 

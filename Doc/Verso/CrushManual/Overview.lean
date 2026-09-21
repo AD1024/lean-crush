@@ -1,304 +1,65 @@
 import VersoManual
-import Crush
 
 open Verso.Genre Manual
-open Verso.Genre.Manual.InlineLean
-
-set_option pp.rawOnError true
 
 #doc (Manual) "Overview" =>
 %%%
 tag := "overview"
 %%%
 
-lean-crush is a leaf-proof tactic for goals that become constraint problems
-after the surrounding proof has exposed the right facts.
-It translates Lean propositions to SMT-LIB, invokes an external solver, and
-reports the solver outcome. An `unsat` result becomes a Lean proof according to
-the selected trust policy; `sat` reports a model and `unknown` leaves the goal
-open.
+lean-crush closes Lean goals by translating selected facts and the negated goal
+to SMT-LIB. It is useful for arithmetic, equality, datatypes, arrays, and
+quantified constraints. Function values and lambdas are supported through
+defunctionalization or cvc5's native higher-order mode.
 
-It is most useful for arithmetic, equality propagation, finite datatypes,
-arrays, quantified facts, and combinations of these theories.
-It does not replace induction, theorem selection for an entire library, or
-domain-specific proof decomposition.
-
-For installation, solver requirements, and a first proof, continue to
-{ref "getting-started"}[Getting Started].
+Use it after the surrounding proof has exposed the relevant facts. Induction
+and domain-specific decomposition remain in Lean.
+Start with {ref "getting-started"}[Getting Started] for installation and examples.
 
 # What Happens During `crush`
 %%%
 tag := "overview-pipeline"
 %%%
 
-A tactic invocation passes through the following stages:
+1. *Collect.* Select local hypotheses, explicit lemmas, relevant defining
+   equations, and optional library premises.
+2. *Try an early proof.* Reuse selected facts or apply bounded, kernel-checked
+   Lean reasoning.
+3. *Normalize.* Rewrite selected definitions and expose constructor structure
+   with proofs of the rewrites.
+4. *Specialize.* Instantiate polymorphic facts at concrete types, then generate
+   bounded ground instances of eligible quantified facts.
+5. *Translate.* Produce SMT sorts, terms, declarations, and axioms. Functions
+   without an encoding or defining equations remain uninterpreted.
+6. *Solve.* Ask the selected backend whether the facts contradict the negated
+   goal. A ground-only query may retry with retained quantifiers.
+7. *Discharge.* Accept `unsat` under the trust policy, replay an Alethe
+   certificate, or reconstruct from the unsat core. `sat` reports a model;
+   `unknown` leaves the goal open.
 
-1. *Collect facts.* Select local hypotheses, explicit lemmas, unfolding
-   equations, and optionally library premises.
-2. *Try a checked proof.* Close simple cases directly from selected facts or
-   bounded Lean reasoning before translating them. See
-   {ref "configuration-reconstruction"}[`crush.preReconstruct.ruleSearch`] for how
-   far this reasoning goes.
-3. *Normalize.* Apply proof-producing rewrites that expose supported
-   operations and constructor structure.
-4. *Specialize.* Monomorphize polymorphic facts and generate bounded ground
-   instances of quantified facts.
-5. *Translate.* Lower Lean terms to SMT sorts, terms, declarations, and
-   axioms. Unsupported functions remain uninterpreted.
-6. *Solve.* Ask Z3, cvc5, or Bitwuzla whether the facts and negated goal are
-   inconsistent.
-7. *Discharge.* Trust the `unsat` result, replay a cvc5 Alethe certificate, or
-   reconstruct a proof from the unsat core.
+An early proof skips SMT even under the default trusting policy. Backend
+`"none"` and checked Alethe-only mode bypass that shortcut. The early pass is
+otherwise independent of the trust policy; its optional rule search is
+controlled by {ref "configuration-reconstruction"}[`crush.preReconstruct.ruleSearch`].
+Requesting a certificate can also affect solver time, so the cost of checked
+proofs is not confined to the final stage.
 
-An early checked proof skips the remaining stages, even under the default
-trust policy. Backend `"none"` skips this shortcut so it always emits the query.
-Alethe-only checked reconstruction also skips it so success exercises replay.
-Stage 2 is otherwise the same work under every trust policy, so the cost of
-requiring a proof is confined to stage 7.
+# Choosing the Next Step
 
-This separation matters when diagnosing a failure.
-A missing equation is a collection or translation problem; an `unknown` result
-is a solver problem; and an `unsat` result followed by failure is a
-reconstruction problem.
-See {ref "troubleshooting-classify"}[Classify the Failure First] for the
-stage-by-stage diagnostic workflow and
-{ref "configuration-diagnostics"}[Diagnostics] for profiling and traces.
+* For ordinary use, start with bare `crush`, then
+  {ref "using-crush-facts"}[choose facts] or
+  {ref "using-crush-definitions"}[expose definitions] as needed.
+* For kernel-checked proofs, select
+  {ref "using-crush-proof-policy"}[a reconstruction policy].
+  {ref "using-crush-reconstruction"}[Core hints and finishers] can supply a
+  short Lean argument when solving succeeds but reconstruction fails.
+* For custom encodings, choose an
+  {ref "extending-choose"}[extension point]. Translation lowerings change the
+  SMT query; replay and reconstruction rules recover Lean proofs.
+* For a failure or a slow goal, follow
+  {ref "troubleshooting-classify"}[the diagnostic workflow] before increasing
+  timeouts or search bounds.
 
-# Constraint Solving
-
-## Arithmetic and Equality
-
-lean-crush combines arithmetic with equality and uninterpreted-function
-congruence.
-Use a bare call when all relevant propositions are already local:
-
-```lean
-example (f : Int → Int) (a b limit : Int)
-    (hab : a = b) (hb : b ≤ limit) :
-    f a = f b ∧ a ≤ limit := by
-  crush
-```
-
-The solver treats an unsupported `f` as an uninterpreted function.
-That is enough for congruence, such as deriving `f a = f b` from `a = b`, but
-not enough to reason from the body of `f`.
-Expose equations or register a lowering when the implementation matters.
-The {ref "using-crush-supported-data"}[Supported Data] section lists the
-built-in theory surface, while
-{ref "using-crush-definitions"}[Exposing Definitions] explains how to reveal
-user-defined functions.
-
-## Inductive Datatypes and Arrays
-
-The translator supports constructor reasoning for ordinary inductive datatypes
-and a finite representation of Lean arrays.
-
-```lean
-inductive OverviewPacket where
-  | packet (sequence : Int) (accepted : Bool)
-
-example (x y : Int) (p q : Bool)
-    (h : OverviewPacket.packet x p =
-      OverviewPacket.packet y q) :
-    x = y ∧ p = q := by
-  crush
-```
-
-Array reads and local updates use SMT Array theory:
-
-```lean
-example (xs : Array Int) (i : Nat) (value : Int)
-    (hi : i < xs.size) :
-    (xs.set! i value)[i]! = value := by
-  crush
-```
-
-Use Lean induction or case analysis for recursive proofs, then invoke `crush`
-on each case.
-Operations that transform an entire symbolic range, such as `Array.map` or
-`Array.filter`, usually need a theorem or custom lowering rather than a larger
-solver timeout.
-See {ref "using-crush-induction"}[Drive Induction in Lean] for recursive proofs,
-{ref "using-crush-supported-data"}[Supported Data] for built-in array
-operations, and {ref "extending-arrays"}[Extending Finite Arrays] for custom
-operations over the canonical array encoding.
-
-# Controlling Knowledge
-
-## Local and Explicit Facts
-
-Bare `crush` sends every local proposition.
-An explicit list without `*` is a strict restriction, while `*` adds all local
-propositions to the named facts:
-
-```lean
-example (a b c : Int) (hab : a ≤ b) (hbc : b ≤ c)
-    (_noise : a * a ≥ 0) : a ≤ c := by
-  crush [hab, hbc]
-
-example (a b c : Int) (hab : a ≤ b) (hbc : b ≤ c) :
-    a ≤ c := by
-  crush [*, Int.le_trans]
-```
-
-Use explicit lists for reproducibility and to keep irrelevant quantifiers out
-of the query.
-Use `crush.premises` instead when a bare call should ask Lean's
-`LibrarySuggestions` engine for likely library theorems.
-Writing any explicit list disables premise selection.
-See {ref "using-crush-facts"}[Choosing Solver Facts] for the exact behavior of
-bare calls, restricted lists, `*`, explicit lemmas, and premise selection.
-
-## Polymorphism and Quantifiers
-
-lean-crush has two related specialization passes:
-
-* *Monomorphization* replaces polymorphic theorem uses with concrete type
-  instances found in the query.
-* *Ground instantiation* applies quantified propositions to relevant concrete
-  terms after their types are fixed.
-
-The following theorem is polymorphic in `α` and quantified over three values:
-
-```lean
-opaque OverviewBefore {α : Type} : α → α → Prop
-
-axiom overviewBeforeTrans {α : Type} :
-  ∀ a b c : α,
-    OverviewBefore a b →
-    OverviewBefore b c →
-    OverviewBefore a c
-
-example (a b c : Int)
-    (hab : OverviewBefore a b)
-    (hbc : OverviewBefore b c) :
-    OverviewBefore a c := by
-  crush [overviewBeforeTrans, hab, hbc]
-```
-
-Monomorphization first specializes `overviewBeforeTrans` at `Int`.
-Ground instantiation then applies that specialized proposition to `a`, `b`, and
-`c`.
-The passes are bounded to prevent search explosions.
-Raise `crush.mono.*` only for missing type specializations, and
-`crush.inst.*` only for missing term applications.
-Increasing one does not compensate for exhaustion in the other.
-The {ref "configuration-monomorphization"}[Monomorphization] and
-{ref "configuration-instantiation"}[Ground Instantiation] sections document
-their separate bounds, warnings, and fallback behavior.
-
-# Higher-Order Terms
-
-Function values, lambdas, and partial applications do not have to be removed
-manually:
-
-```lean
-example (applyAtTwo : (Int → Int) → Int)
-    (h : ∀ f, applyAtTwo f = f 2) :
-    applyAtTwo (fun x => x + 3) = 5 := by
-  crush
-```
-
-The default `crush.ho.mode "defunctionalize"` converts function values to
-first-order closure values without requiring native higher-order solver support.
-The resulting query must still fit the selected backend's ordinary theory and
-quantifier support.
-`crush.ho.mode "native"` preserves function sorts and application for cvc5's
-higher-order engine:
-
-```lean
-set_option crush.backend "cvc5"
-set_option crush.ho.mode "native"
-```
-
-Native mode can give cvc5 more direct higher-order structure, but it is
-backend-specific and certificate support is narrower.
-Defunctionalization is the portable default and is usually the better starting
-point.
-See {ref "configuration-higher-order"}[Higher-Order Translation] for mode
-selection, backend restrictions, and reconstruction implications.
-
-# Trust and Checked Proofs
-
-`crush.trust` decides what an SMT `unsat` result is allowed to do:
-
-* `"trust"` closes with the visible `Crush.crushSorry` axiom. It is fastest and
-  makes the solver and translation part of the trusted base.
-* `"reconstruct"` requires a proof checked by Lean's kernel and fails if none
-  can be built.
-* `"reconstructOrTrust"` reconstructs when possible, then warns before using
-  the axiom as a fallback.
-
-```lean
-set_option crush.trust "reconstruct" in
-example (x y : Int) (hxy : x = y) (hy : y = 4) :
-    x = 4 := by
-  crush
-```
-
-For checked proofs, `crush.reconstruct` selects cvc5 Alethe replay (`"alethe"`),
-unsat-core reconstruction (`"core"`), or replay followed by core reconstruction
-when needed (`"auto"`, the default).
-See {ref "using-crush-proof-policy"}[Choosing a Proof Policy] for the user
-workflow, {ref "configuration-reconstruction"}[Trust and Reconstruction] for
-the complete option semantics, and
-{ref "using-crush-reconstruction"}[Helping Checked Reconstruction] for
-per-invocation recovery mechanisms.
-
-# Extensibility
-
-Different extension points affect different pipeline stages:
-
-* Use `u[f]`, `d[f]`, `@[crush_unfold]`, or `@[crush_defeq]` when ordinary Lean
-  equations are enough.
-* Use `crush_map` or `register_lowering term` when a Lean operation should map
-  to an SMT operation. Use `register_lowering result-type` when dispatch depends
-  on the result family instead of the operation's name.
-* Use `crush_map_sort` or `register_lowering sort` when a Lean type should use
-  an SMT theory sort.
-* Use `with [...]`, `using`, or `@[crush_reconstruct]` when solving succeeds but
-  checked core reconstruction needs Lean-specific help.
-* Use `register_crush_replay` when a custom encoding introduces certificate
-  terms or Alethe inference rules that replay cannot decode.
-
-The simplest extension is usually an equation:
-
-```lean
-@[crush_unfold]
-def overviewOffset (x : Int) : Int :=
-  x + 5
-
-example (x : Int) : overviewOffset x > x := by
-  crush
-```
-
-A lowering is preferable when unfolding is expensive, produces recursive
-quantifiers, or when a Lean operation corresponds directly to an SMT theory
-operator.
-Reconstruction extensions do not change the SMT query, while translation
-extensions do.
-Start with {ref "extending-choose"}[Choosing an Extension Point].
-For a custom encoding, start with
-{ref "extending-patterns"}[Pattern-Based Lowerings]. The attribute APIs remain
-available for full handlers. For checked proofs, see
-{ref "extending-reconstruction"}[core reconstruction rules] and
-{ref "extending-alethe"}[Alethe replay extensions].
-
-# Recommended Workflow
-
-For a new proof:
-
-1. Try bare `crush`.
-2. Restrict or extend the fact set explicitly.
-3. Expose only the definitions needed by the argument.
-4. Run locally with `crush.trust "trust"` to separate solving capability from
-   reconstruction capability.
-5. Enable `crush.profile` and inspect SMT-LIB before increasing search bounds.
-6. Add a translation or reconstruction extension only at the stage where the
-   gap occurs.
-
-The {ref "using-crush-syntax"}[Tactic Syntax] section provides the complete
-grammar.
-For failures, use {ref "troubleshooting-classify"}[the diagnostic workflow],
-then inspect {ref "troubleshooting-smt"}[the generated SMT-LIB] or
-{ref "troubleshooting-reconstruction"}[reconstruction failures] as appropriate.
+The {ref "configuration"}[Configuration Reference] documents every option.
+The {ref "benchmarks"}[Benchmarks] chapter explains the recorded coverage,
+reconstruction, and timing measurements.

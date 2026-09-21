@@ -31,31 +31,14 @@ lake env lean -Dcrush.backend=cvc5 MyProofs.lean
 tag := "configuration-composition"
 %%%
 
-Three option families make independent decisions:
+`crush.backend` selects the solver, `crush.trust` controls discharge of
+`unsat`, and `crush.reconstruct` selects the checked proof procedure.
+See {ref "using-crush-proof-policy"}[Choosing a Proof Policy] for a starting
+configuration.
 
-1. `crush.backend` chooses which solver receives the SMT-LIB query.
-2. `crush.trust` chooses whether an `unsat` verdict may close the Lean goal
-   directly or must produce a checked proof.
-3. `crush.reconstruct` chooses how to build that proof when the trust policy
-   requests one.
-
-For example, this profile asks cvc5 to solve and requires either Alethe replay
-or core-directed reconstruction to produce a checked Lean term:
-
-```
-set_option crush.backend "cvc5"
-set_option crush.trust "reconstruct"
-set_option crush.reconstruct "auto"
-```
-
-Changing between `"auto"` and `"core"` does not affect discharge under
-`crush.trust "trust"`.
-Conversely, changing to `crush.trust "reconstruct"` does not force Alethe:
-Z3 can use core-directed reconstruction. Bitwuzla currently returns neither an
-unsat core nor a proof certificate, so an assumption-dependent checked proof
-normally requires another backend.
-Selecting `crush.reconstruct "alethe"` with an unsupported backend is an error
-rather than a silent fallback, even under a trusting policy.
+Under `crush.trust "trust"`, `"auto"` and `"core"` do not request
+reconstruction. Selecting `"alethe"` still requires cvc5, even with a trusting
+policy or backend `"none"`.
 
 # Solver Process
 %%%
@@ -122,80 +105,40 @@ SMT. Inspect `#print axioms` to audit the resulting theorem's dependencies.
 
 {optionDocs crush.preReconstruct.ruleSearch}
 
-The pre-SMT pass runs under every trust policy and can close a goal without any
-solver call. What this option controls is one step of it: taking a selected fact
-as a backward rule and discharging the premises that application generates. That
-search is off by default, so a trusting and a reconstructing run execute the same
-stages up to the solver and their times are comparable. With it off the pass still
-applies a selected universal rule that closes the goal outright, still eliminates
-locals of empty inductive types, and still supplies existential witnesses — the
-cases where the encoding cannot see that the goal is true.
+With this option off, the early pass still reuses selected facts and
+premise-free local universal rules, eliminates empty inductive types, searches
+for existential witnesses, and tries bounded datatype splitting. Enabling it
+also allows backward application of selected rules with premises to discharge.
 
-Enable it when goals follow from one backward application of a hypothesis or hint,
-which is faster than a solver call. A search that fails still costs time the solver
-would otherwise have had.
+The pass runs under every trust policy except checked Alethe-only mode, and
+backend `"none"` bypasses it to ensure script emission. These exceptions apply
+regardless of the rule-search setting. Successful early proofs avoid SMT;
+unsuccessful searches still cost time.
 
 {optionDocs crush.reconstruct}
 
-Use the cvc5 version listed in {ref "getting-started"}[Getting Started] for
-Alethe replay.
-The core path requires an unsat core, which Z3 and cvc5 provide, and one of
-Lean's finishers must be able to re-prove the result from those hypotheses.
-Bitwuzla does not currently return an unsat core or a proof certificate.
+Use `"auto"` for ordinary checked proofs. `"core"` uses Z3 or cvc5's unsat
+core and Lean finishers; Bitwuzla supplies neither a core nor a certificate.
 
-Use `"auto"` for ordinary checked proofs.
-Use `"alethe"` when testing replay coverage, because a core fallback would hide
-an unsupported certificate step. With a reconstructing trust policy, this mode
-also bypasses early checked proofs and requires a certificate even for simple
-goals. It fails on replay errors even under `"reconstructOrTrust"`.
-Use `"core"` when comparing backends, when cvc5 emits no certificate for a
-theory, or when a short Lean proof is easier than replaying the solver's
-derivation.
+With a reconstructing trust policy, `"alethe"` bypasses early proofs and
+requires a replayed cvc5 certificate. It fails on missing certificates or
+replay errors even under `"reconstructOrTrust"`. This makes it useful for
+testing replay extensions.
 
 {optionDocs crush.reconstruct.trustBvDecide}
 
-This option preserves solver-proof reconstruction but expands its trusted base to
-Lean's native code generator, which `bv_decide` uses while checking an LRAT
-certificate. It does not permit arbitrary generated axioms. Accepted proofs expose
-the dependency as `_native.bv_decide.ax_*` under `#print axioms`.
+`bv_decide` adds a native LRAT-checking dependency, visible as
+`_native.bv_decide.ax_*` in `#print axioms`.
 
 {optionDocs crush.reconstruct.trustNativeDecide}
 
-This broader fallback can execute arbitrary Lean decision procedures. It therefore
-trusts the native compiler and runtime, plus every executable definition reached
-while deciding the proposition. Accepted proofs expose an
-`_native.native_decide.ax_*` dependency under `#print axioms`.
+`native_decide` is broader: core reconstruction may execute any available
+decision procedure, trusting the native compiler, runtime, and definitions it
+reaches. The dependency appears as `_native.native_decide.ax_*`.
 
-Leave both options disabled for kernel-only reconstruction.
-They differ in scope:
-
-* `trustBvDecide` adds a specialized bitvector/SAT decision procedure and its
-  native certificate-checking dependency.
-* `trustNativeDecide` can execute any proposition with a synthesized
-  `Decidable` instance and therefore trusts substantially more generated code.
-
-Enable `trustBvDecide` first for bitvector-heavy goals.
-Enable `trustNativeDecide` only when that broader executable trust boundary is
-acceptable.
-Neither option changes the SMT query or the meaning of
-`crush.trust "trust"`.
-
-For example, core reconstruction can exhaust a finite symbolic domain:
-
-```lean
-section
-
-set_option crush.backend "cvc5"
-set_option crush.trust "reconstruct"
-set_option crush.reconstruct "core"
-set_option crush.reconstruct.trustNativeDecide true
-
-example (a b : BitVec 8) :
-    (a &&& b) + (a ^^^ b) = a ||| b := by
-  crush
-
-end
-```
+Both options are off by default. Leave them off for kernel-only proof
+generation; enable `trustBvDecide` first if a native bitvector checker is
+acceptable. Neither changes the SMT query or the trusting policy.
 
 # Higher-Order Translation
 %%%
@@ -204,28 +147,14 @@ tag := "configuration-higher-order"
 
 {optionDocs crush.ho.mode}
 
-The values are:
+`"defunctionalize"`, the default, translates functions, lambdas, and partial
+applications to first-order closure values. The resulting query still needs
+the backend's ordinary theory and quantifier support.
 
-* `"defunctionalize"` is the portable default.
-* `"native"` passes function sorts and higher-order application directly to
-  cvc5. Other backends warn and fall back to defunctionalization.
-
-Use native mode for solving only with cvc5:
-
-```
-set_option crush.backend "cvc5"
-set_option crush.ho.mode "native"
-```
-
-Backend `"none"` also preserves native higher-order syntax when exporting a
-query without solving it.
-Defunctionalization converts functions and partial applications to ordinary
-first-order closure values and does not require a higher-order backend.
-Its generated query must still fit the backend's ordinary first-order fragment.
-Native mode preserves function sorts and application for cvc5.
-It can avoid a large closure encoding, but cvc5 may not emit an Alethe
-certificate for the resulting higher-order proof; use core reconstruction or a
-trusting policy in that case.
+`"native"` preserves function sorts and application for cvc5, or for script
+export with backend `"none"`. Other backends warn and fall back to
+defunctionalization. Native higher-order queries may lack an Alethe certificate;
+core reconstruction or a trusting policy can still be used.
 
 # Monomorphization
 %%%
@@ -270,10 +199,6 @@ Set either option to `0` to disable it and retain the original quantified facts.
 When generated instances are useful but do not completely replace a quantified
 template, lean-crush first tries a ground-only query and retries with the
 quantifier after `sat` or `unknown`.
-
-Monomorphization and ground instantiation are not interchangeable.
-The former chooses concrete Lean types for polymorphic facts; the latter chooses
-concrete Lean terms for value quantifiers after types are fixed.
 
 # Unfolding and Premises
 
@@ -320,14 +245,6 @@ certificate-size metrics for successful Alethe replay.
 Interactive users normally need only the human-readable `crush.profile`
 report.
 
-The diagnostics answer different questions:
-
-* `crush.profile` identifies the expensive pipeline stage.
-* `crush.save` preserves the exact final query for external solver runs.
-* `crush.trace.script` prints that query as an ordinary Lean info message.
-* `trace.crush.*` reports internal decisions and can be filtered through Lean's
-  trace system.
-
 Lean trace classes provide more focused details:
 
 ```
@@ -336,6 +253,7 @@ set_option trace.crush.mono true
 set_option trace.crush.inst true
 set_option trace.crush.script true
 set_option trace.crush.result true
+set_option trace.crush.reconstruct true
 set_option trace.crush.replay true
 ```
 

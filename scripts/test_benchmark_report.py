@@ -38,6 +38,36 @@ def profile(lane: str, vc: str, outcome: str, replay: str = "") -> dict[str, str
 
 
 class ReconstructionCohortTests(unittest.TestCase):
+    def test_recovered_attempts_do_not_veto_completed_checked_proofs(self) -> None:
+        measurements = [
+            measurement("crush-verify", "goal", "pass"),
+            measurement("crush-alethe", "goal", "pass"),
+            measurement("crush-portfolio", "goal", "pass"),
+        ]
+        profiles = [
+            profile("crush-verify", "goal", "verified"),
+            # The host can close a VC after a failed strict Alethe attempt.
+            profile("crush-alethe", "goal", "reconstruction-failed", "rule-gap"),
+            # PLean can split and retry after an unknown solver result.
+            profile("crush-portfolio", "goal", "unknown"),
+            profile("crush-portfolio", "goal", "core-reconstructed"),
+        ]
+        attempts = benchmark_report.grouped_attempts(measurements)
+        (row,) = benchmark_report.reconstruction_rows(attempts, profiles)
+        self.assertEqual(row[7:], ["-", 1, 1])
+        # Coverage alone does not establish which reconstruction route closed it.
+        self.assertEqual(row[4:7], ["-", 0, 0])
+        self.assertEqual(
+            benchmark_report.reconstruction_comparison_failure_rows(attempts, profiles),
+            [],
+        )
+
+        self.assertFalse(benchmark_report.checked_proof_succeeded(measurements[:1]))
+        self.assertFalse(benchmark_report.checked_proof_succeeded([
+            measurement("crush-portfolio", "goal", "pass"),
+            measurement("crush-portfolio", "goal", "fail"),
+        ]))
+
     def test_pre_smt_success_is_not_a_reconstruction_failure(self) -> None:
         measurements = [
             measurement("crush-verify", "pre-smt", "pass"),

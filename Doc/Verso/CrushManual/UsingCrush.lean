@@ -30,7 +30,7 @@ both are present, must appear in that order.
 These clauses act at different stages:
 
 * `[...]` chooses propositions for the SMT query.
-* `u[...]` and `d[...]` add defining equations to the SMT query.
+* `u[...]` and `d[...]` provide equations for rewriting and for SMT.
 * `with [...]` supplies proof terms only to checked core reconstruction.
 * `using` supplies a final Lean tactic only to checked core reconstruction.
 
@@ -54,7 +54,8 @@ theorem orderedTrans (a b c : Int)
 ```
 
 An explicit list without `*` is a strict restriction.
-Only the listed propositions and the negated goal are sent to the solver:
+Unlisted local hypotheses are excluded; relevant defining equations may still
+be added automatically:
 
 ```lean
 theorem orderedTransRestricted (a b c : Int)
@@ -150,14 +151,9 @@ example (x : Int) (h : nonnegative x) : x + 1 > 0 := by
   crush d[nonnegative]
 ```
 
-The difference is therefore scope and equation shape:
-
-* `u[f]` exposes all pattern-matching equations for this call.
-* `d[f]` exposes one unfold equation for this call.
-* `@[crush_unfold]` is the persistent, relevance-filtered form of `u[f]`.
-* `@[crush_defeq]` is the persistent, relevance-filtered form of `d[f]`.
-
-For a definition that should always be visible, register it once:
+Both forms also drive proof-producing rewrites before SMT translation.
+For persistent support, `@[crush_unfold]` corresponds to `u[f]` and
+`@[crush_defeq]` to `d[f]`:
 
 ```lean
 @[crush_unfold]
@@ -225,8 +221,9 @@ Use these mechanisms at different scales:
   throughout a module or library.
 * `register_crush_replay` extends step-by-step Alethe certificate replay.
 
-The first three mechanisms are not consulted by Alethe replay.
-The extension chapter gives examples of the two persistent mechanisms.
+Alethe replay uses only the last mechanism. See
+{ref "extending-reconstruction"}[core reconstruction rules] and
+{ref "extending-alethe"}[replay extensions] for the persistent APIs.
 
 # Drive Induction in Lean
 %%%
@@ -262,13 +259,17 @@ The built-in translator handles:
 
 * propositional and equality reasoning;
 * `Nat` and `Int` arithmetic, including canonical divisibility;
-* bitvectors, Booleans, strings (length, append, emptiness, and String-pattern
-  prefix/suffix/containment), and supported
+* bitvectors with statically known widths, Booleans, strings (length, append,
+  emptiness, and String-pattern prefix/suffix/containment), and supported
   inductive datatypes;
 * function values through defunctionalization, or native higher-order cvc5;
 * finite Lean arrays with logical length and SMT array data.
 
-String and bitvector operations are sent directly to their SMT theories:
+`Nat` uses SMT integers with nonnegativity constraints and guards preserving
+natural subtraction and division semantics. A symbolic width in `BitVec n`
+stays opaque; `n > 0` alone does not give SMT a concrete bitvector width.
+
+String and concrete-width bitvector operations use their SMT theories:
 
 ```lean
 example (start suffix : String) :
@@ -304,35 +305,24 @@ encoding is quantified element-by-element.
 tag := "using-crush-proof-policy"
 %%%
 
-The trust policy answers whether an SMT `unsat` verdict is sufficient to close
-the Lean goal:
+The default `crush.trust "trust"` closes solver `unsat` results with
+`Crush.crushSorry`. For checked proofs, use:
 
-* `"trust"` is fastest and closes with the visible `Crush.crushSorry` axiom.
-* `"reconstruct"` requires a checked Lean proof and fails if reconstruction
-  cannot produce one.
-* `"reconstructOrTrust"` tries reconstruction, then warns before using the
-  axiom-backed fallback.
+```
+set_option crush.backend "cvc5"
+set_option crush.trust "reconstruct"
+```
 
-When reconstruction is requested, `crush.reconstruct` chooses the algorithm:
+The default reconstruction mode, `"auto"`, tries Alethe replay and then proves
+the goal from the unsat core with Lean tactics. Use `"alethe"` to require
+certificate replay, or `"core"` for core reconstruction alone. Z3 supports the
+core path; Bitwuzla currently supplies neither cores nor certificates.
 
-* `"alethe"` replays a cvc5 proof certificate one inference at a time. It is
-  effective for long solver derivations but requires cvc5.
-* `"core"` ignores certificates and asks Lean tactics to prove the original
-  goal from the unsat-core facts. Z3 and cvc5 provide these cores; Bitwuzla
-  currently does not. The Lean tactics must rediscover the argument.
-* `"auto"` tries Alethe first when a certificate is available, then core
-  reconstruction if needed.
-
-`crush.trust` and `crush.reconstruct` are independent.
-Under `"trust"`, selecting `"auto"` or `"core"` does not change discharge
-because no checked proof is requested.
-Selecting `"alethe"` is still validated and therefore requires cvc5, even under
-a trusting policy.
-The `with [...]`, `using`, and `@[crush_reconstruct]` mechanisms customize only
-the core path.
-For the complete option semantics, including early checked proofs and optional
-native decision procedures, see
-{ref "configuration-reconstruction"}[Trust and Reconstruction].
+`crush.trust "reconstructOrTrust"` allows an axiom-backed fallback with a
+warning, except in strict Alethe mode. Inspect `#print axioms` to audit the
+result. The {ref "configuration-reconstruction"}[configuration reference]
+explains early proofs, strict Alethe behavior, and optional native decision
+procedures.
 
 # Complete Integrations
 
@@ -350,12 +340,9 @@ projects rather than isolated examples:
   module built on `Cedar.Thm`. It uses `crush` as a kernel-reconstructed leaf
   tactic in Cedar foundation proofs.
 
-These branches are useful references for dependency setup, tactic invocation,
-and the lemmas needed at the boundary between a verification-condition
-generator and SMT translation.
-
-The Cedar case study builds on the
-[upstream Cedar specification](https://github.com/cedar-policy/cedar-spec).
+These branches illustrate dependency setup and the lemmas connecting generated
+VCs to SMT translation. Cedar builds on the
+[upstream specification](https://github.com/cedar-policy/cedar-spec).
 
 # Acknowledgements
 

@@ -11,15 +11,8 @@ set_option pp.rawOnError true
 tag := "extending"
 %%%
 
-lean-crush can be extended at both sides of the solver boundary:
-
-* translation extensions teach SMT the semantics of Lean types and operations;
-* reconstruction extensions teach Lean how to recover a checked proof from an
-  `unsat` result.
-
-Adding a translation does not automatically add a reconstruction rule, and
-adding a reconstruction rule does not change the SMT query.
-Identify which side failed before choosing an API.
+Translation extensions supply SMT encodings; reconstruction extensions recover
+Lean proofs. A new encoding may need its own inverse for certificate replay.
 
 # Choosing an Extension Point
 %%%
@@ -80,33 +73,9 @@ reconstruction does not consult replay registrations.
 tag := "extending-equations"
 %%%
 
-Use `u[f]` or `d[f]` at one call site.
-Use attributes when the definition should be available wherever it is relevant:
-
-```lean
-@[crush_unfold]
-def distanceFromZero (x : Int) : Int :=
-  if x < 0 then -x else x
-
-example (x : Int) : 0 ≤ distanceFromZero x := by
-  crush
-```
-
-`@[crush_unfold]` registers all equation lemmas.
-`@[crush_defeq]` registers only the single definitional equation.
-Here the single equation is enough to expose a proposition wrapper:
-
-```lean
-@[crush_defeq]
-def isNonnegative (x : Int) : Prop :=
-  0 ≤ x
-
-example (x : Int) (h : isNonnegative x) :
-    0 < x + 1 := by
-  crush
-```
-
-Both can be local attributes when importing code that cannot be modified:
+{ref "using-crush-definitions"}[Exposing Definitions] covers `u[f]`, `d[f]`,
+and their persistent attributes. They are the simplest extension when Lean's
+defining equations expose enough semantics. Attributes can also be local:
 
 ```lean
 attribute [local crush_unfold] List.length
@@ -115,8 +84,8 @@ example (xs : List Int) : xs.length = 0 ↔ xs = [] := by
   crush
 ```
 
-Equation-based support is the simplest choice when unfolding is finite and does
-not create solver quantifier loops.
+Recursive equations may introduce quantifier loops; a direct theory lowering
+can avoid them when the Lean operation has an exact SMT counterpart.
 
 # Direct Symbol Mappings
 %%%
@@ -316,10 +285,7 @@ Multiple handlers may target the same declaration.
 As shown by `lowerClampNonnegative`, a numeric priority or `high`/`low` controls
 their order in the same style as `simp`.
 
-Targeted dispatch is preferable to `@[crush_translate]` when the head constant
-is known: unrelated applications never invoke the handler, and the declaration
-itself records what is being extended.
-Like a general handler, a targeted handler may call `ctx.declare` when its
+Unrelated heads never invoke a targeted handler. Use `ctx.declare` when its
 encoding needs fresh SMT declarations.
 
 A handler must decline any shape it cannot encode exactly.
@@ -348,11 +314,8 @@ but whose result family is known.
 The handler still receives the original term's `ctx.fn` and `ctx.args`; peeled
 binders are used only to select the handler.
 
-Use result dispatch only when head dispatch is insufficient.
-For an ordinary named operation such as `MappedInt.next`,
-`@[crush_lower MappedInt.next]` is both cheaper and more precise.
-Result dispatch is intended for generated functions, lambdas, and dependent
-functions that all produce one representation family.
+For a named operation such as `MappedInt.next`, head dispatch is more precise.
+Result dispatch is useful for generated functions and dependent results.
 
 The term representation must agree with a sort handler.
 Here every `IndexedInt index` is representation-isomorphic to SMT `Int`,
@@ -409,61 +372,22 @@ of a particular decision procedure.
 The built-in handler is registered for both `Decidable` and the named
 `DecidableEq` alias.
 
-# General Handlers
+# Declaring SMT Symbols
 %%%
 tag := "extending-general"
 %%%
 
-`@[crush_translate]` registers a `TranslationHandler` that can inspect every
-term head.
-General handlers run before targeted lowerings, so they can override built-in
-behavior.
-Use this when dispatch cannot be expressed by one head constant, or when one
-handler intentionally recognizes a family of constants:
-
-```lean
-open Crush
-
-def translatedSuccessor (x : Int) : Int :=
-  x + 1
-
-def translatedPredecessor (x : Int) : Int :=
-  x - 1
-
-@[crush_translate]
-def translateNeighbor : TranslationHandler := fun ctx => do
-  let successor := ctx.fn.isConstOf ``translatedSuccessor
-  let predecessor :=
-    ctx.fn.isConstOf ``translatedPredecessor
-  unless successor || predecessor do return none
-  let #[x] := ctx.args | return none
-  let sx ← ctx.emitTerm x
-  return some <| if successor then (smt| (+ $sx 1))
-    else (smt| (- $sx 1))
-
-example (x : Int) :
-    translatedPredecessor (translatedSuccessor x) = x := by
-  crush
-```
-
-Because a general handler is consulted for every application, it should reject
-non-matching heads before doing reduction or type inference.
-Prefer targeted or result-indexed handlers when either dispatch key is
-available.
-
-The `ctx.declare` callback can emit declarations once and return the allocated
-symbol.
-This example gives an opaque Lean function an equally opaque SMT function.
-The declaration is emitted once even though the translated symbol occurs twice:
+`ctx.declare` emits declarations once per key and returns the allocated symbol.
+This handler gives an opaque Lean function an equally opaque SMT function:
 
 ```lean
 open Crush
 
 opaque externalToken : Int → Int
 
-@[crush_translate]
+@[crush_lower externalToken]
 def translateExternalToken :
-    TranslationHandler := fun ctx => do
+    LoweringHandler := fun ctx => do
   let .const ``externalToken _ := ctx.fn
     | return none
   let #[x] := ctx.args | return none
@@ -634,9 +558,7 @@ computing base.
 tag := "extending-reconstruction"
 %%%
 
-Translation and proof reconstruction are separate extension points.
-When SMT already understands enough semantics to report `unsat`, but
-`crush.trust "reconstruct"` needs a domain theorem to rebuild the argument,
+When SMT returns `unsat` but core reconstruction needs a domain theorem,
 register it with `@[crush_reconstruct]`:
 
 ```lean
@@ -842,10 +764,14 @@ register_crush_replay rule low <<
 
 The right-hand side is an ordinary Lean tactic script.
 Its goal is the decoded conclusion of that certificate step.
-The local context contains only the step's replayed premises and the values
-captured by the pattern; unrelated hypotheses from the user's theorem are not
-available.
-If the tactic does not close the goal, replay tries the next registration.
+The tactic first receives the step's replayed premises and pattern captures.
+If needed, it retries with the enclosing subproof's facts. Unrelated hypotheses
+from the user's theorem remain unavailable. Failure delegates to the next
+registration.
+
+The synthetic rule `assume` validates a decoded SMT assumption against its
+source Lean fact. A `subproof` rule can normalize the implication produced when
+an anchor discharges its local assumptions. Both use the same registration API.
 
 Alternatives and captures follow the same rules as term registrations.
 Use `register_crush_replay rule high`, `low`, or a numeric priority to control
@@ -927,51 +853,11 @@ control.
 
 ## Test Term Decoding
 
-A solver may simplify away an operator or change the shape used in a live
-certificate.
-Add a deterministic fixture for every accepted spelling:
-
-```lean
-private def parseAletheTerm
-    (source : String) : MetaM Sexp := do
-  let some (term, rest) := parseSexp source
-    | throwError "failed to parse Alethe term `{source}`"
-  unless rest.trimAscii.isEmpty do
-    throwError "trailing input after Alethe term `{source}`"
-  return term
-
-private def assertDecoded
-    (symbols : Std.HashMap String Expr)
-    (source : String) (expected : Expr) : MetaM Unit := do
-  let decoders ← getReplayTermHandlers
-  let context : TermCtx := {
-    symbols
-    named := {}
-    decoders
-  }
-  let term ← parseAletheTerm source
-  let some actual ← toExpr? context 64 term
-    | throwError "failed to decode Alethe term `{source}`"
-  unless ← isDefEq actual expected do
-    throwError "decoder mismatch for `{source}`"
-
-run_meta do
-  unless ← hasReplayTermHandlersFor "divisible" do
-    throwError
-      "the `divisible` replay handler was not registered"
-  withLocalDeclD `x (mkConst ``Int) fun x => do
-    let remainder ←
-      mkAppM ``HMod.hMod #[x, Lean.toExpr (3 : Int)]
-    let expected ←
-      mkEq remainder (Lean.toExpr (0 : Int))
-    let symbols :=
-      ({} : Std.HashMap String Expr).insert "x" x
-    assertDecoded symbols "((_ divisible 3) x)" expected
-    assertDecoded symbols "(divisible 3 x)" expected
-```
-
-`TermCtx.symbols` maps symbolic SMT atoms back to Lean expressions.
-`toExpr?` then exercises the same recursive decoder used by certificate replay.
+A solver may simplify away a custom operator. For deterministic decoding tests,
+construct a `TermCtx` with its symbol map and registered decoders, then call
+`Crush.Alethe.toExpr?` on each accepted spelling. Executable examples are in
+[Test/AletheExtension.lean](https://github.com/AD1024/lean-crush/blob/main/Test/AletheExtension.lean).
+Pair these checks with a live certificate test:
 
 ## Require Alethe in an Integration Test
 
@@ -1010,22 +896,9 @@ isolation, compatibility, and kernel rejection, are in
 
 ## Diagnose Replay Failures
 
-The first failure classification identifies the layer to address:
-
-* `term-gap` means a certificate term could not be converted to Lean. Add or
-  correct a `register_crush_replay term` registration or
-  `@[crush_replay]` handler.
-* `rule-gap` means the terms decoded, but Lean could not prove one concrete
-  inference from its replayed premises. Add a
-  `register_crush_replay rule` registration or `@[crush_replay_rule]` handler.
-* “did not emit an Alethe certificate” means cvc5 proved the query but could not
-  serialize the proof. No downstream extension can recover a certificate that
-  the solver did not produce.
-* `kernel-reject` or `replay-exception` indicates an invalid generated proof or
-  an implementation defect. Reduce the failing theorem and report the
-  certificate step.
-
-`@[crush_reconstruct]` extends core-directed reconstruction, not individual
-Alethe inference replay.
-In strict `crush.reconstruct "alethe"` mode, every required inference must be
-supported by Alethe replay itself.
+Use the {ref "troubleshooting-reconstruction"}[reconstruction diagnostics] to
+distinguish missing certificates, term decoding, rule replay, and invalid proof
+terms. The built-in handlers in
+[ArithmeticRules.lean](https://github.com/AD1024/lean-crush/blob/main/Crush/Solver/Alethe/ArithmeticRules.lean)
+and [ReplayRules.lean](https://github.com/AD1024/lean-crush/blob/main/Crush/Solver/Alethe/ReplayRules.lean)
+use the same extension interface.

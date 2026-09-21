@@ -7,141 +7,110 @@ open Verso.Genre Manual
 tag := "benchmarks"
 %%%
 
-The benchmark harness separates solver verification from checked proof
-reconstruction. This distinction prevents a reconstruction limitation from
-being reported as a translation or solver failure.
+These figures are regenerated from the raw measurements in
+`BenchmarkResults/paper/`, also preserved in the
+[evaluation archive](https://github.com/AD1024/lean-crush/blob/main/scripts/benchmark-data/eval-data.zip).
+They cover the same 754 verification conditions (VCs): Curated (20), Cashmere
+(38), Velvet (504), and PLean (192).
+The archive also retains Loom's four VCs, omitted from the figures.
 
-The figures below are recorded snapshots, not a live benchmark of the current
-commit. The headline and reconstruction studies use different Velvet workloads;
-compare strategies within a study rather than combining their totals.
-
-The complete numeric tables, tested revisions, machine configuration, and
-interpretation notes are in
-[BENCHMARKS.md](https://github.com/AD1024/lean-crush/blob/main/BENCHMARKS.md).
-The
+The archive contains `curated/`, `corpora/`, and `plean/` reports, with corpus
+revisions, options, and dirty-tree provenance in `metadata.tsv`. The
 [script guide](https://github.com/AD1024/lean-crush/blob/main/scripts/README.md)
-gives self-contained reproduction commands. The
-[recorded inputs](https://github.com/AD1024/lean-crush/tree/main/scripts/benchmark-data)
-regenerate these exact figures and retain the per-VC baseline records.
+documents reproduction with `run-experiments.sh`. These are recorded results,
+not a fresh run of the current commit. Timings are individual measurements, so
+small differences and results near the solver timeout need repeated runs.
 
 # Headline Comparison
 
-The headline figure compares Auto, Duper, trusted Crush, and `grind` on one
-fixed set of verification-condition (VC) occurrences for each corpus. The newer
-lean-smt rows in `BENCHMARKS.md` are not shown in this four-backend figure.
-Trusted Crush sets
-`crush.trust = "trust"`: it measures collection, specialization, translation,
-and SMT solving without requiring post-solver proof reconstruction. The other
-backends retain their normal proof and trust policies, so the table reports
-those differences rather than treating every row as the same trust guarantee.
+The comparison includes Auto, Duper, lean-smt, `grind`, and two Crush policies:
 
-`Auto` is the lean-auto backend configured by the host project; on the curated
-suite it is lean-auto invoked directly, preprocessing and monomorphizing before
-Duper discharges the residual first-order goal.
-`Duper` invokes Duper directly after host preprocessing. The PLean lane gives
-each Duper attempt one second of saturation and 20,000 heartbeats, while
-leaving the generated file uncapped so every VC is attempted. `grind` is
-Lean's kernel-checked tactic; PLean uses a pure-`grind` backend guarded against
-external solver calls. The `Crush` legend always denotes the trusted SMT lane
-in this figure, not one of the checked reconstruction strategies below.
+* *SMT trusted* uses `crush.trust "trust"` and requires no post-solver proof.
+* *Kernel-checked* uses `crush.trust "reconstruct"` with the `"auto"`
+  reconstruction portfolio: Alethe replay followed by core reconstruction.
 
-`Solved / total` uses the fixed corpus total as its denominator for every
-backend. `Failed` means the backend was attempted but did not close the VC.
-`Missing` means no complete attempt record exists, for example because a
-generated file terminated early. Both count as unsolved for coverage, but
-missing records are excluded from timing statistics. Valid headline runs must
-have zero missing records; every lane in the published comparison has zero.
+Auto uses each host project's lean-auto backend; Curated invokes lean-auto
+with Duper as its first-order prover. Duper runs directly after host
+preprocessing. lean-smt translates to cvc5 and reconstructs its certificate.
+Each backend retains its own proof policy and preprocessing.
 
-The figures show Curated, Cashmere, Velvet, and PLean. Loom is measured and
-kept in the recorded reports, but its four VCs are too few for a coverage bar
-to carry a meaningful percentage, so the figures omit it.
+On these 754 VCs, trusted Crush closes *709 (94.0%)* and the checked portfolio
+closes *692 (91.8%)*. Each corpus uses the same VC identities across lanes,
+and every lane has zero missing attempts.
 
-![Verification coverage by corpus and backend](../../figures/coverage.svg)
+The curves show how many VCs finish within the per-VC time on the logarithmic
+horizontal axis. Time is measured around each tactic invocation, including
+translation and any proof reconstruction. The dashed line marks the corpus's
+total workload; failed VCs never enter a curve. Repeated measurements are
+averaged per VC.
 
-The outcome figure partitions every backend's fixed workload into exactly four
-categories. `Success` means the VC was closed. `Translation error` requires an
-explicit diagnostic that the backend could not translate or encode the goal.
-`Timeout` requires an explicit wall-clock, heartbeat, or saturation-limit
-diagnostic. `Failed to prove` contains all remaining unsuccessful attempts,
-including solver `sat` or `unknown`, exhausted proof search, and ordinary
-tactic failures. It does not hide missing attempts: the plotting script rejects
-a bar unless its four segments sum to the corpus total.
+![Verification coverage over time by corpus and backend](figures/coverage-over-time.svg)
 
-![Verification outcomes by corpus and backend](../../figures/outcomes.svg)
+Outcomes partition the whole workload: success, explicit translation error,
+explicit timeout, and other failures to prove. The last category includes
+`sat`, ordinary `unknown`, exhausted proof search, and reconstruction failures.
+Missing attempts would count as unsolved coverage, but have no attempt time.
+
+![Verification outcomes by corpus and backend](figures/outcomes.svg)
 
 # Proof Reconstruction
 
-Proof reconstruction is measured separately from the headline comparison. Its
-denominator is the subset of successful trusted-verification VCs whose profile
-records that SMT actually returned `unsat`; selected facts and goals closed by
-checked pre-SMT reconstruction are reported as verify-lane successes but are
-not treated as certificate-reconstruction attempts. Core reconstruction
-re-proves an unsat core with Lean tactics. Alethe reconstruction replays cvc5's
-refutation step by step. The portfolio first attempts Alethe and then falls
-back to core reconstruction.
+The reconstruction reports distinguish two denominators:
 
-These plots retain an earlier reconstruction-focused run. They characterize
-the checked strategies and are not extra Crush rows in the latest headline
-comparison.
+* *All VCs* measures checked proof coverage, including early Lean proofs.
+* *SMT cohort* contains the *503* successful trusted-lane VCs whose profiler
+  records SMT `unsat`. It excludes trusted-lane successes closed before SMT.
 
-![Checked proof reconstruction among SMT-verified VCs](../../figures/reconstruction.svg)
+The checked-proof curves compare lean-smt, Alethe, and the portfolio using the
+harness's final VC verdict. The Crush lanes finish
+*246 / 754* in the Alethe lane and *692 / 754* in the portfolio.
+This includes host-side Lean proofs and successes after failed intermediate
+attempts. Core alone was not measured; its absence does not mean zero coverage.
 
-Failure modes distinguish missing or malformed certificates, unsupported
-Alethe rules or terms, solver `sat` and `unknown` results, and failures of
-core-directed Lean reconstruction. `not-attempted` means an earlier failure or
-declaration heartbeat stopped the generated file before that VC reached the
-strict lane; it is not classified as a reconstruction attempt.
+![Checked proof coverage over time by corpus and tool](figures/reconstruction-over-time.svg)
 
-Each pie aggregates failure records from Core, Alethe, and Portfolio for one
-corpus. An SMT-cohort VC can therefore contribute one record per strict lane;
-the lane-specific counts remain available in `reconstruction-failures.tsv` and
-the tables in
-[BENCHMARKS.md](https://github.com/AD1024/lean-crush/blob/main/BENCHMARKS.md).
+Attribution to a reconstruction route is more conservative: every recorded
+attempt must have an outcome accepted by that lane. Within the SMT cohort,
+the reporter attributes *69 / 503* to Alethe and *482 / 503* to the portfolio.
+An unsuccessful attempt can prevent attribution even when the host later
+closes the VC with a checked proof.
 
-![Proof reconstruction failure records by corpus](../../figures/reconstruction-failures.svg)
+The failure chart explains missing attribution within the SMT cohort, with
+one record per lane and VC. It includes recovered attempts; it is not a count
+of unproved VCs. This snapshot measures Alethe and Portfolio, so one VC can
+appear twice. Most failures are cvc5 certificate errors. `term-gap` and `rule-gap`
+identify decoding and Lean inference failures; the remaining categories cover
+core failures, timeouts, and other unsuccessful attempts. `not-attempted`
+records mean the strict lane never reached the VC.
+
+![Reconstruction failure records within the SMT cohort](figures/reconstruction-failures.svg)
 
 # Comparing Reconstruction With lean-smt
 
-The reconstruction plots above compare Crush's own strategies. The harnesses also measure
-[lean-smt](https://github.com/ufmg-smite/lean-smt), which translates a goal,
-calls cvc5, and replays the Alethe certificate in Lean, against Crush's strict
-Alethe lane and its reconstruction portfolio. Because no tool controls the
-denominator of a cross-tool comparison, that report uses the exact VC-identity
-intersection of the compared lanes, and it separates two questions: how many
-matched VCs each lane closed with a kernel-accepted Lean proof by any route,
-and how many certificates each lane replayed within the narrower SMT-`unsat`
-cohort.
+`reconstruction-comparison.tsv` compares lean-smt, strict Alethe, and the
+portfolio on their exact VC-identity intersection. It reports completed checked
+proofs by any route, plus reconstruction attribution within the
+trusted lane's SMT cohort. Timing on VCs proved by every compared lane is
+reported separately from timing on each lane's own successful set.
 
-lean-smt reports an Alethe rule it cannot replay by leaving that step as an
-open goal rather than by failing, so the harness checks the remaining goals
-itself and records those VCs as a rule gap instead of counting them solved.
-The comparison covers every corpus. Only the Curated suite's pinned revision
-already requires lean-smt; the others get it from a recorded patch that adds the
-dependency to the pinned revision, after which the harness checks that no
-revision the corpus already pinned moved. Run it with
-`run-experiments.sh`; the
-[benchmark script guide](https://github.com/AD1024/lean-crush/blob/main/scripts/README.md)
-documents the reports it writes.
+The harness checks for remaining goals: an unsupported lean-smt replay rule
+that leaves a goal open is a failure, even if the tactic did not throw an error.
+See the archive's per-VC measurements for the corresponding attempts.
 
 # Time Breakdown
 
-Profiler records use nanosecond counters around the major Crush phases. The
-stacked bars show the share of profiler-accounted time, not process wall time.
-Solver startup and communication are included in `solve`; certificate parsing,
-step replay, proof assembly, and final kernel checking are included in
-`replay`.
+The bars show shares of profiler-accounted Crush time. `solve` includes solver
+startup, communication, and retrieval of requested cores and proofs. `replay`
+includes certificate parsing, step replay, proof assembly, and final kernel
+checking. These counters do not measure the whole Lean process.
 
-![Crush profiler time grouped by phase](../../figures/phase-breakdown.svg)
+![Crush profiler time grouped by phase](figures/phase-breakdown.svg)
 
 # Alethe Replay Scaling
 
-Certificate size is measured primarily by the number of parsed Alethe
-commands. The plot includes only successful strict Alethe replays and averages
-repeated measurements for each VC. Its replay-time axis is logarithmic because
-the samples span several orders of magnitude. The dashed least-squares line,
-Pearson correlation, and slope are computed in the original linear units.
+Each point is a successful strict Alethe replay, with repeated observations
+averaged per VC. The horizontal axis counts parsed certificate commands and
+the replay-time axis is logarithmic. The plot shows samples without a fitted
+trend; certificate size alone does not determine replay cost.
 
-![Alethe replay time against parsed certificate commands](../../figures/alethe-replay-scaling.svg)
-
-These measurements characterize the recorded corpus and machine. Use multiple
-repeats before treating small timing differences as performance claims.
+![Alethe replay time against parsed certificate commands](figures/alethe-replay-scaling.svg)

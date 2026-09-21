@@ -19,6 +19,7 @@ checked before anything is written.
 import argparse
 import csv
 import importlib.util
+import math
 import statistics
 import sys
 from collections import defaultdict
@@ -206,9 +207,7 @@ def reconstruction_series(
     if not comparison:
         return {}, {}
     measurements = read_tsv(result_dirs, "measurements.tsv")
-    profiles = read_tsv(result_dirs, "profile-events.tsv")
     attempts = report.grouped_attempts(measurements)
-    profile_groups = report.profiles_by_vc(profiles)
     cohorts = {
         suite: cohort
         for suite, cohort in report.reconstruction_comparison_cohort(
@@ -230,10 +229,7 @@ def reconstruction_series(
             solved = {
                 vc
                 for vc in matched
-                if report.checked_proof_succeeded(
-                    by_lane[lane][vc],
-                    profile_groups.get((suite, lane, vc), []),
-                )
+                if report.checked_proof_succeeded(by_lane[lane][vc])
             }
             recorded = expected.get((suite, lane))
             if recorded is not None and len(solved) != recorded:
@@ -1008,21 +1004,19 @@ SQUARE_SIZE = (4.8, 4.8)
 LINE_WIDTH = 2.2
 
 
-def draw_suite(
-    pyplot,
-    path: Path,
+def draw_axis(
+    axis,
     suite: str,
     entries: list[dict[str, object]],
     total: int | None,
     y_label: str,
     mode: str,
     time_axis: str,
-) -> None:
+    show_legend: bool = True,
+) -> tuple[list[object], list[str], list[str]]:
     from matplotlib.patheffects import Stroke, Normal
     from matplotlib.ticker import MaxNLocator
 
-    figure, axis = pyplot.subplots(figsize=PANEL_SIZE)
-    figure.patch.set_facecolor(style.PAPER)
     axis.set_facecolor(style.PAPER)
     for spine in ("top", "right"):
         axis.spines[spine].set_visible(False)
@@ -1094,7 +1088,7 @@ def draw_suite(
         fontweight="bold",
     )
     axis.set_ylabel(y_label, color=style.INK, fontsize=12, fontweight="bold")
-    if handles:
+    if handles and show_legend:
         order = legend_order(keys)
         # The curves rise left to right, so the upper left is the free region.
         axis.legend(
@@ -1108,6 +1102,22 @@ def draw_suite(
             borderaxespad=0.4,
         )
     bold_tick_labels(axis)
+    return handles, labels, keys
+
+
+def draw_suite(
+    pyplot,
+    path: Path,
+    suite: str,
+    entries: list[dict[str, object]],
+    total: int | None,
+    y_label: str,
+    mode: str,
+    time_axis: str,
+) -> None:
+    figure, axis = pyplot.subplots(figsize=PANEL_SIZE)
+    figure.patch.set_facecolor(style.PAPER)
+    draw_axis(axis, suite, entries, total, y_label, mode, time_axis)
     figure.tight_layout()
     figure.savefig(path, facecolor=figure.get_facecolor())
     pyplot.close(figure)
@@ -1124,10 +1134,44 @@ def draw(
     y_label: str,
     mode: str,
     time_axis: str,
+    layout: str = "separate",
 ) -> list[Path]:
-    """Draw one figure per corpus and return the paths written."""
+    """Draw separate corpus figures or a compact grid with a shared legend."""
     written: list[Path] = []
     suites = sorted(series, key=style.suite_sort_key)
+    if layout == "grid" and suites:
+        columns = min(2, len(suites))
+        rows = math.ceil(len(suites) / columns)
+        legend_height = 0.8
+        height = PANEL_SIZE[1] * rows + legend_height
+        figure, axes = pyplot.subplots(
+            rows, columns, figsize=(PANEL_SIZE[0] * columns, height), squeeze=False
+        )
+        figure.patch.set_facecolor(style.PAPER)
+        legend: dict[str, tuple[object, str]] = {}
+        for axis, suite in zip(axes.flat, suites):
+            handles, labels, keys = draw_axis(
+                axis, suite, series[suite], totals.get(suite), y_label, mode,
+                time_axis, show_legend=False,
+            )
+            for key, handle, label in zip(keys, handles, labels):
+                legend.setdefault(key, (handle, label))
+        for axis in list(axes.flat)[len(suites):]:
+            axis.set_visible(False)
+        keys = list(legend)
+        ordered = [legend[keys[i]] for i in legend_order(keys)]
+        if ordered:
+            figure.legend(
+                [handle for handle, _ in ordered],
+                [label for _, label in ordered],
+                loc="lower center", ncols=3, frameon=False, fontsize=11,
+                labelcolor=style.INK, handlelength=2.8,
+            )
+        figure.tight_layout(rect=(0, legend_height / height, 1, 1))
+        path = out_dir / f"{stem}{suffix}.{fmt}"
+        figure.savefig(path, facecolor=figure.get_facecolor())
+        pyplot.close(figure)
+        return [path]
     for suite in suites:
         path = out_dir / f"{stem}-{suite}{suffix}.{fmt}"
         draw_suite(
@@ -1185,6 +1229,12 @@ def parse_args() -> argparse.Namespace:
         help="time axis scale (default: log)",
     )
     parser.add_argument(
+        "--layout",
+        choices=("separate", "grid"),
+        default="separate",
+        help="time-coverage layout: one file per corpus, or one grid with a shared legend",
+    )
+    parser.add_argument(
         "--format",
         choices=("pdf", "svg", "png"),
         default="pdf",
@@ -1231,6 +1281,7 @@ def main() -> None:
                 "VCs proved",
                 args.mode,
                 args.time_axis,
+                args.layout,
             )
             points = args.out_dir / f"coverage-over-time{suffix}.tsv"
             write_points(points, series, args.mode)
@@ -1247,9 +1298,10 @@ def main() -> None:
                 args.format,
                 series,
                 totals,
-                "VCs reconstructed",
+                "VCs with checked proofs",
                 args.mode,
                 args.time_axis,
+                args.layout,
             )
             points = args.out_dir / f"reconstruction-over-time{suffix}.tsv"
             write_points(points, series, args.mode)
