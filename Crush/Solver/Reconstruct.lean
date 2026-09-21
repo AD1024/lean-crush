@@ -39,7 +39,7 @@ programmatic pre-pass below.
 This path is attempted for every backend, but assumption-dependent reconstruction
 requires a backend-provided unsat core. It also depends on a Lean tactic re-finding
 the argument, which fails for long inference chains; when cvc5 supplies an Alethe
-certificate, `Crush/Solver/AletheReplay.lean` runs first and replays the chain step by
+certificate, `Crush/Solver/Alethe/Replay.lean` runs first and replays the chain step by
 step instead. Both end in a kernel-checked term, so they differ only in reach.
 -/
 

@@ -1,13 +1,13 @@
 import Lean
 import Crush.SMT.Sexp
-import Crush.Solver.ReplayAttr
+import Crush.Solver.Alethe.ReplayAttr
 import Crush.Translation.Monad
 open Lean Meta
 
 /-!
 # Alethe terms → Lean `Expr`
 
-Proof replay (`Crush/Solver/AletheReplay.lean`) restates each Alethe step as a Lean
+Proof replay (`Crush/Solver/Alethe/Replay.lean`) restates each Alethe step as a Lean
 proposition, so it needs the *inverse* of translation. Translation is one-directional, so
 this module reconstructs the inverse from two sources:
 

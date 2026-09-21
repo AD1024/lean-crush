@@ -1,5 +1,13 @@
 import Lean.Elab.Tactic.Omega.Frontend
-import Crush.Solver.ReplayAttr
+import Crush.Solver.Alethe.Term
+
+/-!
+# Arithmetic replay rules
+
+Built-in `register_crush_replay` handlers for integer and rational arithmetic,
+including linear certificates, polynomial normalization, and absolute values.
+The supporting lemmas and witness checkers produce Lean proofs for each step.
+-/
 
 open Lean Meta Elab Tactic Omega
 open Lean.Elab.Tactic.Omega
@@ -320,5 +328,125 @@ def replayPolynomialEquality : ReplayRuleHandler := fun ctx =>
 @[crush_replay_rule "poly_simp_rel" high]
 def replayPolynomialRelation : ReplayRuleHandler := fun ctx =>
   ctx.runMeta proveLinearRelationIff
+
+/-! ## Integer rewrites and multiplication -/
+
+private theorem intAbsEq (left right : Int) :
+    intAbs left = intAbs right ↔ left = right ∨ left = -right := by
+  unfold intAbs
+  by_cases hl : left < 0 <;> by_cases hr : right < 0 <;>
+    simp [hl, hr] <;> omega
+
+private theorem intAbsGt (left right : Int) :
+    intAbs left > intAbs right ↔
+      if left ≥ 0 then
+        if right ≥ 0 then left > right else left > -right
+      else
+        if right ≥ 0 then -left > right else -left > -right := by
+  unfold intAbs
+  split <;> split <;> split <;> split <;> omega
+
+private theorem intAbsNatCast (value : Int) : intAbs value = (value.natAbs : Int) := by
+  unfold intAbs
+  split
+  · exact (Int.ofNat_natAbs_of_nonpos (by omega)).symm
+  · exact (Int.natAbs_of_nonneg (by omega)).symm
+
+private theorem intAbsSquareLt (left right : Int) (h : intAbs left < intAbs right) :
+    intAbs (left * left) < intAbs (right * right) := by
+  simp only [intAbsNatCast, Int.natAbs_mul, Int.ofNat_lt] at *
+  exact Nat.mul_lt_mul_of_lt_of_lt h h
+
+private theorem intSquarePositive (value : Int) (h : value ≠ 0) : value * value > 0 := by
+  by_cases hn : value < 0
+  · exact Int.mul_pos_of_neg_of_neg hn hn
+  · exact Int.mul_pos (by omega) (by omega)
+
+private theorem intLeNorm (left right : Int) :
+    (left ≤ right ↔ ¬left ≥ right + 1) := by
+  omega
+
+private theorem intElimLt (left right : Int) :
+    (left < right ↔ ¬left ≥ right) := by
+  omega
+
+private theorem intElimGt (left right : Int) :
+    (left > right ↔ ¬right ≥ left) := by
+  omega
+
+private theorem intMulNegative (coefficient left right : Int) :
+    coefficient < 0 ∧ left ≥ right →
+      coefficient * left ≤ coefficient * right := fun hypothesis =>
+  Int.mul_le_mul_of_nonpos_left (Int.le_of_lt hypothesis.1) hypothesis.2
+
+private theorem intMulPositive (coefficient left right : Int) :
+    coefficient > 0 ∧ left ≤ right →
+      coefficient * left ≤ coefficient * right := fun hypothesis =>
+  Int.mul_le_mul_of_nonneg_left hypothesis.2 (Int.le_of_lt hypothesis.1)
+
+private theorem intMulPositiveEq (coefficient left right : Int) :
+    coefficient > 0 ∧ left = right →
+      coefficient * left = coefficient * right := fun hypothesis =>
+  congrArg (coefficient * ·) hypothesis.2
+
+register_crush_replay rule low <<
+  (rare_rewrite "arith-leq-norm" ..) => by exact intLeNorm _ _
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "arith-elim-lt" ..) => by exact intElimLt _ _
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "arith-elim-gt" ..) => by exact intElimGt _ _
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "arith-geq-norm1-int" ..) => by exact Int.sub_nonneg.symm
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "arith-abs-eq" ..) => by exact intAbsEq _ _
+>>
+
+register_crush_replay rule low <<
+  (rare_rewrite "arith-abs-int-gt" (term left : Int) (term right : Int)) => by
+    exact intAbsGt left right
+>>
+
+register_crush_replay rule low <<
+  (la_mult_sign ..) => by exact intSquarePositive _ (by assumption)
+>>
+
+register_crush_replay rule low <<
+  (la_mult_abs_comparison ..) => by
+    first
+    | exact intAbsSquareLt _ _ ((intAbsGt _ _).mpr (by assumption))
+    | exact intAbsSquareLt _ _ (by assumption)
+    | grind [intAbs]
+>>
+
+private def hasIntAbsPremise : ReplayConditionHandler := fun ctx =>
+  return ctx.premises.any fun premise =>
+    (premise.clause.find? (·.isConstOf ``intAbs)).isSome
+
+-- Alethe closes these anchors with expanded sign tests, while their final
+-- arithmetic step still states the comparison using absolute values.
+register_crush_replay rule low <<
+  (subproof ..) if hasIntAbsPremise => by
+    simp only [← intAbsGt] at *
+    grind (ematch := 0) only
+>>
+
+register_crush_replay rule low <<
+  (la_mult_neg ..) => by exact intMulNegative _ _ _ (by assumption)
+>>
+
+register_crush_replay rule low <<
+  (la_mult_pos ..) =>
+    by first
+      | exact intMulPositive _ _ _ (by assumption)
+      | exact intMulPositiveEq _ _ _ (by assumption)
+>>
 
 end Crush.Alethe

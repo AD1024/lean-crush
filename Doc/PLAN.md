@@ -212,9 +212,13 @@ Module map (⟢ = built & tested, ▷ = designed, □ = todo):
 | `Crush/Translation/HOEncoding.lean` | HO encoding helpers (defunc ⟢, native ⟢, combinators □) | ⟢ |
 | `Crush/Translation/Translate.lean` | driver: `Expr → SMT.Term` via handlers | ⟢ |
 | `Crush/Solver/Reconstruct.lean` | unsat-core → Lean proof replay (finisher ladder) | ⟢ core-directed |
-| `Crush/Solver/Alethe.lean` | cvc5 Alethe proof parser | ⟢ |
-| `Crush/Solver/AletheTerm.lean` | Alethe `Sexp` → Lean `Expr` (`:named` sharing, `Bool`→`Prop`) | ⟢ |
-| `Crush/Solver/AletheReplay.lean` | per-step certificate replay; declines rather than trusts | ⟢ |
+| `Crush/Solver/Alethe.lean` | public entry point for Alethe parsing and replay | ⟢ |
+| `Crush/Solver/Alethe/Parser.lean` | cvc5 Alethe proof parser | ⟢ |
+| `Crush/Solver/Alethe/Term.lean` | Alethe `Sexp` → Lean `Expr` (`:named` sharing, `Bool`→`Prop`) | ⟢ |
+| `Crush/Solver/Alethe/ReplayAttr.lean` | term/rule registries and `register_crush_replay` syntax | ⟢ |
+| `Crush/Solver/Alethe/ArithmeticRules.lean` | arithmetic replay handlers and supporting lemmas | ⟢ |
+| `Crush/Solver/Alethe/ReplayRules.lean` | assumption, logical, string, and bit-vector handlers; anchor tactics | ⟢ |
+| `Crush/Solver/Alethe/Replay.lean` | per-step certificate replay; declines rather than trusts | ⟢ |
 | `Crush/Frontend/Tactic.lean` | the `crush` tactic + hint grammar (`[…] u[…] d[…]`) | ⟢ |
 
 ---
@@ -550,7 +554,7 @@ holds the shared naming and shape helpers.
     the goal is not a computation.
   - *Certificate replay comes first, when cvc5 supplies one.* Some verdicts are a long
     chain of trivial inferences that no single tactic re-finds (a Boolean pigeonhole, a deep
-    EUF conflict). cvc5's Alethe proof *is* that chain, so `Crush/Solver/AletheReplay.lean`
+    EUF conflict). cvc5's Alethe proof *is* that chain, so `Crush/Solver/Alethe/Replay.lean`
     walks it step by step ahead of the ladder, proving each step from its premises and
     letting the kernel check every one. The rule name is only a tactic *hint*, so soundness
     does not depend on rule coverage: an unreplayable step makes replay **decline** and the
@@ -735,7 +739,7 @@ three shapes the finishers reach that a naive whole-context `grind` would not:
 *Alethe replay — staged, all three phases done.* Built under one invariant: **any step a
 replay cannot discharge is a hard failure, never a trusted gap**, so partial coverage stays
 sound and merely falls back to the core-directed finisher. Phase 1, the parser
-(`Crush/Solver/Alethe.lean`), turns cvc5's `--dump-proofs --proof-format-mode=alethe` output
+(`Crush/Solver/Alethe/Parser.lean`), turns cvc5's `--dump-proofs --proof-format-mode=alethe` output
 into an `AletheProof` of `assume`/`step`/`anchor` commands over clauses; it is tested against
 verbatim cvc5 output (`Test/Alethe.lean`), including that an `(error …)` reply parses to
 `none` so the caller falls back rather than mis-reading. Phase 2 requests the proof behind
@@ -757,7 +761,7 @@ when the pinned cvc5 version changes.
 
 ### Phase 3 — proof replay. done (per-step, not per-rule)
 
-`Crush/Solver/AletheReplay.lean` replays a cvc5 Alethe certificate into a Lean proof, and
+`Crush/Solver/Alethe/Replay.lean` replays a cvc5 Alethe certificate into a Lean proof, and
 it is tried **before** the finisher ladder under a reconstructing policy
 (`crush.reconstruct auto`, the default; `alethe` runs it with no ladder fallback and `core`
 skips it). An Alethe proof decomposes one hard goal into many small inferences. Replay
@@ -777,7 +781,7 @@ certificate closes a goal.
 
 Supporting pieces: `TranslateState.nameToExpr` (phase 3a — the emitted-symbol → Lean-term
 reverse map, since translation is otherwise one-directional) and
-`Crush/Solver/AletheTerm.lean` (Alethe `Sexp` → Lean `Expr`, including the `:named`
+`Crush/Solver/Alethe/Term.lean` (Alethe `Sexp` → Lean `Expr`, including the `:named`
 sharing pre-pass and the `Bool`→`Prop` lifting SMT's single `Bool` sort forces).
 
 *Subproof blocks are handled.* An anchor may bind multiple assumptions and contain nested

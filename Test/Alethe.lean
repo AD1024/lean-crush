@@ -1,7 +1,7 @@
-import Crush.Solver.Alethe
+import Crush.Solver.Alethe.Parser
 
 /-!
-Tests for the Alethe proof parser (`Crush/Solver/Alethe.lean`), which feeds the replay
+Tests for the Alethe proof parser (`Crush/Solver/Alethe/Parser.lean`), which feeds the replay
 pass in `Test/AletheReplay.lean`. The parser turns cvc5's `--dump-proofs
 --proof-format-mode=alethe` output into a structured `AletheProof`; it decides nothing,
 so it is sound on its own, and these tests pin that it reads real cvc5 output correctly.

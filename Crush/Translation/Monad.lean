@@ -110,7 +110,7 @@ structure TranslateState where
 
       `nameToAtom` records only a diagnostic label, which cannot be turned back
       into an `Expr`. Proof replay
-      (`Crush/Solver/AletheReplay.lean`) needs the real term: an Alethe proof mentions
+      (`Crush/Solver/Alethe/Replay.lean`) needs the real term: an Alethe proof mentions
       the emitted symbols, and each step has to be restated as a Lean proposition. This
       map is the inverse direction, populated where a symbol is allocated for a Lean
       head (`defaultApp`), specialized at its erased type and instance arguments.

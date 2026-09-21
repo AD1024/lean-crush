@@ -10,7 +10,7 @@ import Crush.Util.Profile
 import Crush.Solver.Process
 import Crush.Solver.KernelCheck
 import Crush.Solver.Reconstruct
-import Crush.Solver.AletheReplay
+import Crush.Solver.Alethe
 import Crush.SMT.Check
 import Crush.SMT.Print
 import Crush.SMT.Result
@@ -326,7 +326,7 @@ private def replayDeclineLabel (cfg : Config) (proofSexps : Array SMT.Sexp)
       else "malformed-certificate"
 
 /-- Try to close `goal` by replaying the solver's proof certificate
-(`Crush/Solver/AletheReplay.lean`).
+(`Crush/Solver/Alethe/Replay.lean`).
 
 The certificate refutes the *negated* goal, so the shape is a proof by contradiction:
 `Classical.byContradiction` turns `G` into `¬G ⊢ False`, the fresh `¬G` hypothesis is bound

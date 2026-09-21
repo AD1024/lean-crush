@@ -183,7 +183,7 @@ run_meta do
       let candidates ← reconstructionLemmasFor completeTarget
       unless candidates.contains ``completeOfActive do
         throwError "the reconstruction index omitted a matching downstream rule"
-      if candidates.contains ``natCubeDown || candidates.contains ``natSquareDown then
+      if candidates.contains ``natCubeLeOfLe || candidates.contains ``natSquareLeOfLe then
         throwError "the reconstruction index returned unrelated Nat rules"
       let goal ← Lean.Meta.mkFreshExprMVar (Lean.mkApp (Lean.mkConst ``Complete) stage)
       let reconstructed ← IO.mkRef false

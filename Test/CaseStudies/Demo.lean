@@ -18,9 +18,6 @@ theorem Nand_self (x : BitVec 4) : Nand x x = ~~~x := by
 
 #print axioms Nand_self
 
-set_option pp.all false in
-#print Nand_self
-
 end NandSelf
 
 section ComputeMask
@@ -50,8 +47,6 @@ theorem computes_mask
   crush
 
 #print axioms computes_mask
-set_option pp.all false in
-#print computes_mask
 end ComputeMask
 
 namespace AletheResolutionExample
@@ -123,8 +118,6 @@ set_option trace.crush.result true in
 theorem resolution_via_crush (p q r : Prop)
     (h0 : p ∨ q) (h1 : ¬p ∨ r) : q ∨ r := by
   crush
-
-#print resolution_via_crush
 
 #print axioms certificate_refutation
 #print axioms resolution_from_certificate

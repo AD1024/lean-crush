@@ -65,7 +65,7 @@ instance : KVMap.Value TrustMode where
 There are two independent ways to turn an `unsat` into a Lean proof, with different
 reach, so this selects between them:
 
-* replaying the solver's proof certificate step by step (`Crush/Solver/AletheReplay.lean`),
+* replaying the solver's proof certificate step by step (`Crush/Solver/Alethe/Replay.lean`),
   which needs cvc5 and handles long inference chains;
 * the core-directed finisher ladder (`Crush/Solver/Reconstruct.lean`), which requires a
   backend-provided unsat core and one Lean tactic to re-find the whole argument. -/

@@ -10,12 +10,6 @@ These are ordinary Lean theorems registered through the same public mechanism av
 to downstream libraries, and the reconstruction engine itself inspects none of them: it
 indexes whatever is registered by discrimination tree and does not know about `Nat`,
 multiplication, or a polynomial degree.
-
-The shipped set is not correspondingly general. Beyond `existsPiOfForallExists` and the
-`Nat.*` library lemmas re-registered at the bottom, it is integer square-root and
-cube-root loop invariants — degree 2 and 3, in both `succ` and `pred` form. A degree-4
-caller would need four more theorems, so this is a concrete rule table rather than a
-schema, and it is in the global registry for every downstream user.
 -/
 
 namespace Crush
@@ -74,56 +68,53 @@ theorem natPredInvariant {P : Nat → Prop} {i j : Nat}
   · exact base
 
 @[crush_reconstruct]
-theorem natSquareSuccInvariant {x i j : Nat}
+theorem natSquareLeOfLtSucc {x i j : Nat}
     (previous : ∀ k < i, k * k ≤ x) (current : i * i ≤ x) (h : j < i + 1) :
     j * j ≤ x :=
   natSuccInvariant (P := fun k => k * k ≤ x) (i := i) (j := j) previous current h
 
 @[crush_reconstruct]
-theorem natCubeSuccInvariant {x i j : Nat}
+theorem natCubeLeOfLtSucc {x i j : Nat}
     (previous : ∀ k < i, k * k * k ≤ x) (current : i * i * i ≤ x)
     (h : j < i + 1) : j * j * j ≤ x :=
   natSuccInvariant (P := fun k => k * k * k ≤ x) (i := i) (j := j) previous current h
 
 @[crush_reconstruct]
-theorem natSquarePredInvariant {x i j : Nat}
+theorem natSquareLeOfLePred {x i j : Nat}
     (previous : ∀ k < i, k * k ≤ x) (h : j ≤ i - 1) : j * j ≤ x :=
   natPredInvariant (P := fun k => k * k ≤ x) (i := i) (j := j)
     (by omega) previous h
 
 @[crush_reconstruct]
-theorem natCubePredInvariant {x i j : Nat}
+theorem natCubeLeOfLePred {x i j : Nat}
     (previous : ∀ k < i, k * k * k ≤ x) (h : j ≤ i - 1) : j * j * j ≤ x :=
   natPredInvariant (P := fun k => k * k * k ≤ x) (i := i) (j := j)
     (by omega) previous h
 
 @[crush_reconstruct]
-theorem natSquareDown {x a b : Nat} (bound : b * b ≤ x) (h : a ≤ b) :
+theorem natSquareLeOfLe {x a b : Nat} (bound : b * b ≤ x) (h : a ≤ b) :
     a * a ≤ x :=
   Nat.le_trans (Nat.mul_self_le_mul_self h) bound
 
 @[crush_reconstruct]
-theorem natCubeDown {x a b : Nat} (bound : b * b * b ≤ x) (h : a ≤ b) :
+theorem natCubeLeOfLe {x a b : Nat} (bound : b * b * b ≤ x) (h : a ≤ b) :
     a * a * a ≤ x :=
   Nat.le_trans (natCubeMono h) bound
 
-/-- If two loop bounds are at most one apart, a value below the predecessor of the upper
-bound is below the lower bound. Put the gap premise first so backward search learns `upper`
-from the loop-exit hypothesis before proving the intermediate inequality. -/
 @[crush_reconstruct]
 theorem natLeOfSubGapAtMostOne {value lower upper : Nat}
     (gap : ¬1 < upper - lower) (h : value ≤ upper - 1) : value ≤ lower := by
   omega
 
 @[crush_reconstruct]
-theorem natSquareMax {x i j : Nat} (hj : j * j ≤ x) (hi : x < i * i) :
+theorem natLePredOfSquareLtSquare {x i j : Nat} (hj : j * j ≤ x) (hi : x < i * i) :
     j ≤ i - 1 := by
   have hsquares : j * j < i * i := Nat.lt_of_le_of_lt hj hi
   have hji : j < i := Nat.mul_self_lt_mul_self_iff.mp hsquares
   omega
 
 @[crush_reconstruct]
-theorem natCubeMax {x i j : Nat} (hj : j * j * j ≤ x) (hi : x < i * i * i) :
+theorem natLePredOfCubeLtCube {x i j : Nat} (hj : j * j * j ≤ x) (hi : x < i * i * i) :
     j ≤ i - 1 := by
   have hcubes : j * j * j < i * i * i := Nat.lt_of_le_of_lt hj hi
   have hji : j < i := by

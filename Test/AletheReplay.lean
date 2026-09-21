@@ -1,7 +1,7 @@
 import Crush
 
 /-!
-Tests for Alethe proof replay (`Crush/Solver/AletheReplay.lean`), whose module comment has
+Tests for Alethe proof replay (`Crush/Solver/Alethe/Replay.lean`), whose module comment has
 the design; these tests pin its two observable properties.
 
 1. **Payoff.** The goals below were measured (2026-08-06) to be exactly the class replay is

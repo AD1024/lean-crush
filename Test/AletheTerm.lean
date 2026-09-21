@@ -1,4 +1,4 @@
-import Crush.Solver.AletheTerm
+import Crush.Solver.Alethe.Term
 
 /-!
 Focused tests for cvc5 Alethe term forms. Live certificate replay is exercised in

@@ -900,7 +900,7 @@ mutual
     let hint := match e with | .const n _ => nameHint n | _ => "s"
     let name ← TranslateM.symbolForStructural key hint
     -- Remember the Lean type behind the sort, so proof replay can give a quantifier
-    -- binder over this sort its Lean type back (`AletheTerm.sortToType?`).
+    -- binder over this sort its Lean type back (`Alethe.sortToType?`).
     TranslateM.recordSymbolExpr name e
     if !(← declaredSort name) then
       TranslateM.emitCommand (.declSort name 0)
