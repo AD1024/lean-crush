@@ -84,7 +84,7 @@ class ReconstructionCohortTests(unittest.TestCase):
 class HeadlineLaneTests(unittest.TestCase):
     def test_lean_smt_is_a_headline_backend(self) -> None:
         lanes = {
-            "auto-duper",
+            "auto-smt",
             "duper-only",
             "smt-only",
             "crush-verify",
@@ -92,9 +92,9 @@ class HeadlineLaneTests(unittest.TestCase):
         }
 
         self.assertEqual(
-            benchmark_report.headline_lane_map("leanhammer", lanes),
+            benchmark_report.headline_lane_map("curated", lanes),
             [
-                ("auto", "auto-duper"),
+                ("auto", "auto-smt"),
                 ("duper", "duper-only"),
                 ("lean-smt", "smt-only"),
                 ("crush", "crush-verify"),
@@ -103,11 +103,11 @@ class HeadlineLaneTests(unittest.TestCase):
         )
 
     def test_absent_smt_lane_is_omitted(self) -> None:
-        lanes = {"auto-duper", "crush-verify"}
+        lanes = {"auto-smt", "crush-verify"}
 
         self.assertEqual(
-            benchmark_report.headline_lane_map("leanhammer", lanes),
-            [("auto", "auto-duper"), ("crush", "crush-verify")],
+            benchmark_report.headline_lane_map("curated", lanes),
+            [("auto", "auto-smt"), ("crush", "crush-verify")],
         )
 
 

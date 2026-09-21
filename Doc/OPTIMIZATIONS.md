@@ -244,9 +244,9 @@ MAX_HEARTBEATS=1000000 \
 scripts/benchmark-corpora.sh
 ```
 
-The harness builds local Crush, provisions the pinned LeanHammer, Loom, and
+The harness builds local Crush, provisions the pinned Curated, Loom, and
 Velvet revisions under `BenchmarkResults/sources`, and builds their Lake
-packages. Override `HAMMER_REPO`, `LOOM_REPO`, or `VELVET_REPO` to use existing
+packages. Override `CURATED_REPO`, `LOOM_REPO`, or `VELVET_REPO` to use existing
 checkouts. Set `Z3_BIN` and `CVC5_BIN` to executable paths when they are not on
 `PATH`.
 
@@ -254,8 +254,8 @@ The script creates detached worktrees for:
 
 - the pinned auto, Duper, and Crush Loom revisions;
 - the pinned auto, Duper, and Crush Velvet revisions;
-- the LeanHammer checkout's `duper-only`, `auto-duper`, `crush-only`,
-  `aesop-auto-duper`, and `aesop-crush` profiles.
+- one per Curated branch that a requested lane needs, kept under
+  `CURATED_TREES` between runs because each carries its own Lake build.
 
 Cashmere is benchmarked from the Loom branches. No source checkout is modified.
 Set the corresponding `LOOM_*_REF` or `VELVET_*_REF` variable to compare
@@ -264,13 +264,13 @@ different commits. For less noisy timing, use at least `REPEATS=3`.
 Focused runs avoid rebuilding unrelated corpora:
 
 ```sh
-RUN_LEANHAMMER=false RUN_LOOM=false RUN_CASHMERE=false \
+RUN_CURATED=false RUN_LOOM=false RUN_CASHMERE=false \
   scripts/benchmark-corpora.sh
 
-RUN_LEANHAMMER=false RUN_LOOM=false RUN_VELVET=false \
+RUN_CURATED=false RUN_LOOM=false RUN_VELVET=false \
   scripts/benchmark-corpora.sh
 
-RUN_LEANHAMMER=false RUN_LOOM=false RUN_CASHMERE=false \
+RUN_CURATED=false RUN_LOOM=false RUN_CASHMERE=false \
 VELVET_CASES="Velvet/Examples/GCD.lean Velvet/Examples/IsSorted.lean" \
   scripts/benchmark-corpora.sh
 ```
@@ -278,10 +278,10 @@ VELVET_CASES="Velvet/Examples/GCD.lean Velvet/Examples/IsSorted.lean" \
 Use `RUN_AUTO=false`, `RUN_DUPER=false`, or `RUN_CRUSH=false` for selected
 backend profiling. Use
 `CRUSH_PROFILE=true` to include Crush's per-phase breakdown in logs. The standalone
-LeanHammer harness is:
+Curated harness is:
 
 ```sh
-REPEATS=3 scripts/benchmark-leanhammer.sh
+REPEATS=3 scripts/benchmark-curated.sh
 ```
 
 The PLean comparison is also self-provisioning:

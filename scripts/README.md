@@ -52,7 +52,7 @@ interpreter it tried and lists what it skipped.
 The harnesses clone pinned revisions into `BenchmarkResults/sources` and build
 every downstream package, so a fresh run needs network access but no manually
 prepared checkouts. Set `BENCHMARK_SOURCE_CACHE` to clone elsewhere, or point
-`HAMMER_REPO`, `LOOM_REPO`, `VELVET_REPO`, `PLEAN_AUTO_TREE`,
+`CURATED_REPO`, `LOOM_REPO`, `VELVET_REPO`, `PLEAN_AUTO_TREE`,
 `PLEAN_DUPER_TREE`, and `PLEAN_CRUSH_TREE` at existing ones.
 
 If a virtualenv is active, check `which -a z3`: a shadowed older z3 changes
@@ -86,7 +86,7 @@ BACKENDS=grind bash benchmark-coverage.sh --case_study Cashmere \
 
 | Argument | Meaning |
 |---|---|
-| `--case_study <all\|LeanHammer\|Velvet\|Cashmere\|PLean>` | Required |
+| `--case_study <all\|Curated\|Velvet\|Cashmere\|PLean>` | Required |
 | `--cases "<file> ..."` | Restrict to named files; needs a single `--case_study` |
 | `--resume <dir>` | Continue into an existing run directory |
 | `--figures_only <dir>` | Redraw a finished run, measuring nothing |
@@ -97,11 +97,55 @@ BACKENDS=grind bash benchmark-coverage.sh --case_study Cashmere \
 | `BACKENDS` | `crush auto duper grind lean-smt` |
 | `CRUSH_LANES` | `verify portfolio` |
 | `SMT_TREES` | unset; names a directory to keep lean-smt worktrees between runs |
+| `CURATED_TREES` | `BenchmarkResults/curated-trees`; one build per Curated branch, kept between runs |
 | `Z3_BIN`, `CVC5_BIN` | resolved from `PATH` |
 
 Drop the slowest lane with `BACKENDS="crush auto duper grind"`. Each lean-smt
 tree carries its corpus's Mathlib build plus lean-smt's, so `SMT_TREES` is worth
 setting if you will run it more than once.
+
+The Curated suite keeps one backend per branch of
+[Lean-SMT-Benchmarks](https://github.com/AD1024/Lean-SMT-Benchmarks), so that no
+backend's dependencies reach another's environment:
+
+| Branch | Lane |
+|---|---|
+| `main` | `grind-only` |
+| `auto` | `auto-smt` (lean-auto translating to SMT-LIB and querying cvc5) |
+| `duper` | `duper-only` |
+| `lean-smt` | `smt-only` |
+| `crush` | `crush-verify`, `crush-core`, `crush-alethe`, `crush-portfolio` |
+
+Each branch needs its own Lake build. They are kept under `CURATED_TREES`
+between runs; delete that directory to force a rebuild. The harness clones over
+SSH; set `CURATED_REPO_URL` to the `https://` form to clone anonymously, or
+`CURATED_REPO` to a checkout you already have.
+
+`--case_study Curated` measures that suite as part of the comparison. The
+recorded headline rows came from driving its harness directly, which is the
+same measurement without the other three corpora:
+
+```sh
+# Settings shared by all three Curated studies. Five seconds of solver or
+# saturation budget per VC, one million Lean heartbeats, one repeat -- coverage
+# is deterministic, timings are not (see "What reproduces"). The suite pulls in
+# no Mathlib, so there is no build cache to fetch.
+export CURATED_TREES=BenchmarkResults/curated-trees
+export REPEATS=1 SOLVER=cvc5 TIMEOUT=5 SMT_TIMEOUT=5 SMT_MONO=true
+export DUPER_TIMEOUT=5 MAX_HEARTBEATS=1000000 MAX_RECURSION_DEPTH=1000000
+export CRUSH_PROFILE=true USE_MATHLIB_CACHE=false
+
+PROFILES="crush-verify crush-portfolio smt-only grind-only duper-only auto-smt" \
+OUT_DIR=BenchmarkResults/curated-main \
+  bash scripts/benchmark-curated.sh
+```
+
+The first Curated run builds a Lake tree per branch and takes roughly half an
+hour. Later runs reuse those trees and take minutes, which is what
+`CURATED_TREES` is for, so keep it pointed at the same directory. The lean-smt branch
+fixes its solver configuration in its own harness, because lean-smt takes it as
+tactic syntax rather than as an option, so `SMT_TIMEOUT` and `SMT_MONO` must be
+left at 5 and `true` or the run refuses to start.
 
 ## 2. Draw the figures
 
@@ -155,6 +199,15 @@ bash benchmark-crush-modes.sh --plot_only <dir>
 reconstruction table is computed against the trusted lane, so `verify` must be
 present or the report comes out empty.
 
+The recorded Curated rows for this study, with the shared settings exported in
+step 1:
+
+```sh
+PROFILES="crush-verify crush-alethe crush-portfolio" \
+OUT_DIR=BenchmarkResults/curated-crush-modes \
+  bash scripts/benchmark-curated.sh
+```
+
 Crush against lean-smt on checked reconstruction. This is the slowest study,
 because each corpus needs a lean-smt tree carrying its own Mathlib build plus
 lean-smt's, so `--smt_trees` is worth passing:
@@ -175,6 +228,15 @@ RECONSTRUCTION_ROOT=BenchmarkResults/reconstruction-<timestamp> \
   bash scripts/render-paper-artifacts.sh
 ```
 
+The recorded Curated rows for this study. `crush-verify` is required here: it
+establishes the SMT-`unsat` cohort the replay columns are measured against.
+
+```sh
+PROFILES="crush-verify crush-alethe crush-portfolio smt-only" \
+OUT_DIR=BenchmarkResults/curated-reconstruction \
+  bash scripts/benchmark-curated.sh
+```
+
 To make a run the committed default, rebuild the archive with that study's
 directory replaced:
 
@@ -193,7 +255,7 @@ directories at its top level; the renderer passes each to the plotter.
 One backend on its own:
 
 ```sh
-bash benchmark.sh --case_study <all|LeanHammer|Velvet|Cashmere|PLean> \
+bash benchmark.sh --case_study <all|Curated|Velvet|Cashmere|PLean> \
   --with <crush|auto|duper|grind|lean-smt> [--smt_trees <dir>]
 bash benchmark.sh --case_study <one> --with <backend> --cases "<file> ..."
 bash benchmark.sh --case_study all --with crush --resume <dir>

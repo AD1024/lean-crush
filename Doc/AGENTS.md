@@ -97,7 +97,7 @@ fallback.
 | `Test/CaseStudies/` | Ported Lean-auto, Loom, Velvet, and Cashmere obligations |
 | `MathlibTest/` | Optional Mathlib integration package |
 | `Doc/Verso/` | Executable user manual and GitHub Pages build |
-| `scripts/` | Corpus and LeanHammer benchmark harnesses |
+| `scripts/` | Corpus and Curated benchmark harnesses |
 | `.github/workflows/` | Core CI and documentation deployment |
 
 `BenchmarkResults/` contains generated measurements. Do not commit benchmark

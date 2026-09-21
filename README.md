@@ -483,6 +483,11 @@ boundary is recorded rather than implied.
 Complete downstream integrations are available in the
 [Loom `crush-backend` branch](https://github.com/AD1024/loom/tree/crush-backend) and
 [Velvet `crush-backend` branch](https://github.com/AD1024/velvet/tree/crush-backend).
+
+The Curated suite -- twenty hand-written obligations over mixed theories, used
+as the fourth case study -- lives in
+[Lean-SMT-Benchmarks](https://github.com/AD1024/Lean-SMT-Benchmarks), one
+backend per branch.
 They show lean-crush wired into verification-condition generation and used on
 real array, arithmetic, and quantified proof obligations.
 
@@ -514,7 +519,7 @@ To measure one backend and case study on its own:
 
 ```sh
 bash benchmark.sh \
-  --case_study <all|LeanHammer|Velvet|Cashmere|PLean> \
+  --case_study <all|Curated|Velvet|Cashmere|PLean> \
   --with <crush|auto|duper|grind>
 ```
 
@@ -524,8 +529,8 @@ For example, run trusted Crush across all four case studies:
 bash benchmark.sh --case_study all --with crush
 ```
 
-[lean-smt](https://github.com/ufmg-smite/lean-smt) is a fifth backend. Only
-the pinned LeanHammer tree requires it already; for the other corpora the
+[lean-smt](https://github.com/ufmg-smite/lean-smt) is a fifth backend. The
+Curated suite carries it on its own `lean-smt` branch; for the other corpora the
 harness applies a recorded patch from
 [`scripts/patches`](scripts/patches) that adds the dependency to the pinned
 revision, then verifies that resolving it moved nothing else:
@@ -583,7 +588,7 @@ bash benchmark-crush-modes.sh \
   --resume BenchmarkResults/crush-modes-<timestamp>
 
 bash benchmark-reconstruction.sh \
-  --case_study LeanHammer \
+  --case_study Curated \
   --resume BenchmarkResults/reconstruction-<timestamp>
 ```
 
@@ -597,7 +602,7 @@ completed result directory:
 python3 -m pip install matplotlib
 
 python3 scripts/plot-time-coverage.py \
-  BenchmarkResults/reproduction-<timestamp>-<backend>/leanhammer \
+  BenchmarkResults/reproduction-<timestamp>-<backend>/curated \
   --out-dir BenchmarkResults/figures
 ```
 

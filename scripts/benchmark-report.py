@@ -18,7 +18,7 @@ RECONSTRUCTION_LANES = (
     "crush-portfolio",
 )
 
-# lean-smt's lane in the LeanHammer harness. It translates the goal, calls
+# lean-smt's lane in the Curated harness. It translates the goal, calls
 # cvc5, and replays the Alethe certificate in Lean, so it is comparable with
 # Crush's strict Alethe lane and with the reconstruction portfolio.
 SMT_LANE = "smt-only"
@@ -274,9 +274,9 @@ def canonical_crush_lane(lanes: set[str]) -> Optional[str]:
 
 def headline_lane_map(suite: str, lanes: set[str]) -> list[tuple[str, str]]:
     selected: list[tuple[str, str]] = []
-    if suite == "leanhammer":
+    if suite == "curated":
         candidates = (
-            ("auto", "auto-duper"),
+            ("auto", "auto-smt"),
             ("duper", "duper-only"),
         )
         grind_lane = "grind-only"

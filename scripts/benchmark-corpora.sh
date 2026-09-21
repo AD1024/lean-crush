@@ -7,11 +7,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CRUSH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/benchmark-common.sh"
 
-HAMMER_REPO="${HAMMER_REPO:-}"
+CURATED_REPO="${CURATED_REPO:-}"
 LOOM_REPO="${LOOM_REPO:-}"
 VELVET_REPO="${VELVET_REPO:-}"
 
-HAMMER_REPO_URL="${HAMMER_REPO_URL:-https://github.com/AD1024/LeanHammer.git}"
 LOOM_REPO_URL="${LOOM_REPO_URL:-https://github.com/AD1024/loom.git}"
 VELVET_REPO_URL="${VELVET_REPO_URL:-https://github.com/AD1024/velvet.git}"
 BENCHMARK_SOURCE_CACHE="${BENCHMARK_SOURCE_CACHE:-$CRUSH_ROOT/BenchmarkResults/sources}"
@@ -25,8 +24,7 @@ VELVET_DUPER_TREE="${VELVET_DUPER_TREE:-}"
 LOOM_SMT_TREE="${LOOM_SMT_TREE:-}"
 VELVET_SMT_TREE="${VELVET_SMT_TREE:-}"
 
-HAMMER_REF="${HAMMER_REF:-df4dd13671412591d678eada250b04c030fd4d40}"
-HAMMER_PROFILES="${HAMMER_PROFILES:-}"
+CURATED_PROFILES="${CURATED_PROFILES:-}"
 LOOM_AUTO_REF="${LOOM_AUTO_REF:-78928abc9054b31d0bea85985496490baae95244}"
 LOOM_CRUSH_REF="${LOOM_CRUSH_REF:-ec16b95ff8bbd047248de031cabd3160847e4b1b}"
 LOOM_DUPER_REF="${LOOM_DUPER_REF:-616f9cd8db660dcd74a1c92b0d19bb50420e1c59}"
@@ -58,7 +56,7 @@ SMT_MONO="${SMT_MONO:-true}"
 # runs: each is created from the pinned revision on first use and reused
 # afterwards. Unset means temporary worktrees, rebuilt every run.
 SMT_TREE_ROOT="${SMT_TREE_ROOT:-}"
-# Shared with scripts/benchmark-leanhammer.sh so both harnesses normalize
+# Shared with scripts/benchmark-curated.sh so both harnesses normalize
 # into the same `lean-smt` headline row.
 SMT_LANE="smt-only"
 
@@ -66,12 +64,12 @@ RUN_AUTO="${RUN_AUTO:-true}"
 RUN_CRUSH="${RUN_CRUSH:-true}"
 RUN_DUPER="${RUN_DUPER:-true}"
 RUN_GRIND="${RUN_GRIND:-true}"
-# Only the pinned LeanHammer tree requires lean-smt already. Loom, Cashmere,
+# Only the pinned Curated tree requires lean-smt already. Loom, Cashmere,
 # and Velvet do not, so this lane adds the dependency to the corpus it
 # measures (see `provision_smt_tree`). Off by default because that mutates
 # the tree's lakefile and manifest.
 RUN_SMT="${RUN_SMT:-false}"
-RUN_LEANHAMMER="${RUN_LEANHAMMER:-true}"
+RUN_CURATED="${RUN_CURATED:-true}"
 RUN_LOOM="${RUN_LOOM:-true}"
 RUN_CASHMERE="${RUN_CASHMERE:-true}"
 RUN_VELVET="${RUN_VELVET:-true}"
@@ -483,7 +481,7 @@ private def smtBenchContains (text needle : String) : Bool :=
   (text.splitOn needle).length > 1
 
 /-- Classify a lean-smt diagnostic with the shared reconstruction vocabulary.
-Kept identical to the LeanHammer lane so one taxonomy covers every corpus. -/
+Kept identical to the Curated lane so one taxonomy covers every corpus. -/
 private def smtBenchOutcome (message : String) : String × String :=
   let text := message.toLower
   if smtBenchContains text "either it is false" ||
@@ -1041,17 +1039,11 @@ if ! (cd "$CRUSH_ROOT" && lake build Crush) \
   die "local Crush build failed"
 fi
 
-if is_true "$RUN_LEANHAMMER"; then
-  if [[ -z "$HAMMER_REPO" ]]; then
-    hammer_source="$(benchmark_ensure_repo "LeanHammer" "$HAMMER_REPO_URL" \
-      "$HAMMER_REF" "$BENCHMARK_SOURCE_CACHE/LeanHammer")" ||
-      die "failed to provision LeanHammer"
-    add_worktree "$hammer_source" "$HAMMER_REF" "leanhammer"
-    HAMMER_REPO="$ADDED_WORKTREE"
-  else
-    HAMMER_REPO="$(cd "$HAMMER_REPO" && pwd)"
-  fi
-  check_repo "$HAMMER_REPO" "LeanHammer"
+if is_true "$RUN_CURATED" && [[ -n "$CURATED_REPO" ]]; then
+  # The suite keeps one backend per branch and builds a tree for each, so it
+  # provisions itself. Only a caller-supplied checkout is resolved here.
+  CURATED_REPO="$(cd "$CURATED_REPO" && pwd)"
+  check_repo "$CURATED_REPO" "Curated"
 fi
 if is_true "$RUN_LOOM" || is_true "$RUN_CASHMERE"; then
   loom_need_auto=false
@@ -1242,43 +1234,44 @@ if is_true "$legacy_checkpoints"; then
     "$RUNS" >> "$CHECKPOINTS"
 fi
 
-if is_true "$RUN_LEANHAMMER"; then
-  printf 'Running LeanHammer focused suite\n'
-  hammer_out="$OUT_DIR/leanhammer"
-  if [[ -z "$HAMMER_PROFILES" ]]; then
-    hammer_profiles=()
+if is_true "$RUN_CURATED"; then
+  printf 'Running Curated focused suite\n'
+  curated_out="$OUT_DIR/curated"
+  if [[ -z "$CURATED_PROFILES" ]]; then
+    curated_profiles=()
     if is_true "$RUN_AUTO"; then
-      hammer_profiles+=("auto-duper")
+      curated_profiles+=("auto-smt")
     fi
     if is_true "$RUN_DUPER"; then
-      hammer_profiles+=("duper-only")
+      curated_profiles+=("duper-only")
     fi
     if is_true "$RUN_CRUSH"; then
       for lane in "${CRUSH_LANES[@]}"; do
-        hammer_profiles+=("$lane")
+        curated_profiles+=("$lane")
       done
     fi
     if is_true "$RUN_SMT"; then
-      hammer_profiles+=("smt-only")
+      curated_profiles+=("smt-only")
     fi
     if is_true "$RUN_GRIND"; then
-      hammer_profiles+=("grind-only")
+      curated_profiles+=("grind-only")
     fi
-    HAMMER_PROFILES="${hammer_profiles[*]}"
+    CURATED_PROFILES="${curated_profiles[*]}"
   fi
-  if HAMMER_REPO="$HAMMER_REPO" REPEATS="$REPEATS" OUT_DIR="$hammer_out" \
+  if CURATED_REPO="$CURATED_REPO" CURATED_TREES="${CURATED_TREES:-$CRUSH_ROOT/BenchmarkResults/curated-trees}" \
+      REPEATS="$REPEATS" OUT_DIR="$curated_out" \
       RESUME="$RESUME" \
-      PROFILES="$HAMMER_PROFILES" \
+      PROFILES="$CURATED_PROFILES" \
       SOLVER="$SOLVER" TIMEOUT="$TIMEOUT" DUPER_TIMEOUT="$DUPER_TIMEOUT" \
       MAX_HEARTBEATS="$MAX_HEARTBEATS" CRUSH_PROFILE="$CRUSH_PROFILE" \
       MAX_RECURSION_DEPTH="$MAX_RECURSION_DEPTH" \
       SMT_TIMEOUT="${SMT_TIMEOUT:-$TIMEOUT}" SMT_MONO="${SMT_MONO:-true}" \
-      "$CRUSH_ROOT/scripts/benchmark-leanhammer.sh" \
-      > "$OUT_DIR/leanhammer.log" 2>&1; then
-    tail -n 12 "$OUT_DIR/leanhammer.log"
+      "$CRUSH_ROOT/scripts/benchmark-curated.sh" \
+      > "$OUT_DIR/curated.log" 2>&1; then
+    tail -n 12 "$OUT_DIR/curated.log"
   else
-    tail -n 80 "$OUT_DIR/leanhammer.log" >&2
-    die "LeanHammer benchmark failed"
+    tail -n 80 "$OUT_DIR/curated.log" >&2
+    die "Curated benchmark failed"
   fi
 fi
 

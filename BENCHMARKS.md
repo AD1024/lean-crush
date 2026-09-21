@@ -22,12 +22,12 @@ been refreshed to this measurement.
 
 | Corpus | Backend | Solved / total | Coverage | Total (s) | Avg (ms) | Min (ms) | Max (ms) |
 |---|---|---:|---:|---:|---:|---:|---:|
-| LeanHammer | Auto | 8 / 20 | 40.0% | 3.240 | 162.0 | 2.0 | 1,317.0 |
-| LeanHammer | Duper | 12 / 20 | 60.0% | 19.348 | 967.4 | 43.0 | 15,745.0 |
-| LeanHammer | lean-smt | 12 / 20 | 60.0% | 1.873 | 93.7 | 50.0 | 144.0 |
-| LeanHammer | Crush (SMT trusted) | 19 / 20 | 95.0% | 11.568 | 578.4 | 3.0 | 5,399.0 |
-| LeanHammer | Crush (kernel-checked) | 19 / 20 | 95.0% | 13.754 | 687.7 | 3.0 | 5,451.0 |
-| LeanHammer | `grind` | 16 / 20 | 80.0% | 0.074 | 3.7 | 0.0 | 13.0 |
+| Curated | Auto | 17 / 20 | 85.0% | 5.401 | 270.1 | 30.0 | 336.0 |
+| Curated | Duper | 12 / 20 | 60.0% | 20.939 | 1,047.0 | 54.0 | 16,635.0 |
+| Curated | lean-smt | 12 / 20 | 60.0% | 1.814 | 90.7 | 48.0 | 152.0 |
+| Curated | Crush (SMT trusted) | 19 / 20 | 95.0% | 9.209 | 460.5 | 4.0 | 5,284.0 |
+| Curated | Crush (kernel-checked) | 19 / 20 | 95.0% | 11.629 | 581.5 | 4.0 | 5,273.0 |
+| Curated | `grind` | 16 / 20 | 80.0% | 0.093 | 4.7 | 0.0 | 15.0 |
 | Loom | Auto | 4 / 4 | 100.0% | 0.974 | 243.5 | 44.0 | 607.0 |
 | Loom | Duper | 1 / 4 | 25.0% | 0.454 | 113.5 | 36.0 | 174.0 |
 | Loom | Crush (SMT trusted) | 4 / 4 | 100.0% | 0.418 | 104.5 | 53.0 | 139.0 |
@@ -68,10 +68,12 @@ the [reconstruction report](#reconstruction) currently applies an additional
 profiler-outcome filter and reports 688. The four-VC discrepancy is explained
 there.
 
-`Auto` is the host project's lean-auto backend. In LeanHammer, its lane is the
-Auto translation and monomorphization pipeline feeding Duper. `Duper` invokes
-Duper directly after host preprocessing. PLean bounds Duper at one second of
-saturation and 20,000 heartbeats per VC, but does not cap the generated file,
+`Auto` is the host project's lean-auto backend. On the curated suite it is
+lean-auto invoked directly: its translation and monomorphization pipeline, with
+Duper bound as the prover for the residual first-order goal.
+`Duper` invokes Duper directly after host preprocessing. PLean bounds Duper at
+one second of saturation and 20,000 heartbeats per VC, but does not cap the
+generated file,
 so all 192 VCs receive an attempt. `grind` is Lean's kernel-checked tactic.
 `lean-smt` is [ufmg-smite/lean-smt](https://github.com/ufmg-smite/lean-smt),
 which unlike the trusted Crush lane returns a checked Lean proof or nothing.
@@ -94,12 +96,12 @@ Commit `c4cb643` leaves the default trusted pre-SMT behavior unchanged.
 Differences between single runs near the solver time cap should not be
 attributed to that change alone.
 
-Across the 250 VCs where the two lanes were compared directly on LeanHammer,
+Across the 250 VCs where the two lanes were compared directly on Curated,
 Cashmere, and PLean, there is no VC that lean-smt closes and Crush does not;
 lean-smt's solved set is a strict subset of Crush's.
 
 The published figures omit Loom, whose four VCs are too few for a coverage bar
-or curve to carry a percentage, so they report LeanHammer, Cashmere, Velvet,
+or curve to carry a percentage, so they report Curated, Cashmere, Velvet,
 and PLean. The tables above and the recorded TSVs keep all five corpora; pass
 `--exclude-suite loom` to reproduce the figure set.
 
@@ -121,12 +123,12 @@ retained inputs in `scripts/benchmark-data`.
 
 | Corpus | Backend | Success | Translation error | Timeout | Failed to prove | Total |
 |---|---|---:|---:|---:|---:|---:|
-| LeanHammer | Auto | 8 | 1 | 0 | 11 | 20 |
-| LeanHammer | Duper | 12 | 0 | 1 | 7 | 20 |
-| LeanHammer | lean-smt | 12 | 5 | 0 | 3 | 20 |
-| LeanHammer | Crush (SMT trusted) | 19 | 0 | 1 | 0 | 20 |
-| LeanHammer | Crush (kernel-checked) | 19 | 0 | 1 | 0 | 20 |
-| LeanHammer | `grind` | 16 | 0 | 0 | 4 | 20 |
+| Curated | Auto | 17 | 3 | 0 | 0 | 20 |
+| Curated | Duper | 12 | 0 | 1 | 7 | 20 |
+| Curated | lean-smt | 12 | 5 | 0 | 3 | 20 |
+| Curated | Crush (SMT trusted) | 19 | 0 | 1 | 0 | 20 |
+| Curated | Crush (kernel-checked) | 19 | 0 | 1 | 0 | 20 |
+| Curated | `grind` | 16 | 0 | 0 | 4 | 20 |
 | Loom | Auto | 4 | 0 | 0 | 0 | 4 |
 | Loom | Duper | 1 | 0 | 0 | 3 | 4 |
 | Loom | Crush (SMT trusted) | 4 | 0 | 0 | 0 | 4 |
@@ -161,10 +163,10 @@ exhausted proof search, reconstruction failure, and other tactic errors.
 
 | Corpus | Baseline | Matched | Baseline only | Crush only | Both | Neither | Baseline avg (ms) | Crush avg (ms) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| LeanHammer | Auto | 20 | 0 | 11 | 8 | 1 | 293.6 | 363.4 |
-| LeanHammer | Duper | 20 | 1 | 8 | 11 | 0 | 76.9 | 338.3 |
-| LeanHammer | lean-smt | 20 | 0 | 7 | 12 | 1 | 102.1 | 342.3 |
-| LeanHammer | `grind` | 20 | 0 | 3 | 16 | 1 | 4.4 | 333.8 |
+| Curated | Auto | 20 | 0 | 2 | 17 | 1 | 305.6 | 212.1 |
+| Curated | Duper | 20 | 1 | 8 | 11 | 0 | 95.4 | 208.4 |
+| Curated | lean-smt | 20 | 0 | 7 | 12 | 1 | 101.1 | 212.2 |
+| Curated | `grind` | 20 | 0 | 3 | 16 | 1 | 5.6 | 210.8 |
 | Loom | Auto | 4 | 0 | 0 | 4 | 0 | 243.5 | 104.5 |
 | Loom | Duper | 4 | 0 | 3 | 1 | 0 | 36.0 | 53.0 |
 | Loom | `grind` | 4 | 0 | 0 | 4 | 0 | 12.0 | 104.5 |
@@ -197,11 +199,11 @@ not zero. Loom is absent.
 
 | Corpus | Verify solved / total | Portfolio checked (reported) / total | SMT cohort / verify solved | Core / SMT cohort | Alethe / SMT cohort | Portfolio / SMT cohort |
 |---|---:|---:|---:|---:|---:|---:|
-| LeanHammer | 19 / 20 | 19 / 20 | 15 / 19 | — | 11 / 15 | 15 / 15 |
+| Curated | 19 / 20 | 19 / 20 | 15 / 19 | — | 12 / 15 | 15 / 15 |
 | Cashmere | 38 / 38 | 38 / 38 | 23 / 38 | — | 0 / 23 | 23 / 23 |
 | Velvet | 478 / 504 | 472 / 504 | 293 / 478 | — | 26 / 293 | 287 / 293 |
 | PLean | 174 / 192 | 159 / 192 | 172 / 174 | — | 0 / 172 | 157 / 172 |
-| **Total** | **709 / 754** | **688 / 754** | **503 / 709** | — | **37 / 503** | **482 / 503** |
+| **Total** | **709 / 754** | **688 / 754** | **503 / 709** | — | **38 / 503** | **482 / 503** |
 
 `Verify solved` counts all trusted-lane successes, including selected facts
 and early checked closures. `SMT cohort` includes only those successes with a
@@ -234,9 +236,8 @@ need not have followed the same route in the checked lane.
 
 | Corpus | Lane | Reported failure mode | SMT-cohort VCs |
 |---|---|---|---:|
-| LeanHammer | Alethe | `certificate-error` | 2 |
-| LeanHammer | Alethe | `rule-gap` | 1 |
-| LeanHammer | Alethe | `term-gap` | 1 |
+| Curated | Alethe | `certificate-error` | 2 |
+| Curated | Alethe | `term-gap` | 1 |
 | Cashmere | Alethe | `certificate-error` | 23 |
 | Velvet | Alethe | `certificate-error` | 236 |
 | Velvet | Alethe | `rule-gap` | 22 |
@@ -266,7 +267,7 @@ same matching rule the [Aligned VCs](#aligned-vcs) table uses. Produce it
 with:
 
 ```sh
-bash benchmark-reconstruction.sh --case_study LeanHammer
+bash benchmark-reconstruction.sh --case_study Curated
 ```
 
 It reports two distinct measures per lane. `Checked proof / matched` counts
@@ -299,7 +300,7 @@ commit.
 The same measurements also drive `reconstruction-over-time.svg`, which plots
 reconstructed VCs against tactic-local time over the matched cohort.
 
-Only LeanHammer's pinned revision already requires lean-smt. Cashmere, Velvet,
+Only the Curated suite's pinned revision already requires lean-smt. Cashmere, Velvet,
 and PLean get it from a recorded patch under
 [`scripts/patches`](scripts/patches), applied to a checkout of the same pinned
 revision the run measures: the patch adds `require Smt`, and for PLean also
@@ -313,13 +314,13 @@ corpus here pins v4.32.2. The exact commands are in the
 
 ### lean-smt
 
-Measured on 2026-09-03 in one LeanHammer run whose five headline lanes and
+Measured on 2026-09-03 in one Curated run whose five headline lanes and
 four Crush reconstruction lanes share the same 20 VC identities, verified with
 `--require-uniform-headline`. It is reported separately from the tables above
 because it is a different measurement: lean-crush at `5408ea4` with a dirty
-working tree, lean-smt at `e5025665`, LeanHammer at `df4dd136`, cvc5 1.3.4,
+working tree, lean-smt at `e5025665`, the suite at `df4dd136`, cvc5 1.3.4,
 `SMT_TIMEOUT=5`, `SMT_MONO=true`. Its Auto, Duper, Crush, and `grind` coverage
-reproduces the recorded LeanHammer numbers exactly (8, 12, 19, and 16 of 20).
+reproduces the recorded Curated numbers exactly (8, 12, 19, and 16 of 20).
 
 | Backend | Solved / total | Coverage | Avg (ms) | Min (ms) | Max (ms) |
 |---|---:|---:|---:|---:|---:|
@@ -367,9 +368,9 @@ scaling or phase tables.
 
 | Corpus | Lane | Accounted (s) | Largest profiler phases |
 |---|---|---:|---|
-| LeanHammer | Verify | 11.519 | solve 98.0%, translate 1.0%, pre-reconstruct 0.6% |
-| LeanHammer | Alethe | 15.184 | solve 85.5%, replay 13.1%, translate 0.9% |
-| LeanHammer | Portfolio | 13.693 | solve 84.7%, replay 13.0%, translate 0.8% |
+| Curated | Verify | 9.390 | solve 97.5%, translate 1.2%, pre-reconstruct 0.7% |
+| Curated | Alethe | 12.493 | solve 80.5%, replay 17.8%, translate 1.1% |
+| Curated | Portfolio | 11.367 | solve 79.5%, replay 17.6%, translate 1.0% |
 | Cashmere | Verify | 18.686 | solve 67.5%, instantiate 29.0%, translate 2.3% |
 | Cashmere | Alethe | 23.356 | solve 69.9%, instantiate 27.6%, translate 2.2% |
 | Cashmere | Portfolio | 19.540 | solve 65.1%, instantiate 28.6%, reconstruct 3.0% |
@@ -388,7 +389,7 @@ mean, minimum, maximum, and percentage for every phase.
 
 | Corpus | Replayed VCs | Commands | Replay time (ms) | Pearson r | R-squared | ms / 100 commands |
 |---|---:|---:|---:|---:|---:|---:|
-| LeanHammer | 13 | 3-231 | 4.9-951.4 | 0.9141 | 0.8356 | 326.4 |
+| Curated | 14 | 3-231 | 5.8-935.2 | 0.9253 | 0.8562 | 330.4 |
 | Velvet | 27 | 10-275 | 23.6-1,335.2 | 0.7110 | 0.5055 | 351.5 |
 
 Each point is one successful strict Alethe replay, averaged by VC across
@@ -399,16 +400,19 @@ replay samples; their strict-lane successes closed before replay.
 
 ## Configuration
 
-The main corpus and LeanHammer lanes use a five-second solver or saturation
-limit and one million Lean heartbeats per VC. PLean uses the same Crush timeout
-and heartbeat budget, disables Crush ground-instantiation fuel, and uses the
-bounded Duper settings described above. Builds and imports are excluded from
-tactic-local timing. The measurements were collected on Apple Silicon arm64
+The main corpus and Curated lanes use a five-second solver or saturation
+limit and one million Lean heartbeats per VC. The exact invocations that
+produced the Curated rows -- one per study, with every environment variable
+they were run with -- are in the
+[script guide](scripts/README.md#3a-reproducing-the-recorded-curated-measurements).
+PLean uses the same Crush timeout and heartbeat budget, disables Crush
+ground-instantiation fuel, and uses the bounded Duper settings described above.
+Builds and imports are excluded from tactic-local timing. The measurements were collected on Apple Silicon arm64
 running macOS 26.6 with Z3 4.15.4 and cvc5 1.3.4.
 
 | Component | Auto revision | Duper revision | Crush / `grind` revision |
 |---|---|---|---|
-| LeanHammer | `df4dd13671412591d678eada250b04c030fd4d40` | same tree | same tree |
+| Curated[^lift] | `e4f8b0c` (`auto`) | `57b04df` (`duper`) | `8422791` (`crush`), `cda392a` (`main`) |
 | Loom and Cashmere | `78928abc9054b31d0bea85985496490baae95244` | `616f9cd8db660dcd74a1c92b0d19bb50420e1c59` | `ec16b95ff8bbd047248de031cabd3160847e4b1b` |
 | Velvet | `d254391d5e84546f96576e5b67dfb6bafe9fc301` | `5a1180338958908323a921255a8d158cf1f26c95` | `e90d79341bb8ef510ec868623e74cfe98feaa4e8` |
 | PLean | `be39726723e71f9aa1e02c6cfeeae9b0c31b8947` | `3557f1f0fa5246ee88fcde3776f3973349049968` | `9c098b4c5ad32faf2a022929b6726d2a182a9e1d` |
@@ -427,3 +431,12 @@ replace metadata, so older `main` metadata must not be used to identify the
 refreshed Crush build. Baselines, Loom, and the archived cross-tool comparison
 retain their original revisions; see the
 [dataset README](scripts/benchmark-data/README.md) for the source mapping.
+
+[^lift]: The curated suite keeps one backend per branch of
+    [Lean-SMT-Benchmarks](https://github.com/AD1024/Lean-SMT-Benchmarks), so a
+    revision names a branch tip rather than one commit the whole suite shares.
+    The `lean-smt` lane is measured on the `lean-smt` branch at `ecd10eb`.
+    Nothing in the suite depends on LeanHammer: the cases previously lived in a
+    fork of it, which made them read as LeanHammer's own benchmark, and the
+    `Auto` row is now lean-auto invoked directly rather than through the
+    `hammer` tactic.

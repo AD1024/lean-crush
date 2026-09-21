@@ -15,7 +15,7 @@ csv.field_size_limit(sys.maxsize)
 
 LANE_LABELS = {
     "auto": "Auto",
-    "auto-duper": "Auto + Duper",
+    "auto-smt": "Auto + SMT",
     "duper": "Duper",
     "duper-only": "Duper",
     "grind": "grind",
@@ -43,18 +43,18 @@ BACKEND_LABELS = {
 BACKEND_ORDER = ("auto", "duper", "lean-smt", "crush", "grind", "crush-checked")
 
 SUITE_LABELS = {
-    "leanhammer": "LeanHammer",
+    "curated": "Curated",
     "loom": "Loom",
     "cashmere": "Cashmere",
     "velvet": "Velvet",
     "plean": "PLean",
 }
 
-SUITE_ORDER = ("leanhammer", "loom", "cashmere", "velvet", "plean")
+SUITE_ORDER = ("curated", "loom", "cashmere", "velvet", "plean")
 
 # Suites the published figures and tables leave out. Loom contributes four VCs,
 # too few for a coverage curve or a meaningful percentage, so the paper reports
-# LeanHammer, Cashmere, Velvet, and PLean. The recorded TSVs keep every suite.
+# Curated, Cashmere, Velvet, and PLean. The recorded TSVs keep every suite.
 PAPER_EXCLUDED_SUITES = ("loom",)
 
 # Okabe-Ito, the colourblind-safe qualitative palette, picked for maximum hue
@@ -80,7 +80,7 @@ OUTCOME_FIELDS = (
 
 LANE_ORDER = (
     "auto",
-    "auto-duper",
+    "auto-smt",
     "duper",
     "duper-only",
     "smt-only",
@@ -98,7 +98,7 @@ LANE_ORDER = (
 # they are the maximally separated triple.
 LANE_COLORS = {
     "auto": "#E69F00",
-    "auto-duper": "#E69F00",
+    "auto-smt": "#E69F00",
     "duper": "#CC79A7",
     "duper-only": "#CC79A7",
     "smt-only": "#009E73",
@@ -252,6 +252,16 @@ def lane_sort_key(lane: str) -> tuple[int, str]:
 
 def label_lane(lane: str) -> str:
     return LANE_LABELS.get(lane, lane)
+
+
+def phase_sort_key(phase: str) -> tuple[int, str]:
+    """Pipeline order, so a stacked bar reads left to right as time flows.
+
+    `PHASE_COLORS` is declared in that order; anything unrecognised sorts after
+    it by name rather than being dropped.
+    """
+    names = list(PHASE_COLORS)
+    return (names.index(phase) if phase in names else len(names), phase)
 
 
 def label_backend(backend: str) -> str:
@@ -1079,15 +1089,7 @@ def plot_phases(rows: list[dict[str, str]], path: Path) -> None:
     for row in rows:
         grouped[(row["suite"], row["lane"])].append(row)
     keys = sorted(grouped, key=lambda key: (key[0], lane_sort_key(key[1])))
-    phases = sorted(
-        {row["phase"] for row in rows},
-        key=lambda phase: (
-            list(PHASE_COLORS).index(phase)
-            if phase in PHASE_COLORS
-            else len(PHASE_COLORS),
-            phase,
-        ),
-    )
+    phases = sorted({row["phase"] for row in rows}, key=phase_sort_key)
     phase_colors = {
         phase: PHASE_COLORS.get(
             phase, FAILURE_COLORS[index % len(FAILURE_COLORS)]

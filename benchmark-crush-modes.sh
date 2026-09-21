@@ -8,9 +8,9 @@ usage() {
   cat <<'EOF'
 Usage:
   bash benchmark-crush-modes.sh \
-    --case_study <all|LeanHammer|Velvet|Cashmere|PLean>
+    --case_study <all|Curated|Velvet|Cashmere|PLean>
   bash benchmark-crush-modes.sh \
-    --case_study <all|LeanHammer|Velvet|Cashmere|PLean> \
+    --case_study <all|Curated|Velvet|Cashmere|PLean> \
     --resume <result-directory>
   bash benchmark-crush-modes.sh --plot_only <result-directory>
 EOF
@@ -81,7 +81,7 @@ if [[ -n "$plot_only" ]]; then
   if [[ -f "$plot_only/measurements.tsv" ]]; then
     result_dirs+=("$plot_only")
   else
-    for name in leanhammer corpora velvet cashmere plean; do
+    for name in curated corpora velvet cashmere plean; do
       if [[ -f "$plot_only/$name/measurements.tsv" ]]; then
         result_dirs+=("$plot_only/$name")
       fi
@@ -96,7 +96,7 @@ fi
 
 case "$case_study" in
   all) case_study="all" ;;
-  LeanHammer|leanhammer) case_study="LeanHammer" ;;
+  Curated|curated) case_study="Curated" ;;
   Velvet|velvet) case_study="Velvet" ;;
   Cashmere|cashmere) case_study="Cashmere" ;;
   PLean|plean) case_study="PLean" ;;
@@ -116,15 +116,16 @@ else
 fi
 result_dirs=()
 
-run_leanhammer() {
-  local out="$result_root/leanhammer"
+run_curated() {
+  local out="$result_root/curated"
   # Same lane selection as the corpora and PLean legs, spelled the way
-  # benchmark-leanhammer.sh names its profiles. Unquoted on purpose: CRUSH_MODES is a
+  # benchmark-curated.sh names its profiles. Unquoted on purpose: CRUSH_MODES is a
   # space-separated list and each word becomes one profile.
   local profiles
   # shellcheck disable=SC2086
   profiles="$(printf 'crush-%s ' $CRUSH_MODES)"
   PROFILES="${profiles% }" \
+  CURATED_TREES="${CURATED_TREES:-$ROOT/BenchmarkResults/curated-trees}" \
   REPEATS=1 \
   SOLVER=cvc5 \
   TIMEOUT=5 \
@@ -134,7 +135,7 @@ run_leanhammer() {
   USE_MATHLIB_CACHE=true \
   RESUME="$resume" \
   OUT_DIR="$out" \
-    "$ROOT/scripts/benchmark-leanhammer.sh"
+    "$ROOT/scripts/benchmark-curated.sh"
   result_dirs+=("$out")
 }
 
@@ -143,7 +144,7 @@ run_corpora() {
   local run_velvet="$2"
   local out_name="$3"
   local out="$result_root/$out_name"
-  RUN_LEANHAMMER=false \
+  RUN_CURATED=false \
   RUN_LOOM=false \
   RUN_CASHMERE="$run_cashmere" \
   RUN_VELVET="$run_velvet" \
@@ -194,8 +195,8 @@ if [[ "$resume" == "true" ]]; then
 fi
 
 case "$case_study" in
-  LeanHammer)
-    run_leanhammer
+  Curated)
+    run_curated
     ;;
   Velvet)
     run_corpora false true velvet
@@ -207,7 +208,7 @@ case "$case_study" in
     run_plean
     ;;
   all)
-    run_leanhammer
+    run_curated
     run_corpora true true corpora
     run_plean
     ;;

@@ -7,18 +7,18 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
-  bash benchmark.sh --case_study <all|LeanHammer|Velvet|Cashmere|PLean> \
+  bash benchmark.sh --case_study <all|Curated|Velvet|Cashmere|PLean> \
     --with <crush|auto|duper|grind>
-  bash benchmark.sh --case_study <all|LeanHammer|Velvet|Cashmere|PLean> \
+  bash benchmark.sh --case_study <all|Curated|Velvet|Cashmere|PLean> \
     --with <crush|auto|duper|grind> --resume <result-directory>
-  bash benchmark.sh --case_study <all|LeanHammer|Velvet|Cashmere|PLean> \
+  bash benchmark.sh --case_study <all|Curated|Velvet|Cashmere|PLean> \
     --with lean-smt [--smt_trees <directory>]
-  bash benchmark.sh --case_study <LeanHammer|Velvet|Cashmere|PLean> \
+  bash benchmark.sh --case_study <Curated|Velvet|Cashmere|PLean> \
     --with <backend> --cases "<file> <file> ..."
   bash benchmark.sh --plot_only <result-directory> \
     [--exclude_suite <corpus>]
 
---with lean-smt measures ufmg-smite/lean-smt. Only the pinned LeanHammer tree
+--with lean-smt measures ufmg-smite/lean-smt. Only the pinned Curated tree
 requires it already; for Velvet, Cashmere, and PLean the harness applies a
 recorded patch from scripts/patches that adds the dependency (and, for PLean,
 substitutes the backend inside its tactic module), then resolves it with
@@ -147,7 +147,7 @@ if [[ -n "$plot_only" ]]; then
   if [[ -f "$plot_only/measurements.tsv" ]]; then
     result_dirs+=("$plot_only")
   else
-    for name in leanhammer corpora velvet cashmere plean; do
+    for name in curated corpora velvet cashmere plean; do
       if [[ -f "$plot_only/$name/measurements.tsv" ]]; then
         result_dirs+=("$plot_only/$name")
       fi
@@ -162,7 +162,7 @@ fi
 
 case "$case_study" in
   all) case_study="all" ;;
-  LeanHammer|leanhammer) case_study="LeanHammer" ;;
+  Curated|curated) case_study="Curated" ;;
   Velvet|velvet) case_study="Velvet" ;;
   Cashmere|cashmere) case_study="Cashmere" ;;
   PLean|plean) case_study="PLean" ;;
@@ -184,19 +184,19 @@ run_crush=false
 run_grind=false
 run_smt=false
 case "$backend" in
-  auto) run_auto=true; leanhammer_profile="auto-duper" ;;
-  duper) run_duper=true; leanhammer_profile="duper-only" ;;
+  auto) run_auto=true; curated_profile="auto-smt" ;;
+  duper) run_duper=true; curated_profile="duper-only" ;;
   crush)
     run_crush=true
-    # LeanHammer names lanes where the others name modes.
-    leanhammer_profile="$(printf 'crush-%s ' $CRUSH_LANES)"
-    leanhammer_profile="${leanhammer_profile% }"
+    # The curated suite names lanes where the others name modes.
+    curated_profile="$(printf 'crush-%s ' $CRUSH_LANES)"
+    curated_profile="${curated_profile% }"
     ;;
-  grind) run_grind=true; leanhammer_profile="grind-only" ;;
+  grind) run_grind=true; curated_profile="grind-only" ;;
   lean-smt|smt)
     backend="lean-smt"
     run_smt=true
-    leanhammer_profile="smt-only"
+    curated_profile="smt-only"
     ;;
   "") die "--with is required" ;;
   *) die "unknown backend: $backend" ;;
@@ -223,10 +223,11 @@ else
 fi
 result_dirs=()
 
-run_leanhammer() {
-  local out="$result_root/leanhammer"
-  PROFILES="$leanhammer_profile" \
-  HAMMER_CASES="$cases" \
+run_curated() {
+  local out="$result_root/curated"
+  PROFILES="$curated_profile" \
+  CURATED_CASES="$cases" \
+  CURATED_TREES="${CURATED_TREES:-$ROOT/BenchmarkResults/curated-trees}" \
   REPEATS=1 \
   SOLVER=cvc5 \
   TIMEOUT=5 \
@@ -239,7 +240,7 @@ run_leanhammer() {
   USE_MATHLIB_CACHE=true \
   RESUME="$resume" \
   OUT_DIR="$out" \
-    "$ROOT/scripts/benchmark-leanhammer.sh"
+    "$ROOT/scripts/benchmark-curated.sh"
   result_dirs+=("$out")
 }
 
@@ -258,7 +259,7 @@ run_corpora() {
   if [[ "$run_velvet" == "true" ]]; then
     velvet_cases="$cases"
   fi
-  RUN_LEANHAMMER=false \
+  RUN_CURATED=false \
   RUN_LOOM=false \
   RUN_CASHMERE="$run_cashmere" \
   RUN_VELVET="$run_velvet" \
@@ -325,8 +326,8 @@ if [[ "$resume" == "true" ]]; then
 fi
 
 case "$case_study" in
-  LeanHammer)
-    run_leanhammer
+  Curated)
+    run_curated
     ;;
   Velvet)
     run_corpora false true velvet
@@ -338,7 +339,7 @@ case "$case_study" in
     run_plean
     ;;
   all)
-    run_leanhammer
+    run_curated
     run_corpora true true corpora
     run_plean
     ;;

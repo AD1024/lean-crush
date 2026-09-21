@@ -64,6 +64,7 @@ OUTPUTS = (
     "coverage-table",
     "reconstruction-table",
     "failures-table",
+    "phase-breakdown",
 )
 
 
@@ -283,7 +284,7 @@ def draw_scaling_suite(
         axis.spines[spine].set_visible(False)
     for spine in ("left", "bottom"):
         axis.spines[spine].set_color(style.GRID)
-    axis.tick_params(colors=style.MUTED, labelsize=10)
+    axis.tick_params(colors=style.INK, labelsize=12)
     axis.grid(True, color=style.GRID, linewidth=0.7, alpha=0.9)
     axis.set_axisbelow(True)
 
@@ -307,11 +308,17 @@ def draw_scaling_suite(
     axis.set_title(
         f"{style.label_suite(suite)} — {len(samples)} replayed certificates",
         color=style.INK,
-        fontsize=12,
+        fontsize=14,
+        fontweight="bold",
         pad=8,
     )
-    axis.set_xlabel("Parsed Alethe commands", color=style.MUTED, fontsize=10)
-    axis.set_ylabel("Replay time (ms)", color=style.MUTED, fontsize=10)
+    axis.set_xlabel(
+        "Parsed Alethe commands", color=style.INK, fontsize=12, fontweight="bold"
+    )
+    axis.set_ylabel(
+        "Replay time (ms)", color=style.INK, fontsize=12, fontweight="bold"
+    )
+    bold_tick_labels(axis)
     figure.tight_layout()
     figure.savefig(path, facecolor=figure.get_facecolor())
     pyplot.close(figure)
@@ -377,6 +384,17 @@ def coverage_table_rows(
     ]
 
 
+def bold_tick_labels(axis) -> None:
+    """Draw the tick labels in the body ink weight.
+
+    `tick_params` carries colour but not weight, and the tick label objects only
+    exist once the locator has run, so this is called after the scale and limits
+    are set rather than beside the other axis styling.
+    """
+    for label in axis.get_xticklabels() + axis.get_yticklabels():
+        label.set_fontweight("bold")
+
+
 def draw_table(
     pyplot,
     path: Path,
@@ -393,7 +411,7 @@ def draw_table(
     than emitted as markdown so it shares the figures' typeface.
     """
     body_rows = sum(len(rows) for _, _, rows in groups)
-    row_height = 0.30
+    row_height = 0.34
     height = 0.62 + body_rows * row_height
     figure = pyplot.figure(figsize=(width, height))
     figure.patch.set_facecolor(style.PAPER)
@@ -408,7 +426,7 @@ def draw_table(
     for x, label, align in zip(columns, header, aligns):
         axis.text(
             x, top, label, ha=align, va="center",
-            fontsize=10, fontweight="bold", color=style.INK,
+            fontsize=12, fontweight="bold", color=style.INK,
         )
     rule = top - step * 0.55
     axis.plot([0, 1], [rule, rule], color=style.INK, linewidth=1.1)
@@ -423,18 +441,18 @@ def draw_table(
             ):
                 axis.text(
                     x, y, value, ha=align, va="center",
-                    fontsize=9.5, fontweight=weight, color=style.INK,
+                    fontsize=11.5, fontweight=weight, color=style.INK,
                 )
         last = top - step * (row + 1.15 + len(rows) - 1)
         centre = (first + last) / 2
         axis.text(
             columns[0], centre, label, ha=aligns[0], va="center",
-            fontsize=10, fontweight="bold", color=style.INK,
+            fontsize=12, fontweight="bold", color=style.INK,
         )
         if sublabel:
             axis.text(
                 columns[0], centre - step * 0.52, sublabel,
-                ha=aligns[0], va="center", fontsize=8.5, color=style.MUTED,
+                ha=aligns[0], va="center", fontsize=10, color=style.MUTED,
             )
         row += len(rows)
         if index < len(groups) - 1:
@@ -650,6 +668,147 @@ def draw_failure_table(
     )
 
 
+# The lane the breakdown describes. The portfolio is the configuration the paper
+# reports as kernel-checked, so it is the one whose time is worth splitting: it
+# is the only lane that can spend time in every phase, replay and reconstruct
+# included.
+PHASE_LANE = "crush-portfolio"
+
+# The profiler records eleven phases, which is more detail than a paper figure
+# can carry: most slices land under a few percent and cannot be labelled. These
+# are the stages the paper names. Appendix "Query Preparation" scopes
+# pre-processing as fact collection and normalization, query-directed
+# monomorphization, and bounded quantifier instantiation; the overview then has
+# \sys "translate the prepared propositions into an SMT query", so translation is
+# the step after those, not a bucket containing them.
+PHASE_GROUPS = {
+    "collect": "pre-process",
+    "normalize": "pre-process",
+    "monomorphize": "pre-process",
+    "instantiate": "pre-process",
+    # Not a stage the paper describes. It runs before translation and produces a
+    # checked Lean proof, so it is preparation that can finish early rather than
+    # recovery of a solver's answer.
+    "pre-reconstruct": "pre-process",
+    "translate": "translation",
+    "translate-fallback": "translation",
+    "solve": "solving",
+    "solve-fallback": "solving",
+    "replay": "reconstruct",
+    "reconstruct": "reconstruct",
+}
+
+# Declaration order is pipeline order, so a stacked bar reads left to right as
+# time flows. Taken from the per-phase palette's representative of each stage.
+PHASE_GROUP_COLORS = {
+    "pre-process": "#4F6D7A",
+    "translation": "#6E7FA3",
+    "solving": "#234E52",
+    "reconstruct": "#9E2A2B",
+}
+
+
+def phase_breakdown_rows(
+    result_dirs: list[Path],
+) -> list[tuple[str, list[tuple[str, float]]]]:
+    """Per-suite stage shares for the kernel-checked lane, in pipeline order."""
+    rows = read_tsv(result_dirs, "phase-summary.tsv")
+    unmapped = {
+        row["phase"] for row in rows if row["phase"] not in PHASE_GROUPS
+    }
+    if unmapped:
+        # Silently dropping a phase would leave bars that do not reach 100% and
+        # percentages that quietly understate a stage.
+        raise SystemExit(
+            "phase-summary.tsv has phases missing from PHASE_GROUPS: "
+            + ", ".join(sorted(unmapped))
+        )
+    totals: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    for row in rows:
+        if row["lane"] != PHASE_LANE:
+            continue
+        suite = row["suite"]
+        if suite in EXCLUDED_SUITES:
+            continue
+        totals[suite][PHASE_GROUPS[row["phase"]]] += float(row["phase_pct"])
+    order = list(PHASE_GROUP_COLORS)
+    return [
+        (
+            suite,
+            [
+                (stage, totals[suite][stage])
+                for stage in order
+                if totals[suite][stage] > 0.0
+            ],
+        )
+        for suite in sorted(totals, key=style.suite_sort_key)
+    ]
+
+
+def draw_phase_breakdown(
+    pyplot,
+    path: Path,
+    groups: list[tuple[str, list[tuple[str, float]]]],
+) -> None:
+    """One stacked bar per benchmark, in the typeface the curves use."""
+    suites = [suite for suite, _ in groups]
+    height = 1.5 + 0.62 * len(suites)
+    figure, axis = pyplot.subplots(figsize=(9.0, height))
+    figure.patch.set_facecolor(style.PAPER)
+    axis.set_facecolor(style.PAPER)
+
+    seen: list[str] = []
+    for index, (_, phases) in enumerate(groups):
+        left = 0.0
+        for phase, share in phases:
+            axis.barh(
+                index, share, left=left, height=0.62,
+                color=PHASE_GROUP_COLORS.get(phase, "#66736F"),
+                edgecolor=style.PAPER, linewidth=0.8,
+                label=phase if phase not in seen else None,
+            )
+            # Only label a slice wide enough to hold its number.
+            if share >= 6.0:
+                axis.text(
+                    left + share / 2, index, f"{share:.0f}%",
+                    ha="center", va="center", color=style.PAPER,
+                    fontsize=10.5, fontweight="bold",
+                )
+            if phase not in seen:
+                seen.append(phase)
+            left += share
+
+    axis.set_yticks(range(len(suites)))
+    axis.set_yticklabels([style.label_suite(suite) for suite in suites])
+    axis.invert_yaxis()
+    axis.set_xlim(0, 100)
+    axis.set_xlabel(
+        "Share of measured tactic time (%)",
+        color=style.INK, fontsize=12, fontweight="bold",
+    )
+    axis.set_title(
+        style.label_lane(PHASE_LANE),
+        color=style.INK, fontsize=14, fontweight="bold", pad=8,
+    )
+    for spine in ("top", "right", "left"):
+        axis.spines[spine].set_visible(False)
+    axis.spines["bottom"].set_color(style.GRID)
+    axis.tick_params(colors=style.INK, labelsize=12, length=0)
+    axis.grid(True, axis="x", color=style.GRID, linewidth=0.7, alpha=0.9)
+    axis.set_axisbelow(True)
+    bold_tick_labels(axis)
+
+    handles, labels = axis.get_legend_handles_labels()
+    axis.legend(
+        handles, labels, loc="upper center", bbox_to_anchor=(0.5, -0.32),
+        ncol=min(5, len(labels)), frameon=False, fontsize=11,
+        labelcolor=style.INK, handlelength=1.6, columnspacing=1.4,
+    )
+    figure.tight_layout()
+    figure.savefig(path, facecolor=figure.get_facecolor(), bbox_inches="tight")
+    pyplot.close(figure)
+
+
 def write_points(
     path: Path,
     series: dict[str, list[dict[str, object]]],
@@ -699,7 +858,7 @@ def draw_suite(
         axis.spines[spine].set_visible(False)
     for spine in ("left", "bottom"):
         axis.spines[spine].set_color(style.GRID)
-    axis.tick_params(colors=style.MUTED, labelsize=10)
+    axis.tick_params(colors=style.INK, labelsize=12)
     axis.grid(True, color=style.GRID, linewidth=0.7, alpha=0.9)
     axis.set_axisbelow(True)
 
@@ -750,19 +909,21 @@ def draw_suite(
         axis.set_xscale("log")
     axis.set_xlim(floor, limit)
     axis.set_title(
-        f"{style.label_suite(suite)}" + (f" — {total} VCs" if total else ""),
+        style.label_suite(suite),
         color=style.INK,
-        fontsize=12,
+        fontsize=14,
+        fontweight="bold",
         pad=8,
     )
     axis.set_xlabel(
         "Time (s)"
         if mode == "cumulative"
         else "Time per VC (s)",
-        color=style.MUTED,
-        fontsize=10,
+        color=style.INK,
+        fontsize=12,
+        fontweight="bold",
     )
-    axis.set_ylabel(y_label, color=style.MUTED, fontsize=10)
+    axis.set_ylabel(y_label, color=style.INK, fontsize=12, fontweight="bold")
     if handles:
         order = legend_order(keys)
         # The curves rise left to right, so the upper left is the free region.
@@ -771,11 +932,12 @@ def draw_suite(
             [labels[index] for index in order],
             loc="upper left",
             frameon=False,
-            fontsize=9.5,
+            fontsize=11,
             labelcolor=style.INK,
             handlelength=2.8,
             borderaxespad=0.4,
         )
+    bold_tick_labels(axis)
     figure.tight_layout()
     figure.savefig(path, facecolor=figure.get_facecolor())
     pyplot.close(figure)
@@ -953,6 +1115,13 @@ def main() -> None:
         if groups:
             path = args.out_dir / f"reconstruction-failures-table.{args.format}"
             draw_failure_table(pyplot, path, groups)
+            generated.append(path)
+
+    if "phase-breakdown" in selected:
+        groups = phase_breakdown_rows(args.result_dirs)
+        if groups:
+            path = args.out_dir / f"phase-breakdown.{args.format}"
+            draw_phase_breakdown(pyplot, path, groups)
             generated.append(path)
 
     if not generated:

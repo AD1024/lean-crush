@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
-  bash benchmark-coverage.sh --case_study <all|LeanHammer|Velvet|Cashmere|PLean>
+  bash benchmark-coverage.sh --case_study <all|Curated|Velvet|Cashmere|PLean>
   bash benchmark-coverage.sh --case_study <...> --resume <result-directory>
   bash benchmark-coverage.sh --case_study <...> --skip_figures
   bash benchmark-coverage.sh --figures_only <result-directory>
@@ -132,7 +132,7 @@ else
   result_root="$ROOT/BenchmarkResults/coverage-$(date +%Y%m%d-%H%M%S)"
   mkdir -p "$result_root"
   # Every backend after the first joins the directory the first one created, so
-  # they land in the same corpora/leanhammer/plean TSVs and the figures can
+  # they land in the same corpora/curated/plean TSVs and the figures can
   # compare them. Per-case checkpoints make this restartable too.
   resume_flag=(--resume "$result_root")
 fi

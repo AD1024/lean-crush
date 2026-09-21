@@ -34,14 +34,14 @@ DATA_ROOT="${DATA_ROOT:-scripts/benchmark-data}"
 
 # Each study's root is overridable so the figures can be drawn from a fresh run
 # without renaming anything: `benchmark-coverage.sh` writes `corpora/`,
-# `leanhammer/` and `plean/` under one directory, which is exactly the shape
+# `curated/` and `plean/` under one directory, which is exactly the shape
 # MAIN_ROOT wants, and the other two harnesses do the same for their roots.
 MAIN_ROOT="${MAIN_ROOT:-$DATA_ROOT/main}"
 MODES_ROOT="${MODES_ROOT:-$DATA_ROOT/crush-modes}"
 RECONSTRUCTION_ROOT="${RECONSTRUCTION_ROOT:-$DATA_ROOT/reconstruction}"
 
 # Which suite directories a run root holds depends on how it was measured: a
-# full `--case_study all` writes corpora/, leanhammer/ and plean/, while a single
+# full `--case_study all` writes corpora/, curated/ and plean/, while a single
 # case study writes only its own (velvet/, cashmere/, ...). Discover them instead
 # of assuming the three, so a partial run still draws. A directory counts when it
 # carries measurements, which skips figures/ and any stray output.
@@ -89,7 +89,7 @@ if [[ ${#RECON_DIRS[@]} -eq 0 ]]; then
 fi
 
 # Loom contributes four VCs, too few for a coverage bar or curve to say
-# anything, so the paper reports LeanHammer, Cashmere, Velvet, and PLean. The
+# anything, so the paper reports Curated, Cashmere, Velvet, and PLean. The
 # recorded inputs under benchmark-data keep every suite.
 EXCLUDE=(--exclude-suite loom)
 
@@ -126,8 +126,7 @@ if [[ "$HAVE_MODES" == "true" ]]; then
     --out-dir "$OUT_DIR" \
     "${EXCLUDE[@]}" \
     --only reconstruction \
-    --only reconstruction-failures \
-    --only phase-breakdown
+    --only reconstruction-failures
 fi
 
 # The time figures need matplotlib, which the other renderers deliberately do
@@ -160,7 +159,8 @@ if python3 -c "import matplotlib" >/dev/null 2>&1; then
       --out-dir "$OUT_DIR" \
       "${EXCLUDE[@]}" \
       --only scaling \
-      --only failures-table
+      --only failures-table \
+      --only phase-breakdown
   fi
 else
   # Name the interpreter. matplotlib is commonly installed into a different

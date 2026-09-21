@@ -35,8 +35,9 @@ and SMT solving without requiring post-solver proof reconstruction. The other
 backends retain their normal proof and trust policies, so the table reports
 those differences rather than treating every row as the same trust guarantee.
 
-`Auto` is the lean-auto backend configured by the host project; in LeanHammer
-this is its Auto preprocessing and monomorphization pipeline feeding Duper.
+`Auto` is the lean-auto backend configured by the host project; on the curated
+suite it is lean-auto invoked directly, preprocessing and monomorphizing before
+Duper discharges the residual first-order goal.
 `Duper` invokes Duper directly after host preprocessing. The PLean lane gives
 each Duper attempt one second of saturation and 20,000 heartbeats, while
 leaving the generated file uncapped so every VC is attempted. `grind` is
@@ -51,7 +52,7 @@ generated file terminated early. Both count as unsolved for coverage, but
 missing records are excluded from timing statistics. Valid headline runs must
 have zero missing records; every lane in the published comparison has zero.
 
-The figures show LeanHammer, Cashmere, Velvet, and PLean. Loom is measured and
+The figures show Curated, Cashmere, Velvet, and PLean. Loom is measured and
 kept in the recorded reports, but its four VCs are too few for a coverage bar
 to carry a meaningful percentage, so the figures omit it.
 
@@ -114,8 +115,8 @@ cohort.
 lean-smt reports an Alethe rule it cannot replay by leaving that step as an
 open goal rather than by failing, so the harness checks the remaining goals
 itself and records those VCs as a rule gap instead of counting them solved.
-The comparison covers every corpus. Only LeanHammer's pinned revision already
-requires lean-smt; the others get it from a recorded patch that adds the
+The comparison covers every corpus. Only the Curated suite's pinned revision
+already requires lean-smt; the others get it from a recorded patch that adds the
 dependency to the pinned revision, after which the harness checks that no
 revision the corpus already pinned moved. Run it with
 `benchmark-reconstruction.sh`; the

@@ -18,7 +18,7 @@ SPEC.loader.exec_module(plot_benchmarks)
 class SuiteFilterTests(unittest.TestCase):
     def rows(self) -> list[dict[str, str]]:
         return [
-            {"suite": "leanhammer", "lane": "smt-only"},
+            {"suite": "curated", "lane": "smt-only"},
             {"suite": "loom", "lane": "crush-verify"},
             {"suite": "velvet", "lane": "crush-verify"},
         ]
@@ -26,7 +26,7 @@ class SuiteFilterTests(unittest.TestCase):
     def test_named_suites_are_dropped(self) -> None:
         kept = plot_benchmarks.drop_suites(self.rows(), {"loom"})
 
-        self.assertEqual([row["suite"] for row in kept], ["leanhammer", "velvet"])
+        self.assertEqual([row["suite"] for row in kept], ["curated", "velvet"])
 
     def test_no_exclusions_returns_the_same_rows(self) -> None:
         rows = self.rows()

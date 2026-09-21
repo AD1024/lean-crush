@@ -8,19 +8,19 @@ usage() {
   cat <<'EOF'
 Usage:
   bash benchmark-reconstruction.sh \
-    --case_study <all|LeanHammer|Velvet|Cashmere|PLean> \
+    --case_study <all|Curated|Velvet|Cashmere|PLean> \
     [--smt_trees <directory>]
   bash benchmark-reconstruction.sh \
-    --case_study <all|LeanHammer|Velvet|Cashmere|PLean> \
+    --case_study <all|Curated|Velvet|Cashmere|PLean> \
     --resume <result-directory>
   bash benchmark-reconstruction.sh \
-    --case_study <LeanHammer|Velvet|Cashmere|PLean> \
+    --case_study <Curated|Velvet|Cashmere|PLean> \
     --cases "<file> <file> ..."
   bash benchmark-reconstruction.sh --plot_only <result-directory> \
     [--exclude_suite <corpus>]
 
 Compares checked proof reconstruction between lean-smt, Crush's strict Alethe
-replay, and Crush's reconstruction portfolio. Only the pinned LeanHammer tree
+replay, and Crush's reconstruction portfolio. Only the pinned Curated tree
 requires lean-smt already; the other corpora get it from a recorded patch under
 scripts/patches. Each lean-smt tree carries its corpus's Mathlib build plus
 lean-smt's, so --smt_trees names a directory to keep them in between runs.
@@ -135,7 +135,7 @@ if [[ -n "$plot_only" ]]; then
   if [[ -f "$plot_only/measurements.tsv" ]]; then
     result_dirs+=("$plot_only")
   else
-    for name in leanhammer corpora velvet cashmere plean; do
+    for name in curated corpora velvet cashmere plean; do
       if [[ -f "$plot_only/$name/measurements.tsv" ]]; then
         result_dirs+=("$plot_only/$name")
       fi
@@ -150,7 +150,7 @@ fi
 
 case "$case_study" in
   all) case_study="all" ;;
-  LeanHammer|leanhammer) case_study="LeanHammer" ;;
+  Curated|curated) case_study="Curated" ;;
   Velvet|velvet) case_study="Velvet" ;;
   Cashmere|cashmere) case_study="Cashmere" ;;
   PLean|plean) case_study="PLean" ;;
@@ -177,12 +177,13 @@ else
 fi
 result_dirs=()
 
-run_leanhammer() {
-  local out="$result_root/leanhammer"
+run_curated() {
+  local out="$result_root/curated"
   # crush-verify establishes the SMT-`unsat` cohort that the narrower
   # certificate-replay columns are measured against.
   PROFILES="crush-verify crush-alethe crush-portfolio smt-only" \
-  HAMMER_CASES="$cases" \
+  CURATED_CASES="$cases" \
+  CURATED_TREES="${CURATED_TREES:-$ROOT/BenchmarkResults/curated-trees}" \
   REPEATS=1 \
   SOLVER=cvc5 \
   TIMEOUT=5 \
@@ -194,7 +195,7 @@ run_leanhammer() {
   USE_MATHLIB_CACHE=true \
   RESUME="$resume" \
   OUT_DIR="$out" \
-    "$ROOT/scripts/benchmark-leanhammer.sh"
+    "$ROOT/scripts/benchmark-curated.sh"
   result_dirs+=("$out")
 }
 
@@ -211,7 +212,7 @@ run_corpora() {
   if [[ "$run_velvet" == "true" ]]; then
     velvet_cases="$cases"
   fi
-  RUN_LEANHAMMER=false \
+  RUN_CURATED=false \
   CASHMERE_CASES="$cashmere_cases" \
   VELVET_CASES="$velvet_cases" \
   RUN_LOOM=false \
@@ -273,12 +274,12 @@ if [[ "$resume" == "true" ]]; then
 fi
 
 case "$case_study" in
-  LeanHammer) run_leanhammer ;;
+  Curated) run_curated ;;
   Velvet) run_corpora false true velvet ;;
   Cashmere) run_corpora true false cashmere ;;
   PLean) run_plean ;;
   all)
-    run_leanhammer
+    run_curated
     run_corpora true true corpora
     run_plean
     ;;
