@@ -1,4 +1,4 @@
-import Crush.Metatheory
+import Crush.Metatheory.Soundness
 
 open scoped Crush.Metatheory
 

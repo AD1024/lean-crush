@@ -4,7 +4,7 @@ open Lake DSL
 -- Mathlib integration tests are a separate package so installing `crush` does not
 -- fetch Mathlib or its transitive dependency graph.
 require crush from ".."
-require mathlib from git "https://github.com/leanprover-community/mathlib4" @ "v4.32.2"
+require mathlib from git "https://github.com/leanprover-community/mathlib4" @ "v4.34.0"
 
 package crushMathlibTest where
   reservoir := false
