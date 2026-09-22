@@ -172,7 +172,7 @@ private theorem denote_core (M : Model signature) :
       | arrow domain codomain =>
           constructor
           · intro Δ r ν
-            simp only [translateWith, finishClosure_term, Term.rename]
+            simp only [translateWith, Term.rename]
             exact etaClosure_denote M (.var (r ref)) ν
           · intro Δ r ν
             rw [translateSpineWith.eq_1]
@@ -200,7 +200,7 @@ private theorem denote_core (M : Model signature) :
       | arrow domain codomain =>
           constructor
           · intro Δ r ν
-            simp only [translateWith, finishClosure_term, Term.rename]
+            simp only [translateWith, Term.rename]
             exact etaClosure_denote M (.const constant) ν
           · intro Δ r ν
             rw [translateSpineWith.eq_2]
@@ -264,12 +264,12 @@ private theorem denote_core (M : Model signature) :
       rename_i actualContext domain codomain
       constructor
       · intro Δ r ν
-        simp only [translateWith, finishClosure_term, Term.rename]
+        simp only [translateWith, Term.rename]
         exact etaClosure_denote M (.lam (body.rename (Renaming.lift r))) ν
       · intro Δ r ν
         rw [translateSpineWith.eq_3]
         simp only [SpineResult.denote, TargetArguments.applyUnary,
-          FunctionHead.denote, finishClosure_term, Term.rename]
+          FunctionHead.denote, Term.rename]
         have closureCorrect := etaClosure_denote M
           (.lam (body.rename (Renaming.lift r))) ν
         have mapped := congrArg (fromCanonical M (.arrow domain codomain))
@@ -298,7 +298,7 @@ private theorem denote_core (M : Model signature) :
           constructor
           · intro Δ r ν
             rw [translateWith.eq_19]
-            simp only [finishClosure_term, Term.rename]
+            simp only [Term.rename]
             exact etaClosure_denote M
               (.app (fn.rename r) (argument.rename r)) ν
           · intro Δ r ν

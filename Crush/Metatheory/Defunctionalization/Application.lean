@@ -68,16 +68,11 @@ theorem TargetArguments.completeArgs_apply
         (arguments.applyUnary source targetValuation value)) := by
   induction arguments with
   | nil =>
-      cases ground <;>
-        simp only [TargetArguments.completeFamilyArgs,
-          flattenedDenote, TargetArguments.applyUnary, toCanonical] <;>
-        simp only [List.map] <;>
-        rw [FO.FamilyArgs.apply.eq_1]
+      cases ground <;> exact heq_of_eq (FO.FamilyArgs.apply.eq_1 _ _ _)
   | @cons domain codomain result argument rest inductionHypothesis =>
-      simp only [TargetArguments.completeFamilyArgs,
-        flattenedDenote, TargetArguments.applyUnary]
-      simp only [List.map]
-      rw [FO.FamilyArgs.apply.eq_2]
+      apply HEq.trans (heq_of_eq (FO.FamilyArgs.apply.eq_2
+        (canonicalModel source) targetValuation _ _ argument
+        (rest.completeFamilyArgs ground) (flattenedDenote source _ value)))
       exact inductionHypothesis ground
         (value (fromCanonical source domain
           (FO.FamilyTerm.denote (canonicalModel source) argument targetValuation)))
@@ -123,10 +118,11 @@ theorem TargetArguments.sourceApp_denote
       (arguments.applyUnary source targetValuation (source.const constant)))
   exact denotationEquality.trans (by
     dsimp only [raw]
-    simpa only [FO.FamilyTerm.denote.eq_2,
-      canonicalModel_sourceConstant, sourceDecl] using
-      arguments.completeArgs_apply
-        source targetValuation ground (source.const constant))
+    exact (heq_of_eq (FO.FamilyTerm.denote.eq_2
+      (canonicalModel source) _ targetValuation _
+      (Symbol.sourceConstant constant) (arguments.completeFamilyArgs ground))).trans
+        (arguments.completeArgs_apply
+          source targetValuation ground (source.const constant)))
 
 /-- Denotation of the actual single-symbol flattened application emitted for a
 complete target spine. -/
@@ -179,9 +175,9 @@ theorem TargetArguments.completeApp_denote
         (FO.FamilyTerm.denote (canonicalModel source) head targetValuation)
     rw [FO.FamilyTerm.denote.eq_2]
     rw [canonicalModel_application]
-    dsimp only [applicationArguments]
-    simp only [FO.appDecl, List.map]
-    rw [FO.FamilyArgs.apply.eq_2]
+    apply HEq.trans (heq_of_eq (FO.FamilyArgs.apply.eq_2
+      (canonicalModel source) targetValuation _ _ head completeArguments
+      (flattenedDenote source (.arrow domain codomain))))
     change HEq
       ((arguments.completeFamilyArgs ground).apply (canonicalModel source)
         targetValuation

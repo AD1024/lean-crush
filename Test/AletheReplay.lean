@@ -277,6 +277,10 @@ theorem alethe_bitvec_logical_shift (x : BitVec 8) :
     (x >>> 1) <<< 1 = x &&& 0xfe := by
   crush
 
+/-- info: 'alethe_bitvec_logical_shift' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms alethe_bitvec_logical_shift
+
 theorem alethe_bitvec_arithmetic_shift (x : BitVec 8) :
     BitVec.sshiftRight x 0 = x := by
   crush

@@ -43,13 +43,12 @@ theorem apply_captureArgs_interpretClosure
           (sourceValuation source targetValuation) reconstructed) := by
   induction captures generalizing reconstructed with
   | nil =>
-      simp [captureArgs, FO.FamilyArgs.apply,
-        interpretClosureCaptures, installCaptured]
+      exact FO.FamilyArgs.apply.eq_1 _ _ _
   | cons capture captures inductionHypothesis =>
       cases capture with
       | pack ref =>
           unfold captureArgs
-          simp only [List.map_cons, FO.FamilyArgs.apply.eq_2,
+          simp only [FO.FamilyArgs.apply.eq_2,
             FO.FamilyTerm.denote.eq_1]
           unfold interpretClosureCaptures installCaptured
           exact inductionHypothesis _

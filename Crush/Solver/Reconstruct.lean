@@ -190,7 +190,7 @@ The bounded `grind` call uses no theorem set or E-matching; it only supplies gen
 propositional and constructor reasoning for the normalized local context. -/
 private def guardNormalizationTactic : CoreM (TSyntax `tactic) :=
   `(tactic|
-    simp_all only [if_pos, if_neg, dif_pos, dif_neg] <;>
+    simp_all only [ite_eq_left, ite_eq_right, dite_eq_left, dite_eq_right] <;>
       grind (ematch := 0) only)
 
 /-- Cheap finishers for the pre-SMT one-level datatype split.

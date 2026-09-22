@@ -111,7 +111,7 @@ private theorem stringSubstrAppendSuffix (left right : String) :
   have nonnegative : ¬Int.ofNat left.length < 0 :=
     Int.not_lt.mpr (Int.natCast_nonneg _)
   unfold stringSubstr
-  rw [if_neg nonnegative]
+  rw [ite_eq_right nonnegative]
   apply String.ext
   simp [String.Slice.toList_copy_take, String.toList_copy_drop,
     String.toList_append, ← String.length_toList]
@@ -533,6 +533,14 @@ register_crush_replay rule low <<
 
 register_crush_replay rule low <<
   (aci_simp ..) => by exact bitVecAndOfNatPowSubOne _
+>>
+
+register_crush_replay rule low <<
+  (bv_bitwise_slicing ..) => by
+    simp only [BitVec.and_eq, BitVec.or_eq, BitVec.xor_eq, BitVec.append_eq,
+      BitVec.extractLsb, ← BitVec.extractLsb'_and, ← BitVec.extractLsb'_or,
+      ← BitVec.extractLsb'_xor, BitVec.extractLsb'_append_extractLsb',
+      BitVec.and_comm, BitVec.or_comm, BitVec.xor_comm]
 >>
 
 register_crush_replay rule low <<

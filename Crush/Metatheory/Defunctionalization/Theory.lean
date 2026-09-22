@@ -121,7 +121,8 @@ private theorem renamed_denotes {symbols : FO.SymbolFamily}
     (nil := fun {_} => by
       unfold RenamedArgumentsDenote
       intro target result r ν function
-      simp only [FO.FamilyArgs.rename, FO.FamilyArgs.apply.eq_1])
+      simp only [FO.FamilyArgs.rename, FO.FamilyArgs.apply.eq_1]
+      rfl)
     (cons := fun argument rest argumentIH restIH => by
       unfold RenamedArgumentsDenote
       intro target result r ν function
@@ -928,8 +929,8 @@ private theorem translation_valid (M : Model signature) :
             FO.FOSort.ofTy] using closureEq
         have equationValid := openLambda_valid M r body closureTerm
           (.nil (.arrow domain codomain)) bodyIH.lambda closureCorrect
-        simpa only [closureTerm, closure, translateLambdaBodyWith] using
-          equationValid
+        rw [translateLambdaBodyWith.eq_3] at equationValid
+        exact equationValid
       refine ⟨resultValid, ?_, ?_⟩
       · intro Δ r
         simpa only [translateSpineWith, translateWith, SpineResultValid, TermTranslationValid]

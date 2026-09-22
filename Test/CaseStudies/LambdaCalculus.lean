@@ -229,14 +229,14 @@ public section Lam
     induction e with
     | Var y =>
         by_cases hxy : x = y
-        · subst hxy; simp only [subst, beq_self_eq_true, if_true]; exact subst_not_free x t t h
+        · subst hxy; simp only [subst, beq_self_eq_true, ite_true]; exact subst_not_free x t t h
         · simp [subst, hxy]
     | NatConst n => simp only [subst]
     | BoolConst b => simp only [subst]
     | Lam y ty body ih =>
         by_cases hxy : y = x
         · subst hxy; simp [subst]
-        · simp only [subst, show (y != x) = true by simp [hxy], if_true]; crush
+        · simp only [subst, show (y != x) = true by simp [hxy], ite_true]; crush
     | App a b iha ihb => simp only [subst]; crush
     | Ite c a b ihc iha ihb => simp only [subst]; crush
 

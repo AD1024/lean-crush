@@ -38,7 +38,7 @@ private theorem arrayGetSetInt
   by_cases hij : i = j
   · subst j
     simpa using Array.getElem!_set!_self arr i val hi
-  · rw [if_neg hij]
+  · rw [ite_eq_right hij]
     exact Array.getElem!_set!_ne arr j i val (fun hji => hij (Eq.symm hji))
 
 theorem nestedArraySetLean
