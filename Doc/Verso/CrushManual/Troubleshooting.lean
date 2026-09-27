@@ -191,8 +191,15 @@ Finite arrays support local reads and updates.
 Operations that transform a symbolic range, including `append`, `extract`,
 `map`, and `filter`, generally need quantified lemmas or custom lowerings.
 
-Bitvector theory requires a statically known width. A symbolic `BitVec n`
-uses an opaque sort even if the context proves `0 < n`.
+Bitvector theory requires a statically known width. A symbolic `BitVec n` is
+refused as a dependent type, even if the context proves `0 < n`.
+
+The error `cannot translate the dependent type` means that the goal, a hypothesis,
+or a lemma that crush uses mentions a type such as `Fin n` or a function of type
+`(n : Nat) → β n`. crush
+has no sound way to translate these types. Restate the goal so that the type does
+not appear, for example by stating a fact about `Fin n` as a fact about natural
+numbers below `n`, or prove the goal without `crush`.
 
 Native higher-order solving is cvc5-only and has certificate gaps.
 Defunctionalization supports more backends, but its encoded function sorts need

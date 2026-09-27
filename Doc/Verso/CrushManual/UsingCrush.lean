@@ -266,8 +266,16 @@ The built-in translator handles:
 * finite Lean arrays with logical length and SMT array data.
 
 `Nat` uses SMT integers with nonnegativity constraints and guards preserving
-natural subtraction and division semantics. A symbolic width in `BitVec n`
-stays opaque; `n > 0` alone does not give SMT a concrete bitvector width.
+natural subtraction and division semantics. A `BitVec n` whose width is not a
+literal is refused; `n > 0` alone does not give SMT a concrete bitvector width.
+
+Dependent types are refused with the error `cannot translate the dependent type`.
+This covers a type that depends on a value, such as `Fin n`, `Fin 5` or `BitVec k`,
+and a function type whose result type depends on its argument, such as
+`(n : Nat) → β n`. An SMT sort cannot change with the value of a variable, so
+translating these types could produce false proofs. Types that depend only on
+other types, such as `List α`, are supported. So is `DecidableEq α`, which looks
+dependent but has its own sound translation.
 
 String and concrete-width bitvector operations use their SMT theories:
 

@@ -18,7 +18,9 @@ closures (`emitTerm`/`emitSort`/`declare`) handlers recurse through.
 Covers propositional/Boolean structure, equality, quantifiers, `Int`/`Nat` (Nat via
 Int with a `≥ 0` guard), bit-vectors, strings, datatypes, and the higher-order
 encoding. Anything unrecognized becomes a fresh uninterpreted symbol, so
-translation degrades rather than crashing.
+translation degrades rather than crashing. The exceptions are cases with no sound
+encoding, which are refused with an error: a quantifier over an uninhabited type,
+and any dependent type.
 
 ## Why the definitions in this file are `partial`
 
@@ -260,6 +262,35 @@ def isEmptyType (ty : Expr) : MetaM Bool := do
   let .const n _ := ty.getAppFn | return false
   let some (.inductInfo iv) := (← getEnv).find? n | return false
   return iv.ctors.isEmpty && iv.numIndices == 0
+
+/-- Whether `e` is a *value* that a type could depend on: something crush turns
+into an SMT term, such as a number, a Boolean, a proposition or a predicate.
+Types and type constructors (`Int`, `List`) are not values. Neither are proofs,
+which crush erases, nor type-class instances, which Lean fills in automatically. -/
+def isValueForDependency (e : Expr) : MetaM Bool := do
+  let ty ← inferType e
+  if ← isProp ty then return false
+  forallTelescopeReducing ty fun _ result => do
+    match ← whnf result with
+    | .sort level => return level.isZero
+    | result => return (← isClass? result).isNone
+
+/-- Whether `ty` is a dependent type, which crush has no sound way to translate.
+Two shapes count:
+
+* a function type whose result type depends on its argument, such as
+  `(n : Nat) → β n`;
+* a type that takes or mentions a value, such as `Fin n`, `BitVec k`, `β 0` or
+  `Vector α n`.
+
+Types built only from other types, such as `List α` or `Int → Bool`, do not
+count, and neither do propositions. -/
+def isDependentType (ty : Expr) : MetaM Bool := do
+  if ← isProp ty then return false
+  let ty ← whnf ty
+  if ty.isForall then return !ty.isArrow
+  if ← ty.getAppArgs.anyM isValueForDependency then return true
+  (Lean.collectFVars {} ty).fvarIds.anyM fun id => isValueForDependency (.fvar id)
 
 /-- Names of the SMT constructor / selector for a Lean constructor.
 
@@ -616,7 +647,7 @@ mutual
       return .app (.symb enc.sortName) #[]
     -- `BitVec w` at a statically-known width maps to the indexed sort
     -- `(_ BitVec w)`. A symbolic width has no SMT counterpart, so it falls through
-    -- to an opaque sort (where `BitVec` ops will not be recognized either).
+    -- to the dependent-type check at the end and is refused.
     match ← bvWidthOfType? e with
     | some w => return bvSort w
     | none =>
@@ -641,7 +672,24 @@ mutual
     | some (n, typeArgs) =>
       let name ← declareDatatype n typeArgs (some e)
       return .app (.symb name) #[]
-    | none => declareUninterpretedSort e
+    | none =>
+      -- Everything left becomes an uninterpreted sort, which is not sound for a
+      -- dependent type. An SMT sort cannot change with the value of a variable, so
+      -- under `∀ n`, every `Fin n` would get the same sort, and facts that hold for
+      -- each `n` separately could contradict each other. A quantified variable of a
+      -- dependent function type has a second problem: its applications would be
+      -- declared as new symbols with no link back to the variable. Refuse both.
+      -- Types with a fixed value, such as `Fin 5`, are refused too, so that there
+      -- is one simple rule. Types that a sort handler or an earlier case handles,
+      -- such as `DecidableEq α` or `BitVec 8`, never reach this point.
+      if ← isDependentType e then
+        throwError "crush: cannot translate the dependent type{indentExpr e}\n\
+                    A dependent type is a type that depends on a value, such as \
+                    `Fin n`, or a function type whose result type depends on its \
+                    argument, such as `(n : Nat) → β n`. crush cannot translate \
+                    these types to SMT without risking false proofs. Restate the \
+                    goal without this type, or prove it another way."
+      declareUninterpretedSort e
 
   /-- Declare the `Fn` sort and `app` symbol for an arrow type `σ₁ → … → τ`, once.
   Returns the sort and its `app` symbol name.
@@ -1799,6 +1847,8 @@ mutual
       throwError "crush: cannot translate a quantifier over the uninhabited type \
                   `{ty}` — every SMT sort is non-empty, so the encoding would be \
                   unsound. Eliminate the quantifier first (e.g. `exact absurd .. ..`)."
+    -- `emitSort` refuses a dependent type such as `(n : Nat) → β n` here, before
+    -- any of the body is translated.
     let sort ← emitSort ty
     let vname ← TranslateM.freshSymbol "q"
     -- Enter the binder with a real fvar so `body` becomes a closed Expr, and bind
