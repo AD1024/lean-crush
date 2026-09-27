@@ -42,8 +42,12 @@ theorem bv_lit_add : (2 : BitVec 7) + (3 : BitVec 7) = (5 : BitVec 7) := by crus
 theorem bv_comm' (a b : BitVec 10) : a + b = b + a := by crush
 theorem bv_width_one (a b c : BitVec 1) : a = b ∨ b = c ∨ c = a := by crush
 
--- A `BitVec` of *symbolic* width has no SMT sort, so it degrades to an opaque
--- sort. Reflexivity still holds there, which is the point: degrade, don't crash.
+-- A `BitVec` whose width is a variable is a dependent type, so crush refuses it
+-- with a clear error. It used to become an uninterpreted sort, which let crush
+-- prove false statements; see `Test/DependentTypes.lean`. The goal here is true,
+-- so this is one of the goals the refusal gives up.
+/-- error: crush: cannot translate the dependent type -/
+#guard_msgs(error, substring := true) in
 theorem bv_symbolic_width {k : Nat} (a : BitVec k) : a = a := by crush
 
 /-! ### Named function forms

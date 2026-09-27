@@ -15,6 +15,9 @@ Porting notes worth stating up front:
   capability one.
 * Empty-type goals are discharged in Lean before SMT. This preserves the semantics
   that SMT's nonempty sorts cannot encode directly.
+* crush refuses a `BitVec` whose width is a variable, because it is a dependent
+  type (see `Test/DependentTypes.lean`). lean-auto proves the ported reflexivity
+  goal `a = a` for such a bitvector; crush reports an error instead.
 -/
 
 open Crush
@@ -48,6 +51,8 @@ uninterpreted-symbol gaps until this port surfaced them (see the notes below). -
 open BitVec
 
 example : (2 : BitVec 7) + (3 : BitVec 7) = (5 : BitVec 7) := by crush
+/-- error: crush: cannot translate the dependent type -/
+#guard_msgs(error, substring := true) in
 example (k : Nat) (a : BitVec k) : a = a := by crush
 example (a b : BitVec 10) : a + b = b + a := by crush
 example (a b c : BitVec 1) : a = b ∨ b = c ∨ c = a := by crush
