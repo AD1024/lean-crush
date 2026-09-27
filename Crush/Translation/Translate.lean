@@ -1799,6 +1799,22 @@ mutual
       throwError "crush: cannot translate a quantifier over the uninhabited type \
                   `{ty}` — every SMT sort is non-empty, so the encoding would be \
                   unsound. Eliminate the quantifier first (e.g. `exact absurd .. ..`)."
+    -- A *dependent* function domain cannot be kept connected to its applications.
+    -- In both HO modes the `funVar` registration below, like the arrow branch of
+    -- `emitSort`, is gated on `isArrow`, which is false for a dependent `∀`. The
+    -- binder would get an opaque sort and the body would declare `k a` as a global
+    -- unrelated to it, so the hypothesis would assert the property for one fixed
+    -- function instead of all of them. That is strictly stronger than the Lean
+    -- statement and closes false goals; refuse instead, as for an uninhabited domain.
+    let tyWhnf ← whnf ty
+    if tyWhnf.isForall && !tyWhnf.isArrow then
+      throwError "crush: cannot translate a quantifier over the dependent function \
+                  type `{ty}` — the higher-order encoding keeps a function-typed \
+                  binder connected to its applications only for non-dependent \
+                  arrows. Encoding this binder as an opaque sort would declare its \
+                  applications as unrelated symbols, silently strengthening the \
+                  hypothesis. Specialize the binder first, or supply the instances \
+                  you need as separate hypotheses."
     let sort ← emitSort ty
     let vname ← TranslateM.freshSymbol "q"
     -- Enter the binder with a real fvar so `body` becomes a closed Expr, and bind
