@@ -1,8 +1,8 @@
 import Crush
 
 /-!
-Tests for Alethe proof replay (`Crush/Solver/Alethe/Replay.lean`), whose module comment has
-the design; these tests pin its two observable properties.
+Tests for Alethe proof replay through `Crush/Solver/Replay/Engine.lean`.
+These tests pin its two observable properties.
 
 1. **Payoff.** The goals below were measured (2026-08-06) to be exactly the class replay is
    for: cvc5 returns a hole-free proof and the finisher ladder *fails*, so before replay
@@ -54,10 +54,9 @@ end Payoff
 
 /-! ## Harder cases, with the ladder switched off
 
-Everything below runs under `crush.reconstruct "alethe"`, which removes the finisher-ladder
-fallback. That matters for a test: under the default `auto` a goal can pass because the
-ladder quietly rescued it, so these would not actually be exercising replay. Here a passing
-theorem *is* a replayed certificate, and each is kernel-checked.
+Everything below selects `crush.reconstruct "alethe"` and disables
+`crush.reconstruct.fallback`. A passing theorem must therefore come from a
+kernel-checked replayed certificate.
 
 Scaled up along the two axes that make a certificate long — chain depth and boolean
 branching — since replay's whole claim is that step count is not the obstacle. -/
@@ -67,6 +66,7 @@ set_option crush.backend "cvc5"
 set_option crush.timeout 30
 set_option crush.trust "reconstruct"
 set_option crush.reconstruct "alethe"
+set_option crush.reconstruct.fallback false
 
 /-- A five-variable pigeonhole: ten disjuncts, so the case analysis is substantially wider
 than `bool_pigeonhole`'s six. -/
@@ -131,6 +131,7 @@ set_option crush.backend "cvc5"
 set_option crush.timeout 30
 set_option crush.trust "reconstruct"
 set_option crush.reconstruct "alethe"
+set_option crush.reconstruct.fallback false
 
 theorem string_append_fresh (x : String) : x ++ "'" ++ "'" ≠ x := by crush
 
@@ -160,6 +161,7 @@ set_option crush.backend "cvc5"
 set_option crush.timeout 30
 set_option crush.trust "reconstruct"
 set_option crush.reconstruct "alethe"
+set_option crush.reconstruct.fallback false
 set_option maxHeartbeats 1000000
 set_option maxRecDepth 10000
 
@@ -205,6 +207,7 @@ set_option crush.backend "cvc5"
 set_option crush.timeout 30
 set_option crush.trust "reconstruct"
 set_option crush.reconstruct "alethe"
+set_option crush.reconstruct.fallback false
 set_option maxHeartbeats 1000000
 set_option maxRecDepth 10000
 
@@ -404,6 +407,7 @@ set_option crush.backend "cvc5"
 set_option crush.timeout 30
 set_option crush.trust "reconstruct"
 set_option crush.reconstruct "alethe"
+set_option crush.reconstruct.fallback false
 set_option maxHeartbeats 1000000
 set_option maxRecDepth 10000
 
@@ -483,6 +487,7 @@ set_option crush.backend "cvc5"
 set_option crush.timeout 30
 set_option crush.trust "reconstruct"
 set_option crush.reconstruct "alethe"
+set_option crush.reconstruct.fallback false
 
 /-- error: crush: cvc5 did not emit an Alethe certificate -/
 #guard_msgs(error, substring := true) in
@@ -515,9 +520,9 @@ end NoCertificate
 /-! ## Choosing a path with `crush.reconstruct`
 
 z3 emits no Alethe proof, so the ladder does the work there and the same goals close either
-way. `crush.reconstruct core` selects the ladder explicitly, and `alethe` selects
-certificate replay with no fallback — so a goal only the ladder can close *fails* under it,
-which is what makes the two paths independently testable. -/
+way. `crush.reconstruct core` selects the ladder explicitly. Selecting `alethe` and
+disabling `crush.reconstruct.fallback` isolates certificate replay, so the two paths
+can be tested independently. -/
 
 section Toggle
 set_option crush.timeout 20
@@ -526,6 +531,7 @@ set_option crush.trust "reconstruct"
 /-- error: crush: `crush.reconstruct alethe` requires the cvc5 backend -/
 #guard_msgs(error, substring := true) in
 set_option crush.reconstruct "alethe" in
+set_option crush.reconstruct.fallback false in
 example (x : Int) : x = x := by
   crush
 
@@ -543,11 +549,12 @@ theorem core_only (x y : Int) (h1 : x = y) (h2 : y = 3) : x = 3 := by crush
 #guard_msgs in
 #print axioms core_only
 
--- `alethe`: certificate only. The pigeonhole needs replay, so it still closes here — and
--- being kernel-checked under `alethe` proves replay itself did the work, with no ladder to
+-- With fallback disabled, a kernel-checked result must come from certificate replay.
+-- The pigeonhole needs replay, so it still closes here, with no ladder to
 -- fall back on.
 set_option crush.backend "cvc5" in
 set_option crush.reconstruct "alethe" in
+set_option crush.reconstruct.fallback false in
 theorem alethe_only (p q r s : Bool) :
     p = q ∨ p = r ∨ p = s ∨ q = r ∨ q = s ∨ r = s := by crush
 /-- info: 'alethe_only' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -559,6 +566,7 @@ theorem alethe_only (p q r s : Bool) :
 -- a contradictory one — cannot contribute, and replay still produces a checked proof.
 set_option crush.backend "cvc5" in
 set_option crush.reconstruct "alethe" in
+set_option crush.reconstruct.fallback false in
 theorem alethe_restricted_hints (p q r s : Bool) (n : Int)
     (unrelated1 : n = 0) (unrelated2 : n = 1) (unrelated3 : n > 5) :
     p = q ∨ p = r ∨ p = s ∨ q = r ∨ q = s ∨ r = s := by crush []
@@ -569,6 +577,7 @@ theorem alethe_restricted_hints (p q r s : Bool) (n : Int)
 -- This application chain is also replayable with the ladder disabled.
 set_option crush.backend "cvc5" in
 set_option crush.reconstruct "alethe" in
+set_option crush.reconstruct.fallback false in
 theorem alethe_only_function_chain (f g h : Int → Int) (a : Int)
     (h1 : f a = g a) (h2 : g a = h a) (h3 : h a = 7) : f a = 7 := by
   crush

@@ -5,6 +5,14 @@ open Crush.SMT
 export Crush.Replay (Command stripAnnot proofError? CertificateFeatures)
 abbrev AletheProof := Crush.Replay.Proof
 
+namespace AletheProof
+abbrev emptyClauseStep? (proof : AletheProof) : Option Command :=
+  Crush.Replay.Proof.emptyClauseStep? proof
+abbrev stats (proof : AletheProof) : Nat × Nat × Nat := Crush.Replay.Proof.stats proof
+abbrev rules (proof : AletheProof) : Array String := Crush.Replay.Proof.rules proof
+abbrev features (proof : AletheProof) : CertificateFeatures := Crush.Replay.Proof.features proof
+end AletheProof
+
 /-- The keyword-tagged tail of a `step`, as an assoc list from `:kw` to the following
 S-expression. `:rule R :premises (…) :args (…)` → `[("rule", R), …]`. A keyword with
 no following value maps to an empty list. -/

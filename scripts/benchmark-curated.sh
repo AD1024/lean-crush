@@ -392,10 +392,11 @@ for profile in "${profiles[@]}"; do
   # Crush's lanes are one branch differing only in options.
   crush_trust=""
   crush_reconstruct=""
+  crush_replay_fallback=true
   case "$profile" in
     crush-verify) crush_trust="trust"; crush_reconstruct="auto" ;;
     crush-core) crush_trust="reconstruct"; crush_reconstruct="core" ;;
-    crush-alethe) crush_trust="reconstruct"; crush_reconstruct="alethe" ;;
+    crush-alethe) crush_trust="reconstruct"; crush_reconstruct="alethe"; crush_replay_fallback=false ;;
     crush-portfolio) crush_trust="reconstruct"; crush_reconstruct="auto" ;;
   esac
   for case_name in "${case_names[@]}"; do
@@ -434,6 +435,7 @@ for profile in "${profiles[@]}"; do
             "-Dcrush.timeout=$timeout"
             "-Dcrush.trust=$crush_trust"
             "-Dcrush.reconstruct=$crush_reconstruct"
+            "-Dcrush.reconstruct.fallback=$crush_replay_fallback"
             "-Dcrush.profile=$crush_profile"
             "-Dcrush.profile.machine=true"
           ) ;;

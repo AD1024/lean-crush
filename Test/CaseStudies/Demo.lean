@@ -8,6 +8,7 @@ section NandSelf
 set_option crush.backend "cvc5"
 set_option crush.trust "reconstruct"
 set_option crush.reconstruct "alethe"
+set_option crush.reconstruct.fallback false
 set_option crush.trace.script true
 set_option trace.crush.result true
 
@@ -35,6 +36,7 @@ register_crush_replay term <<
 set_option crush.backend "cvc5"
 set_option crush.trust "reconstruct"
 set_option crush.reconstruct "alethe"
+set_option crush.reconstruct.fallback false
 set_option trace.crush.result true
 set_option crush.trace.script true
 
@@ -113,6 +115,7 @@ theorem resolution_from_certificate (p q r : Prop)
 set_option crush.backend "cvc5"
 set_option crush.trust "reconstruct"
 set_option crush.reconstruct "alethe"
+set_option crush.reconstruct.fallback false
 
 set_option trace.crush.result true in
 theorem resolution_via_crush (p q r : Prop)

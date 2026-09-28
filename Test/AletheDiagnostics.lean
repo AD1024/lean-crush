@@ -17,6 +17,7 @@ def lowerMultipleOfFive : LoweringHandler := fun ctx => do
 set_option crush.backend "cvc5"
 set_option crush.trust "reconstruct"
 set_option crush.reconstruct "alethe"
+set_option crush.reconstruct.fallback false
 set_option crush.timeout 10
 
 /-!

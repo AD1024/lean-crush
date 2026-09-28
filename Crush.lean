@@ -18,6 +18,7 @@ import Crush.Translation.Translate
 import Crush.Translation.DefaultLowerings
 import Crush.Solver.Process
 import Crush.Solver.Alethe
+import Crush.Solver.CPC
 import Crush.Solver.Reconstruct
 import Crush.Frontend.Tactic
 
@@ -37,9 +38,9 @@ This root module re-exports the public API. `import Crush` gives you:
   (`Crush.Translation.Attr`, `Crush.SMT.Quote`, `Crush.Translation.Builtins`),
 * the `@[crush_reconstruct]` attribute for extending checked proof replay
   (`Crush.Solver.ReconstructAttr`),
-* `register_crush_replay`, `@[crush_replay]`, and
-  `@[crush_replay_rule]` for extending checked Alethe replay
-  (`Crush.Solver.Alethe`),
+* `register_crush_replay term`, `register_replay_rule Alethe`, and
+  `register_replay_rule CPC` for shared term decoders and format-specific rules
+  (`Crush.Solver.Replay.Attr`),
 * all `crush.*` `set_option`s (`Crush.Frontend.Config`).
 
 See `README.md` and `Doc/PLAN.md` for the architecture and roadmap.

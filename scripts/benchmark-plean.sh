@@ -380,7 +380,7 @@ prepare_tree() {
 write_prelude() {
   local output="$1"
   local backend="$2"
-  local trust reconstruct
+  local trust reconstruct replay_fallback
 
   if [[ "$backend" == "auto" ]]; then
     cat >> "$output" <<EOF
@@ -397,6 +397,8 @@ EOF
   elif is_crush_lane "$backend"; then
     trust="$(crush_lane_trust "$backend")"
     reconstruct="$(crush_lane_reconstruct "$backend")"
+    replay_fallback=true
+    [[ "$reconstruct" != "alethe" ]] || replay_fallback=false
     cat >> "$output" <<EOF
 
 macro "#plean_bench_pverify " name:ident : command =>
@@ -405,6 +407,7 @@ macro "#plean_bench_pverify " name:ident : command =>
     set_option crush.timeout $TIMEOUT in
     set_option crush.trust "$trust" in
     set_option crush.reconstruct "$reconstruct" in
+    set_option crush.reconstruct.fallback $replay_fallback in
     set_option crush.inst.fuel $CRUSH_INST_FUEL in
     set_option crush.profile $CRUSH_PROFILE in
     set_option crush.profile.machine true in

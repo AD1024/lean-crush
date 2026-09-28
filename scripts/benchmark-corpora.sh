@@ -574,7 +574,7 @@ LEAN
 write_prelude() {
   local output="$1"
   local backend="$2"
-  local trust reconstruct
+  local trust reconstruct replay_fallback
 
   if is_smt_lane "$backend"; then
     write_smt_backend "$output"
@@ -590,6 +590,8 @@ EOF
   elif is_crush_lane "$backend"; then
     trust="$(crush_lane_trust "$backend")"
     reconstruct="$(crush_lane_reconstruct "$backend")"
+    replay_fallback=true
+    [[ "$reconstruct" != "alethe" ]] || replay_fallback=false
     cat >> "$output" <<EOF
 
 macro "corpus_backend" : tactic =>
@@ -598,6 +600,7 @@ macro "corpus_backend" : tactic =>
     set_option crush.timeout $TIMEOUT in
     set_option crush.trust "$trust" in
     set_option crush.reconstruct "$reconstruct" in
+    set_option crush.reconstruct.fallback $replay_fallback in
     set_option crush.profile $CRUSH_PROFILE in
     set_option crush.profile.machine true in
     set_option trace.crush.inst $CRUSH_TRACE_INST in

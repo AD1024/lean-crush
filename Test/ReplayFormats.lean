@@ -1,9 +1,22 @@
-import Crush.Solver.Replay.Attr
+import Crush.Solver.Alethe
 
 open Lean Meta Elab Tactic
 open Crush Crush.SMT
 
 namespace ReplayFormatTests
+
+-- Qualified helper names remain available through the former public entry point.
+example (proof : Alethe.AletheProof) : Nat × Nat × Nat := Alethe.AletheProof.stats proof
+example (proof : Alethe.AletheProof) : Array String := Alethe.AletheProof.rules proof
+example (proof : Alethe.AletheProof) : Alethe.CertificateFeatures :=
+  Alethe.AletheProof.features proof
+example (proof : Alethe.AletheProof) : Option Alethe.Command :=
+  Alethe.AletheProof.emptyClauseStep? proof
+example (failure : Alethe.ReplayFailure) : MessageData :=
+  Alethe.ReplayFailure.toMessageData failure
+example (kind : Alethe.ReplayFailureClass) : String := Alethe.ReplayFailureClass.label kind
+example : ReplayRuleHandler := Alethe.replayPolynomialEquality
+example : String → CoreM (Option Alethe.ReplayRules.TacticHint) := Alethe.ReplayRules.protocolHint?
 
 register_replay_rule Alethe << (format_specific (nat n)) => by exact Nat.le_refl n >>
 register_replay_rule CPC << (format_specific (nat n)) => by exact Nat.le_succ n >>

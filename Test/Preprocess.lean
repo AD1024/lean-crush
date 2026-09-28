@@ -67,5 +67,6 @@ theorem auto_unfold_normalizes (x : Int) : markedDouble x = x + x := by
 -- core-directed fallback.
 set_option crush.backend "cvc5" in
 set_option crush.reconstruct "alethe" in
+set_option crush.reconstruct.fallback false in
 theorem normalized_goal_replays (x : Int) : triple x = x + x + x := by
   crush d[triple]

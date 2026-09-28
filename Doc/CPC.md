@@ -16,11 +16,11 @@ shared because custom lowerings have the same meaning in either certificate.
   must decline without accepting unproved assumptions.
 - [x] Add CPC handlers through the public registry, reusing checked arithmetic,
   logical, and theory proof helpers. Keep dispatch isolated by format.
-- [ ] Add `crush.reconstruct "cpc"` (also accept `"CPC"`), configure cvc5's proof
+- [x] Add `crush.reconstruct "cpc"` (also accept `"CPC"`), configure cvc5's proof
   output, and select the matching parser and handlers. Alethe and CPC both use
   core-guided fallback by default; `crush.reconstruct.fallback false` requires
   certificate replay and skips early closure for reliable replay testing.
-- [ ] Add parser, registry, scope, soundness, fallback, and live cvc5 tests.
+- [x] Add parser, registry, scope, soundness, fallback, and live cvc5 tests.
   Reuse existing Alethe obligations for both formats and check proof axioms.
 - [ ] Update the README and executable Verso manual; build the library, full
   test suite, and manual, then review the final diff.
@@ -44,3 +44,8 @@ and search behavior. CPC is opt-in. No search bounds are increased.
    scope boundaries, reused identifiers, and malformed input. Soundness tests
    reject invented assumptions, escaped local assumptions, forged conclusions,
    and handler proofs of the wrong proposition.
+3. Tactic integration and regression coverage. Live cvc5 tests re-prove 52 Alethe
+   obligations using CPC with fallback disabled and reject any trust, sorry, or
+   native-decision axiom. Both formats pass checked fallback tests; strict replay
+   still reports errors under `reconstructOrTrust`. Benchmark scripts explicitly
+   disable fallback in the existing strict Alethe lane.
