@@ -11,10 +11,10 @@ shared because custom lowerings have the same meaning in either certificate.
   `register_replay_rule Alethe << ... >>` and
   `register_replay_rule CPC << ... >>`, including format-specific attributes.
   Preserve the existing Alethe registration spelling as a compatibility alias.
-- [ ] Parse cvc5 CPC certificates with explicit conclusions, including shared
+- [x] Parse cvc5 CPC certificates with explicit conclusions, including shared
   terms, bound variables, assumptions, and scoped subproofs. Unsupported forms
   must decline without accepting unproved assumptions.
-- [ ] Add CPC handlers through the public registry, reusing checked arithmetic,
+- [x] Add CPC handlers through the public registry, reusing checked arithmetic,
   logical, and theory proof helpers. Keep dispatch isolated by format.
 - [ ] Add `crush.reconstruct "cpc"` (also accept `"CPC"`), configure cvc5's proof
   output, and select the matching parser and handlers. Alethe and CPC both use
@@ -35,3 +35,12 @@ trigger checked core reconstruction, never an implicit trusted discharge.
 
 The default `auto` mode continues to request Alethe, preserving its solver query
 and search behavior. CPC is opt-in. No search bounds are increased.
+
+## Completed milestones
+
+1. Shared replay engine and format-indexed registration. Registry isolation,
+   priorities, compatibility aliases, Alethe parsing, and term tests pass.
+2. CPC parser and inference handlers. Parser tests cover sharing, quantifiers,
+   scope boundaries, reused identifiers, and malformed input. Soundness tests
+   reject invented assumptions, escaped local assumptions, forged conclusions,
+   and handler proofs of the wrong proposition.
