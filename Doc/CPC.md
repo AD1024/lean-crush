@@ -1,6 +1,6 @@
 # CPC replay implementation plan
 
-The replay engine will share term decoding, checked proof construction, and scope
+The replay engine shares term decoding, checked proof construction, and scope
 management across certificate formats. Parsers retain each format's rule names;
 inference handlers are indexed by both format and rule. SMT term decoders remain
 shared because custom lowerings have the same meaning in either certificate.
@@ -22,7 +22,7 @@ shared because custom lowerings have the same meaning in either certificate.
   certificate replay and skips early closure for reliable replay testing.
 - [x] Add parser, registry, scope, soundness, fallback, and live cvc5 tests.
   Reuse existing Alethe obligations for both formats and check proof axioms.
-- [ ] Update the README and executable Verso manual; build the library, full
+- [x] Update the README and executable Verso manual; build the library, full
   test suite, and manual, then review the final diff.
 
 ## Validation boundaries
@@ -35,6 +35,12 @@ trigger checked core reconstruction, never an implicit trusted discharge.
 
 The default `auto` mode continues to request Alethe, preserving its solver query
 and search behavior. CPC is opt-in. No search bounds are increased.
+
+CPC rule coverage is partial. The solver is configured to print explicit
+conclusions without parameterized proof macros; the parser also accepts nullary
+term sharing. Internal total division and remainder currently require a concrete,
+nonzero divisor. Quantifier skolem decoding handles index zero and requires Lean
+evidence of nonemptiness. Unsupported forms decline to the configured fallback.
 
 ## Completed milestones
 
@@ -49,3 +55,20 @@ and search behavior. CPC is opt-in. No search bounds are increased.
    native-decision axiom. Both formats pass checked fallback tests; strict replay
    still reports errors under `reconstructOrTrust`. Benchmark scripts explicitly
    disable fallback in the existing strict Alethe lane.
+4. Documentation and validation. The README, architecture notes, and executable
+   manual describe both formats and the default fallback policy. The manual
+   builds without warnings and renders the new configuration and extension pages.
+
+## Validation results
+
+Validated with Lean 4.34.0, cvc5 1.3.4, and Z3 5.1.0:
+
+- `lake build` and `lake build Test` pass.
+- `cd MathlibTest && lake build` passes.
+- `cd Doc/Verso && lake build && lake exe crush-docs` passes.
+- The three updated benchmark scripts pass `bash -n`; the benchmark-report
+  Python suite passes all 15 tests.
+
+An initial concurrent test run reached the existing 10-second solver limit for
+`cubeInvariantStep` in `Test/VelvetReconstruct.lean`. It passed without the full
+compile load, with its timeout unchanged, and the subsequent full suite passed.

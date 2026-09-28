@@ -33,13 +33,13 @@ tag := "overview-pipeline"
    without an encoding or defining equations remain uninterpreted.
 6. *Solve.* Ask the selected backend whether the facts contradict the negated
    goal. A ground-only query may retry with retained quantifiers.
-7. *Discharge.* Accept `unsat` under the trust policy, replay an Alethe
+7. *Discharge.* Accept `unsat` under the trust policy, replay an Alethe or CPC
    certificate, or reconstruct from the unsat core. `sat` reports a model;
    `unknown` leaves the goal open.
 
 An early proof skips SMT even under the default trusting policy. Backend
-`"none"` and checked Alethe-only mode bypass that shortcut. The early pass is
-otherwise independent of the trust policy; its optional rule search is
+`"none"` and checked replay with `crush.reconstruct.fallback false` bypass that
+shortcut. The early pass is otherwise independent of the trust policy; its optional rule search is
 controlled by {ref "configuration-reconstruction"}[`crush.preReconstruct.ruleSearch`].
 Requesting a certificate can also affect solver time, so the cost of checked
 proofs is not confined to the final stage.

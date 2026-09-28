@@ -6,7 +6,7 @@ equalities, bitvectors, datatypes, and higher-order functions.
 - **Higher-order translation:** supports function arguments, partial applications,
   and lambdas through defunctionalization or cvc5's native higher-order mode.
 - **Checked proofs:** reconstructs Lean proofs from unsat cores or replays cvc5's
-  Alethe certificates. Solver trust is explicit and auditable.
+  Alethe or CPC certificates. Solver trust is explicit and auditable.
 - **Extensible translation:** custom lowerings and replay rules use the same
   interfaces as the built-in theories.
 
@@ -17,7 +17,7 @@ configuration reference, and extension APIs.
 
 Use the Lean version in [`lean-toolchain`](lean-toolchain) and install a solver on
 `PATH`: Z3 ≥ 4.15.4 (the default), cvc5 ≥ 1.3.4, or Bitwuzla. cvc5 additionally
-supports Alethe replay and native higher-order solving; Bitwuzla supports a
+supports Alethe and CPC replay and native higher-order solving; Bitwuzla supports a
 restricted quantifier-free fragment and does not provide proof certificates or
 unsat cores. The package has no third-party Lean dependencies.
 
@@ -82,9 +82,11 @@ theorem checked (x y : Int) (hxy : x = y) (hy : y = 3) : x = 3 := by
 
 This policy fails if reconstruction cannot produce a checked proof. The default
 reconstruction portfolio can use cvc5's Alethe certificate and an unsat-core
-fallback; Z3 uses core reconstruction. Some goals close with a checked proof
-before SMT even under the default trust policy. Use `#print axioms` to inspect
-dependencies.
+fallback; Z3 uses core reconstruction. To select CPC, set `crush.backend "cvc5"`
+and `crush.reconstruct "cpc"`. Both formats fall back to checked core
+reconstruction; use `crush.reconstruct.fallback false` to require replay. Otherwise,
+some goals close with a checked proof before SMT even under the default trust
+policy. Use `#print axioms` to inspect dependencies.
 
 Common settings include:
 
@@ -116,7 +118,8 @@ example (x : Int) : addThree x = x + 3 := by crush
 its `Lean.Expr`. The RHS can also be a metaprogram. The same syntax supports
 `register_lowering result-type` and `register_lowering sort`.
 
-Use `register_crush_replay` for custom Alethe term decoding and inference rules,
+Use `register_crush_replay term` for inverse term decoding,
+`register_replay_rule Alethe` or `register_replay_rule CPC` for inference handlers,
 and `@[crush_reconstruct]` for core reconstruction lemmas. See
 [Extending lean-crush](https://ad1024.github.io/lean-crush/Extending-lean-crush/)
 and [`Test/AletheExtension.lean`](Test/AletheExtension.lean) for complete examples.

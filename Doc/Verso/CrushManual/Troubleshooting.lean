@@ -118,7 +118,7 @@ For short queries, `crush.trace.script true` or `trace.crush.script true` prints
 the generated script.
 `trace.crush.mono`, `trace.crush.inst`, and `trace.crush.result` expose the main
 decision points without dumping the whole query. Use `trace.crush.replay` to
-identify slow Alethe rules and the replay method selected for each one.
+identify slow certificate rules and the replay method selected for each one.
 
 # Reconstruction Fails After Unsat
 %%%
@@ -128,33 +128,34 @@ tag := "troubleshooting-reconstruction"
 Solving and proof reconstruction have different capabilities.
 SMT can prove datatype cardinality, finite-array, native higher-order, or long
 theory combinations that the current replay and finisher set cannot reproduce.
-The tested cvc5 1.3.4 backend has certificate gaps for datatype cardinality,
+The tested cvc5 1.3.4 backend has Alethe certificate gaps for datatype cardinality,
 finite-array encodings, native higher-order solving, and signed
 bitvector-to-`Int` conversion. When it cannot emit a certificate,
-`crush.reconstruct "auto"` can still try core-directed reconstruction.
+CPC may provide a certificate, though its terms or rules can still exceed replay
+support. Both formats use core-directed reconstruction as their default fallback.
 
 For the core path, add {ref "using-crush-reconstruction"}[`with [...]` facts
 or a `using` finisher], register a reusable `@[crush_reconstruct]` theorem, or
 split the goal into smaller steps. Core reconstruction needs an unsat core,
 available from Z3 and cvc5.
 
-For Alethe replay, the first failure identifies the layer:
+For Alethe or CPC replay, the first failure identifies the layer:
 
 * `term-gap`: a certificate term could not be decoded. A custom operator may
   need `register_crush_replay term`; some terms also need evidence such as
   nonemptiness of a Lean type.
 * `rule-gap`: the terms decoded, but Lean could not prove the inference or
-  validate a source assumption. Use `register_crush_replay rule`.
+  validate a source assumption. Use `register_replay_rule Alethe` or `register_replay_rule CPC`.
 * `certificate-error` or a missing-certificate message: cvc5 supplied no usable
-  proof. A replay registration cannot fix this; try `"auto"` or `"core"`.
+  proof. A replay registration cannot fix this; try the other format or leave core fallback enabled.
 * `malformed-certificate`: the certificate's structure or premise references
   could not be replayed.
 * `kernel-reject` or `replay-exception`: inspect the failing step and extension
   for an invalid proof or implementation error.
 
-See {ref "extending-alethe"}[Extending Alethe Replay] for registration examples.
+See {ref "extending-alethe"}[Extending Certificate Replay] for registration examples.
 If a trusted result is acceptable, choose an explicit
-{ref "using-crush-proof-policy"}[trust policy]; strict Alethe mode never takes
+{ref "using-crush-proof-policy"}[trust policy]; replay with `crush.reconstruct.fallback false` never takes
 the `"reconstructOrTrust"` fallback.
 
 Do not interpret reconstruction failure as evidence that the goal is false.

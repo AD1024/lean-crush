@@ -133,18 +133,22 @@ Equality splitting is attempted only when a quantified local rule already applie
 target. Its branches use `omega`, `simp_all`, `rfl`, and `decide`; global `grind` is
 intentionally excluded.
 
-## Alethe replay
+## Certificate replay
 
 Alethe clauses retain their top-level literal boundaries; Boolean `or` inside one SMT
 literal is not flattened into the enclosing clause. Replay validates each named source
 assumption before derived steps can consume it.
 
-Source-assumption bridges also dispatch through `register_crush_replay rule` with
-the rule name `assume`. The built-in bridge normalizes Nat-to-Int quantifier and
-arithmetic guards using proved equivalences, then uses `grind (ematch := 0) only`.
-It receives only the source fact; unrelated assumptions cannot help justify an
-incorrect decoding. Rational certificate arithmetic uses registered term and rule
-handlers, with closed numeric evaluations checked by the kernel.
+Inference handlers dispatch through `register_replay_rule Alethe` or
+`register_replay_rule CPC`; the term decoder and checked structural engine are shared.
+Source-assumption bridges use the synthetic rule name `assume`. The built-in bridge
+normalizes Nat-to-Int quantifier and arithmetic guards using proved equivalences,
+then uses `grind (ematch := 0) only`. Named assumptions receive their source fact.
+CPC assumptions whose printed form cannot be matched to a named assertion are
+proved from selected source facts; no unselected ambient hypotheses are available.
+The stored clause retains the decoded proposition even when the source proof has a
+definitionally equal type. Rational certificate arithmetic uses registered term and
+rule handlers, with closed numeric evaluations checked by the kernel.
 
 Integer square signs and absolute-value comparisons use registered handlers backed
 by proved arithmetic lemmas. Subproof discharge also consults registered handlers:
@@ -154,7 +158,8 @@ propositional discharge, using only the replayed implication and enclosing scope
 Structural proof construction runs before tactic search for resolution, weakening,
 transitivity, excluded-middle clauses, conjunction projection, and `Iff` implication
 clauses. Wide or multiply referenced resolution results are shared through checked
-auxiliary declarations. Only remaining theory-specific steps enter the tactic portfolio.
+auxiliary declarations. CPC chain resolution uses the same sharing policy. Only
+remaining theory-specific steps enter the tactic portfolio.
 
 This ordering is profiler-driven. On an isolated width-8 bit-vector comparison,
 structural replay reduced replay from 5.50-5.59 seconds to 1.09-1.13 seconds. Across two

@@ -20,7 +20,7 @@ It does require an SMT solver executable on `PATH`:
 * Z3 4.15.4 or newer is the default and is sufficient for ordinary use. CI pins
   5.1.0; releases up to 4.13 reject `sbv_to_int`, which the translator emits for
   `BitVec.toInt`.
-* cvc5 1.3.4 or newer additionally supports native higher-order solving and Alethe
+* cvc5 1.3.4 or newer additionally supports native higher-order solving and Alethe/CPC
   certificate replay.
 * Bitwuzla can solve the quantifier-free bitvector, array, and uninterpreted
   function fragment, but does not provide unsat cores or proof certificates.

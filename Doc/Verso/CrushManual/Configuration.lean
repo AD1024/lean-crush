@@ -37,7 +37,7 @@ See {ref "using-crush-proof-policy"}[Choosing a Proof Policy] for a starting
 configuration.
 
 Under `crush.trust "trust"`, `"auto"` and `"core"` do not request
-reconstruction. Selecting `"alethe"` still requires cvc5, even with a trusting
+reconstruction. Selecting `"alethe"` or `"cpc"` requires cvc5, even with a trusting
 policy or backend `"none"`.
 
 # Solver Process
@@ -110,8 +110,8 @@ premise-free local universal rules, eliminates empty inductive types, searches
 for existential witnesses, and tries bounded datatype splitting. Enabling it
 also allows backward application of selected rules with premises to discharge.
 
-The pass runs under every trust policy except checked Alethe-only mode, and
-backend `"none"` bypasses it to ensure script emission. These exceptions apply
+The pass runs under every trust policy except when checked certificate replay is
+required, and backend `"none"` bypasses it to ensure script emission. These exceptions apply
 regardless of the rule-search setting. Successful early proofs avoid SMT;
 unsuccessful searches still cost time.
 
@@ -120,10 +120,16 @@ unsuccessful searches still cost time.
 Use `"auto"` for ordinary checked proofs. `"core"` uses Z3 or cvc5's unsat
 core and Lean finishers; Bitwuzla supplies neither a core nor a certificate.
 
-With a reconstructing trust policy, `"alethe"` bypasses early proofs and
-requires a replayed cvc5 certificate. It fails on missing certificates or
-replay errors even under `"reconstructOrTrust"`. This makes it useful for
-testing replay extensions.
+Select `"alethe"` or `"cpc"` to choose cvc5's certificate format. Both try
+core-guided reconstruction if replay fails. Alethe remains the format used by
+`"auto"`; CPC uses a separate parser and rule registry.
+
+{optionDocs crush.reconstruct.fallback}
+
+Set this to `false` to test certificate replay itself. With a reconstructing
+trust policy, this bypasses early proofs and requires a replayed certificate.
+Missing certificates and replay failures are errors even under
+`"reconstructOrTrust"`.
 
 {optionDocs crush.reconstruct.trustBvDecide}
 
@@ -241,7 +247,7 @@ It should be the first diagnostic enabled for a scalability problem.
 It has an effect only when `crush.profile` is enabled and adds one
 tab-separated `CRUSH_PROFILE` record per tactic invocation.
 The record includes the outcome, replay status, nanosecond phase timings, and
-certificate-size metrics for successful Alethe replay.
+certificate-size metrics for successful certificate replay.
 Interactive users normally need only the human-readable `crush.profile`
 report.
 
@@ -261,5 +267,5 @@ Trace classes are separate from `crush.trace.script`.
 The option emits the script as an info message, while `trace.crush.script`
 uses Lean's trace mechanism and can be filtered with other traces.
 `trace.crush.replay` reports attempts, selected methods, and decode/dispatch
-timings by Alethe rule. It also prints the decoded inputs for steps taking at
+timings by certificate rule. It also prints the decoded inputs for steps taking at
 least 100 ms. Anchor timings are inclusive and overlap their nested steps.
