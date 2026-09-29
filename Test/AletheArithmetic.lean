@@ -11,6 +11,7 @@ namespace AletheArithmetic
 set_option crush.backend "cvc5"
 set_option crush.trust "reconstruct"
 set_option crush.reconstruct "alethe"
+set_option crush.reconstruct.fallback false
 
 -- Exercises `la_mult_sign`.
 /-- [crush.result] proof replay succeeded; no axiom used -/

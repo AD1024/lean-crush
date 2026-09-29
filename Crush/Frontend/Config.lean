@@ -1,4 +1,5 @@
 import Lean
+import Crush.Solver.Replay.Format
 open Lean
 
 /-!
@@ -60,36 +61,33 @@ instance : KVMap.Value TrustMode where
     | "reconstructOrTrust" => some .reconstructOrTrust
     | _ => none
 
-/-- Which reconstruction path(s) to use under a reconstructing `TrustMode`.
-
-There are two independent ways to turn an `unsat` into a Lean proof, with different
-reach, so this selects between them:
-
-* replaying the solver's proof certificate step by step (`Crush/Solver/Alethe/Replay.lean`),
-  which needs cvc5 and handles long inference chains;
-* the core-directed finisher ladder (`Crush/Solver/Reconstruct.lean`), which requires a
-  backend-provided unsat core and one Lean tactic to re-find the whole argument. -/
+/-- Certificate selection and core-guided reconstruction. -/
 inductive ReconstructMode where
-  /-- Try Alethe certificate replay first, then the finisher ladder. The default: replay
-  reaches goals the ladder cannot, and declining is cheap, so trying both closes the most. -/
+  /-- Alethe replay on cvc5, followed by core-guided reconstruction. -/
   | auto
-  /-- Alethe certificate replay only; do not fall back to the ladder. For working on replay
-  itself, where a silent fallback would mask whether replay actually succeeded. -/
+  /-- Alethe replay, with core fallback unless explicitly disabled. -/
   | alethe
-  /-- Core-directed finisher ladder only; ignore any certificate. Also what a backend
-  that emits no Alethe proof (z3) effectively gets. -/
+  /-- CPC replay, with core fallback unless explicitly disabled. -/
+  | cpc
+  /-- Core-guided reconstruction without certificate replay. -/
   | core
   deriving BEq, Hashable, Inhabited, Repr
 
 instance : ToString ReconstructMode where
   toString
-    | .auto => "auto" | .alethe => "alethe" | .core => "core"
+    | .auto => "auto" | .alethe => "alethe" | .cpc => "cpc" | .core => "core"
 
 instance : KVMap.Value ReconstructMode where
   toDataValue m := toString m
   ofDataValue?
-    | "auto" => some .auto | "alethe" => some .alethe | "core" => some .core
+    | "auto" => some .auto | "alethe" | "Alethe" => some .alethe
+    | "cpc" | "CPC" => some .cpc | "core" => some .core
     | _ => none
+
+/-- The requested certificate format; automatic mode preserves Alethe selection. -/
+def ReconstructMode.format : ReconstructMode → ReplayFormat
+  | .cpc => .cpc
+  | _ => .alethe
 
 /-- Strategy for eliminating higher-order features before hitting first-order SMT. -/
 inductive HOMode where
@@ -213,17 +211,16 @@ register_option crush.preReconstruct.ruleSearch : Bool := {
 
 register_option crush.reconstruct : ReconstructMode := {
   defValue := ReconstructMode.auto
-  descr := "Which reconstruction path to use when `crush.trust` asks for one: auto \
-            (default — try the Alethe certificate, then the finisher ladder), alethe \
-            (cvc5 Alethe certificate only, no ladder fallback), or core (finisher ladder \
-            only, ignoring any certificate). Both paths end in a kernel-checked term and \
-            neither can close a goal on the solver's word; they differ in reach. Alethe \
-            replay handles long chains of trivial inferences (Boolean pigeonhole, deep EUF \
-            conflicts) but needs cvc5 ≥ 1.3; the ladder needs one Lean tactic to re-find \
-            the whole argument and an unsat core (available from Z3 and cvc5, but not \
-            currently Bitwuzla). Under `alethe`, a goal whose \
-            certificate cannot be replayed fails rather than falling back — useful when \
-            working on replay itself, where a silent fallback hides whether it worked."
+  descr := "Reconstruction path: auto (Alethe on cvc5, then core reconstruction), \
+            alethe, cpc, or core. Explicit Alethe and CPC modes require cvc5 and \
+            default to checked core-guided fallback when replay fails."
+}
+
+register_option crush.reconstruct.fallback : Bool := {
+  defValue := true
+  descr := "After certificate replay fails, try checked core-guided reconstruction. \
+            Set false with alethe or cpc to require replay and bypass pre-SMT proof \
+            shortcuts. This does not enable trusting an unreplayed certificate."
 }
 
 register_option crush.reconstruct.trustBvDecide : Bool := {
@@ -289,6 +286,7 @@ structure Config where
   autoUnfold     : Bool      := true
   preRuleSearch  : Bool      := false
   reconstruct    : ReconstructMode := .auto
+  reconstructFallback : Bool := true
   trustBvDecide  : Bool      := false
   trustNativeDecide : Bool   := false
   profile        : Bool      := false
@@ -320,6 +318,7 @@ def Config.ofOptions (opts : Options) : Config :=
     autoUnfold     := crush.autoUnfold.get opts
     preRuleSearch  := crush.preReconstruct.ruleSearch.get opts
     reconstruct    := crush.reconstruct.get opts
+    reconstructFallback := crush.reconstruct.fallback.get opts
     trustBvDecide  := crush.reconstruct.trustBvDecide.get opts
     trustNativeDecide := crush.reconstruct.trustNativeDecide.get opts
     profile        := crush.profile.get opts

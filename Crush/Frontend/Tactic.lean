@@ -11,6 +11,7 @@ import Crush.Solver.Process
 import Crush.Solver.KernelCheck
 import Crush.Solver.Reconstruct
 import Crush.Solver.Alethe
+import Crush.Solver.CPC
 import Crush.SMT.Check
 import Crush.SMT.Print
 import Crush.SMT.Result
@@ -267,7 +268,7 @@ private structure ReplayCertificateStats where
 
 private inductive ProofReplayAttempt where
   | success (certificate : ReplayCertificateStats)
-  | declined (failure : Option Alethe.ReplayFailure)
+  | declined (failure : Option Replay.ReplayFailure)
 
 private structure RunProfileContext where
   decl : String
@@ -314,7 +315,7 @@ private def replayProfileMetrics (cfg : Config) (certificate : ReplayCertificate
     #[]
 
 private def replayDeclineLabel (cfg : Config) (proofSexps : Array SMT.Sexp)
-    (failure? : Option Alethe.ReplayFailure) : String :=
+    (failure? : Option Replay.ReplayFailure) : String :=
   if cfg.reconstruct == .core then
     "not-attempted"
   else
@@ -339,7 +340,15 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
     (proofSexps : Array SMT.Sexp) : TacticM ProofReplayAttempt := do
   if cfg.reconstruct == .core then return .declined none
   if proofSexps.isEmpty then return .declined none
-  let some proof := Alethe.parseProofSexps proofSexps | return .declined none
+  let format := cfg.reconstruct.format
+  let proof ← match format with
+    | .alethe =>
+      let some proof := Alethe.parseProofSexps proofSexps | return .declined none
+      pure proof
+    | .cpc =>
+      match CPC.parseProofSexps proofSexps with
+      | .error detail => return .declined (some { kind := .malformedCertificate, detail })
+      | .ok proof => pure (CPC.withFactAliases proof st.commands)
   let certificate : ReplayCertificateStats :=
     if cfg.profile && cfg.profileMachine then
       let (assumes, steps, anchors) := proof.stats
@@ -347,7 +356,7 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
     else
       { commands := 0, assumes := 0, steps := 0, anchors := 0 }
   let features := proof.features
-  trace[crush.result] "alethe certificate features: operators={features.operators}, \
+  trace[crush.result] "{format} certificate features: operators={features.operators}, \
     indexed={features.indexedOperators}, sorts={features.sorts}, rules={features.rules}"
   goal.withContext do
     let saved ← saveState
@@ -355,7 +364,7 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
     -- `byContradiction` gives us `¬G` as a hypothesis and `False` as the goal.
     let goalType ← instantiateMVars (← goal.getType)
     let negGoal ← mkAppM ``Not #[goalType]
-    let replayed : Except Alethe.ReplayFailure Expr ← try
+    let replayed : Except Replay.ReplayFailure Expr ← try
       withLocalDeclD `hneg negGoal fun hneg => do
         -- Map each `crush_fact_<n>` assumption to a Lean proof: a real hypothesis for an
         -- asserted fact, and the freshly-introduced `¬G` for the negated goal.
@@ -369,17 +378,17 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
             let proof := src.negationTransform.map (fun transform => mkApp transform hneg)
               |>.getD hneg
             facts := facts.insert name proof
-        match ← Alethe.replay proof proofSexps facts st.nameToExpr with
+        match ← Replay.replay proof proofSexps facts st.nameToExpr format with
         | .ok falseProof => return .ok (← mkLambdaFVars #[hneg] falseProof)
         | .error failure => return .error failure
     catch e =>
       let detail ← e.toMessageData.toString
       pure (.error {
         kind := .replayException
-        detail } : Except Alethe.ReplayFailure Expr)
+        detail } : Except Replay.ReplayFailure Expr)
     match replayed with
     | .error failure =>
-      trace[crush.result] "alethe replay: declined ({failure.toMessageData})"
+      trace[crush.result] "{format} replay: declined ({failure.toMessageData})"
       restoreState saved
       return .declined (some failure)
     | .ok lam =>
@@ -390,10 +399,10 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
         return .success certificate
       catch e =>
         let detail ← e.toMessageData.toString
-        let failure : Alethe.ReplayFailure := {
+        let failure : Replay.ReplayFailure := {
           kind := .kernelReject
           detail }
-        trace[crush.result] "alethe replay: declined ({failure.toMessageData})"
+        trace[crush.result] "{format} replay: declined ({failure.toMessageData})"
         restoreState saved
         return .declined (some failure)
 
@@ -425,9 +434,10 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
     (reconstructionHints : Array (Expr × String) := #[])
     (reconstructionFinisher? : Option (TSyntax `tactic) := none) : TacticM Unit :=
   goal.withContext do
-  let forceAlethe := cfg.trust != .trust && cfg.reconstruct == .alethe
-  if cfg.reconstruct == .alethe && cfg.backend != .cvc5 then
-    throwError "crush: `crush.reconstruct alethe` requires the cvc5 backend, but \
+  let forceReplay := cfg.trust != .trust && cfg.reconstruct != .core &&
+    !cfg.reconstructFallback
+  if (cfg.reconstruct == .alethe || cfg.reconstruct == .cpc) && cfg.backend != .cvc5 then
+    throwError "crush: `crush.reconstruct {cfg.reconstruct}` requires the cvc5 backend, but \
                 `crush.backend` is `{cfg.backend}`"
   -- `native` HO mode needs cvc5, or `none` when the script is only being emitted.
   -- z3 prints "ignoring unsupported logic" and then chokes on the function sorts,
@@ -453,7 +463,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
   trace[crush] "selected {collected.selectedPremises} library premise(s)"
   -- `backend = none` is an emission/debugging mode, so it must still produce the script
   -- even when Lean can close the goal without consulting a solver.
-  if cfg.backend != .none && !forceAlethe then
+  if cfg.backend != .none && !forceReplay then
     if ← closeFromSelectedFacts goal collected.facts then
       trace[crush.result] "goal is one of the selected facts; skipped SMT"
       reportRunProfile cfg prof profileContext? "selected-fact" "not-attempted"
@@ -576,8 +586,8 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
       let replayAttempt ← prof.time "replay" (tryProofReplay goal cfg st proofSexps)
       if let .success certificate := replayAttempt then
         trace[crush.result] "proof replay succeeded; no axiom used"
-        reportRunProfile cfg prof profileContext? "alethe-reconstructed" "success"
-          "Alethe certificate replay succeeded"
+        reportRunProfile cfg prof profileContext? s!"{cfg.reconstruct.format}-reconstructed" "success"
+          s!"{cfg.reconstruct.format.displayName} certificate replay succeeded"
           (replayProfileMetrics cfg certificate proofSexps)
         return
       let replayFailure? :=
@@ -585,34 +595,22 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
         | .success _ => none
         | .declined failure => failure
       let replayLabel := replayDeclineLabel cfg proofSexps replayFailure?
-      -- `alethe` mode deliberately has no fallback: it is for working on replay itself,
-      -- where the ladder silently closing the goal would hide whether replay worked.
-      if cfg.reconstruct == .alethe then
-        if let some reason := Alethe.proofError? proofSexps then
-          reportRunProfile cfg prof profileContext? "reconstruction-failed"
-            replayLabel reason
-          throwError m!"crush: cvc5 did not emit an Alethe certificate: {reason}. \
-                        Set `crush.reconstruct` to \"auto\" to use core-directed \
-                        reconstruction instead."
-        else if proofSexps.isEmpty then
-          reportRunProfile cfg prof profileContext? "reconstruction-failed"
-            replayLabel "cvc5 returned no Alethe certificate"
-          throwError "crush: cvc5 did not return an Alethe certificate. Set \
-                      `crush.reconstruct` to \"auto\" to use core-directed \
-                      reconstruction instead."
-        else if let some failure := replayFailure? then
-          reportRunProfile cfg prof profileContext? "reconstruction-failed"
-            replayLabel failure.detail
-          throwError m!"crush: Alethe replay failed with {failure.toMessageData}. \
-                        Set `crush.reconstruct` to \"auto\" to fall back to the \
-                        core-directed finishers."
-        else
-          reportRunProfile cfg prof profileContext? "reconstruction-failed"
-            replayLabel "the Alethe certificate could not be parsed"
-          throwError m!"crush: `crush.reconstruct alethe` is set and the solver's Alethe \
-                        certificate could not be replayed. Set `crush.reconstruct` to \
-                        \"auto\" to fall back to the core-directed finishers, or enable \
-                        `trace.crush.result` to see which step declined."
+      if cfg.reconstruct != .core && !cfg.reconstructFallback then
+        let name := cfg.reconstruct.format.displayName
+        let article := if cfg.reconstruct.format == .alethe then "an" else "a"
+        let detail : MessageData :=
+          if let some reason := Replay.proofError? proofSexps then
+            m!"cvc5 did not emit {article} {name} certificate: {reason}"
+          else if proofSexps.isEmpty then
+            m!"cvc5 did not return {article} {name} certificate"
+          else if let some failure := replayFailure? then
+            m!"{name} replay failed with {failure.toMessageData}"
+          else
+            m!"the {name} certificate could not be parsed"
+        reportRunProfile cfg prof profileContext? "reconstruction-failed"
+          replayLabel (← detail.toString)
+        throwError m!"crush: {detail}. Set `crush.reconstruct.fallback` to true \
+          to try checked core-guided reconstruction."
       let ok ←
         prof.time "reconstruct"
           (tryReconstruct goal reconstructionProofs (← finisherTactics)

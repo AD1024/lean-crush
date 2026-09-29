@@ -167,6 +167,9 @@ backend's dependencies reach another's environment:
 | `lean-smt` | `smt-only` |
 | `crush` | `crush-verify`, `crush-core`, `crush-alethe`, `crush-portfolio` |
 
+The `crush-alethe` lane explicitly disables `crush.reconstruct.fallback` so
+only certificate replay counts. `crush-portfolio` retains core-guided fallback.
+
 Each branch needs its own Lake build, kept under `CURATED_TREES`. The harness
 clones over SSH; set `CURATED_REPO_URL` to the `https://` form to clone
 anonymously, or `CURATED_REPO` to a checkout you already have. The `lean-smt`

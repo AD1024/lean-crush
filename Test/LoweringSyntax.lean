@@ -233,6 +233,7 @@ example (x : Int) : bad x = x + 1 := by crush
 set_option crush.backend "cvc5" in
 set_option crush.trust "reconstruct" in
 set_option crush.reconstruct "alethe" in
+set_option crush.reconstruct.fallback false in
 theorem checkedLowering (x : Int) : bumpDo x = x + 6 := by crush
 
 /-- info: 'LoweringSyntaxTest.checkedLowering' depends on axioms: [propext, Classical.choice, Quot.sound] -/

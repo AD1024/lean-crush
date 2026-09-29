@@ -72,15 +72,9 @@ def backendSpec (b : Backend) : Option BackendSpec :=
       logic := id }
   | .cvc5 => some {
       exe := "cvc5"
-      -- `--proof-format-mode=alethe` makes `(get-proof)` emit the format
-      -- `Crush.Alethe` parses (cvc5's native format is a different language), and
-      -- `--proof-granularity=dsl-rewrite` expands the coarse `hole` steps
-      -- ("untranslated rewrite") into checkable ones — measured 4 holes → 0 on a small
-      -- linear goal. A `hole` is a gap replay must reject, so the granularity flag is
-      -- what makes proofs replayable at all.
       args := fun t => #[s!"--tlimit={t * 1000}", "--produce-models",
                           "--produce-unsat-cores", "--enum-inst", "--incremental",
-                          "--proof-format-mode=alethe", "--proof-granularity=dsl-rewrite"]
+                          "--proof-granularity=dsl-rewrite"]
       logic := id }
   | .bitwuzla => some {
       exe := "bitwuzla"
@@ -90,6 +84,15 @@ def backendSpec (b : Backend) : Option BackendSpec :=
       unsatCores := false
       proofs := false }
   | .none => none
+
+/-- CPC conclusions must be explicit. Disable proof macros so every premise is a
+named, already checked step. The parser also accepts nullary shared-term definitions. -/
+def proofFormatArgs (cfg : Config) : Array String :=
+  if cfg.backend != .cvc5 then #[]
+  else match cfg.reconstruct.format with
+    | .alethe => #["--proof-format-mode=alethe"]
+    | .cpc => #["--proof-format-mode=cpc", "--proof-print-conclusion",
+        "--no-proof-dag-global", "--dag-thresh=0"]
 
 /-- Locate an executable the way process launch does: a name containing a path separator
 is taken as a path, a bare name is searched on `PATH`. -/
@@ -183,7 +186,7 @@ def spawn (cfg : Config) : MetaM SolverProc := do
     | throwError "crush: backend `{cfg.backend}` does not spawn a solver process"
   unless ← backendAvailable cfg.backend do
     throwError (← missingSolverMessage cfg.backend spec.exe)
-  let args := spec.args cfg.timeout ++ cfg.additionalArgs
+  let args := spec.args cfg.timeout ++ cfg.additionalArgs ++ proofFormatArgs cfg
   -- Launched by name so the OS still performs its own lookup; the resolution above is a
   -- check, not a substitution.
   try

@@ -35,7 +35,7 @@ These clauses act at different stages:
 * `using` supplies a final Lean tactic only to checked core reconstruction.
 
 The last two clauses are rejected under `crush.trust "trust"` because trusted
-mode does not attempt reconstruction. They do not affect Alethe certificate
+mode does not attempt reconstruction. They do not affect Alethe or CPC certificate
 replay, which reconstructs individual solver steps instead of the original goal.
 
 # Choosing Solver Facts
@@ -210,7 +210,7 @@ the `with [...]` hints in its local context.
 It cannot accidentally use unrelated hypotheses that the solver did not use.
 Its result, including any auxiliary declarations it creates, is checked by
 Lean's kernel before assignment.
-If an early checked proof or Alethe replay already closes the goal, the core
+If an early checked proof or certificate replay already closes the goal, the core
 finisher is not run.
 
 Use these mechanisms at different scales:
@@ -219,9 +219,9 @@ Use these mechanisms at different scales:
 * `using` is a per-call reconstruction procedure.
 * `@[crush_reconstruct]` registers a reusable theorem for core reconstruction
   throughout a module or library.
-* `register_crush_replay` extends step-by-step Alethe certificate replay.
+* `register_crush_replay term` and `register_replay_rule` extend certificate replay.
 
-Alethe replay uses only the last mechanism. See
+Certificate replay uses only the last mechanism. See
 {ref "extending-reconstruction"}[core reconstruction rules] and
 {ref "extending-alethe"}[replay extensions] for the persistent APIs.
 
@@ -322,14 +322,16 @@ set_option crush.trust "reconstruct"
 ```
 
 The default reconstruction mode, `"auto"`, tries Alethe replay and then proves
-the goal from the unsat core with Lean tactics. Use `"alethe"` to require
-certificate replay, or `"core"` for core reconstruction alone. Z3 supports the
+the goal from the unsat core with Lean tactics. Select `"alethe"` or `"cpc"`
+for a certificate format, or `"core"` for core reconstruction alone. Both
+certificate formats use core fallback by default. Set
+`crush.reconstruct.fallback false` to require certificate replay. Z3 supports the
 core path; Bitwuzla currently supplies neither cores nor certificates.
 
 `crush.trust "reconstructOrTrust"` allows an axiom-backed fallback with a
-warning, except in strict Alethe mode. Inspect `#print axioms` to audit the
+warning, except when certificate replay is required. Inspect `#print axioms` to audit the
 result. The {ref "configuration-reconstruction"}[configuration reference]
-explains early proofs, strict Alethe behavior, and optional native decision
+explains early proofs, replay-only behavior, and optional native decision
 procedures.
 
 # Complete Integrations

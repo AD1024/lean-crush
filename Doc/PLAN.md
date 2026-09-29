@@ -5,7 +5,7 @@ metaprogrammed, user-extensible translation layer.**
 
 Status: milestones 0–2 complete; 3, 4, and 5 partial (see §9). The `crush` tactic
 works end-to-end; it closes goals on the solver's verdict by default, and on request
-produces kernel-checked proofs by replaying cvc5's Alethe certificate or via the
+produces kernel-checked proofs by replaying cvc5's Alethe or CPC certificate or via the
 core-directed finishers (`crush.trust`, `crush.reconstruct`).
 The extension layer covers term handlers, sort handlers, and
 `@[crush_unfold]` auto-unfolding; the hint grammar is in, as is monomorphization —
@@ -212,13 +212,16 @@ Module map (⟢ = built & tested, ▷ = designed, □ = todo):
 | `Crush/Translation/HOEncoding.lean` | HO encoding helpers (defunc ⟢, native ⟢, combinators □) | ⟢ |
 | `Crush/Translation/Translate.lean` | driver: `Expr → SMT.Term` via handlers | ⟢ |
 | `Crush/Solver/Reconstruct.lean` | unsat-core → Lean proof replay (finisher ladder) | ⟢ core-directed |
-| `Crush/Solver/Alethe.lean` | public entry point for Alethe parsing and replay | ⟢ |
-| `Crush/Solver/Alethe/Parser.lean` | cvc5 Alethe proof parser | ⟢ |
-| `Crush/Solver/Alethe/Term.lean` | Alethe `Sexp` → Lean `Expr` (`:named` sharing, `Bool`→`Prop`) | ⟢ |
-| `Crush/Solver/Alethe/ReplayAttr.lean` | term/rule registries and `register_crush_replay` syntax | ⟢ |
-| `Crush/Solver/Alethe/ArithmeticRules.lean` | arithmetic replay handlers and supporting lemmas | ⟢ |
-| `Crush/Solver/Alethe/ReplayRules.lean` | assumption, logical, string, and bit-vector handlers; anchor tactics | ⟢ |
-| `Crush/Solver/Alethe/Replay.lean` | per-step certificate replay; declines rather than trusts | ⟢ |
+| `Crush/Solver/Alethe.lean` | Alethe parser and compatibility exports | ⟢ |
+| `Crush/Solver/Alethe/Parser.lean` | Alethe clauses and anchors → shared certificate | ⟢ |
+| `Crush/Solver/CPC/Parser.lean` | CPC explicit conclusions, sharing, binders, and scopes → shared certificate | ⟢ |
+| `Crush/Solver/CPC/Term.lean` | inverse mappings for CPC internal terms | ⟢ |
+| `Crush/Solver/CPC/ReplayRules.lean` | CPC-specific inference handlers | ⟢ |
+| `Crush/Solver/Replay/Attr.lean` | shared term decoders and format-indexed `register_replay_rule` handlers | ⟢ |
+| `Crush/Solver/Replay/Term.lean` | SMT terms → Lean expressions, including named sharing and Bool/Prop conversion | ⟢ |
+| `Crush/Solver/Replay/ArithmeticRules.lean` | shared arithmetic handlers and supporting lemmas | ⟢ |
+| `Crush/Solver/Replay/ReplayRules.lean` | shared assumption, logical, string, and bit-vector handlers | ⟢ |
+| `Crush/Solver/Replay/Engine.lean` | scoped, checked certificate traversal and structural proof construction | ⟢ |
 | `Crush/Frontend/Tactic.lean` | the `crush` tactic + hint grammar (`[…] u[…] d[…]`) | ⟢ |
 
 ---
@@ -630,7 +633,8 @@ at entry, so this layers on without changing the pipeline.
 | `crush.backend` | `z3\|cvc5\|bitwuzla\|none` | `z3` | solver process / translation profile |
 | `crush.timeout` | `Nat` (s) | `10` | hard wall-clock limit (enforced by us) |
 | `crush.trust` | `trust\|reconstruct\|reconstructOrTrust` | `trust` | how `unsat` discharges the goal (the default closes via the auditable `crushSorry` axiom) |
-| `crush.reconstruct` | `auto\|alethe\|core` | `auto` | which reconstruction path runs when `crush.trust` asks for one: Alethe certificate replay, the core-directed finisher ladder, or both in order |
+| `crush.reconstruct` | `auto\|alethe\|cpc\|core` | `auto` | certificate format or core-only reconstruction; `auto` selects Alethe on cvc5 |
+| `crush.reconstruct.fallback` | `Bool` | `true` | try checked core reconstruction after replay fails; `false` requires replay and skips pre-SMT closure in certificate modes |
 | `crush.ho.mode` | `defunctionalize\|native` | `defunctionalize` | HO elimination strategy |
 | `crush.mono.fuel` | `Nat` | `512` | max monomorphization instances |
 | `crush.mono.rounds` | `Nat` | `8` | max saturation rounds |
@@ -761,10 +765,16 @@ when the pinned cvc5 version changes.
 
 ### Phase 3 — proof replay. done (per-step, not per-rule)
 
-`Crush/Solver/Alethe/Replay.lean` replays a cvc5 Alethe certificate into a Lean proof, and
-it is tried **before** the finisher ladder under a reconstructing policy
-(`crush.reconstruct auto`, the default; `alethe` runs it with no ladder fallback and `core`
-skips it). An Alethe proof decomposes one hard goal into many small inferences. Replay
+`Crush/Solver/Replay/Engine.lean` replays parsed Alethe or CPC certificates into Lean
+proofs before the core-directed finisher ladder. `crush.reconstruct auto` selects
+Alethe on cvc5; `alethe` and `cpc` select their corresponding formats, with checked
+core fallback by default. `crush.reconstruct.fallback false` requires certificate
+replay. `core` skips replay entirely.
+
+Both formats use the same scoped engine and term decoders, with separate inference
+registries selected by `register_replay_rule Alethe` or `register_replay_rule CPC`.
+The implementation and validation milestones are recorded in [CPC.md](CPC.md).
+A certificate decomposes one hard goal into many small inferences. Replay
 restates each clause as a Lean proposition, applies structural proof constructors where
 the clause shape is known, and uses a small tactic portfolio only for the remaining
 concrete steps. The final empty clause is `False`, which discharges the negated goal via
@@ -781,7 +791,7 @@ certificate closes a goal.
 
 Supporting pieces: `TranslateState.nameToExpr` (phase 3a — the emitted-symbol → Lean-term
 reverse map, since translation is otherwise one-directional) and
-`Crush/Solver/Alethe/Term.lean` (Alethe `Sexp` → Lean `Expr`, including the `:named`
+`Crush/Solver/Replay/Term.lean` (certificate `Sexp` → Lean `Expr`, including the `:named`
 sharing pre-pass and the `Bool`→`Prop` lifting SMT's single `Bool` sort forces).
 
 *Subproof blocks are handled.* An anchor may bind multiple assumptions and contain nested
@@ -1132,7 +1142,10 @@ both builds must be clean and produce **no `sorry`**.
 | `TIP.lean` | inductive theorems from the TIP `prod` benchmarks over a *polymorphic* element type, proved hammer-in-the-loop (manual `induction`, `crush` per case, `@[crush_unfold]` definitions) |
 | `Cvc5.lean` | the **cvc5 backend** and **`native` HO mode** (`HO_ALL`, `(-> σ τ)` sorts, `lambda`), which the default `z3`/`defunctionalize` suite never exercises; plus the z3-vs-cvc5 `sat`/`unknown` difference on false HO goals |
 | `Alethe.lean` | the Alethe proof **parser** (M4 phase 1) against verbatim cvc5 output: command/clause/`:named` structure, premise reading, the empty-clause conclusion, and that an `(error …)` reply parses to `none` |
-| `AletheReplay.lean` | Alethe **proof replay** (M4 phase 3): the measured payoff class — Boolean pigeonhole and EUF conflict, which the finisher ladder cannot reconstruct — closes kernel-checked (`#print axioms`, no `crushSorry`); a `Harder` section running under `crush.reconstruct alethe` (no ladder fallback, so a pass *is* a replayed certificate) covering a 5-variable/10-disjunct pigeonhole, a 4-step EUF chain, binary-function congruence, disequality-driven conflict, and boolean implication chaining; plus the decline cases (no certificate, unprovable, false goal) pinned so a certificate is never taken on faith, and the path-selection cases (`crush.reconstruct core`/`alethe`, plus z3, which emits no certificate) |
+| `AletheReplay.lean` | Alethe **proof replay** (M4 phase 3): the measured payoff class — Boolean pigeonhole and EUF conflict, which the finisher ladder cannot reconstruct — closes kernel-checked (`#print axioms`, no `crushSorry`); a `Harder` section running under `crush.reconstruct alethe` and `crush.reconstruct.fallback false` (so a pass *is* a replayed certificate) covering a 5-variable/10-disjunct pigeonhole, a 4-step EUF chain, binary-function congruence, disequality-driven conflict, and boolean implication chaining; plus the decline cases (no certificate, unprovable, false goal) pinned so a certificate is never taken on faith, and the path-selection cases (`crush.reconstruct core`/`alethe`, plus z3, which emits no certificate) |
+| `ReplayFormats.lean` | inference registry isolation, shared registrations, legacy syntax, priorities, and selected-premise scope |
+| `CPCParser.lean` / `CPCSoundness.lean` | sharing and quantifier normalization, nested scopes, malformed certificates, and rejection of unproved assumptions or invalid handler proofs |
+| `CPCReplay.lean` / `CPCFallback.lean` | 52 existing Alethe obligations re-proved using live CPC certificates with fallback disabled; checked fallback and strict-policy failures |
 | `Recursive.lean` | recursive functions and recursive/nested datatypes: a 5-constructor expression language with `size`/`depth`/`eval`, binary trees under structural `induction` (mirror/sum/height preservation), a `Nat` accumulator's closed form, and structures nested inside datatypes. Drove the case-split pre-pass (§10c-bis), so datatype exhaustiveness and structure eta now reconstruct; pins the indirect-recursion boundary (`Rose ⊃ List Rose`) that stays an opaque sort |
 | `ReconstructHard.lean` | core-directed reconstruction with the ladder isolated (`crush.reconstruct core`): selection under 10–24 irrelevant hypotheses (incl. nonlinear distractors), congruence depth 3, quantifier instantiation at non-syntactic points, read-over-write both branches, and goals crossing `Bool`/`Int`/`String` |
 | `LeanAutoPort.lean` | goals ported from lean-auto's `SmtTranslation/` suite (BoolNatInt, BitVec, String, inductive/enum, recursive-with-unfold): demonstrates the same corpus translates and solves, and pins the `Empty`-type cases where we are deliberately *sound* and lean-auto documents itself unsound |

@@ -59,13 +59,13 @@ Then choose according to the reconstruction algorithm:
 * Use `@[crush_reconstruct]` for reusable lemmas used by core-directed
   reconstruction.
 * Use `register_crush_replay term` to decode a custom SMT term appearing in a
-  cvc5 Alethe certificate.
-* Use `register_crush_replay rule` to prove a custom or unsupported Alethe
+  cvc5 certificate.
+* Use `register_replay_rule Alethe` or `register_replay_rule CPC` to prove an unsupported
   inference from its replayed premises.
 
 The first three mechanisms operate on the original Lean goal and unsat core.
 The last two operate on individual certificate terms and steps.
-An Alethe-only run does not consult `@[crush_reconstruct]`, while core-only
+A replay-only run does not consult `@[crush_reconstruct]`, while core-only
 reconstruction does not consult replay registrations.
 
 # Equation-Based Support
@@ -608,26 +608,30 @@ against reconstruction goals and can be applied at different arguments.
 Unlike `using`, it supplies a declarative rule rather than a complete tactic
 script.
 
-# Extending Alethe Replay
+# Extending Certificate Replay
 %%%
 tag := "extending-alethe"
 %%%
 
-Alethe replay has two extension layers:
+Alethe and CPC replay share two extension layers:
 
 1. certificate terms are decoded back into Lean expressions;
 2. certificate inference rules are proved from their replayed premises.
 
-The `register_crush_replay term` and `register_crush_replay rule` commands
-extend these layers without requiring Lean metaprogramming.
-Trust mode does not replay a certificate. Alethe reconstruction must decode
+Use `register_crush_replay term` for shared term decoders and
+`register_replay_rule Alethe` or `register_replay_rule CPC` for inference rules.
+The rule registries are separate: registering a handler for one format does not
+change the other. Use `register_replay_rule Alethe | CPC` when the same rule
+pattern and proof apply to both. The earlier `register_crush_replay rule`
+spelling remains an alias for Alethe registration.
+Trust mode does not replay a certificate. Certificate replay must decode
 every relevant certificate term and construct a proof for every inference;
 core reconstruction does not use these registrations.
 
 A term registration is an inverse translation: use it when a custom lowering
 introduces an SMT operator that may appear in the certificate.
 A rule registration is a proof procedure: use it when terms already decode but
-one named Alethe inference is unsupported.
+one named certificate inference is unsupported.
 Adding one does not substitute for the other.
 
 ## Replay DSL Syntax
@@ -644,7 +648,7 @@ term-registration ::=
     "=>" lean-term ">>"
 
 rule-registration ::=
-  "register_crush_replay" "rule" [priority] "<<"
+  "register_replay_rule" format {"|" format} [priority] "<<"
     rule-pattern {"|" rule-pattern}
     ["if" lean-term]
     "=>" "by" tactic-sequence ">>"
@@ -655,12 +659,13 @@ term-pattern ::=
 
 rule-pattern ::= "(" symbol {sexp-pattern} ")"
 symbol       ::= identifier | string-literal
+format       ::= "Alethe" | "CPC"
 ```
 
 An ordinary term pattern matches an SMT operator whose arguments have already
 been decoded to Lean expressions.
 The `(_ operator indices...)` form additionally matches an indexed SMT
-identifier, while a rule pattern matches an Alethe rule name and its raw
+identifier, while a rule pattern matches a format-specific rule name and its raw
 `:args`.
 Decoded argument patterns (`expr-pattern`) are `_`, `..`, `(term x)`, or
 `(term x : T)`. Raw patterns (`sexp-pattern`) also support literal matches,
@@ -751,10 +756,10 @@ capture. A polymorphic helper makes the inferred width available in its body.
 
 ## Register an Inference Rule
 
-A rule pattern matches the Alethe rule name followed by its raw `:args`:
+A rule pattern matches the selected format's rule name followed by its raw `:args`:
 
 ```lean
-register_crush_replay rule low <<
+register_replay_rule CPC low <<
   (docs_arith_commute
     (term left : Int) (term right : Int)) |
   (docs_arith_swap (term left : Int) (term right : Int)) =>
@@ -769,12 +774,13 @@ If needed, it retries with the enclosing subproof's facts. Unrelated hypotheses
 from the user's theorem remain unavailable. Failure delegates to the next
 registration.
 
-The synthetic rule `assume` validates a decoded SMT assumption against its
-source Lean fact. A `subproof` rule can normalize the implication produced when
-an anchor discharges its local assumptions. Both use the same registration API.
+The synthetic rule `assume` validates a decoded SMT assumption against selected
+Lean facts. Alethe's `subproof` and CPC's `scope` can normalize the implication
+produced when a block discharges its local assumptions. Both use the same
+registration API.
 
 Alternatives and captures follow the same rules as term registrations.
-Use `register_crush_replay rule high`, `low`, or a numeric priority to control
+Use `register_replay_rule Alethe high`, `low`, or a numeric priority to control
 dispatch.
 Exact-rule handlers run before wildcard low-level handlers.
 
@@ -797,7 +803,7 @@ def docsEnabledReplay : ReplayStringBindingIs where
   name := `mode
   expected := "enabled"
 
-register_crush_replay rule low <<
+register_replay_rule Alethe low <<
   (docs_conditional_rule (atom mode) ..)
     if docsEnabledReplay =>
     by exact True.intro
@@ -831,7 +837,7 @@ def replayDocsZero : ReplayTermHandler := fun ctx => do
   let #[] := ctx.args | return none
   return some (Lean.toExpr (0 : Int))
 
-@[crush_replay_rule "docs_rule" low]
+@[crush_replay_rule CPC "docs_rule" low]
 def replayDocsRule : ReplayRuleHandler := fun ctx => do
   unless ctx.args.isEmpty do return none
   ctx.runTacticWithScopeFallback (← `(tactic| grind))
@@ -839,14 +845,14 @@ def replayDocsRule : ReplayRuleHandler := fun ctx => do
 
 A `ReplayTermContext` exposes `head`, raw `indices`, and recursively decoded
 `args`.
-A `ReplayRuleContext` additionally exposes the step target, clause literals,
+A `ReplayRuleContext` additionally exposes the certificate `format`, step target, clause literals,
 replayed premises, raw rule arguments, term/sort decoders, and enclosing
 subproof facts.
 Returning `none` delegates to the next handler.
 `runTactic` uses only ordinary premises; `runTacticWithScopeFallback` retries
 with enclosing subproof facts when the certificate rule requires them.
 
-Prefer the `register_crush_replay` pattern DSL for a fixed certificate shape.
+Prefer the pattern commands for a fixed certificate shape.
 Use `@[crush_replay]` or `@[crush_replay_rule]` only when matching requires
 recursive inspection, dynamic operator selection, or custom metavariable
 control.
@@ -855,15 +861,14 @@ control.
 
 A solver may simplify away a custom operator. For deterministic decoding tests,
 construct a `TermCtx` with its symbol map and registered decoders, then call
-`Crush.Alethe.toExpr?` on each accepted spelling. Executable examples are in
+`Crush.Replay.toExpr?` on each accepted spelling. Executable examples are in
 [Test/AletheExtension.lean](https://github.com/AD1024/lean-crush/blob/main/Test/AletheExtension.lean).
 Pair these checks with a live certificate test:
 
-## Require Alethe in an Integration Test
+## Require Replay in an Integration Test
 
-Run a symbolic theorem with cvc5 and Alethe-only reconstruction.
-Using `"auto"` here is insufficient because core-directed reconstruction could
-hide a broken replay registration:
+Run a symbolic theorem with cvc5 and disable core fallback. Choose `"alethe"`
+or `"cpc"`; leaving fallback enabled could hide a broken replay registration:
 
 ```lean
 section
@@ -871,6 +876,7 @@ section
 set_option crush.backend "cvc5"
 set_option crush.trust "reconstruct"
 set_option crush.reconstruct "alethe"
+set_option crush.reconstruct.fallback false
 set_option crush.timeout 10
 
 theorem customDivisibilityReplay (x : Int)
@@ -880,14 +886,19 @@ theorem customDivisibilityReplay (x : Int)
 
 #print axioms customDivisibilityReplay
 
+set_option crush.reconstruct "cpc" in
+example (x : Int) (hx : MultipleOfThree x) :
+    ¬x % 3 ≠ 0 := by
+  crush
+
 end
 ```
 
 The theorem must elaborate without `Crush.crushSorry` in the `#print axioms`
 output.
 Use symbolic operands and a property that depends on the custom operator;
-the solver may simplify away operators on closed inputs. The Alethe-only policy
-above disables Lean's early proof shortcut, so a successful test must replay a
+the solver may simplify away operators on closed inputs. Disabling fallback
+also disables Lean's early proof shortcut, so a successful test must replay a
 certificate.
 
 The complete executable tests, including alternatives, priorities, context
@@ -899,6 +910,6 @@ isolation, compatibility, and kernel rejection, are in
 Use the {ref "troubleshooting-reconstruction"}[reconstruction diagnostics] to
 distinguish missing certificates, term decoding, rule replay, and invalid proof
 terms. The built-in handlers in
-[ArithmeticRules.lean](https://github.com/AD1024/lean-crush/blob/main/Crush/Solver/Alethe/ArithmeticRules.lean)
-and [ReplayRules.lean](https://github.com/AD1024/lean-crush/blob/main/Crush/Solver/Alethe/ReplayRules.lean)
+[ArithmeticRules.lean](https://github.com/AD1024/lean-crush/blob/main/Crush/Solver/Replay/ArithmeticRules.lean)
+and [ReplayRules.lean](https://github.com/AD1024/lean-crush/blob/main/Crush/Solver/Replay/ReplayRules.lean)
 use the same extension interface.

@@ -72,6 +72,7 @@ theorem resolution_from_certificate (p q r : Prop)
 set_option crush.backend "cvc5"
 set_option crush.trust "reconstruct"
 set_option crush.reconstruct "alethe"
+set_option crush.reconstruct.fallback false
 
 set_option trace.crush.result true in
 theorem resolution_via_crush (p q r : Prop)

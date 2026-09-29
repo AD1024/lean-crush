@@ -68,6 +68,7 @@ theorem powerInstances (custom : HPow Nat Nat Nat) (n x y : Nat)
 set_option crush.backend "cvc5" in
 set_option crush.trust "reconstruct" in
 set_option crush.reconstruct "alethe" in
+set_option crush.reconstruct.fallback false in
 theorem rationalCoefficients (n : Nat) (h : n = 0) : 0 ≥ n * 10 := by
   crush
 
