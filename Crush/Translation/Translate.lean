@@ -67,6 +67,7 @@ The numeral argument is a raw `Expr.lit (.natVal _)`, so we read it directly. -/
 def getNatLit? (e : Expr) : TranslateM (Option Nat) := do
   match_expr e with
   | OfNat.ofNat _ n _ =>
+    unless ← hasExpectedOfNatInstance e do return none
     match (← whnf n) with
     | .lit (.natVal k) => return some k
     | _ => return none
@@ -1803,6 +1804,7 @@ mutual
         -- uninterpreted symbol, losing every fact relating it to its argument.
         return some (.app (.indexed "int2bv" #[.inr wv]) #[← emitTerm n])
     | OfNat.ofNat ty n _ =>
+      unless ← hasExpectedOfNatInstance e do return none
       -- A `BitVec`-typed numeral must become a bit-vector literal, not an `Int`
       -- one; `OfNat` is shared with `Nat`/`Int`, so dispatch on the type.
       let some wv ← bvWidthOfType? ty | return none

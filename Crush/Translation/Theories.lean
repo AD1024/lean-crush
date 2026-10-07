@@ -1,4 +1,5 @@
 import Lean
+import Crush.Translation.Instances
 import Crush.SMT.Syntax
 import Crush.SMT.Quote
 import Crush.Translation.Monad
@@ -46,6 +47,7 @@ def natValue? (e : Expr) : MetaM (Option Nat) := do
   | _ =>
     match_expr e' with
     | OfNat.ofNat _ n _ =>
+      unless ← hasExpectedOfNatInstance e' do return none
       match (← whnf n) with
       | .lit (.natVal k) => return some k
       | _ => return none
