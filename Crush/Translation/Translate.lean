@@ -1332,6 +1332,10 @@ mutual
   array-empty check. -/
   partial def emitTerm (e : Expr) : TranslateM SMT.Term := do
     let e ← instantiateMVars e
+    -- Proofs are erased, never inhabitants of an SMT carrier. In particular a
+    -- hypothetical proof of False must not generate an unconditional witness.
+    if ← isProof e then
+      throwError "crush: cannot translate a proof-valued term as an SMT value"
     -- Zeta-reduce a let (including one in application-head position) before it
     -- can become an opaque symbol and lose dependencies on enclosing binders.
     if let .letE _ _ value body _ := e.getAppFn then
@@ -1390,6 +1394,11 @@ mutual
       let reduced ← withTransparency .instances <| whnf e
       if reduced != e then
         return ← emitTerm reduced
+    -- Proof irrelevance also covers proofs of function-shaped propositions.
+    -- Handle their equality before the higher-order function encoder sees it.
+    match_expr e with
+    | Eq ty _ _ => if ← isProp ty then return (smt| true)
+    | _ => pure ()
     -- Higher-order forms, before the first-order structural path.
     if let some t ← hoTerm? e then
       return t
