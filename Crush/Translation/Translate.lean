@@ -1213,7 +1213,8 @@ mutual
     if let some elem ← finiteArrayElem? ty then
       return ← finiteArraySortSelected ty elem
     if let some shape ← arrowShape? ty then
-      if (← TranslateM.getConfig).hoMode == .native then return false
+      if (← TranslateM.getConfig).hoMode == .native then
+        if ← shape.args.anyM (needsWFGuard · visiting) then return true
       return ← needsWFGuard shape.res visiting
     let some (n, typeArgs) ← supportedDatatypeType? ty | do
       discard <| emitSort ty
@@ -1297,7 +1298,8 @@ mutual
       let wf ← reserveWfSymbol enc.sortName
       return some (.app (.symb wf) #[t])
     if let some shape ← arrowShape? ty then
-      if (← TranslateM.getConfig).hoMode == .native then return none
+      if (← TranslateM.getConfig).hoMode == .native then
+        return ← nativeFunctionWF shape t
       if !(← needsWFGuard shape.res) then return none
       let (sort, _) ← declareArrowSort ty
       let .app (.symb sortName) _ := sort | return none
@@ -1514,6 +1516,29 @@ mutual
       markFunDeclared name
       TranslateM.emitCommand (.declFun name #[] sort)
     return .const name
+
+  /-- A native function must produce valid results at valid arguments and agree
+  with the canonical extension outside its Lean domain. This predicate restricts
+  quantified functions as well as function-valued results and datatype fields. -/
+  partial def nativeFunctionWF (shape : ArrowShape) (t : SMT.Term) :
+      TranslateM (Option SMT.Term) := do
+    let f ← TranslateM.freshSymbol "wf_fn"
+    let mut binders : Array (String × SSort) := #[]
+    for ty in shape.args do
+      binders := binders.push (← TranslateM.freshSymbol "wf_arg", ← emitSort ty)
+    let value := SMT.Term.app (.symb f) (binders.map fun b => SMT.Term.const b.1)
+    let result ← wfCondition shape.res value
+    let domain ← binderGuard (binders.map (·.1)) shape.args
+    let condition ← match domain, result with
+      | none, none => return none
+      | none, some valid => pure valid
+      | some domain, result =>
+        let outside ← nativeOutsideValue shape.res
+        let canonical := (smt| (=> (not $domain) (= $value $outside)))
+        match result with
+        | none => pure canonical
+        | some valid => pure (smt| (and (=> $domain $valid) $canonical))
+    return some (.letE #[(f, t)] (.forallE binders condition))
 
   /-- A native higher-order `lambda` term, for HO-capable backends. -/
   partial def emitNativeLambda (lam : Expr) : TranslateM SMT.Term := do
