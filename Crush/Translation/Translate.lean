@@ -295,6 +295,21 @@ private def knownNonemptyCarrier (ty : Expr) : TranslateM Bool := do
   modify fun s => { s with nonemptyCarriers := s.nonemptyCarriers.insert ty nonempty }
   return nonempty
 
+/-- An inhabited defunctionalized arrow needs no padding functions: its
+uninterpreted `Fn` sort can consist entirely of Lean functions. Besides ordinary
+inhabitation evidence, a nonempty result supplies a constant function, and a
+result matching an argument supplies a projection (including `α → α`, even when
+`α` may be empty).
+
+Native SMT function sorts contain all functions on the padded SMT carriers, so
+they must retain their validity predicates even when the Lean arrow is inhabited. -/
+private def knownNonemptyDefunctionalizedArrow (ty : Expr) (shape : ArrowShape) :
+    TranslateM Bool := do
+  if (← TranslateM.getConfig).hoMode == .native then return false
+  if ← shape.args.anyM (isDefEqRigid · shape.res) then return true
+  if ← knownNonemptyCarrier shape.res then return true
+  return ← knownNonemptyCarrier ty
+
 /-- Whether `e` is a *value* that a type could depend on: something crush turns
 into an SMT term, such as a number, a Boolean, a proposition or a predicate.
 Types and type constructors (`Int`, `List`) are not values. Neither are proofs,
@@ -772,11 +787,17 @@ mutual
           match ← binderGuard names shape.args with
           | none => pure res
           | some g => pure (smt| (=> $g $res))
-        let wf ← reserveWfSymbol sortName
-        markFunDeclared wf
-        TranslateM.emitCommand (.defFun false wf #[(fName, sort)]
-          (.app (.symb "Bool") #[]) (.forallE (names.zip argSorts) guarded))
-        recordValidityPredicate wf ty
+        if ← knownNonemptyDefunctionalizedArrow ty shape then
+          -- This sort can contain only actual functions. Constrain application
+          -- globally, retaining argument guards when the domain itself is padded.
+          TranslateM.emitCommand (.assert
+            (.forallE (#[(fName, sort)] ++ names.zip argSorts) guarded))
+        else
+          let wf ← reserveWfSymbol sortName
+          markFunDeclared wf
+          TranslateM.emitCommand (.defFun false wf #[(fName, sort)]
+            (.app (.symb "Bool") #[]) (.forallE (names.zip argSorts) guarded))
+          recordValidityPredicate wf ty
     return (sort, appName)
 
   /-- Offer a Lean type to `handlers`, in the priority order they were resolved in. -/
@@ -1222,6 +1243,8 @@ mutual
     if let some shape ← arrowShape? ty then
       if (← TranslateM.getConfig).hoMode == .native then
         if ← shape.args.anyM (needsWFGuard · visiting) then return true
+      else if ← knownNonemptyDefunctionalizedArrow ty shape then
+        return false
       return ← needsWFGuard shape.res visiting
     let some (n, typeArgs) ← supportedDatatypeType? ty | do
       discard <| emitSort ty
@@ -1311,6 +1334,7 @@ mutual
         return ← nativeFunctionWF shape t
       if !(← needsWFGuard shape.res) then return none
       let (sort, _) ← declareArrowSort ty
+      if ← knownNonemptyDefunctionalizedArrow ty shape then return none
       let .app (.symb sortName) _ := sort | return none
       let wf ← reserveWfSymbol sortName
       return some (.app (.symb wf) #[t])
