@@ -119,8 +119,7 @@ def hasLawfulBEq (carrier inst : Expr) : TranslateM Bool := do
 /-- SMT datatypes require a finite constructor tree for every mutually declared sort.
 A Lean inductive may have only recursive constructors and therefore be empty. Keep
 such a block opaque and guarded instead of emitting an invalid SMT datatype. -/
-private def hasProductiveDatatypeBlock (iv : InductiveVal) (typeArgs : Array Expr) :
-    MetaM Bool := do
+private def hasProductiveDatatypeBlock (iv : InductiveVal) : MetaM Bool := do
   let block := iv.all.toArray
   let mut productive : Std.HashSet Name := {}
   for _ in [:block.size] do
@@ -129,9 +128,12 @@ private def hasProductiveDatatypeBlock (iv : InductiveVal) (typeArgs : Array Exp
       let info ← getConstInfoInduct name
       for ctor in info.ctors do
         let ctorInfo ← getConstInfoCtor ctor
-        let ctorType ← instantiateForall ctorInfo.type typeArgs
-        let ready ← forallTelescopeReducing ctorType fun fields _ =>
-          fields.allM fun field => do
+        -- Inspect generic fields before substituting parameters. A parameter
+        -- instantiated with another product is an external sort, not a recursive
+        -- occurrence of the product currently being declared. External sorts are
+        -- padded; their Lean validity is enforced separately by datatype guards.
+        let ready ← forallTelescopeReducing ctorInfo.type fun binders _ =>
+          (binders.extract ctorInfo.numParams binders.size).allM fun field => do
             let ty ← whnf (← inferType field)
             let .const head _ := ty.getAppFn | return true
             return !block.contains head || productive.contains head
@@ -162,7 +164,7 @@ def isSupportedDatatypeApp (n : Name) (typeArgs : Array Expr) : MetaM Bool := do
   if typeArgs.size != iv.numParams then return false
   if n == ``Nat || n == ``Int || n == ``Bool || n == ``String then return false
   if iv.ctors.isEmpty then return false
-  unless ← hasProductiveDatatypeBlock iv typeArgs do return false
+  unless ← hasProductiveDatatypeBlock iv do return false
   -- A type *class* (`HAdd`, `Inhabited`, …) is not data: its fields are typically
   -- functions, and a value is an instance-dictionary chosen by synthesis, not
   -- something to reason about structurally. Keep classes opaque; this also stops a
