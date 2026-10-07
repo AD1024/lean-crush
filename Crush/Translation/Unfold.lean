@@ -33,15 +33,21 @@ inductive UnfoldKind where
   | defeq
   deriving Inhabited, BEq
 
-/-- Persistent set of definitions marked for automatic unfolding, with their kind.
-Keyed by the definition's `Name`; the value records `unfold` vs. `defeq`. -/
+/-- Definitions marked for automatic unfolding, with their kind. Local and scoped
+attributes follow Lean's section and namespace scopes. -/
 initialize crushUnfoldExt :
-    SimplePersistentEnvExtension (Name × UnfoldKind) (Std.HashMap Name UnfoldKind) ←
-  registerSimplePersistentEnvExtension {
-    addEntryFn := fun m (n, k) => m.insert n k
-    addImportedFn := fun ms => ms.foldl (fun acc arr =>
-      arr.foldl (fun acc (n, k) => acc.insert n k) acc) {}
+    SimpleScopedEnvExtension (Name × UnfoldKind) (Std.HashMap Name UnfoldKind) ←
+  registerSimpleScopedEnvExtension {
+    initial := {}
+    addEntry := fun m (n, k) => m.insert n k
   }
+
+/-- Attribute erasure changes only the current scope, like erasing a simp lemma. -/
+private def eraseUnfoldAttribute (declName : Name) (kind : UnfoldKind)
+    (attributeName : String) : CoreM Unit := do
+  unless (crushUnfoldExt.getState (← getEnv)).get? declName == some kind do
+    throwError "cannot erase [{attributeName}] from `{declName}`: the attribute is not active"
+  modifyEnv fun env => crushUnfoldExt.modifyState env (·.erase declName)
 
 /-- The equation-lemma names for a single constant under a given kind. Shared by the
 attribute machinery and the `u[…]`/`d[…]` hint parser so both resolve identically.
@@ -64,43 +70,44 @@ def eqnLemmasFor (n : Name) (kind : UnfoldKind) : MetaM (Array Name) := do
     | some eqn => return #[eqn]
     | none => return #[]
 
-/-- The user-facing attribute keywords. `registerBuiltinAttribute` keys on `name`, so
-without these the attribute would have to be written `@[crushUnfoldAttr]`; the `syntax`
-declarations give the friendly `@[crush_unfold]` / `@[crush_defeq]` spellings. -/
-syntax (name := crushUnfoldAttr) "crush_unfold" : attr
-syntax (name := crushDefeqAttr) "crush_defeq" : attr
+/-- The attribute parser names match the public names so both adding and erasing
+attributes use the same spelling. -/
+syntax (name := crush_unfold) "crush_unfold" : attr
+syntax (name := crush_defeq) "crush_defeq" : attr
 
 /-- `@[crush_unfold]` — fold a definition's full equation-lemma set into every `crush`
 query (like `u[f]`). Two separate attributes share one extension; each checks at
 attribute time that the target actually has equations, so a misuse (on an `axiom`,
 `opaque`, or structure) is a declaration-time error rather than a silent no-op. -/
 initialize registerBuiltinAttribute {
-  name := `crushUnfoldAttr
+  name := `crush_unfold
   descr := "Fold this definition's equation lemmas into every `crush` query (like `u[f]`)."
   applicationTime := .afterCompilation
-  add := fun declName _stx _ => do
+  add := fun declName _stx attrKind => do
     let hasEqns ← MetaM.run' do
       return (← getEqnsFor? declName).isSome
         || (← getUnfoldEqnFor? declName (nonRec := true)).isSome
     unless hasEqns do
       throwError "@[crush_unfold] expects a definition with equational lemmas, but \
                   `{declName}` has none (is it an `axiom`, `opaque`, or structure?)."
-    modifyEnv fun env => crushUnfoldExt.addEntry env (declName, .unfold)
+    crushUnfoldExt.add (declName, .unfold) attrKind
+  erase := fun declName => eraseUnfoldAttribute declName .unfold "crush_unfold"
 }
 
 /-- `@[crush_defeq]` — fold a definition's single unfold equation (`f.eq_def`) into
 every `crush` query (like `d[f]`). -/
 initialize registerBuiltinAttribute {
-  name := `crushDefeqAttr
+  name := `crush_defeq
   descr := "Fold this definition's unfold equation into every `crush` query (like `d[f]`)."
   applicationTime := .afterCompilation
-  add := fun declName _stx _ => do
+  add := fun declName _stx attrKind => do
     let hasEqn ← MetaM.run' do
       return (← getUnfoldEqnFor? declName (nonRec := true)).isSome
     unless hasEqn do
       throwError "@[crush_defeq] expects a definition with an unfold equation, but \
                   `{declName}` has none."
-    modifyEnv fun env => crushUnfoldExt.addEntry env (declName, .defeq)
+    crushUnfoldExt.add (declName, .defeq) attrKind
+  erase := fun declName => eraseUnfoldAttribute declName .defeq "crush_defeq"
 }
 
 /-- All equation-lemma names contributed by marked definitions **relevant** to `seeds`
