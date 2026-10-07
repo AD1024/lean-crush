@@ -17,7 +17,8 @@ setup.
 The set of facts is governed by `Hints` (parsed from the tactic's argument grammar,
 see `Crush/Frontend/Tactic.lean`):
 
-* bare `crush` collects **all** local `Prop` hypotheses (the common case);
+* bare `crush` collects **all** local `Prop` hypotheses and defining equations for
+  visible local data definitions (the common case);
 * `crush [t₁, …]` collects only the listed terms (plus the goal), matching
   Sledgehammer/`auto` semantics where an explicit list is a *restriction*;
 * `crush [t₁, …, *]` collects the listed terms **and** all local hypotheses;
@@ -145,6 +146,19 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
             proof := decl.toExpr
             descr := s!"hyp {decl.userName}"
             instantiateTerms := hints.instantiateHyps }
+        else if !ty.consumeMData.isSort then
+          -- A visible local let is definitionally equal to its value. Keeping
+          -- that equality connects the SMT atom for the local to its definition.
+          -- Opaque `have` values are intentionally hidden by `value?`.
+          if let some value := decl.value? then
+            let value ← instantiateMVars value
+            let prop ← mkEq decl.toExpr value
+            let proof := mkApp2 (mkConst ``id [0]) prop (← mkEqRefl value)
+            seeds := seeds ++ prop.getUsedConstants
+            facts := facts.push {
+              prop
+              proof := some proof
+              descr := s!"let {decl.userName}" }
     -- Explicit term hints (lemmas or hypotheses the user named).
     for (proof, descr) in hints.terms do
       -- Re-abstract leftover mvars into leading binders. Elaborating a bare
