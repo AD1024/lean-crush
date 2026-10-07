@@ -1850,6 +1850,7 @@ mutual
     | HShiftLeft.hShiftLeft _ _ _ _ a b => shiftOp "bvshl" w a b
     | HShiftRight.hShiftRight _ _ _ _ a b => shiftOp "bvlshr" w a b
     | BitVec.sshiftRight _ a b => shiftOp "bvashr" w a b
+    | BitVec.sshiftRight' _ _ a b => shiftOp "bvashr" w a b
     | BitVec.shiftLeft _ a b => shiftOp "bvshl" w a b
     | BitVec.ushiftRight _ a b => shiftOp "bvlshr" w a b
     -- Rotations. SMT-LIB takes the amount as an *index*, not an operand, so only a
@@ -1927,8 +1928,14 @@ mutual
   partial def shiftOp (op : String) (w : Nat) (a b : Expr) : TranslateM (Option SMT.Term) := do
     let sa ← emitTerm a
     if let some bw ← bvWidthOf? b then
-      -- Same-width bit-vector amount: pad if the widths differ.
-      return some (.symbApp op #[sa, bvResize false bw w (← emitTerm b)])
+      let sb ← emitTerm b
+      let shifted := SMT.Term.symbApp op #[sa, bvResize false bw w sb]
+      if bw > w then
+        -- Truncating a wide amount would wrap, e.g. 256#16 to 0#8. Compare
+        -- the full amount first; shifting by the width gives zero or sign-fill.
+        let saturated := SMT.Term.symbApp op #[sa, bvLit w w]
+        return some (smt| (ite (bvuge $sb $(bvLit bw w)) $saturated $shifted))
+      return some shifted
     if (← whnf (← inferType b)).isConstOf ``Nat then
       let some bv ← natValue? b | return none
       -- Saturate at the width: both Lean and SMT yield 0 (or sign-fill) there, and
