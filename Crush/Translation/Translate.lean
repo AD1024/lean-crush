@@ -133,7 +133,7 @@ private def hasProductiveDatatypeBlock (iv : InductiveVal) (typeArgs : Array Exp
         let ready ← forallTelescopeReducing ctorType fun fields _ =>
           fields.allM fun field => do
             let ty ← whnf (← inferType field)
-            let head := ty.getAppFn.constName!
+            let .const head _ := ty.getAppFn | return true
             return !block.contains head || productive.contains head
         if ready then
           productive := productive.insert name
@@ -1251,6 +1251,8 @@ mutual
   `declareDatatype` drives the two in that order across the whole block. -/
   partial def declDatatypeWF (sortName : String) : TranslateM Bool := do
     let wf ← reserveWfSymbol sortName
+    if let some sourceType := (← get).nameToExpr[sortName]? then
+      recordValidityPredicate wf sourceType
     if ← declaredFun wf then return false
     markFunDeclared wf
     return true
