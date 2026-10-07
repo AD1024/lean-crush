@@ -1738,6 +1738,12 @@ mutual
     | ite _ c _ a b =>
       -- `if c then a else b`; the condition `c : Prop` becomes an SMT Bool term.
       return some (smt| (ite $(← emitTerm c) $(← emitTerm a) $(← emitTerm b)))
+    | dite _ c _ a b =>
+      -- Proof binders are not runtime inputs. Translate each branch under its
+      -- hypothesis and use the actual proposition to select the branch.
+      let yes ← withLocalDeclD `hp c fun hp => emitTerm ((mkApp a hp).headBeta)
+      let no ← withLocalDeclD `hnp (mkNot c) fun hnp => emitTerm ((mkApp b hnp).headBeta)
+      return some (smt| (ite $(← emitTerm c) $yes $no))
     | cond _ b t e =>
       -- `Bool.cond`/`cond` with a `Bool` scrutinee.
       return some (smt| (ite $(← emitTerm b) $(← emitTerm t) $(← emitTerm e)))
