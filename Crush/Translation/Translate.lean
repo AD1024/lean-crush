@@ -1719,12 +1719,14 @@ mutual
     -- imports `Int`'s distinctness and lets the solver "prove" that equal values
     -- differ. Fall through to an uninterpreted symbol instead, which keeps
     -- congruence without assuming injectivity.
-    | Nat.cast target _ a =>
+    | Nat.cast target inst a =>
       let target ← whnf target
-      if target.isConstOf ``Int || target.isConstOf ``Nat then
-        return some (← emitTerm a)
-      else
-        return none
+      let expected ←
+        if target.isConstOf ``Int then pure (mkConst ``instNatCastInt)
+        else if target.isConstOf ``Nat then pure (mkConst ``instNatCastNat)
+        else return none
+      unless ← isDefEqReadOnly inst expected do return none
+      return some (← emitTerm a)
     | LE.le _ _ a b => return some (smt| (<= $(← emitTerm a) $(← emitTerm b)))
     | LT.lt _ _ a b => return some (smt| (< $(← emitTerm a) $(← emitTerm b)))
     | GE.ge _ _ a b => return some (smt| (>= $(← emitTerm a) $(← emitTerm b)))
