@@ -43,6 +43,23 @@ private def ensureComplete (label : String) (e : Expr) : MetaM Unit := do
   if e.getUsedConstants.contains `Crush.crushSorry then
     throwError "crush: {label} depends on `Crush.crushSorry`"
 
+/-- Find an admitted-proof axiom in a declaration's transitive dependencies.
+
+Ordinary user-declared axioms remain valid premises, as they are for other Lean tactics.
+Checked reconstruction specifically excludes `sorryAx` and the SMT trust axiom, including
+when they are hidden behind previously compiled theorems. `collectAxioms` also handles
+imported declarations whose bodies are unavailable in the current module. -/
+def forbiddenReconstructionAxiom? (name : Name) : CoreM (Option Name) := do
+  for axiomName in ← collectAxioms name do
+    if axiomName == ``sorryAx || axiomName == `Crush.crushSorry then
+      return some axiomName
+  return none
+
+private def ensureAxiomClosure (label : String) (e : Expr) : MetaM Unit := do
+  for name in e.getUsedConstants do
+    if let some axiomName ← forbiddenReconstructionAxiom? name then
+      throwError "crush: {label} depends on forbidden axiom `{axiomName}` through `{name}`"
+
 /-- Check a replay fragment with the elaborator before the complete proof reaches the kernel. -/
 def validateProofCandidate (expected proof : Expr) : MetaM Expr := do
   let expected ← instantiateMVars expected
@@ -157,6 +174,10 @@ def kernelCheckProofWithParams (snapshot : KernelCheckSnapshot) (params : Array 
   let closedProof ← instantiateMVars (← mkLambdaFVars params proof)
   ensureComplete "reconstructed goal type" closedExpected
   ensureComplete "reconstructed proof" closedProof
+  -- Baseline declarations are already kernel-checked, but their proofs may still
+  -- depend on an admission. Check the complete closure before skipping that baseline.
+  ensureAxiomClosure "reconstructed goal type" closedExpected
+  ensureAxiomClosure "reconstructed proof" closedProof
   let current ← getEnv
   let mut checked : Std.HashSet Name := {}
   for name in closedExpected.getUsedConstants do

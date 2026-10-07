@@ -2,6 +2,7 @@ import Lean
 import Lean.LibrarySuggestions.Default
 import Crush.Translation.Monad
 import Crush.Translation.Unfold
+import Crush.Solver.KernelCheck
 open Lean Meta
 
 /-!
@@ -179,10 +180,14 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
         caller := some "crush"
         filter := fun name => do
           let some info := (← getEnv).find? name | return false
-          isProp info.type }
+          unless ← isProp info.type do return false
+          return (← forbiddenReconstructionAxiom? name).isNone }
       for suggestion in suggestions do
         if selectedPremises >= premiseMax then break
         if seenPremises.contains suggestion.name then continue
+        -- Selectors may ignore their filter. Never automatically select an
+        -- admitted theorem; ordinary user axioms remain eligible premises.
+        if (← forbiddenReconstructionAxiom? suggestion.name).isSome then continue
         unless ← premiseAppliesToGoal goal suggestion.name do continue
         seenPremises := seenPremises.insert suggestion.name
         let proof ← mkConstWithFreshMVarLevels suggestion.name
