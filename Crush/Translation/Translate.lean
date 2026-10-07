@@ -583,6 +583,13 @@ private structure DefaultAppArgs where
   types     : Array Expr := #[]
   instances : Array Expr := #[]
 
+/-- Types and type constructors are erased signature parameters. Predicates
+and proposition-valued functions remain values, represented with SMT Bool. -/
+private def isTypeArgument (type : Expr) : MetaM Bool :=
+  forallTelescopeReducing type fun _ result => do
+    let result ← whnf result
+    return result.isSort && !result.isProp
+
 /-- Partition application arguments by their Lean binder role.
 
 Type and proof arguments are erased. Instance-implicit arguments affect the selected
@@ -604,7 +611,7 @@ private def partitionDefaultAppArgs (fn : Expr) (args : Array Expr) :
     let argType ← inferType arg
     if ← isProp argType then
       pure ()
-    else if (← whnf argType).isSort && !(← whnf argType).isProp then
+    else if ← isTypeArgument argType then
       out := { out with types := out.types.push arg }
     else if binderInfo? == some .instImplicit then
       let dependsOnBound :=

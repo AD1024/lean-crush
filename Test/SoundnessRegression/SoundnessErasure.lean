@@ -37,3 +37,10 @@ example (p : Prop) [Decidable p] (a b : Int) : True := by
     split <;> simp_all
   fail_if_success have : False := by crush
   trivial
+
+-- A closed type constructor is an erased signature parameter, not a function
+-- value that should be eta-expanded over an SMT representation of all types.
+opaque soundnessTypeConstructorCode : (Type → Type) → Int
+
+example (h : soundnessTypeConstructorCode (Except Int) = 2) :
+    soundnessTypeConstructorCode (Except Int) + 1 = 3 := by crush
