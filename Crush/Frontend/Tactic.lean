@@ -799,9 +799,7 @@ private def parseHintList (goal : MVarId) (stx : TSyntax ``crushHints) :
       match elem with
       | `(crushHintElem| *) => allHyps := true
       | `(crushHintElem| $t:term) =>
-        let e ← Term.elabTerm t none
-        Term.synthesizeSyntheticMVarsNoPostponing
-        let e ← instantiateMVars e
+        let e ← Tactic.withoutRecover <| Tactic.elabTerm t none
         let descr := (t.raw.reprint.getD "hint").trimAscii.toString
         terms := terms.push (e, s!"hint {descr}")
       | _ => throwUnsupportedSyntax
@@ -817,9 +815,7 @@ private def parseReconstructionHints (goal : MVarId)
     | throwUnsupportedSyntax
   let mut hints : Array (Expr × String) := #[]
   for term in terms do
-    let proof ← Term.elabTerm term none
-    Term.synthesizeSyntheticMVarsNoPostponing
-    let proof ← instantiateMVars proof
+    let proof ← Tactic.withoutRecover <| Tactic.elabTerm term none
     let proof ←
       if proof.hasExprMVar || proof.hasLevelMVar then
         pure (← abstractMVars proof (levels := false)).expr
