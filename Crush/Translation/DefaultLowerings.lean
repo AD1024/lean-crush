@@ -289,7 +289,7 @@ def arrayGetElem : LoweringHandler := fun ctx => do
   let #[coll, idxTy, elem, _, _, arr, idx, _] := ctx.args | return none
   let some arrayElem ← finiteArrayElem? coll | return none
   unless (← whnf idxTy).isConstOf ``Nat do return none
-  unless ← isDefEqReadOnly elem arrayElem do return none
+  unless ← isDefEqRigid elem arrayElem do return none
   unless ctx.hasInstanceHead 4 ``Array.instGetElemNatLtSize do return none
   let sidx ← ctx.emitTerm idx
   withFiniteArray ctx arrayElem arr fun view =>
@@ -300,7 +300,7 @@ def arrayGetElemBang : LoweringHandler := fun ctx => do
   let #[coll, idxTy, elem, _, _, inhabited, arr, idx] := ctx.args | return none
   let some arrayElem ← finiteArrayElem? coll | return none
   unless (← whnf idxTy).isConstOf ``Nat do return none
-  unless ← isDefEqReadOnly elem arrayElem do return none
+  unless ← isDefEqRigid elem arrayElem do return none
   unless ctx.hasInstanceHead 4 ``Array.instGetElem?NatLtSize do return none
   let sidx ← ctx.emitTerm idx
   let defaultFn := mkConst ``default [← getLevel elem]
@@ -314,7 +314,7 @@ def arrayGetElemOpt : LoweringHandler := fun ctx => do
   let #[coll, idxTy, elem, _, _, arr, idx] := ctx.args | return none
   let some arrayElem ← finiteArrayElem? coll | return none
   unless (← whnf idxTy).isConstOf ``Nat do return none
-  unless ← isDefEqReadOnly elem arrayElem do return none
+  unless ← isDefEqRigid elem arrayElem do return none
   unless ctx.hasInstanceHead 4 ``Array.instGetElem?NatLtSize do return none
   let sidx ← ctx.emitTerm idx
   withFiniteArray ctx arrayElem arr fun view => do

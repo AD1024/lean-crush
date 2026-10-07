@@ -6,10 +6,14 @@ open Lean Meta Crush
 -- discard the assignment that made that comparison valid.
 run_meta do
   let dictionary ← mkFreshExprMVar (mkApp (mkConst ``NatCast [.zero]) (mkConst ``Int))
-  if ← isDefEqReadOnly dictionary (mkConst ``instNatCastInt) then
+  if ← isDefEqRigid dictionary (mkConst ``instNatCastInt) then
     throwError "unresolved dictionary was accepted as the library instance"
   if ← dictionary.mvarId!.isAssigned then
     throwError "read-only instance comparison assigned its input"
+  unless ← isDefEqReadOnly dictionary (mkConst ``instNatCastInt) do
+    throwError "pattern matching lost its ability to test an instantiation"
+  if ← dictionary.mvarId!.isAssigned then
+    throwError "speculative pattern comparison retained its assignment"
 
 -- A query-local Int must not turn an unresolved carrier into an unguarded sort.
 run_meta do

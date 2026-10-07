@@ -104,7 +104,7 @@ library operation its SMT meaning, even when users register higher-priority inst
 def TranslationCtx.hasExpectedInstance
     (ctx : TranslationCtx) (i : Nat) (expected : Expr) : TranslateM Bool := do
   let some actual := ctx.args[i]? | return false
-  isDefEqReadOnly actual expected
+  isDefEqRigid actual expected
 
 /-- Whether argument `i` has the given declaration head.
 

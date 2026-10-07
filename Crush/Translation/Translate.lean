@@ -1764,7 +1764,7 @@ mutual
         if target.isConstOf ``Int then pure (mkConst ``instNatCastInt)
         else if target.isConstOf ``Nat then pure (mkConst ``instNatCastNat)
         else return none
-      unless ← isDefEqReadOnly inst expected do return none
+      unless ← isDefEqRigid inst expected do return none
       return some (← emitTerm a)
     | LE.le _ _ a b => return some (smt| (<= $(← emitTerm a) $(← emitTerm b)))
     | LT.lt _ _ a b => return some (smt| (< $(← emitTerm a) $(← emitTerm b)))

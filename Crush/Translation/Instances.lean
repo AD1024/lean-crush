@@ -22,7 +22,7 @@ def hasExpectedOfNatInstance (e : Expr) : MetaM Bool := do
       else
         pure none
     let some expected := expected | return false
-    isDefEqReadOnly actual expected
+    isDefEqRigid actual expected
   | _ => return false
 
 /-- Select a fixed dictionary for a structural theory carrier. No search through
@@ -106,7 +106,7 @@ carriers; definitional equality allows aliases of the supported instances. -/
 def hasExpectedOverloadInstance (e : Expr) (instanceIndex : Nat) : MetaM Bool := do
   let some actual := e.getAppArgs[instanceIndex]? | return false
   let some expected ← expectedOverloadInstance? e | return false
-  unless ← isDefEqReadOnly (← inferType actual) (← inferType expected) do return false
-  isDefEqReadOnly actual expected
+  unless ← isDefEqRigid (← inferType actual) (← inferType expected) do return false
+  isDefEqRigid actual expected
 
 end Crush

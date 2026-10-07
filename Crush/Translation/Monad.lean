@@ -159,6 +159,13 @@ abbrev TranslateM := StateRefT TranslateState MetaM
 
 /-- Test definitional equality without retaining metavariable assignments. -/
 def isDefEqReadOnly (left right : Expr) : MetaM Bool :=
+  withoutModifyingState do
+    Meta.isDefEqGuarded left right
+
+/-- Test equality without even temporarily specializing caller metavariables.
+Semantic encoding eligibility needs this stronger check; pattern matching may
+instead use `isDefEqReadOnly` to test whether an instantiation is possible. -/
+def isDefEqRigid (left right : Expr) : MetaM Bool :=
   withoutModifyingState <| Meta.withNewMCtxDepth do
     Meta.isDefEqGuarded left right
 
