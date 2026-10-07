@@ -1347,6 +1347,10 @@ mutual
   array-empty check. -/
   partial def emitTerm (e : Expr) : TranslateM SMT.Term := do
     let e ← instantiateMVars e
+    -- Zeta-reduce a let (including one in application-head position) before it
+    -- can become an opaque symbol and lose dependencies on enclosing binders.
+    if let .letE _ _ value body _ := e.getAppFn then
+      return ← emitTerm (mkAppN (body.instantiate1 value) e.getAppArgs)
     -- A quantifier-bound variable renders as its SMT name, never a declaration.
     if let .fvar fid := e then
       if let some vname ← TranslateM.boundVar? fid then
