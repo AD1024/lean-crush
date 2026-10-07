@@ -1759,6 +1759,12 @@ mutual
         else
           quantifier true ty body
       | .app (.app (.const ``Exists _) _) (.lam _ ty body _) =>
+        if ← isProp ty then
+          -- A proof exists exactly when its proposition holds. Proof irrelevance
+          -- permits a fresh proof local when the predicate mentions its witness.
+          let a ← emitTerm ty
+          let b ← withLocalDeclD `hp ty fun hp => emitTerm (body.instantiate1 hp)
+          return some (smt| (and $a $b))
         quantifier false ty body
       | .lit (.natVal n) => return some (.lit (.num n))
       | _ => return none
