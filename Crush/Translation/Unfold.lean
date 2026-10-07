@@ -135,7 +135,9 @@ def relevantAutoUnfoldLemmas (seeds : Array Name) : MetaM (Array Name) := do
       relevant := relevant.push (n, kind)
       -- Follow into this definition's body: constants it uses may be marked too.
       if let some ci := env.find? n then
-        for c in ci.value!.getUsedConstants do
+        let some body := ci.value? |
+          throwError "crush: cannot automatically unfold `{n}` because its definition body is unavailable"
+        for c in body.getUsedConstants do
           unless seen.contains c do frontier := frontier.push c
   -- Resolve each relevant marked constant to its equation lemmas.
   let mut names : Array Name := #[]
