@@ -335,7 +335,7 @@ private def proveStepCore (target : Expr) (premises : Array Expr) (rule : String
   for candidate in tactics do
     let tactic := candidate.tactic
     let saved ← saveState
-    try
+    let result ← tryCatchRuntimeEx (do
       let mv ← withLCtx {} {} do mkFreshExprMVar closedImpl
       let gs ← Tactic.run mv.mvarId! <|
         Tactic.withSuppressedMessages <|
@@ -347,8 +347,11 @@ private def proveStepCore (target : Expr) (premises : Array Expr) (rule : String
         let proof ← validateProofCandidate target proof
         return some { proof, method := candidate.label }
       restoreState saved
-    catch _ =>
+      return none
+    ) fun _ => do
       restoreState saved
+      return none
+    if result.isSome then return result
   return none
 
 private def proveStep (target : Expr) (premises : Array Expr) (rule : String)

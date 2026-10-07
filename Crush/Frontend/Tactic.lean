@@ -357,7 +357,7 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
     -- `byContradiction` gives us `¬G` as a hypothesis and `False` as the goal.
     let goalType ← instantiateMVars (← goal.getType)
     let negGoal ← mkAppM ``Not #[goalType]
-    let replayed : Except Alethe.ReplayFailure Expr ← try
+    let replayed : Except Alethe.ReplayFailure Expr ← tryCatchRuntimeEx (do
       withLocalDeclD `hneg negGoal fun hneg => do
         -- Map each `crush_fact_<n>` assumption to a Lean proof: a real hypothesis for an
         -- asserted fact, and the freshly-introduced `¬G` for the negated goal.
@@ -374,7 +374,7 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
         match ← Alethe.replay proof proofSexps facts st.nameToExpr with
         | .ok falseProof => return .ok (← mkLambdaFVars #[hneg] falseProof)
         | .error failure => return .error failure
-    catch e =>
+    ) fun e => do
       let detail ← e.toMessageData.toString
       pure (.error {
         kind := .replayException
@@ -385,12 +385,12 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
       restoreState saved
       return .declined (some failure)
     | .ok lam =>
-      try
+      tryCatchRuntimeEx (do
         -- Assemble `byContradiction (fun hneg => falseProof)` and hand it to the kernel.
         let pf ← mkAppOptM ``Classical.byContradiction #[some goalType, some lam]
         goal.assign (← kernelCheckProof snapshot goalType pf)
         return .success certificate
-      catch e =>
+      ) fun e => do
         let detail ← e.toMessageData.toString
         let failure : Alethe.ReplayFailure := {
           kind := .kernelReject
@@ -412,14 +412,18 @@ private def closeFromSelectedFacts (goal : MVarId) (facts : Array Fact) : Tactic
     for fact in facts do
       let some proof := fact.proof | continue
       let saved ← saveState
-      try
+      let closed ← tryCatchRuntimeEx (do
         let proof ← instantiateMVars proof
         if ← isDefEqGuarded (← inferType proof) target then
           let proof ← instantiateMVars proof
           goal.assign (← kernelCheckProof snapshot target proof)
           return true
         restoreState saved
-      catch _ => restoreState saved
+        return false
+      ) fun _ => do
+        restoreState saved
+        return false
+      if closed then return true
     return false
 
 /-- Preserve every dependency of the actual SMT query in the trusted proof term.
@@ -497,9 +501,13 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
     -- The pass itself is policy-independent, and so is the rule-search setting: the
     -- stages up to the solver call must not depend on whether a kernel-checked proof is
     -- required, or the two policies are not measuring the same pipeline.
-    let closed ←
-      prof.time "pre-reconstruct"
-        (tryPreReconstruct goal collected.facts (selectedRuleSearch := cfg.preRuleSearch))
+    let saved ← saveState
+    let closed ← prof.time "pre-reconstruct" <| tryCatchRuntimeEx
+      (tryPreReconstruct goal collected.facts (selectedRuleSearch := cfg.preRuleSearch))
+      fun e => do
+        trace[crush.reconstruct] "pre-SMT reconstruction declined: {e.toMessageData}"
+        restoreState saved
+        return false
     if closed then
       trace[crush.result] "pre-translation checked proof succeeded; skipped SMT"
       reportRunProfile cfg prof profileContext? "pre-reconstructed" "not-attempted"

@@ -524,7 +524,7 @@ def ReplayRuleContext.runTactic (ctx : ReplayRuleContext)
   let stepParams ← collectProofParams #[implication]
   let closedImplication ← instantiateMVars (← mkForallFVars stepParams implication)
   let saved ← saveState
-  try
+  tryCatchRuntimeEx (do
     let goal ← withLCtx {} {} do mkFreshExprMVar closedImplication
     let tacticGoal ← introReplayBinders goal.mvarId!
     let goals ←
@@ -539,7 +539,7 @@ def ReplayRuleContext.runTactic (ctx : ReplayRuleContext)
       return some proof
     restoreState saved
     return none
-  catch _ =>
+  ) fun _ => do
     restoreState saved
     return none
 
@@ -562,7 +562,7 @@ def ReplayRuleContext.runMeta (ctx : ReplayRuleContext)
   let stepParams ← collectProofParams #[implication]
   let closedImplication ← instantiateMVars (← mkForallFVars stepParams implication)
   let saved ← saveState
-  try
+  tryCatchRuntimeEx (do
     let goal ← withLCtx {} {} do mkFreshExprMVar closedImplication
     let procedureGoal ← introReplayBinders goal.mvarId!
     if ← procedure procedureGoal then
@@ -571,7 +571,7 @@ def ReplayRuleContext.runMeta (ctx : ReplayRuleContext)
       return some proof
     restoreState saved
     return none
-  catch exception =>
+  ) fun exception => do
     trace[crush.replay] "replay metaprogram raised: {exception.toMessageData}"
     restoreState saved
     return none

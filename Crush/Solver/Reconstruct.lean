@@ -496,12 +496,16 @@ mutual
     if ← g.isAssigned then return true
     unless ← isProp (← instantiateMVars (← g.getType)) do return false
     let saved ← saveState
-    try
+    let closed ← tryCatchRuntimeEx (do
       if ← g.assumptionCore then
         let proof ← instantiateMVars (mkMVar g)
         unless proof.hasSorry || proof.hasMVar do return true
       restoreState saved
-    catch _ => restoreState saved
+      return false
+    ) fun _ => do
+      restoreState saved
+      return false
+    if closed then return true
     -- A premise with unconstrained theorem parameters must be anchored by an exact
     -- contextual fact before recursive search. Sending such a goal to `grind` can explore
     -- arbitrary instantiations and turn an unrelated generic rule into a major slowdown.
@@ -513,12 +517,16 @@ mutual
       if ← finishWithRegisteredRules g finishers ruleFuel then return true
     for tac in finishers do
       let saved ← saveState
-      try
+      let closed ← tryCatchRuntimeEx (do
         if (← Tactic.run g (evalTactic tac)).isEmpty then
           let proof ← instantiateMVars (mkMVar g)
           unless proof.hasSorry || proof.hasMVar do return true
         restoreState saved
-      catch _ => restoreState saved
+        return false
+      ) fun _ => do
+        restoreState saved
+        return false
+      if closed then return true
     if ruleFuel > 0 then
       if ← finishWithEqualitySplits g then return true
     return false
@@ -640,7 +648,7 @@ private def finishSelectedRulePremise (g : MVarId)
     g.withContext do
   if ← finishOne g finishers ruleFuel then return true
   let saved ← saveState
-  try
+  tryCatchRuntimeEx (do
     let normalizedGoals ← Tactic.run g (evalTactic (← guardNormalizationTactic))
     trace[crush.reconstruct] "guard normalization left {normalizedGoals.length} goal(s)"
     if normalizedGoals.isEmpty then
@@ -650,7 +658,7 @@ private def finishSelectedRulePremise (g : MVarId)
         return true
     restoreState saved
     return false
-  catch e =>
+  ) fun e => do
     trace[crush.reconstruct] "guard normalization declined: {e.toMessageData}"
     restoreState saved
     return false
@@ -965,7 +973,7 @@ private def trySelectedExistentialWitness (snapshot : KernelCheckSnapshot)
   let params ← collectProofParams #[target]
   let closedTarget ← mkForallFVars params target
   let saved ← saveState
-  try
+  tryCatchRuntimeEx (do
     let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
     let (_, g) ← mv.mvarId!.intros
     if ← tryExistentialWitness g (useGlobalSimpPrepass proofs) then
@@ -975,7 +983,7 @@ private def trySelectedExistentialWitness (snapshot : KernelCheckSnapshot)
       return true
     restoreState saved
     return false
-  catch e =>
+  ) fun e => do
     trace[crush.reconstruct] "pre-SMT witness synthesis declined: {e.toMessageData}"
     restoreState saved
     return false
@@ -1000,7 +1008,7 @@ private def trySelectedConstructorSplit (snapshot : KernelCheckSnapshot)
   let params ← collectProofParams #[target]
   let closedTarget ← mkForallFVars params target
   let saved ← saveState
-  try
+  tryCatchRuntimeEx (do
     let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
     let (_, g) ← mv.mvarId!.intros
     if (← splittableFVars g (onlyComputationallyScrutinized := true)).isEmpty then
@@ -1024,7 +1032,7 @@ private def trySelectedConstructorSplit (snapshot : KernelCheckSnapshot)
       return true
     restoreState saved
     return false
-  catch e =>
+  ) fun e => do
     trace[crush.reconstruct] "pre-SMT constructor split declined: {e.toMessageData}"
     restoreState saved
     return false
@@ -1052,7 +1060,7 @@ private def trySelectedFactRulesOnce (snapshot : KernelCheckSnapshot)
   let params ← collectProofParams #[target]
   let closedTarget ← mkForallFVars params target
   let saved ← saveState
-  try
+  tryCatchRuntimeEx (do
     let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
     let (introduced, g) ← mv.mvarId!.intros
     if introduced.size < proofs.size then
@@ -1094,7 +1102,7 @@ private def trySelectedFactRulesOnce (snapshot : KernelCheckSnapshot)
         restoreState candidateSaved
     restoreState saved
     return false
-  catch e =>
+  ) fun e => do
     trace[crush.reconstruct] "pre-SMT selected-rule reconstruction declined: {e.toMessageData}"
     restoreState saved
     return false
@@ -1117,7 +1125,7 @@ private partial def trySelectedFactRules (snapshot : KernelCheckSnapshot)
   let goalType ← instantiateMVars (← goal.getType)
   let some guard ← firstUndecidedIteGuard? goal proofs | return false
   let saved ← saveState
-  try
+  tryCatchRuntimeEx (do
     let (positive, negative) ← goal.byCases guard `hUpdateGuard
     trace[crush.reconstruct] "split selected-rule update guard {guard}"
     for branch in #[positive, negative] do
@@ -1129,7 +1137,7 @@ private partial def trySelectedFactRules (snapshot : KernelCheckSnapshot)
     let assigned ← instantiateMVars (mkMVar goal)
     discard <| kernelCheckProof snapshot goalType assigned
     return true
-  catch e =>
+  ) fun e => do
     trace[crush.reconstruct] "selected-rule guard split declined: {e.toMessageData}"
     restoreState saved
     return false
@@ -1159,7 +1167,7 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
     let closedTarget ← mkForallFVars params target
     if let some tac := manualFinisher? then
       let saved ← saveState
-      try
+      let closed ← tryCatchRuntimeEx (do
         trace[crush.reconstruct] "trying manual finisher: {tac}"
         let ambientLCtx ← getLCtx
         let paramIds := params.foldl (init := ({} : FVarIdSet))
@@ -1180,15 +1188,18 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
           return true
         trace[crush.reconstruct] "manual finisher left goals: {← gs.mapM (·.getType)}"
         restoreState saved
-      catch e =>
+        return false
+      ) fun e => do
         trace[crush.reconstruct] "manual finisher declined: {e.toMessageData}"
         restoreState saved
+        return false
+      if closed then return true
     -- Try conclusion-indexed domain rules before the general tactic ladder. This path is
     -- especially important for nonlinear or datatype-specific bridges: `grind` may spend
     -- the whole command budget without discovering a theorem the user explicitly
     -- registered for this purpose.
     let saved ← saveState
-    try
+    let closed ← tryCatchRuntimeEx (do
       let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
       let (_, initialGoal) ← mv.mvarId!.intros
       let g ← destructAndHypotheses initialGoal
@@ -1215,14 +1226,17 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
         goal.assign (← kernelCheckProof snapshot goalType proof)
         return true
       restoreState saved
-    catch e =>
+      return false
+    ) fun e => do
       trace[crush.reconstruct] "rule-directed reconstruction declined: {e.toMessageData}"
       restoreState saved
+      return false
+    if closed then return true
     for tac in finishers do
       -- Each attempt gets a fresh metavariable and a saved state, so a failed
       -- finisher leaves nothing behind for the next one to trip over.
       let saved ← saveState
-      try
+      let closed ← tryCatchRuntimeEx (do
         trace[crush.reconstruct] "trying finisher: {tac}"
         let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
         let gs ← Tactic.run mv.mvarId! (evalTactic tac)
@@ -1233,15 +1247,18 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
           return true
         trace[crush.reconstruct] "finisher left goals: {← gs.mapM (·.getType)}"
         restoreState saved
-      catch e =>
+        return false
+      ) fun e => do
         trace[crush.reconstruct] "finisher declined: {e.toMessageData}"
         restoreState saved
+        return false
+      if closed then return true
     -- Last resort: intro the core hypotheses, synthesize constructor-shaped existential
     -- witnesses, then search bounded datatype splits. Only reached after every fixed rung
     -- fails, so these more expensive generic searches strictly add reach.
     trace[crush.reconstruct] "trying structured reconstruction"
     let saved ← saveState
-    try
+    let closed ← tryCatchRuntimeEx (do
       let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
       let (_, g) ← mv.mvarId!.intros
       let structuralFinishers ← structuralFinisherTactics
@@ -1275,9 +1292,12 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
         goal.assign (← kernelCheckProof snapshot goalType proof)
         return true
       restoreState saved
-    catch e =>
+      return false
+    ) fun e => do
       trace[crush.reconstruct] "structured reconstruction declined: {e.toMessageData}"
       restoreState saved
+      return false
+    if closed then return true
     return false
 
 /-- Try the checked Lean cases required before SMT for sound-but-incomplete encodings.
