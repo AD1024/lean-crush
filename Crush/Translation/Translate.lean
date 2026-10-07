@@ -623,7 +623,7 @@ private def partitionDefaultAppArgs (fn : Expr) (args : Array Expr) :
     let argType ← inferType arg
     if ← isProp argType then
       pure ()
-    else if (← whnf argType).isSort then
+    else if (← whnf argType).isSort && !(← whnf argType).isProp then
       out := { out with types := out.types.push arg }
     else if binderInfo? == some .instImplicit then
       let dependsOnBound :=
@@ -2021,6 +2021,17 @@ mutual
     -- Note z3 does not reject that; it silently reinterprets, so nothing would
     -- surface at the boundary.
     let partition ← partitionDefaultAppArgs fn args
+    -- Every SMT binder dependency must be an explicit argument of this symbol.
+    -- A dependency hidden in the head or an erased type/instance/proof would
+    -- collapse distinct binder instantiations into a single SMT constant.
+    let st ← get
+    let checkClosed (term : Expr) : TranslateM Unit := do
+      if (Lean.collectFVars {} term).fvarIds.any
+          (fun id => st.boundVars.contains id || st.funVars.contains id) then
+        throwError "crush: cannot erase a bound-variable dependency in an uninterpreted application:{indentExpr term}"
+    checkClosed fn
+    for i in [:args.size] do
+      unless partition.valuePositions.contains i do checkClosed args[i]!
     let valueArgs := partition.values
     let appExpr := mkAppN fn args
     -- Preserve aliases for `emitSort`: a user sort handler may intentionally target a
