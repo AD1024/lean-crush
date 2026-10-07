@@ -1230,13 +1230,11 @@ mutual
   quantifier over them needs a guard. True for `Nat` (encoded as `Int`) and for any
   datatype that transitively contains such a field.
 
-  `visiting` holds the datatype heads already on the stack. A recursive datatype needs a
-  guard iff some field does, so re-entering one contributes nothing new and returns
-  `false` — which is also what makes this terminate. Tracking a *set* rather than just
-  comparing against the current head is essential: recursion through another type
-  (`Rose` ⊃ `List Rose` ⊃ `Rose`) never repeats two heads in a row, so a
-  self-reference-only check recurses forever and overflows the stack. -/
-  partial def needsWFGuard (ty : Expr) (visiting : Std.HashSet Name := {}) :
+  `visiting` holds the instantiated types already on the stack. Re-entering the
+  same recursive type contributes nothing new. Distinct applications of the same
+  constructor must still be traversed: `Int × (Nat × Nat)` needs the guards of its
+  inner product even though the outer product has already been visited. -/
+  partial def needsWFGuard (ty : Expr) (visiting : Std.HashSet Expr := {}) :
       TranslateM Bool := do
     let ty ← whnf ty
     if ty.isConstOf ``Nat then return true
@@ -1254,8 +1252,8 @@ mutual
       if (← TranslateM.structuralSymbol? key).isSome then
         return !(← knownNonemptyCarrier ty)
       return false
-    if visiting.contains n then return false
-    let visiting := visiting.insert n
+    if visiting.contains ty then return false
+    let visiting := visiting.insert ty
     -- Fields are examined at this instantiation, so a `Nat` reached only through the type
     -- parameter (`Option Nat`) is caught, while `Option Int` is not.
     let iv ← getConstInfoInduct n
