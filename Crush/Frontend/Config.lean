@@ -297,17 +297,36 @@ structure Config where
   premiseMax     : Nat       := 32
   deriving Inhabited
 
-/-- Read the current option environment into a `Config`. -/
-def Config.ofOptions (opts : Options) : Config :=
+/-- Read an enum option without silently treating an invalid value as its default. -/
+private def readEnumOption {α : Type} [KVMap.Value α] {m : Type → Type}
+    [Monad m] [MonadError m] (opts : Options) (opt : Lean.Option α)
+    (choices : String) : m α := do
+  match opts.find? opt.name with
+  | none => return opt.defValue
+  | some raw =>
+    match KVMap.Value.ofDataValue? raw with
+    | some value => return value
+    | none =>
+      throwError "crush: invalid value '{toString raw}' for option '{opt.name}'; expected {choices}"
+
+/-- Read the current option environment into a `Config`, rejecting invalid enum values.
+In particular, a misspelled trust policy must never select the default trusted policy. -/
+def Config.ofOptions {m : Type → Type} [Monad m] [MonadError m]
+    (opts : Options) : m Config := do
+  let backend ← readEnumOption opts crush.backend "z3, cvc5, bitwuzla, or none"
+  let trustMode ← readEnumOption opts crush.trust "trust, reconstruct, or reconstructOrTrust"
+  let hoMode ← readEnumOption opts crush.ho.mode "defunctionalize or native"
+  let reconstruct ← readEnumOption opts crush.reconstruct "auto, alethe, or core"
   let split (s : String) : Array String :=
     (s.splitOn " ").toArray.filterMap (fun w =>
       let w := w.trimAscii.toString
       if w.isEmpty then none else some w)
   let logicStr := crush.logic.get opts
-  { backend        := crush.backend.get opts
+  return {
+    backend        := backend
     timeout        := crush.timeout.get opts
-    trust          := crush.trust.get opts
-    hoMode         := crush.ho.mode.get opts
+    trust          := trustMode
+    hoMode         := hoMode
     monoFuel       := crush.mono.fuel.get opts
     monoRounds     := crush.mono.rounds.get opts
     monoCertify    := crush.mono.certify.get opts
@@ -319,7 +338,7 @@ def Config.ofOptions (opts : Options) : Config :=
     traceScript    := crush.trace.script.get opts
     autoUnfold     := crush.autoUnfold.get opts
     preRuleSearch  := crush.preReconstruct.ruleSearch.get opts
-    reconstruct    := crush.reconstruct.get opts
+    reconstruct    := reconstruct
     trustBvDecide  := crush.reconstruct.trustBvDecide.get opts
     trustNativeDecide := crush.reconstruct.trustNativeDecide.get opts
     profile        := crush.profile.get opts

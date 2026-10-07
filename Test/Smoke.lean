@@ -164,7 +164,7 @@ example (p q : Prop) : modelLabelProbe p = modelLabelProbe q := by
 
 -- Config parsing from options.
 #eval show Lean.MetaM Unit from do
-  let cfg := Config.ofOptions (← Lean.getOptions)
+  let cfg ← Config.ofOptions (← Lean.getOptions)
   IO.println s!"default backend = {cfg.backend}, timeout = {cfg.timeout}s, ho = {cfg.hoMode}"
 
 -- Backend executable resolution: a missing solver must be caught before a query runs.

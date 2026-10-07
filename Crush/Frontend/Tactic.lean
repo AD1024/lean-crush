@@ -839,7 +839,7 @@ def evalCrush : Tactic := fun stx => do
         $[$reconstructionHintsStx:crushReconstructionHints]?
         $[$reconstructionFinisherStx:crushReconstructionFinisher]?) := stx
     | throwUnsupportedSyntax
-  let cfg := Config.ofOptions (← getOptions)
+  let cfg ← Config.ofOptions (← getOptions)
   let goal ← getMainGoal
   -- Intro any leading binders so ∀-goals become closed props under hypotheses.
   let (_, goal) ← goal.intros
