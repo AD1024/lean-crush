@@ -1,4 +1,5 @@
 import Lean
+import Lean.Meta.Native
 import Crush.Frontend.Config
 
 open Lean Meta
@@ -77,32 +78,10 @@ private def isBvDecideAxiomName : Name → Bool
   | _ => false
 
 private def isNativeDecideAxiomName : Name → Bool
-  | .str (.str (.str _ "_native") "native_decide") suffix =>
-      suffix == "ax" || suffix.startsWith "ax_"
+  | .str (.str (.str _ "_native") tacticName) suffix =>
+      (tacticName == "native_decide" || tacticName == "decide") &&
+        (suffix == "ax" || suffix.startsWith "ax_")
   | _ => false
-
-private def isDecideAxiomName : Name → Bool
-  | .str (.str (.str _ "_native") "decide") suffix =>
-      suffix == "ax" || suffix.startsWith "ax_"
-  | _ => false
-
-/-- Native trust applies to the complete proof dependency closure, including
-pre-existing lemmas. The bit-vector-specific option does not authorize arbitrary
-compiler evaluation through the general reflection axioms. -/
-private def ensureNativeAxiomClosure (snapshot : KernelCheckSnapshot)
-    (label : String) (e : Expr) : MetaM Unit := do
-  for name in e.getUsedConstants do
-    for axiomName in ← collectAxioms name do
-      let needsBv := isBvDecideAxiomName axiomName
-      let needsNative := isNativeDecideAxiomName axiomName ||
-        isDecideAxiomName axiomName || axiomName == ``Lean.ofReduceBool ||
-        axiomName == ``Lean.ofReduceNat || axiomName == ``Lean.trustCompiler
-      if needsBv && !snapshot.trustBvDecide then
-        throwError "crush: {label} depends on native axiom `{axiomName}` through `{name}`; \
-          enable `crush.reconstruct.trustBvDecide` to allow bit-vector native evaluation"
-      if needsNative && !snapshot.trustNativeDecide then
-        throwError "crush: {label} depends on native axiom `{axiomName}` through `{name}`; \
-          enable `crush.reconstruct.trustNativeDecide` to allow general native evaluation"
 
 private def isBvDecideAxiomType (type : Expr) : Bool :=
   let type := type.consumeMData
@@ -121,6 +100,52 @@ private def checkGeneratedType (env : Environment) (type : Expr) (label : String
     unless inferred.consumeMData matches .sort _ do
       throwError "crush: {label} has a kernel-inferred type that is not a sort"
   | .error ex => throwKernelFailure label ex
+
+/-- A native-looking name is only a candidate, not evidence that the asserted
+computation happened. Independently evaluate its Boolean assertion under the caller's
+explicit native-trust option. The temporary validation axiom is discarded. -/
+private def checkNativeAxiom (env : Environment) (name : Name) : MetaM Unit := do
+  let some (.axiomInfo info) := env.find? name
+    | throwError "crush: native-decision dependency `{name}` is not an axiom"
+  if info.isUnsafe then
+    throwError "crush: native-decision axiom `{name}` is marked unsafe"
+  let type ← instantiateMVars info.type
+  unless (isBvDecideAxiomName name && isBvDecideAxiomType type) ||
+      (isNativeDecideAxiomName name && isNativeDecideAxiomType type) do
+    throwError "crush: native-decision axiom `{name}` has an unexpected type"
+  checkGeneratedType env type s!"native-decision axiom `{name}` type"
+  let assertion := type.consumeMData.getAppArgs[1]!
+  let result ← withoutModifyingEnv do
+    nativeEqTrue `crush_native_validation assertion
+  match result with
+  | .success _ => pure ()
+  | .notTrue =>
+    throwError "crush: native-decision axiom `{name}` asserts a computation that evaluates to false"
+
+/-- Native trust applies to the complete proof dependency closure, including
+pre-existing lemmas. The bit-vector-specific option does not authorize arbitrary
+compiler evaluation through the general reflection axioms. -/
+private def ensureNativeAxiomClosure (snapshot : KernelCheckSnapshot)
+    (label : String) (e : Expr) (checked : Std.HashSet Name) :
+    MetaM (Std.HashSet Name) := do
+  let mut checked := checked
+  for name in e.getUsedConstants do
+    for axiomName in ← collectAxioms name do
+      if checked.contains axiomName then continue
+      let needsBv := isBvDecideAxiomName axiomName
+      let isNativeDecision := isNativeDecideAxiomName axiomName
+      let needsNative := isNativeDecision || axiomName == ``Lean.ofReduceBool ||
+        axiomName == ``Lean.ofReduceNat || axiomName == ``Lean.trustCompiler
+      if needsBv && !snapshot.trustBvDecide then
+        throwError "crush: {label} depends on native axiom `{axiomName}` through `{name}`; \
+          enable `crush.reconstruct.trustBvDecide` to allow bit-vector native evaluation"
+      if needsNative && !snapshot.trustNativeDecide then
+        throwError "crush: {label} depends on native axiom `{axiomName}` through `{name}`; \
+          enable `crush.reconstruct.trustNativeDecide` to allow general native evaluation"
+      if needsBv || isNativeDecision then
+        checkNativeAxiom (← getEnv) axiomName
+      checked := checked.insert axiomName
+  return checked
 
 /-- Collect the local declarations needed to close `exprs`, without scanning unrelated
 entries in the ambient context. Visible let values contribute dependencies; nondependent
@@ -201,8 +226,6 @@ def kernelCheckProofWithParams (snapshot : KernelCheckSnapshot) (params : Array 
   -- depend on an admission. Check the complete closure before skipping that baseline.
   ensureAxiomClosure "reconstructed goal type" closedExpected
   ensureAxiomClosure "reconstructed proof" closedProof
-  ensureNativeAxiomClosure snapshot "reconstructed goal type" closedExpected
-  ensureNativeAxiomClosure snapshot "reconstructed proof" closedProof
   let current ← getEnv
   let mut checked : Std.HashSet Name := {}
   for name in closedExpected.getUsedConstants do
@@ -211,6 +234,9 @@ def kernelCheckProofWithParams (snapshot : KernelCheckSnapshot) (params : Array 
   for name in closedProof.getUsedConstants do
     checked ← checkGeneratedDeclaration snapshot.env current snapshot.trustBvDecide
       snapshot.trustNativeDecide name checked {}
+  let nativeChecked ←
+    ensureNativeAxiomClosure snapshot "reconstructed goal type" closedExpected {}
+  discard <| ensureNativeAxiomClosure snapshot "reconstructed proof" closedProof nativeChecked
   kernelCheckExpected current {} closedExpected closedProof "reconstructed proof"
   return proof
 
