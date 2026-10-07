@@ -125,12 +125,14 @@ crush_map_sort Nat => "Int"
       derived == repeated && derived != distinct do
     throwError "derived SMT symbol allocation was colliding or unstable"
 
-opaque modelLabelProbe : Prop → Nat
+-- Erased type arguments specialize one Lean name into several SMT symbols.
+-- Propositions are value arguments, so they must not be used as this fixture.
+opaque modelLabelProbe : Type → Nat
 
 /-- error: crush: could not prove the goal — the solver found a model:
     modelLabelProbe [modelLabelProbe_ -/
 #guard_msgs(error, substring := true) in
-example (p q : Prop) : modelLabelProbe p = modelLabelProbe q := by
+example (p q : Type) : modelLabelProbe p = modelLabelProbe q := by
   crush
 
 -- Structural symbol keys distinguish universe levels even when pretty-printing
