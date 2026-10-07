@@ -338,7 +338,8 @@ Lean proof of its own), and replay produces the `False`.
 Returns a structured decline, leaving `goal` untouched, whenever anything is missing or a
 step cannot be replayed, so the caller can report it or use the finisher ladder. -/
 def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
-    (proofSexps : Array SMT.Sexp) : TacticM ProofReplayAttempt := do
+    (proofSexps : Array SMT.Sexp)
+    (snapshot? : Option KernelCheckSnapshot := none) : TacticM ProofReplayAttempt := do
   if cfg.reconstruct == .core then return .declined none
   if proofSexps.isEmpty then return .declined none
   let some proof := Alethe.parseProofSexps proofSexps | return .declined none
@@ -353,7 +354,7 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
     indexed={features.indexedOperators}, sorts={features.sorts}, rules={features.rules}"
   goal.withContext do
     let saved ← saveState
-    let snapshot ← KernelCheckSnapshot.capture
+    let snapshot ← snapshot?.getDM KernelCheckSnapshot.capture
     -- `byContradiction` gives us `¬G` as a hypothesis and `False` as the goal.
     let goalType ← instantiateMVars (← goal.getType)
     let negGoal ← mkAppM ``Not #[goalType]
@@ -405,9 +406,9 @@ Checking only `facts` preserves the strict meaning of `crush [h₁, ...]`: an am
 hypothesis omitted by the user cannot be used by this fast path. This runs before
 translation because quantified nonlinear assumptions can otherwise make an identity query
 expensive for SMT despite the Lean proof being a single local constant. -/
-private def closeFromSelectedFacts (goal : MVarId) (facts : Array Fact) : TacticM Bool :=
+private def closeFromSelectedFacts (snapshot : KernelCheckSnapshot)
+    (goal : MVarId) (facts : Array Fact) : TacticM Bool :=
   goal.withContext do
-    let snapshot ← KernelCheckSnapshot.capture
     let target ← instantiateMVars (← goal.getType)
     for fact in facts do
       let some proof := fact.proof | continue
@@ -462,8 +463,10 @@ private def trustedProof (goalType : Expr) (st : TranslateState) : MetaM Expr :=
 /-- The core driver, given a resolved goal, config, and collected hints. -/
 def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
     (reconstructionHints : Array (Expr × String) := #[])
-    (reconstructionFinisher? : Option (TSyntax `tactic) := none) : TacticM Unit :=
+    (reconstructionFinisher? : Option (TSyntax `tactic) := none)
+    (snapshot? : Option KernelCheckSnapshot := none) : TacticM Unit :=
   goal.withContext do
+  let snapshot ← snapshot?.getDM KernelCheckSnapshot.capture
   let forceAlethe := cfg.trust != .trust && cfg.reconstruct == .alethe
   if cfg.reconstruct == .alethe && cfg.backend != .cvc5 then
     throwError "crush: `crush.reconstruct alethe` requires the cvc5 backend, but \
@@ -493,7 +496,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
   -- `backend = none` is an emission/debugging mode, so it must still produce the script
   -- even when Lean can close the goal without consulting a solver.
   if cfg.backend != .none && !forceAlethe then
-    if ← closeFromSelectedFacts goal collected.facts then
+    if ← closeFromSelectedFacts snapshot goal collected.facts then
       trace[crush.result] "goal is one of the selected facts; skipped SMT"
       reportRunProfile cfg prof profileContext? "selected-fact" "not-attempted"
         "closed from a selected Lean fact"
@@ -503,7 +506,8 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
     -- required, or the two policies are not measuring the same pipeline.
     let saved ← saveState
     let closed ← prof.time "pre-reconstruct" <| tryCatchRuntimeEx
-      (tryPreReconstruct goal collected.facts (selectedRuleSearch := cfg.preRuleSearch))
+      (tryPreReconstruct goal collected.facts (selectedRuleSearch := cfg.preRuleSearch)
+        (snapshot? := some snapshot))
       fun e => do
         trace[crush.reconstruct] "pre-SMT reconstruction declined: {e.toMessageData}"
         restoreState saved
@@ -616,7 +620,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
       -- goals the single-shot ladder cannot (long chains of trivial steps — Boolean
       -- pigeonhole, deep EUF conflicts) because the chain is already found. A step it
       -- cannot replay falls through to the ladder below.
-      let replayAttempt ← prof.time "replay" (tryProofReplay goal cfg st proofSexps)
+      let replayAttempt ← prof.time "replay" (tryProofReplay goal cfg st proofSexps (snapshot? := some snapshot))
       if let .success certificate := replayAttempt then
         trace[crush.result] "proof replay succeeded; no axiom used"
         reportRunProfile cfg prof profileContext? "alethe-reconstructed" "success"
@@ -659,7 +663,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
       let ok ←
         prof.time "reconstruct"
           (tryReconstruct goal reconstructionProofs (← finisherTactics)
-            reconstructionFinisher?)
+            reconstructionFinisher? (snapshot? := some snapshot))
       if ok then
         trace[crush.result] "reconstruction succeeded; no axiom used"
         reportRunProfile cfg prof profileContext? "core-reconstructed" replayLabel
@@ -842,6 +846,9 @@ private def parseReconstructionFinisher
 
 @[tactic crushTac]
 def evalCrush : Tactic := fun stx => do
+  -- Hint elaboration and preprocessing can generate declarations before the first
+  -- proof attempt. Keep one boundary for the entire invocation, including hints.
+  let snapshot ← KernelCheckSnapshot.capture
   let `(tactic|
       crush $hintsStx:crushHints $[$uordStxs:crushUOrD]*
         $[$reconstructionHintsStx:crushReconstructionHints]?
@@ -868,5 +875,6 @@ def evalCrush : Tactic := fun stx => do
   let hints : Hints := {
     terms, eqnLemmas, allHyps, instantiateHyps, allowPremiseSelection }
   runCrush goal cfg hints reconstructionHints reconstructionFinisher?
+    (snapshot? := some snapshot)
 
 end Crush

@@ -1153,9 +1153,10 @@ time out.
 Returns `true` if the goal was closed; leaves `goal` untouched otherwise. -/
 def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
     (finishers : Array (TSyntax `tactic))
-    (manualFinisher? : Option (TSyntax `tactic) := none) : TacticM Bool :=
+    (manualFinisher? : Option (TSyntax `tactic) := none)
+    (snapshot? : Option KernelCheckSnapshot := none) : TacticM Bool :=
   goal.withContext do
-    let snapshot ← KernelCheckSnapshot.capture
+    let snapshot ← snapshot?.getDM KernelCheckSnapshot.capture
     let goalType ← instantiateMVars (← goal.getType)
     let hypTypes ← coreProofs.mapM fun p => do instantiateMVars (← inferType p)
     let target := mkArrowChain hypTypes goalType
@@ -1314,9 +1315,9 @@ because first-order defunctionalization does not imply that every pointwise choi
 member in its encoded function sort. Other goals proceed directly to SMT, avoiding the full
 reconstruction ladder on the normal path. -/
 def tryPreReconstruct (goal : MVarId) (facts : Array Fact)
-    (selectedRuleSearch := true) : TacticM Bool :=
-    goal.withContext do
-  let snapshot ← KernelCheckSnapshot.capture
+    (selectedRuleSearch := true) (snapshot? : Option KernelCheckSnapshot := none) :
+    TacticM Bool := goal.withContext do
+  let snapshot ← snapshot?.getDM KernelCheckSnapshot.capture
   let goalType ← instantiateMVars (← goal.getType)
   for localDecl in ← getLCtx do
     if localDecl.isImplementationDetail then continue
@@ -1374,6 +1375,6 @@ def tryPreReconstruct (goal : MVarId) (facts : Array Fact)
   let args := target.getAppArgs
   unless target.getAppFn.isConstOf ``Exists && args.size == 2 do return false
   unless (← whnf args[0]!).isForall do return false
-  tryReconstruct goal selectedProofs #[]
+  tryReconstruct goal selectedProofs #[] (snapshot? := some snapshot)
 
 end Crush
