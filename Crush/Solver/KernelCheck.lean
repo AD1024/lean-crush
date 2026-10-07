@@ -81,6 +81,29 @@ private def isNativeDecideAxiomName : Name → Bool
       suffix == "ax" || suffix.startsWith "ax_"
   | _ => false
 
+private def isDecideAxiomName : Name → Bool
+  | .str (.str (.str _ "_native") "decide") suffix =>
+      suffix == "ax" || suffix.startsWith "ax_"
+  | _ => false
+
+/-- Native trust applies to the complete proof dependency closure, including
+pre-existing lemmas. The bit-vector-specific option does not authorize arbitrary
+compiler evaluation through the general reflection axioms. -/
+private def ensureNativeAxiomClosure (snapshot : KernelCheckSnapshot)
+    (label : String) (e : Expr) : MetaM Unit := do
+  for name in e.getUsedConstants do
+    for axiomName in ← collectAxioms name do
+      let needsBv := isBvDecideAxiomName axiomName
+      let needsNative := isNativeDecideAxiomName axiomName ||
+        isDecideAxiomName axiomName || axiomName == ``Lean.ofReduceBool ||
+        axiomName == ``Lean.ofReduceNat || axiomName == ``Lean.trustCompiler
+      if needsBv && !snapshot.trustBvDecide then
+        throwError "crush: {label} depends on native axiom `{axiomName}` through `{name}`; \
+          enable `crush.reconstruct.trustBvDecide` to allow bit-vector native evaluation"
+      if needsNative && !snapshot.trustNativeDecide then
+        throwError "crush: {label} depends on native axiom `{axiomName}` through `{name}`; \
+          enable `crush.reconstruct.trustNativeDecide` to allow general native evaluation"
+
 private def isBvDecideAxiomType (type : Expr) : Bool :=
   let type := type.consumeMData
   type.isAppOfArity ``Eq 3 &&
@@ -178,6 +201,8 @@ def kernelCheckProofWithParams (snapshot : KernelCheckSnapshot) (params : Array 
   -- depend on an admission. Check the complete closure before skipping that baseline.
   ensureAxiomClosure "reconstructed goal type" closedExpected
   ensureAxiomClosure "reconstructed proof" closedProof
+  ensureNativeAxiomClosure snapshot "reconstructed goal type" closedExpected
+  ensureNativeAxiomClosure snapshot "reconstructed proof" closedProof
   let current ← getEnv
   let mut checked : Std.HashSet Name := {}
   for name in closedExpected.getUsedConstants do
