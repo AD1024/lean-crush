@@ -159,7 +159,7 @@ abbrev TranslateM := StateRefT TranslateState MetaM
 
 /-- Test definitional equality without retaining metavariable assignments. -/
 def isDefEqReadOnly (left right : Expr) : MetaM Bool :=
-  withoutModifyingState do
+  withoutModifyingState <| Meta.withNewMCtxDepth do
     Meta.isDefEqGuarded left right
 
 namespace TranslateM

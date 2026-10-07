@@ -282,7 +282,7 @@ private def knownNonemptyCarrier (ty : Expr) : TranslateM Bool := do
   let st ← get
   if let some result := st.nonemptyCarriers[ty]? then return result
   let nonempty ← (show MetaM Bool from withLCtx st.inputLCtx st.inputLocalInstances do
-    withoutModifyingState do
+    withoutModifyingState <| withNewMCtxDepth do
       for decl in st.inputLCtx do
         if ← isDefEqGuarded decl.type ty then return true
         let prop ← whnf decl.type
