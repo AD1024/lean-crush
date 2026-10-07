@@ -1504,12 +1504,30 @@ mutual
       return none
     | _ => return none
 
+  /-- One shared padding value per native codomain, used only outside the
+  corresponding Lean argument domain. It need not be a Lean inhabitant. -/
+  partial def nativeOutsideValue (ty : Expr) : TranslateM SMT.Term := do
+    let key : StructuralKey := { tag := "native-outside", typeExprs := #[ty] }
+    let name ← TranslateM.symbolForStructural key "outside"
+    unless ← declaredFun name do
+      let sort ← emitSort ty
+      markFunDeclared name
+      TranslateM.emitCommand (.declFun name #[] sort)
+    return .const name
+
   /-- A native higher-order `lambda` term, for HO-capable backends. -/
   partial def emitNativeLambda (lam : Expr) : TranslateM SMT.Term := do
     let lamTy ← whnf (← inferType lam)
     let some shape ← arrowShape? lamTy
       | throwError "crush: internal — native lambda of non-arrow type {lamTy}"
     let (binders, body) ← emitLambdaBody lam shape
+    -- Native equality compares the entire SMT domain. Equal Lean functions
+    -- therefore need the same extension at negative Nats and other padding.
+    let body ← match ← binderGuard (binders.map (·.1)) shape.args with
+      | none => pure body
+      | some valid =>
+        let outside ← nativeOutsideValue shape.res
+        pure (smt| (ite $valid $body $outside))
     return .lam binders body
 
   /-- Translate a term of function type as an `Fn`-sorted *value* (not as a symbol
