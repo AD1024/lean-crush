@@ -1,6 +1,7 @@
 import Lean
 import Crush.SMT.Syntax
 import Crush.Translation.Monad
+import Crush.Translation.Instances
 open Lean Elab Meta
 
 /-!
@@ -90,22 +91,12 @@ private def unpackHandlers (cached : Array Dynamic) : Array TranslationHandler :
 private def packHandlers (handlers : Array TranslationHandler) : Array Dynamic :=
   handlers.map fun handler => Dynamic.mk handler
 
-/-- Whether argument `i` is the ambient global instance selected by typeclass synthesis.
-
-Local instances are disabled while synthesizing the baseline; otherwise a local
-override would compare equal to itself. A scoped or imported high-priority global
-instance still becomes the baseline. Therefore, a lowering that models one particular
-library dictionary should use `hasExpectedInstance` instead. -/
+/-- Whether argument `i` is the fixed library instance of an operator supported by
+the structural translator. Unsupported operations return `false`. Extension
+lowerings should use `hasExpectedInstance` to specify the dictionary they model. -/
 def TranslationCtx.hasCanonicalInstance (ctx : TranslationCtx) (i : Nat) :
     TranslateM Bool := do
-  let some inst := ctx.args[i]? | return false
-  let instTy ← inferType inst
-  try
-    let lctx ← getLCtx
-    let canonical ← withLCtx lctx {} do synthInstance instTy
-    isDefEqReadOnly inst canonical
-  catch _ =>
-    return false
+  return ← hasExpectedOverloadInstance (mkAppN ctx.fn ctx.args) i
 
 /-- Whether argument `i` is definitionally equal to the exact instance dictionary
 whose semantics a lowering implements. This is the sound check for assigning a fixed

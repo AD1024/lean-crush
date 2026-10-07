@@ -96,30 +96,10 @@ def getAppFnArgs' (e : Expr) : Expr × Array Expr :=
 def isNatTyped (e : Expr) : TranslateM Bool := do
   return (← whnf (← inferType e)).isConstOf ``Nat
 
-/-- Whether the instance argument at position `i` of the application `e` is the
-canonical global instance.
-
-Recognizing `HAdd.hAdd _ _ _ inst a b` as SMT `+` assumes `inst` is the *standard*
-instance. A user can supply another — `⟨fun _ _ => 99⟩` is a legal `HAdd Int Int Int`
-— and then `1 + 2` is `99`, not `3`. Matching on the head alone therefore imports
-arithmetic that does not hold, and lets the solver prove false goals.
-
-Local instances are disabled while synthesizing the baseline. Otherwise a local
-override is exactly what synthesis picks and would compare equal to itself. Returns
-`false` when synthesis fails, so an exotic instance degrades to an uninterpreted
-symbol rather than being silently mistranslated. -/
-def hasCanonicalInstance (e : Expr) (i : Nat) : TranslateM Bool := do
-  let args := e.getAppArgs
-  let some inst := args[i]? | return false
-  let instTy ← inferType inst
-  try
-    let lctx ← getLCtx
-    let canon ← withLCtx lctx {} do synthInstance instTy
-    isDefEqReadOnly inst canon
-  catch _ =>
-    -- Synthesis failed: we cannot confirm the instance is standard, so treat it as
-    -- non-canonical and let the term degrade to an uninterpreted symbol.
-    return false
+/-- Compare a structural operator with the fixed library dictionary it models.
+Global and local overrides must both remain uninterpreted. -/
+def hasCanonicalInstance (e : Expr) (i : Nat) : TranslateM Bool :=
+  hasExpectedOverloadInstance e i
 
 /-- Whether `inst` is accompanied by a `LawfulBEq` proof for `carrier`.
 
