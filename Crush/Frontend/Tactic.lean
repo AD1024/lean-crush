@@ -51,8 +51,10 @@ namespace Crush
 
 /-- The trust axiom, used only under `crush.trust`. Deliberately `Prop`-only (not
 `Sort u`), so it cannot be used to fabricate data, and auditable via
-`#print axioms`: any theorem closed by trusting the solver names it. -/
-axiom crushSorry (P : Prop) : P
+`#print axioms`: any theorem closed by trusting the solver names it. The proof
+argument retains the asserted facts, so trusting SMT does not hide their axioms,
+`sorry`s, unsafe constants, or recursive calls from Lean's declaration checks. -/
+axiom crushSorry (P : Prop) {Q : Prop} (dependencies : Q) : P
 
 initialize registerTraceClass `crush
 initialize registerTraceClass `crush.script
@@ -420,6 +422,39 @@ private def closeFromSelectedFacts (goal : MVarId) (facts : Array Fact) : Tactic
       catch _ => restoreState saved
     return false
 
+/-- Preserve every dependency of the actual SMT query in the trusted proof term.
+
+The negated goal has no proof, but its normalization bridge can depend on selected
+equations, so retain that bridge as well. Using every asserted fact also works
+when the backend returns no unsat core. A balanced conjunction avoids linear
+proof depth for large contexts; no dependency is hidden behind a reducible let. -/
+private def trustedProof (goalType : Expr) (st : TranslateState) : MetaM Expr := do
+  let mut seen : Std.HashSet Expr := {}
+  let mut dependencies : Array (Expr × Expr) := #[]
+  for fact in st.facts do
+    for candidate in #[fact.proof, fact.negationTransform,
+        fact.reconstructionProof, fact.instanceOf] do
+      let some proof := candidate | continue
+      let proof ← instantiateMVars proof
+      if seen.contains proof then continue
+      seen := seen.insert proof
+      dependencies := dependencies.push (← inferType proof, proof)
+  if dependencies.isEmpty then
+    dependencies := #[(mkConst ``True, mkConst ``True.intro)]
+  while dependencies.size > 1 do
+    let mut combined : Array (Expr × Expr) := #[]
+    for i in [:((dependencies.size + 1) / 2)] do
+      let (leftType, leftProof) := dependencies[2 * i]!
+      if let some (rightType, rightProof) := dependencies[2 * i + 1]? then
+        combined := combined.push
+          (mkApp2 (mkConst ``And) leftType rightType,
+           mkApp4 (mkConst ``And.intro) leftType rightType leftProof rightProof)
+      else
+        combined := combined.push (leftType, leftProof)
+    dependencies := combined
+  let (dependencyType, dependencyProof) := dependencies[0]!
+  return mkApp3 (mkConst ``crushSorry) goalType dependencyType dependencyProof
+
 /-- The core driver, given a resolved goal, config, and collected hints. -/
 def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
     (reconstructionHints : Array (Expr × String) := #[])
@@ -556,7 +591,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
     match cfg.trust with
     | .trust =>
       let goalType ← goal.getType
-      goal.assign (mkApp (mkConst ``crushSorry) goalType)
+      goal.assign (← trustedProof goalType st)
       reportRunProfile cfg prof profileContext? "verified" "not-requested"
         "solver returned unsat; closed under the trust policy"
     | .reconstruct | .reconstructOrTrust =>
@@ -630,7 +665,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
                       closing with the `crushSorry` axiom (trusting the solver). \
                       Set `crush.trust` to `reconstruct` to make this an error."
         let goalType ← goal.getType
-        goal.assign (mkApp (mkConst ``crushSorry) goalType)
+        goal.assign (← trustedProof goalType st)
         reportRunProfile cfg prof profileContext? "trusted-fallback" replayLabel
           "core-directed reconstruction failed; closed under the trust policy"
       else
