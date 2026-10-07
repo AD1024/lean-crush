@@ -100,6 +100,13 @@ structure RegistryCache where
 /-- Mutable translation state. -/
 structure TranslateState where
   cfg        : Config
+  /-- The real query context, before translation introduces hypothetical constructor
+      fields, lambda parameters, or quantifier binders. Only this context may justify
+      representing a Lean type by a nonempty, unguarded SMT carrier. -/
+  inputLCtx : LocalContext := {}
+  inputLocalInstances : LocalInstances := #[]
+  /-- Inhabitation evidence is stable because it is checked only in `inputLCtx`. -/
+  nonemptyCarriers : Std.HashMap Expr Bool := {}
   /-- Bijection between high-level atoms and emitted SMT symbols. -/
   atomToName : Std.HashMap String String := {}
   /-- Structural identities for expression-derived symbols. Kept separate from
@@ -157,8 +164,11 @@ def isDefEqReadOnly (left right : Expr) : MetaM Bool :=
 
 namespace TranslateM
 
-def run {α : Type} (cfg : Config) (x : TranslateM α) : MetaM (α × TranslateState) :=
-  StateRefT'.run x { cfg := cfg }
+def run {α : Type} (cfg : Config) (x : TranslateM α) : MetaM (α × TranslateState) := do
+  StateRefT'.run x {
+    cfg
+    inputLCtx := ← getLCtx
+    inputLocalInstances := ← Meta.getLocalInstances }
 
 @[inline] def getConfig : TranslateM Config := return (← get).cfg
 

@@ -18,9 +18,8 @@ closures (`emitTerm`/`emitSort`/`declare`) handlers recurse through.
 Covers propositional/Boolean structure, equality, quantifiers, `Int`/`Nat` (Nat via
 Int with a `≥ 0` guard), bit-vectors, strings, datatypes, and the higher-order
 encoding. Anything unrecognized becomes a fresh uninterpreted symbol, so
-translation degrades rather than crashing. The exceptions are cases with no sound
-encoding, which are refused with an error: a quantifier over an uninhabited type,
-and any dependent type.
+translation degrades rather than crashing. Potentially empty carriers are padded
+and guarded, including datatype fields and closures. Dependent types are refused.
 
 ## Why the definitions in this file are `partial`
 
@@ -136,6 +135,30 @@ def hasLawfulBEq (carrier inst : Expr) : TranslateM Bool := do
   catch _ =>
     return false
 
+/-- SMT datatypes require a finite constructor tree for every mutually declared sort.
+A Lean inductive may have only recursive constructors and therefore be empty. Keep
+such a block opaque and guarded instead of emitting an invalid SMT datatype. -/
+private def hasProductiveDatatypeBlock (iv : InductiveVal) (typeArgs : Array Expr) :
+    MetaM Bool := do
+  let block := iv.all.toArray
+  let mut productive : Std.HashSet Name := {}
+  for _ in [:block.size] do
+    for name in block do
+      if productive.contains name then continue
+      let info ← getConstInfoInduct name
+      for ctor in info.ctors do
+        let ctorInfo ← getConstInfoCtor ctor
+        let ctorType ← instantiateForall ctorInfo.type typeArgs
+        let ready ← forallTelescopeReducing ctorType fun fields _ =>
+          fields.allM fun field => do
+            let ty ← whnf (← inferType field)
+            let head := ty.getAppFn.constName!
+            return !block.contains head || productive.contains head
+        if ready then
+          productive := productive.insert name
+          break
+  return block.all productive.contains
+
 /-- A supported inductive we can emit as an SMT datatype: enumerations, simple
 structures, self-recursive `List`- or tree-shaped types, and — via monomorphization —
 *fully-applied parametric* types such as `Option Int`, `Int × Int`, `List Bool`.
@@ -158,6 +181,7 @@ def isSupportedDatatypeApp (n : Name) (typeArgs : Array Expr) : MetaM Bool := do
   if typeArgs.size != iv.numParams then return false
   if n == ``Nat || n == ``Int || n == ``Bool || n == ``String then return false
   if iv.ctors.isEmpty then return false
+  unless ← hasProductiveDatatypeBlock iv typeArgs do return false
   -- A type *class* (`HAdd`, `Inhabited`, …) is not data: its fields are typically
   -- functions, and a value is an instance-dictionary chosen by synthesis, not
   -- something to reason about structurally. Keep classes opaque; this also stops a
@@ -262,6 +286,33 @@ def isEmptyType (ty : Expr) : MetaM Bool := do
   let .const n _ := ty.getAppFn | return false
   let some (.inductInfo iv) := (← getEnv).find? n | return false
   return iv.ctors.isEmpty && iv.numIndices == 0
+
+/-- Check that an opaque carrier is inhabited in the original query context.
+
+SMT sorts are nonempty even when used only in generated closure equations or
+datatype fields. Checking source quantifiers alone is therefore insufficient.
+An actual local value or a `Nonempty` instance justifies an unguarded carrier;
+otherwise its SMT sort needs a predicate restricting it to Lean inhabitants.
+
+Do not consult translation's extended local context: a hypothetical field
+`x : Empty` introduced while inspecting `Option Empty` is not a witness. -/
+private def knownNonemptyCarrier (ty : Expr) : TranslateM Bool := do
+  let ty ← instantiateMVars ty
+  let st ← get
+  if let some result := st.nonemptyCarriers[ty]? then return result
+  let nonempty ← (show MetaM Bool from withLCtx st.inputLCtx st.inputLocalInstances do
+    withoutModifyingState do
+      for decl in st.inputLCtx do
+        if ← isDefEqGuarded decl.type ty then return true
+        let prop ← whnf decl.type
+        if prop.isAppOfArity ``Nonempty 1 then
+          if ← isDefEqGuarded prop.appArg! ty then return true
+      try
+        let witness ← mkOfNonempty ty
+        return !(← instantiateMVars witness).hasMVar
+      catch _ => return false)
+  modify fun s => { s with nonemptyCarriers := s.nonemptyCarriers.insert ty nonempty }
+  return nonempty
 
 /-- Whether `e` is a *value* that a type could depend on: something crush turns
 into an SMT term, such as a number, a Boolean, a proposition or a predicate.
@@ -733,8 +784,11 @@ mutual
           match ← binderGuard names shape.args with
           | none => pure res
           | some g => pure (smt| (=> $g $res))
-        let binders := #[(fName, sort)] ++ names.zip argSorts
-        TranslateM.emitCommand (.assert (.forallE binders guarded))
+        let wf ← reserveWfSymbol sortName
+        markFunDeclared wf
+        TranslateM.emitCommand (.defFun false wf #[(fName, sort)]
+          (.app (.symb "Bool") #[]) (.forallE (names.zip argSorts) guarded))
+        recordValidityPredicate wf ty
     return (sort, appName)
 
   /-- Offer a Lean type to `handlers`, in the priority order they were resolved in. -/
@@ -803,6 +857,10 @@ mutual
     let premise := SMT.Term.forallE binders pointwise
     let aRef := SMT.Term.const a
     let bRef := SMT.Term.const b
+    let premise ←
+      match ← binderGuard #[a, b] #[ty, ty] with
+      | none => pure premise
+      | some valid => pure (smt| (and $valid $premise))
     TranslateM.emitCommand (.assert
       (.forallE #[(a, sort), (b, sort)]
         (smt| (=> $premise (= $aRef $bRef)))))
@@ -869,6 +927,15 @@ mutual
     let allBinders := binders ++ paramBinders
     TranslateM.emitCommand (.assert
       (if allBinders.isEmpty then axiomBody else .forallE allBinders axiomBody))
+    -- A closure at valid captures is an actual Lean function. Do not assert this
+    -- for padding captures, which need not correspond to any Lean environment.
+    if let some valid ← wfCondition lamTy cloApp then
+      let valid ←
+        match ← binderGuard (binders.map (·.1)) captureTys with
+        | none => pure valid
+        | some guard => pure (smt| (=> $guard $valid))
+      TranslateM.emitCommand (.assert
+        (if binders.isEmpty then valid else .forallE binders valid))
     let capArgs ← captures.mapM fun fid => emitTerm (.fvar fid)
     return if capArgs.isEmpty then .const cloName
            else .app (.symb cloName) capArgs
@@ -942,8 +1009,10 @@ mutual
       | .proj _ _ b => go b acc
       | _ => acc
 
-  /-- Emit a `declare-sort` for an opaque type, once. -/
-  partial def declareUninterpretedSort (e : Expr) : TranslateM SSort := do
+  /-- Allocate an opaque carrier, without asserting that its values represent Lean
+  inhabitants. Callers must either prove nonemptiness or exclude padding values
+  with a guard (the finite `Array Empty` representation uses only its sentinel). -/
+  partial def declareOpaqueCarrier (e : Expr) : TranslateM SSort := do
     let key : StructuralKey := { tag := "opaque-sort", typeExprs := #[e] }
     let hint := match e with | .const n _ => nameHint n | _ => "s"
     let name ← TranslateM.symbolForStructural key hint
@@ -954,6 +1023,32 @@ mutual
       TranslateM.emitCommand (.declSort name 0)
       markSortDeclared name
     return .app (.symb name) #[]
+
+  /-- Every actual Lean value is valid. Replay can therefore decode a validity
+  predicate as `True` over the source type, even when that type is empty. -/
+  partial def recordValidityPredicate (name : String) (ty : Expr) : TranslateM Unit := do
+    let head ← withLocalDeclD `value ty fun value =>
+      mkLambdaFVars #[value] (mkConst ``True)
+    TranslateM.recordSymbolExpr name head
+
+  /-- Pad a possibly empty carrier and restrict its Lean image with a predicate.
+  Only actual terms are constrained to satisfy it; the SMT sort itself remains
+  nonempty even when the predicate has no satisfying values. -/
+  partial def declareUninterpretedSort (e : Expr) : TranslateM SSort := do
+    let sort ← declareOpaqueCarrier e
+    unless ← knownNonemptyCarrier e do
+      let .app (.symb name) _ := sort | return sort
+      let wf ← reserveWfSymbol name
+      unless ← declaredFun wf do
+        markFunDeclared wf
+        if ← isEmptyType e then
+          let x ← TranslateM.freshSymbol "empty"
+          TranslateM.emitCommand (.defFun false wf #[(x, sort)]
+            (.app (.symb "Bool") #[]) (smt| false))
+        else
+          TranslateM.emitCommand (.declFun wf #[sort] (.app (.symb "Bool") #[]))
+        recordValidityPredicate wf e
+    return sort
 
   /-- Whether sort translation actually selected Crush's finite representation
   for this Lean Array type. A user sort handler may replace it, in which case
@@ -1136,7 +1231,15 @@ mutual
     if ty.isConstOf ``Nat then return true
     if let some elem ← finiteArrayElem? ty then
       return ← finiteArraySortSelected ty elem
-    let some (n, typeArgs) ← supportedDatatypeType? ty | return false
+    if let some shape ← arrowShape? ty then
+      if (← TranslateM.getConfig).hoMode == .native then return false
+      return ← needsWFGuard shape.res visiting
+    let some (n, typeArgs) ← supportedDatatypeType? ty | do
+      discard <| emitSort ty
+      let key : StructuralKey := { tag := "opaque-sort", typeExprs := #[ty] }
+      if (← TranslateM.structuralSymbol? key).isSome then
+        return !(← knownNonemptyCarrier ty)
+      return false
     if visiting.contains n then return false
     let visiting := visiting.insert n
     -- Fields are examined at this instantiation, so a `Nat` reached only through the type
@@ -1212,7 +1315,20 @@ mutual
       let enc ← declareFiniteArray elem
       let wf ← reserveWfSymbol enc.sortName
       return some (.app (.symb wf) #[t])
-    let some (n, typeArgs) ← supportedDatatypeType? ty | return none
+    if let some shape ← arrowShape? ty then
+      if (← TranslateM.getConfig).hoMode == .native then return none
+      if !(← needsWFGuard shape.res) then return none
+      let (sort, _) ← declareArrowSort ty
+      let .app (.symb sortName) _ := sort | return none
+      let wf ← reserveWfSymbol sortName
+      return some (.app (.symb wf) #[t])
+    let some (n, typeArgs) ← supportedDatatypeType? ty | do
+      discard <| emitSort ty
+      let key : StructuralKey := { tag := "opaque-sort", typeExprs := #[ty] }
+      let some sortName ← TranslateM.structuralSymbol? key | return none
+      if ← knownNonemptyCarrier ty then return none
+      let wf ← reserveWfSymbol sortName
+      return some (.app (.symb wf) #[t])
     if !(← needsWFGuard ty) then return none
     let sortName ← declareDatatype n typeArgs (some ty)
     let wf ← reserveWfSymbol sortName
@@ -1840,13 +1956,6 @@ mutual
   The SMT quantifier uses the *named* binder form (not de Bruijn), so we register
   the introduced fvar → name mapping and reference it directly. -/
   partial def quantifier (isForall : Bool) (ty body : Expr) : TranslateM (Option SMT.Term) := do
-    -- SMT sorts are non-empty; a Lean quantifier over an uninhabited type is not
-    -- faithfully representable (`∀ x : Empty, P` is vacuously true, its SMT image
-    -- is not). Refuse rather than emit an unsound encoding.
-    if ← isEmptyType ty then
-      throwError "crush: cannot translate a quantifier over the uninhabited type \
-                  `{ty}` — every SMT sort is non-empty, so the encoding would be \
-                  unsound. Eliminate the quantifier first (e.g. `exact absurd .. ..`)."
     -- `emitSort` refuses a dependent type such as `(n : Nat) → β n` here, before
     -- any of the body is translated.
     let sort ← emitSort ty
@@ -1932,7 +2041,13 @@ mutual
       let resSort ← emitSort resTy
       TranslateM.emitCommand (.declFun name argSorts resSort)
       markFunDeclared name
-      emitResultWF name argSorts resTy
+      -- Erasing a proof argument can enlarge the domain of a partial Lean
+      -- function. Extending it to a possibly empty result carrier is not sound.
+      -- Until its preconditions are carried by the function signature, refuse
+      -- this case instead of asserting an unconditional result inhabitant.
+      if !(← knownNonemptyCarrier resTy) && (← args.anyM fun a => isProof a) then
+        throwError "crush: cannot translate a possibly empty result type after erasing proof arguments: {resTy}"
+      emitResultWF name argSorts argTypes resTy
     -- A *function-typed* argument must be passed as a value of its `Fn` sort, not
     -- as a first-order symbol: `emitSort` already gave the parameter an `Fn` sort,
     -- so emitting the bare symbol would be a sort mismatch. `emitFunValue`
@@ -1945,7 +2060,8 @@ mutual
   sort — the `Nat`-valued case (`f : α → Nat` is never negative) generalized to any
   guarded type. Nullary symbols get a bare assertion; higher arity a quantified one
   over fresh variables. Emitted once, at declaration time. -/
-  partial def emitResultWF (name : String) (argSorts : Array SSort) (resTy : Expr) :
+  partial def emitResultWF (name : String) (argSorts : Array SSort)
+      (argTypes : Array Expr) (resTy : Expr) :
       TranslateM Unit := do
     if argSorts.isEmpty then
       if let some c ← wfCondition resTy (.const name) then
@@ -1958,6 +2074,10 @@ mutual
       binders := binders.push (v, s)
       appArgs := appArgs.push (.const v)
     if let some c ← wfCondition resTy (.app (.symb name) appArgs) then
+      let c ←
+        match ← binderGuard (binders.map (·.1)) argTypes with
+        | none => pure c
+        | some guard => pure (smt| (=> $guard $c))
       TranslateM.emitCommand (.assert (.forallE binders c))
 
   partial def headHint (fn : Expr) : TranslateM String := do
