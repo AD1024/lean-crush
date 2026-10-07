@@ -856,6 +856,7 @@ def evalCrush : Tactic := fun stx => do
     | throwUnsupportedSyntax
   let cfg ← Config.ofOptions (← getOptions)
   let goal ← getMainGoal
+  discard <| getPropositionalGoalType goal
   -- Intro any leading binders so ∀-goals become closed props under hypotheses.
   let (_, goal) ← goal.intros
   replaceMainGoal [goal]

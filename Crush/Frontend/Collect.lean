@@ -110,6 +110,13 @@ private def premiseAppliesToGoal (goal : MVarId) (declName : Name) : MetaM Bool 
       restoreState saved
       return false
 
+/-- Require a proposition before forming the negated SMT goal. -/
+def getPropositionalGoalType (goal : MVarId) : MetaM Expr := goal.withContext do
+  let goalType ← instantiateMVars (← goal.getType)
+  unless ← isProp goalType do
+    throwError "crush: expected a proposition, but the goal has type `{goalType}`"
+  return goalType
+
 /-- Collect assertable facts from `goal` under `hints`, plus the (negated) goal.
 Returns the facts and leaves the goal untouched (the tactic decides how to close
 it). Only `Prop` propositions are collected; the goal's type is negated. -/
@@ -124,7 +131,7 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
     -- invisible to relevance and its `@[crush_unfold]` equations never get folded in.
     let mut seeds : Array Name := #[]
     let mut seenPremises : Std.HashSet Name := {}
-    let goalType ← instantiateMVars (← goal.getType)
+    let goalType ← getPropositionalGoalType goal
     seeds := seeds ++ goalType.getUsedConstants
     -- Local hypotheses, unless an explicit `[…]` list without `*` restricts us.
     if hints.allHyps then
