@@ -949,11 +949,25 @@ private def tryExistentialWitness (g : MVarId) (useGlobalSimp := true) :
 
 /-- `t₁ → … → tₙ → concl`. The binders are non-dependent — each hypothesis is a
 closed `Prop` — so a plain `mkForall` chain suffices. -/
-def mkArrowChain (tys : Array Expr) (concl : Expr) : Expr := Id.run do
+def mkArrowChain (tys : Array Expr) (concl : Expr) (names : Array Name := #[]) :
+    Expr := Id.run do
   let mut result := concl
-  for ty in tys.reverse do
-    result := mkForall `h .default ty result
+  for i in [:tys.size] do
+    let index := tys.size - 1 - i
+    result := mkForall (names[index]?.getD `h) .default tys[index]! result
   return result
+
+/-- Keep accessible names for selected local proofs. Shadowed locals and compound
+proof terms receive fresh names, so they cannot hide another selected hypothesis
+that the user's finisher could name in the original context. -/
+private def proofBinderNames (proofs : Array Expr) : MetaM (Array Name) := do
+  let lctx ← getLCtx
+  proofs.mapM fun proof => do
+    if let .fvar fvarId := proof.consumeMData then
+      let decl ← fvarId.getDecl
+      if (lctx.findFromUserName? decl.userName).any (·.fvarId == fvarId) then
+        return decl.userName
+    mkFreshUserName `h
 
 /-- Try bounded constructor witnesses using only explicitly selected facts.
 
@@ -1159,7 +1173,7 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
     let snapshot ← snapshot?.getDM KernelCheckSnapshot.capture
     let goalType ← instantiateMVars (← goal.getType)
     let hypTypes ← coreProofs.mapM fun p => do instantiateMVars (← inferType p)
-    let target := mkArrowChain hypTypes goalType
+    let target := mkArrowChain hypTypes goalType (← proofBinderNames coreProofs)
     -- Abstract exactly the local data/type variables that occur in the target
     -- (plus their dependencies). Proposition hypotheses not selected by the SMT
     -- core are absent from `target` and therefore cannot enter the finisher's
@@ -1180,7 +1194,7 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
         let restrictedInsts := (← getLocalInstances).filter fun inst =>
           paramIds.contains inst.fvar.fvarId!
         let mv ← withLCtx restrictedLCtx restrictedInsts do mkFreshExprMVar target
-        let (_, manualGoal) ← mv.mvarId!.introN coreProofs.size
+        let (_, manualGoal) ← mv.mvarId!.introNP coreProofs.size
         let gs ← Tactic.run manualGoal (evalTactic tac)
         if gs.isEmpty then
           let assigned ← instantiateMVars mv
