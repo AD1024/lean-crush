@@ -8,9 +8,12 @@ namespace Crush.Alethe
 
 open Crush SMT
 
+-- table4:begin arithmetic lemma alethearithmetic-1
 private def rationalTarget : ReplayConditionHandler := fun ctx =>
   return (ctx.target.find? (·.isConstOf ``Rat)).isSome
+-- table4:end alethearithmetic-1
 
+-- table4:begin arithmetic handler alethearithmetic-2
 register_crush_replay rule low <<
   (evaluate ..) if rationalTarget => by decide +kernel
 >>
@@ -28,7 +31,9 @@ register_crush_replay rule low <<
     have rounded : bound.ceil = limit := by decide +kernel
     simpa only [rounded] using (Rat.ceil_le_iff (x := bound) (y := value)).symm
 >>
+-- table4:end alethearithmetic-2
 
+-- table4:begin arithmetic lemma alethearithmetic-3
 private structure RationalCoefficient where
   numerator : Int
   denominator : Nat
@@ -307,7 +312,9 @@ private def proveLinearRelationIff (goal : MVarId) : TacticM Bool := goal.withCo
         catch _ =>
           pure ()
   return false
+-- table4:end alethearithmetic-3
 
+-- table4:begin arithmetic handler alethearithmetic-4
 @[crush_replay_rule "la_generic" high]
 def replayLinearArithmetic : ReplayRuleHandler := fun ctx => do
   let some coefficients := integerMultipliers ctx.args | return none
@@ -320,5 +327,6 @@ def replayPolynomialEquality : ReplayRuleHandler := fun ctx =>
 @[crush_replay_rule "poly_simp_rel" high]
 def replayPolynomialRelation : ReplayRuleHandler := fun ctx =>
   ctx.runMeta proveLinearRelationIff
+-- table4:end alethearithmetic-4
 
 end Crush.Alethe

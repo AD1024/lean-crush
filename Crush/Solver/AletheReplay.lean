@@ -235,6 +235,7 @@ private def stepTactics : CoreM (Array ReplayTactic) := do
     { label := "rfl", tactic := ← `(tactic| rfl) },
     { label := "decide", tactic := ← `(tactic| decide) }]
 
+-- table4:begin strings lemma alethereplay-1
 private theorem stringEqAppendSelfIff (pre rest : String) :
     rest = pre ++ rest ↔ "" = pre := by
   rw [eq_comm (a := rest), String.append_eq_right_iff, eq_comm (a := pre)]
@@ -269,6 +270,7 @@ private theorem stringPrefixIffSubstr (pattern value : String) :
   change value.startsWith pattern ↔ _
   rw [String.startsWith_string_iff, List.prefix_iff_eq_take, String.ext_iff]
   simp [stringSubstr, ← String.length_toList]
+-- table4:end alethereplay-1
 
 private theorem boolXorPos1 (left right : Bool) :
     ¬((left ^^ right) = true) ∨ left = true ∨ right = true := by
@@ -353,6 +355,7 @@ private def boolXorTheorem? : String → Option Name
   | "xor_neg2" => some ``boolXorNeg2
   | _ => none
 
+-- table4:begin strings lemma alethereplay-2
 private theorem stringEndsWithAppend (left right : String) :
     (left ++ right).endsWith right = true := by
   change (left ++ right).toSlice.endsWith right
@@ -415,7 +418,9 @@ private theorem stringAppendIsEmptyEqIff (left right : String) :
       ((left ++ right = "") ↔ (left = "" ∧ right = "")) := by
   rw [Bool.eq_iff_iff]
   simp only [String.isEmpty_iff, Bool.and_eq_true]
+-- table4:end alethereplay-2
 
+-- table4:begin bitvectors lemma alethereplay-3
 private theorem bitVecGetLsbDXor {width : Nat} (left right : BitVec width)
     (index : Nat) :
     (BitVec.xor left right).getLsbD index =
@@ -453,7 +458,9 @@ private theorem existsLtSucc {predicate : Nat → Prop} (bound : Nat) :
   · rintro (holds | ⟨index, less, holds⟩)
     · exact ⟨bound, by omega, holds⟩
     · exact ⟨index, by omega, holds⟩
+-- table4:end alethereplay-3
 
+-- table4:begin quantifiers lemma alethereplay-4
 private theorem forallIffAtCounterexample {α : Sort u} [Nonempty α] (predicate : α → Prop) :
     (∀ x, predicate x) ↔
       predicate (Classical.epsilon fun x => ¬predicate x) := by
@@ -478,7 +485,9 @@ private theorem forallInstClause {α : Sort u} (predicate : α → Prop) (witnes
   by_cases h : ∀ x, predicate x
   · exact Or.inr (h witness)
   · exact Or.inl h
+-- table4:end alethereplay-4
 
+-- table4:begin arithmetic lemma alethereplay-5
 private theorem intAbsEq (left right : Int) :
     intAbs left = intAbs right ↔ left = right ∨ left = -right := by
   unfold intAbs
@@ -509,7 +518,9 @@ private theorem intSquarePositive (value : Int) (h : value ≠ 0) : value * valu
   by_cases hn : value < 0
   · exact Int.mul_pos_of_neg_of_neg hn hn
   · exact Int.mul_pos (by omega) (by omega)
+-- table4:end alethereplay-5
 
+-- table4:begin logic lemma alethereplay-6
 private theorem iffTrueIff (predicate : Prop) : ((predicate ↔ True) ↔ predicate) := by
   simp
 
@@ -523,7 +534,9 @@ private theorem equalityReflexiveIffTrue {α : Sort u} (value : α) :
 private theorem equalitySymmetricIff {α : Sort u} (left right : α) :
     (left = right ↔ right = left) :=
   eq_comm
+-- table4:end alethereplay-6
 
+-- table4:begin arithmetic lemma alethereplay-7
 private theorem intLeNorm (left right : Int) :
     (left ≤ right ↔ ¬left ≥ right + 1) := by
   omega
@@ -550,7 +563,9 @@ private theorem intMulPositiveEq (coefficient left right : Int) :
     coefficient > 0 ∧ left = right →
       coefficient * left = coefficient * right := fun hypothesis =>
   congrArg (coefficient * ·) hypothesis.2
+-- table4:end alethereplay-7
 
+-- table4:begin bitvectors lemma alethereplay-8
 private def bitVecUnsignedLtBits : (width : Nat) → BitVec width → BitVec width → Prop
   | 0, _, _ => False
   | width + 1, left, right =>
@@ -675,7 +690,9 @@ private theorem bitVecSmodEliminate {width : Nat}
 private def bvDecideHint? : CoreM (Option (TSyntax `tactic)) := do
   unless crush.reconstruct.trustBvDecide.get (← getOptions) do return none
   return some (← `(tactic| bv_decide))
+-- table4:end alethereplay-8
 
+-- table4:begin strings handler alethereplay-9
 register_crush_replay rule low <<
   (rare_rewrite "str-prefixof-elim" ..) =>
     by exact stringPrefixIffSubstr _ _
@@ -737,7 +754,9 @@ register_crush_replay rule low <<
   (rare_rewrite "str-concat-unify-base" ..) =>
     by simp only [stringEqAppendSelfIff, stringEqSelfAppendIff]
 >>
+-- table4:end alethereplay-9
 
+-- table4:begin logic handler alethereplay-10
 register_crush_replay rule low <<
   (rare_rewrite "bool-eq-true" ..) => by exact iffTrueIff _
 >>
@@ -753,7 +772,9 @@ register_crush_replay rule low <<
 register_crush_replay rule low <<
   (rare_rewrite "eq-symm" ..) => by exact equalitySymmetricIff _ _
 >>
+-- table4:end alethereplay-10
 
+-- table4:begin arithmetic handler alethereplay-11
 register_crush_replay rule low <<
   (rare_rewrite "arith-leq-norm" ..) => by exact intLeNorm _ _
 >>
@@ -773,7 +794,9 @@ register_crush_replay rule low <<
 register_crush_replay rule low <<
   (rare_rewrite "arith-abs-eq" ..) => by exact intAbsEq _ _
 >>
+-- table4:end alethereplay-11
 
+-- table4:begin bitvectors handler alethereplay-12
 register_crush_replay rule low <<
   (rare_rewrite "bv-ule-max" ..) =>
     by exact iff_true_intro (bitVecUleOfNatPowSubOne _)
@@ -809,7 +832,9 @@ register_crush_replay rule low <<
   (rare_rewrite "bv-sgt-self" ..) =>
     by simp [BitVec.ult_eq_decide, BitVec.slt_eq_decide]
 >>
+-- table4:end alethereplay-12
 
+-- table4:begin logic handler alethereplay-13
 register_crush_replay rule low <<
   (refl ..) => by rfl
 >>
@@ -829,11 +854,15 @@ register_crush_replay rule low <<
       | (congr 1 <;> assumption)
       | simp_all only
 >>
+-- table4:end alethereplay-13
 
+-- table4:begin quantifiers handler alethereplay-14
 register_crush_replay rule low <<
   (forall_inst ..) => by exact forallInstClause _ _
 >>
+-- table4:end alethereplay-14
 
+-- table4:begin arithmetic handler alethereplay-15
 register_crush_replay rule low <<
   (rare_rewrite "arith-abs-int-gt" (term left : Int) (term right : Int)) => by
     exact intAbsGt left right
@@ -850,13 +879,17 @@ register_crush_replay rule low <<
     | exact intAbsSquareLt _ _ (by assumption)
     | grind [intAbs]
 >>
+-- table4:end alethereplay-15
 
+-- table4:begin arithmetic lemma alethereplay-16
 private def hasIntAbsPremise : ReplayConditionHandler := fun ctx =>
   return ctx.premises.any fun premise =>
     (premise.clause.find? (·.isConstOf ``intAbs)).isSome
 
 -- Alethe closes these anchors with expanded sign tests, while their final
 -- arithmetic step still states the comparison using absolute values.
+-- table4:end alethereplay-16
+-- table4:begin arithmetic handler alethereplay-17
 register_crush_replay rule low <<
   (subproof ..) if hasIntAbsPremise => by
     simp only [← intAbsGt] at *
@@ -873,16 +906,22 @@ register_crush_replay rule low <<
       | exact intMulPositive _ _ _ (by assumption)
       | exact intMulPositiveEq _ _ _ (by assumption)
 >>
+-- table4:end alethereplay-17
 
+-- table4:begin logic handler alethereplay-18
 register_crush_replay rule low <<
   (and_neg ..) =>
     by simp_all [Bool.xor_comm, Bool.xor_left_comm]
 >>
+-- table4:end alethereplay-18
 
+-- table4:begin bitvectors handler alethereplay-19
 register_crush_replay rule low <<
   (aci_simp ..) => by exact bitVecAndOfNatPowSubOne _
 >>
+-- table4:end alethereplay-19
 
+-- table4:begin logic handler alethereplay-20
 register_crush_replay rule low <<
   (resolution ..) =>
     by first | grind | simp_all [stringIsEmptyEqDecide]
@@ -898,7 +937,9 @@ register_crush_replay rule low <<
   (implies_neg1 ..) | (implies_neg2 ..) =>
     by grind
 >>
+-- table4:end alethereplay-20
 
+-- table4:begin bitvectors lemma alethereplay-21
 private partial def concreteNatValue? (value : Expr) : MetaM (Option Nat) := do
   if let some value ← getNatValue? value then return some value
   let value ← whnf value
@@ -1113,7 +1154,9 @@ private def runBitVecReplay (kind : BitVecReplayKind) : TacticM Unit := do
   let some tactic ← kind.hint? target
     | throwError "bit-vector replay target has an unsupported shape"
   evalTactic tactic
+-- table4:end alethereplay-21
 
+-- table4:begin bitvectors handler alethereplay-22
 register_crush_replay rule low <<
   (bv_bitblast_step_bvequal ..)
     if BitVecReplayKind.equality =>
@@ -1158,6 +1201,7 @@ private def replayTrustedBitVecRule : ReplayRuleHandler := fun ctx => do
   unless applicable do return none
   let some tactic ← bvDecideHint? | return none
   ctx.runTacticWithScopeFallback tactic
+-- table4:end alethereplay-22
 
 private def protocolHint? (rule : String) : CoreM (Option ReplayTactic) := do
   match rule with

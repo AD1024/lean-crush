@@ -10,6 +10,7 @@ namespace Crush.Alethe
 
 open Lean Meta Elab Tactic
 
+-- table4:begin assumptions lemma alethebridge-1
 private theorem intForallNonneg (p : Int → Prop) :
     (∀ i : Int, i ≥ 0 → p i) ↔ ∀ n : Nat, p n := by
   constructor
@@ -51,7 +52,9 @@ private def revertNonnegativeInts : TacticM Unit := withMainContext do
   unless variables.isEmpty do
     let (_, goal) ← (← getMainGoal).revert variables
     replaceMainGoal [goal]
+-- table4:end alethebridge-1
 
+-- table4:begin assumptions handler alethebridge-2
 register_crush_replay rule low <<
   (assume ..) => by
     -- SMT Boolean equality decodes as Iff. This direct bridge avoids using
@@ -71,5 +74,6 @@ register_crush_replay rule low <<
        Int.toNat_natCast, Int.ofNat_lt, Int.ofNat_le, Int.ofNat_inj]
     <;> grind (ematch := 0) only
 >>
+-- table4:end alethebridge-2
 
 end Crush.Alethe
