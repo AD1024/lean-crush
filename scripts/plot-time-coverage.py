@@ -494,10 +494,11 @@ def draw_coverage_table(
     draw_table(
         pyplot,
         path,
-        ("Benchmark", "Tool", "#VC proved", "Coverage", "Median (ms)"),
-        (0.015, 0.30, 0.62, 0.79, 0.985),
+        ("Benchmark", "Tool", "VCs proved", "Coverage", "Median (ms)"),
+        (0.015, 0.20, 0.66, 0.80, 0.985),
         ("left", "left", "right", "right", "right"),
         rendered,
+        width=8.8,
     )
 
 
@@ -556,10 +557,9 @@ def draw_reconstruction_table(
                         lane,
                         f"{proved}",
                         f"{pct:.1f}%",
-                        f"{replayed} / {cohort}",
                         f"{common_ms:,.1f}",
                     ),
-                    (weight, weight, weight, "normal", "normal"),
+                    (weight, weight, weight, "normal"),
                 )
             )
         rendered.append(
@@ -575,16 +575,15 @@ def draw_reconstruction_table(
         (
             "Benchmark",
             "Tool",
-            "Checked proof",
+            "Proofs",
             "Coverage",
-            "Replayed/Total",
             "Common (ms)",
         ),
         # Column positions and width are sized to the widest cell each column
         # can hold -- the Tool column has to fit `Crush w/ UNSAT Core+Alethe`
-        # in bold without running into the right-aligned `Checked proof`.
-        (0.012, 0.193, 0.583, 0.687, 0.835, 0.975),
-        ("left", "left", "right", "right", "right", "right"),
+        # in bold without running into the right-aligned `Proofs` count.
+        (0.012, 0.21, 0.66, 0.79, 0.975),
+        ("left", "left", "right", "right", "right"),
         rendered,
         width=9.3,
     )

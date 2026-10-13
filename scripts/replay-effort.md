@@ -6,7 +6,6 @@ From the repository root, using Python 3.10 or later (no dependencies):
 python3 scripts/count_replay_effort.py
 python3 scripts/count_replay_effort.py --format latex
 python3 scripts/count_replay_effort.py --format json
-python3 -m unittest discover -s scripts -p 'test_count_replay_effort.py'
 ```
 
 The default output is the paper's six-category table. LaTeX output is an

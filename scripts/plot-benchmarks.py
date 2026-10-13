@@ -587,7 +587,7 @@ def plot_coverage(rows: list[dict[str, str]], path: Path) -> None:
             elements.append(
                 text(
                     x + bar_width / 2,
-                    max(top - 5, y - 7),
+                    max(top - 20, y - 7 - (entry_index % 2) * 14),
                     f'{row["solved_vcs"]}/{total_vcs}',
                     "value",
                     "middle",
@@ -629,9 +629,9 @@ def plot_outcomes(rows: list[dict[str, str]], path: Path) -> None:
                 f"{suite}: {sorted(totals)}"
             )
 
-    width = max(1180, 220 + len(suites) * 220)
-    height = 650
-    left, right, top, bottom = 82.0, 36.0, 142.0, 120.0
+    width = max(1180, 220 + len(suites) * 320)
+    height = 780
+    left, right, top, bottom = 82.0, 36.0, 142.0, 245.0
     chart_width = width - left - right
     chart_height = height - top - bottom
     chart_bottom = top + chart_height
@@ -717,16 +717,17 @@ def plot_outcomes(rows: list[dict[str, str]], path: Path) -> None:
                     chart_bottom + 22,
                     label_backend(backend),
                     "axis",
-                    "middle",
+                    "end",
+                    f"rotate(-55 {x + bar_width / 2:.2f} {chart_bottom + 22:.2f})",
                 )
             )
         center = left + (suite_index + 0.5) * group_width
         total = int(indexed[(suite, available[0])]["total_vcs"])
         elements.append(
-            text(center, chart_bottom + 50, label_suite(suite), "label", "middle")
+            text(center, chart_bottom + 177, label_suite(suite), "label", "middle")
         )
         elements.append(
-            text(center, chart_bottom + 69, f"{total} VCs", "axis", "middle")
+            text(center, chart_bottom + 196, f"{total} VCs", "axis", "middle")
         )
         if suite_index > 0:
             separator = left + suite_index * group_width

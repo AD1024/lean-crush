@@ -335,6 +335,24 @@ prepare_tree() {
   local tree="$2"
   local log="$OUT_DIR/build-$label.log"
   local guard_log="$OUT_DIR/solver-guard-build-$label.log"
+  local dependency
+
+  # Lake may recursively replace a dependency when its origin changes. Never
+  # let that operation follow a package symlink into another working checkout.
+  for dependency in "$tree"/.lake/packages/*; do
+    [[ ! -L "$dependency" ]] ||
+      die "refusing Lake preparation through dependency symlink: $dependency"
+  done
+
+  # Keep the case/frame scaffolds for every lane, but replace their auxiliary
+  # proof-search leaves with this lane's selected backend before compilation.
+  if grep -Fq -- '-- PLEAN_BACKEND_ONLY_V1' "$tree/PLean/Verify/Tactic.lean"; then
+    python3 "$SCRIPT_DIR/prepare-plean-backend-only.py" "$tree" \
+      --backend "$label" --check || die "invalid backend-only $label tree"
+  else
+    python3 "$SCRIPT_DIR/prepare-plean-backend-only.py" "$tree" \
+      --backend "$label" || die "failed to remove auxiliary $label automation"
+  fi
 
   printf 'Building %s PLean tree\n' "$label"
   if ! (cd "$tree" && lake env printenv LEAN_PATH) \
@@ -473,65 +491,19 @@ private def pleanBenchReportDiagnostic (obligation : String) : IO Unit := do
   IO.println s!"PLEAN_DIAG\t{obligation}\t{category}"
 
 EOF
-
-  if [[ "$backend" == "auto" ]]; then
-    cat >> "$output" <<'EOF'
+  cat >> "$output" <<'EOF'
 
 open Lean Elab Command
 
 elab "#plean_bench_report" : command => do
   let profile <- liftM (PLean.Verify.Profile.stateRef.get : IO _)
+  let times <- liftM (PLean.pverifyBenchTimes.get : IO _)
   for row in profile.rows do
-    let nanos := row.cachePp + row.cacheHash + row.cacheFs +
-      row.smtPrep + row.smtAuto + row.smtSolver + row.smtAssign
+    let nanos := (times.get? row.obligation).getD 0
     IO.println s!"PLEAN_TIME\t{row.obligation}\t{nanos}"
     liftM (pleanBenchReportDiagnostic row.obligation)
 
 EOF
-  elif is_crush_lane "$backend"; then
-    cat >> "$output" <<'EOF'
-
-open Lean Elab Command
-
-elab "#plean_bench_report" : command => do
-  let profile <- liftM (PLean.Verify.Profile.stateRef.get : IO _)
-  for row in profile.rows do
-    let nanos := row.cachePp + row.cacheHash + row.cacheFs +
-      row.cacheClose + row.smtPrep + row.smtCrush
-    IO.println s!"PLEAN_TIME\t{row.obligation}\t{nanos}"
-    liftM (pleanBenchReportDiagnostic row.obligation)
-
-EOF
-  elif [[ "$backend" == "grind" ]] || is_smt_lane "$backend"; then
-    # The patch substitutes the backend at the site the profiler already times
-    # as `smtCrush`, so the same two fields cover both lanes.
-    cat >> "$output" <<'EOF'
-
-open Lean Elab Command
-
-elab "#plean_bench_report" : command => do
-  let profile <- liftM (PLean.Verify.Profile.stateRef.get : IO _)
-  for row in profile.rows do
-    let nanos := row.smtPrep + row.smtCrush
-    IO.println s!"PLEAN_TIME\t{row.obligation}\t{nanos}"
-    liftM (pleanBenchReportDiagnostic row.obligation)
-
-EOF
-  else
-    cat >> "$output" <<'EOF'
-
-open Lean Elab Command
-
-elab "#plean_bench_report" : command => do
-  let profile <- liftM (PLean.Verify.Profile.stateRef.get : IO _)
-  for row in profile.rows do
-    let nanos := row.cachePp + row.cacheHash + row.cacheFs +
-      row.cacheClose + row.smtPrep + row.smtDuper
-    IO.println s!"PLEAN_TIME\t{row.obligation}\t{nanos}"
-    liftM (pleanBenchReportDiagnostic row.obligation)
-
-EOF
-  fi
   printf '\n-- PLEAN_BENCH_PRELUDE_END\n' >> "$output"
 }
 
@@ -677,6 +649,12 @@ append_markers() {
     BEGIN { FS = " "; OFS = "\t" }
     {
       if (index($0, "[SMT]") > 0) passed[$2] = 1
+      marker = index($0, "PLEAN_BENCH\t")
+      if (marker > 0) {
+        line = substr($0, marker)
+        split(line, result, "\t")
+        provenance[result[2]] = result[4]
+      }
       marker = index($0, "PLEAN_DIAG\t")
       if (marker > 0) {
         line = substr($0, marker)
@@ -700,9 +678,10 @@ append_markers() {
         printf "plean\t%s\t%s\t%s\t%s\t-\t%s\t%s\t%.3f\tfalse\t-\t-\n",
           backend, repeat, file, name, status, category, nanos[name] / 1000000
         vcKey = file "|" name
-        printf("plean\t%s\t%s\t%s\t%s\t%s\t%.3f\t-\n",
+        origin = (name in provenance) ? provenance[name] : "not-entered"
+        printf("plean\t%s\t%s\t%s\t%s\t%s\t%.3f\t%s\n",
           backend, repeat, vcKey, status, category,
-          nanos[name] / 1000000) >> measurements
+          nanos[name] / 1000000, origin) >> measurements
       }
     }
   ' "$log" >> "$RESULTS"
@@ -976,6 +955,12 @@ write_reports() {
 
 }
 
+# Allow diagnostic pilots to reuse source generation without provisioning or
+# running the full corpus. No backend is invoked in this mode.
+if [[ "${PLEAN_LIBRARY_ONLY:-false}" == "true" ]]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 if ! is_true "$RUN_AUTO" && ! is_true "$RUN_CRUSH" && ! is_true "$RUN_DUPER" &&
     ! is_true "$RUN_GRIND" && ! is_true "$RUN_SMT"; then
   die "at least one backend must be enabled"
@@ -989,6 +974,13 @@ case "$RESUME" in
 esac
 
 mkdir -p "$OUT_DIR/logs"
+
+if is_true "$RESUME" && [[ -f "$OUT_DIR/measurements.tsv" ]]; then
+  [[ -f "$OUT_DIR/harness-policy.txt" ]] &&
+    grep -Fxq 'backend-only-scaffolds-v1' "$OUT_DIR/harness-policy.txt" ||
+    die "cannot resume pre-ablation measurements; use a fresh OUT_DIR"
+fi
+printf '%s\n' 'backend-only-scaffolds-v1' > "$OUT_DIR/harness-policy.txt"
 
 validate_nat "GRIND_SPLITS" "$GRIND_SPLITS"
 prepare_solver_guard
@@ -1096,6 +1088,24 @@ initialize_tsv() {
     printf '%b\n' "$header" > "$file"
   fi
 }
+
+# PREPARE_TREES=false must never silently reuse an old, auxiliary-enabled build.
+for backend in auto crush grind smt duper; do
+  case "$backend" in
+    auto) enabled="$RUN_AUTO"; tree="$PLEAN_AUTO_TREE" ;;
+    crush) enabled="$RUN_CRUSH"; tree="$PLEAN_CRUSH_TREE" ;;
+    grind) enabled="$RUN_GRIND"; tree="$PLEAN_GRIND_TREE" ;;
+    smt) enabled="$RUN_SMT"; tree="$PLEAN_SMT_TREE" ;;
+    duper) enabled="$RUN_DUPER"; tree="$PLEAN_DUPER_TREE" ;;
+  esac
+  if is_true "$enabled"; then
+    python3 "$SCRIPT_DIR/prepare-plean-backend-only.py" "$tree" \
+      --backend "$backend" --check || die "unpatched $backend tree"
+    mkdir -p "$OUT_DIR/source-$backend"
+    cp "$tree/PLean/Verify/Tactic.lean" "$tree/PLean/Verify/Obligation.lean" \
+      "$OUT_DIR/source-$backend/"
+  fi
+done
 
 legacy_checkpoints=false
 if is_true "$RESUME" && [[ ! -f "$CHECKPOINTS" ]]; then

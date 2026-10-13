@@ -53,20 +53,6 @@ RECONSTRUCTION_ACCEPTED_OUTCOMES = {
 # so a replay failure is the whole failure.
 ALETHE_ONLY_LANES = frozenset({"crush-alethe", SMT_LANE})
 
-# Outcomes that mean the lane handed back a Lean proof term the kernel
-# accepted, whichever route produced it. This is the cross-tool question of
-# whether a checked proof was obtained, so it is deliberately wider than the
-# per-lane sets above: a goal closed by checked pre-SMT reconstruction is a
-# checked proof even though no certificate was replayed.
-CHECKED_PROOF_OUTCOMES = frozenset(
-    {
-        "alethe-reconstructed",
-        "core-reconstructed",
-        "pre-reconstructed",
-        "selected-fact",
-    }
-)
-
 # One suite's comparison cohort: the compared lanes, their attempt rows keyed
 # by lane and VC, and the VC identities every compared lane attempted.
 ComparisonCohort = tuple[
@@ -165,6 +151,12 @@ def reconstruction_succeeded(
     profiles: list[dict[str, str]],
     lane: str,
 ) -> bool:
+    """Conservative call-level diagnostic, not the final-VC success metric.
+
+    Profile events include backtracked calls. Without proof provenance for
+    each event, their outcomes cannot identify which calls proved the VC.
+    Final proof coverage is reported by checked_proof_succeeded instead.
+    """
     if not all_pass(rows):
         return False
     if not profiles:
@@ -176,14 +168,14 @@ def reconstruction_succeeded(
 def checked_proof_succeeded(
     rows: list[dict[str, str]], profiles: list[dict[str, str]]
 ) -> bool:
-    """Whether the lane closed the VC with a kernel-checked Lean proof."""
-    if not all_pass(rows):
-        return False
-    if not profiles:
-        return True
-    return all(
-        profile["outcome"] in CHECKED_PROOF_OUTCOMES for profile in profiles
-    )
+    """Final VC success in a proof-producing lane, across all repetitions.
+
+    Failed intermediate calls may be backtracked before a successful proof.
+    Their telemetry must not override the harness's final proof status.
+    Backend-versus-scaffold provenance is reported separately by the harness.
+    Callers exclude trusted SMT lanes from this comparison.
+    """
+    return all_pass(rows)
 
 
 def verification_cohorts(
@@ -640,7 +632,7 @@ def reconstruction_failure_rows(
             for vc in smt_verified:
                 rows = attempts.get((suite, lane, vc), [])
                 vc_profiles = profile_groups[(suite, lane, vc)]
-                if reconstruction_succeeded(rows, vc_profiles, lane):
+                if checked_proof_succeeded(rows, vc_profiles):
                     continue
                 mode = (
                     failure_mode(rows, vc_profiles, lane)

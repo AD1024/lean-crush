@@ -36,32 +36,6 @@ diff --git a/PLean/Verify/Tactic.lean b/PLean/Verify/Tactic.lean
      ))
  
  /-- Arithmetic / boolean fallback for default-invariant goals SMT
-@@ -1357,11 +1358,7 @@ macro_rules
-   | `(tactic| pverify_close_chain) => `(tactic| (
-       first
-         | default_inv
--        | pverify_smt
--        | pverify_structural_smt
--        | pverify_split_ite_smt
--        | pverify_split_smt
--        | pverify_grind))
-+        | pverify_smt))
- 
- /-- Internal close-chain used by `pverify_default`: SMT first because
- the goal arrives with explicit `DefaultInvariants` content the SMT
-@@ -1371,11 +1368,7 @@ macro_rules
-   | `(tactic| pverify_close_chain_smt_first) => `(tactic| (
-       first
-         | pverify_smt
--        | pverify_structural_smt
--        | pverify_split_ite_smt
--        | pverify_split_smt
--        | default_inv
--        | pverify_grind))
-+        | default_inv))
- 
- /-- The headline auto-discharge tactic. Three branches in order:
- trivial / `True`-shaped post; post-equals-pre (any handler whose
 diff --git a/lakefile.lean b/lakefile.lean
 --- a/lakefile.lean
 +++ b/lakefile.lean

@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "policy": "shared-backend-only-scaffolds-v2",
+  "PLean": {"url": "https://github.com/AD1024/P.git", "rev": "9c098b4c5ad32faf2a022929b6726d2a182a9e1d"},
+  "auto_adapter_rev": "be39726723e71f9aa1e02c6cfeeae9b0c31b8947",
+  "toolchains": {"modern": "leanprover/lean4:v4.32.2", "auto": "leanprover/lean4:v4.24.0"},
+  "compiler_commits": {"modern": "f3b06c705e6c85f5314019d5d3baab0fec5b580c", "auto": "797c613eb9b6d4ec95db23e3e00af9ac6657f24b"},
+  "source_bundle_sha256": {
+    "modern": "274c9f31459e1949de1edb70ed553b839119ff3c9fded1b58b450faefbe3d935",
+    "auto": "9f36c5fd9af749189e8565886352dc9e1d81c1c928564fe80c9de2d7af7e604d"
+  },
+  "modern": {
+    "Crush": {"url": "https://github.com/AD1024/lean-crush.git", "rev": "3b009bb9bf535c27b2d9ce85a243aa68c1891f6a"},
+    "Duper": {"url": "https://github.com/leanprover-community/duper.git", "rev": "ca7c5862bee2e62e019e6a1b70ce95612b6b6365"},
+    "Smt": {"url": "https://github.com/ufmg-smite/lean-smt.git", "rev": "e50256657e5d213241005bcf353f28d13f3e6ea7"},
+    "auto": {"url": "https://github.com/leanprover-community/lean-auto.git", "rev": "1175ff6b958ad9513fe4830f9fca11ebe59eb78d"},
+    "cvc5": {"url": "https://github.com/abdoo8080/lean-cvc5.git", "rev": "a3ffc29af30f97e41e32356f21296d0a3e0f7c04"},
+    "Loom": {"url": "https://github.com/AD1024/loom.git", "rev": "ec16b95ff8bbd047248de031cabd3160847e4b1b"},
+    "mathlib": {"url": "https://github.com/leanprover-community/mathlib4.git", "rev": "905b95818eb32af7874a58b427f50c1711a5e96c"}
+  },
+  "auto": {
+    "Loom": {"url": "https://github.com/AD1024/loom.git", "rev": "d10340821daf0ea04e05e7eec53814e0a9b248ce"},
+    "auto": {"url": "https://github.com/leanprover-community/lean-auto.git", "rev": "36d85bf6372f1a35fb5487325d1ef965b33c6296"},
+    "mathlib": {"url": "https://github.com/leanprover-community/mathlib4.git", "rev": "f897ebcf72cd16f89ab4577d0c826cd14afaafc7"}
+  },
+  "external_cvc5": {
+    "version": "1.3.4",
+    "release_url": "https://github.com/cvc5/cvc5/releases/download/cvc5-1.3.4",
+    "binary_sha256": {"macOS-arm64-static": "76677e62998e673622edc8ad2df168cb2445177ab7a336c5a25ce149bad836e1"}
+  },
+  "embedded_cvc5_version": "1.3.2"
+}
