@@ -75,6 +75,9 @@ RUN_CASHMERE="${RUN_CASHMERE:-true}"
 RUN_VELVET="${RUN_VELVET:-true}"
 USE_MATHLIB_CACHE="${USE_MATHLIB_CACHE:-true}"
 KEEP_WORKTREES="${KEEP_WORKTREES:-false}"
+# The top-level runner opts into reclaiming its managed SMT caches too.
+# Explicit *_TREE inputs always remain caller-owned.
+RECLAIM_BUILD_TREES="${RECLAIM_BUILD_TREES:-false}"
 RESUME="${RESUME:-false}"
 
 CASHMERE_CASES="${CASHMERE_CASES:-}"
@@ -201,10 +204,17 @@ cleanup() {
     for entry in "${WORKTREES[@]}"; do
       repo="${entry%%|*}"
       path="${entry#*|}"
-      git -C "$repo" worktree remove --force "$path" >/dev/null 2>&1 || true
+      benchmark_release_worktree "$repo" "$path" || true
     done
   fi
-  rm -rf "$TMP_ROOT"
+  # Generated query files are disposable; retained worktrees are not.
+  # Keep the scratch root if a protected worktree still lives below it.
+  local retained=false
+  for entry in ${WORKTREES[@]+"${WORKTREES[@]}"}; do
+    path="${entry#*|}"
+    [[ "$path" == "$TMP_ROOT/"* && -d "$path" ]] && retained=true
+  done
+  [[ "$retained" == true ]] || rm -rf "$TMP_ROOT"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -219,6 +229,26 @@ add_worktree() {
     die "failed to create worktree for $repo at $ref"
   WORKTREES+=("$repo|$path")
   ADDED_WORKTREE="$path"
+}
+
+release_worktree() {
+  local target="$1" entry repo path
+  local remaining=()
+  is_true "$KEEP_WORKTREES" && return 0
+  # Only paths registered by this run are eligible; never remove a source
+  # checkout, a caller-supplied tree, or any result/log directory.
+  for entry in ${WORKTREES[@]+"${WORKTREES[@]}"}; do
+    repo="${entry%%|*}"
+    path="${entry#*|}"
+    if [[ "$path" == "$target" ]]; then
+      benchmark_release_worktree "$repo" "$path" ||
+        die "failed to reclaim completed build tree $path"
+      [[ ! -d "$path" ]] || remaining+=("$entry")
+    else
+      remaining+=("$entry")
+    fi
+  done
+  WORKTREES=(${remaining[@]+"${remaining[@]}"})
 }
 
 seed_solvers() {
@@ -403,6 +433,9 @@ resolve_smt_tree() {
     if [[ ! -d "$path" ]]; then
       benchmark_add_worktree "$repo" "$ref" "$path" >/dev/null ||
         die "failed to create the $name tree at $path"
+    fi
+    if is_true "$RECLAIM_BUILD_TREES"; then
+      WORKTREES+=("$repo|$path")
     fi
     RESOLVED_SMT_TREE="$path"
     return
@@ -876,6 +909,29 @@ remove_checkpoint_rows() {
     "$CHECKPOINTS" > "$temporary" && mv "$temporary" "$CHECKPOINTS"
 }
 
+checkpoint_complete() {
+  local suite="$1" backend="$2" repeat="$3" file="$4"
+  is_true "$RESUME" || return 1
+  awk -F '\t' -v suite="$suite" -v backend="$backend" \
+    -v repeat="$repeat" -v file="$file" '
+      NR > 1 && $1 == suite && $2 == backend && $3 == repeat && $4 == file {
+        found = 1
+      }
+      END { exit !found }
+    ' "$CHECKPOINTS"
+}
+
+lane_pending() {
+  local suite="$1" backend="$2" repeat file
+  shift 2
+  for ((repeat = 1; repeat <= REPEATS; repeat++)); do
+    for file in "$@"; do
+      checkpoint_complete "$suite" "$backend" "$repeat" "$file" || return 0
+    done
+  done
+  return 1
+}
+
 run_lean_file() {
   local suite="$1"
   local backend="$2"
@@ -888,13 +944,7 @@ run_lean_file() {
   local started elapsed exit_code vc_count commit toolchain truncated message
   local dynlib
 
-  if is_true "$RESUME" && awk -F '\t' -v suite="$suite" \
-      -v backend="$backend" -v repeat="$repeat" -v file="$label" '
-        NR > 1 && $1 == suite && $2 == backend && $3 == repeat && $4 == file {
-          found = 1
-        }
-        END { exit !found }
-      ' "$CHECKPOINTS"; then
+  if checkpoint_complete "$suite" "$backend" "$repeat" "$label"; then
     printf 'checkpoint: skipping %s %s run %s: %s\n' \
       "$suite" "$backend" "$repeat" "$label"
     return
@@ -975,6 +1025,11 @@ run_files() {
   mkdir -p "$TMP_ROOT/generated/$suite/$backend" "$OUT_DIR/logs/$suite/$backend"
   for repeat in $(seq 1 "$REPEATS"); do
     for file in "${files[@]}"; do
+      if checkpoint_complete "$suite" "$backend" "$repeat" "$file"; then
+        printf 'checkpoint: skipping %s %s run %s: %s\n' \
+          "$suite" "$backend" "$repeat" "$file"
+        continue
+      fi
       source="$tree/$file"
       if [[ ! -f "$source" ]]; then
         if is_true "$RESUME"; then
@@ -1316,185 +1371,129 @@ if [[ -n "$VELVET_CASES" ]]; then
   read -r -a VELVET_FILES <<< "$VELVET_CASES"
 fi
 
+# Provision one environment at a time. The Crush modes and grind share a
+# tree; Loom and Cashmere also share their backend trees. Finish every user
+# of a tree before releasing it, without touching any measurement settings.
+group_lane_pending() {
+  local family="$1" lane="$2"
+  if [[ "$family" == loom ]]; then
+    if is_true "$RUN_LOOM" && lane_pending loom "$lane" LoomBackend.lean; then
+      return 0
+    fi
+    if is_true "$RUN_CASHMERE" &&
+        lane_pending cashmere "$lane" "${CASHMERE_FILES[@]}"; then
+      return 0
+    fi
+    return 1
+  fi
+  lane_pending velvet "$lane" "${VELVET_FILES[@]}"
+}
+
+run_backend_group() {
+  local family="$1" kind="$2" repo="$3" ref="$4" configured="$5"
+  shift 5
+  local label="$family-$kind" tree lane
+  local pending=() targets=()
+  for lane in "$@"; do
+    if group_lane_pending "$family" "$lane"; then
+      pending+=("$lane")
+    fi
+  done
+  if [[ "${#pending[@]}" == 0 ]]; then
+    printf 'checkpoint: all %s measurements complete; skipping build\n' "$label"
+    if [[ "$kind" == smt && -z "$configured" && -n "$SMT_TREE_ROOT" ]] &&
+        is_true "$RECLAIM_BUILD_TREES" && ! is_true "$KEEP_WORKTREES"; then
+      benchmark_release_worktree "$repo" "$SMT_TREE_ROOT/$label" ||
+        die "failed to reclaim completed build tree $SMT_TREE_ROOT/$label"
+    fi
+    return 0
+  fi
+
+  if [[ "$kind" == smt ]]; then
+    resolve_smt_tree "$configured" "$repo" "$ref" "$label"
+    tree="$RESOLVED_SMT_TREE"
+  elif [[ -n "$configured" ]]; then
+    tree="$(cd "$configured" && pwd)" || die "$label tree not found: $configured"
+  else
+    add_worktree "$repo" "$ref" "$label"
+    tree="$ADDED_WORKTREE"
+  fi
+  [[ "$(git -C "$tree" rev-parse HEAD)" == \
+      "$(git -C "$tree" rev-parse "${ref}^{commit}")" ]] ||
+    die "$label tree is not at $ref"
+  if [[ "$family" == loom ]]; then
+    targets=(CaseStudies.Tactic CaseStudies.Cashmere.Syntax_Cashmere)
+  else
+    targets=(Velvet.Std)
+  fi
+  if [[ "$kind" == smt ]]; then
+    provision_smt_tree "$label" "$tree" "$label"
+    targets+=(Smt)
+  fi
+  prepare_tree "$label" "$tree" "${targets[@]}"
+  if [[ "$kind" == smt ]]; then
+    smt_dynlib_path "$tree" >/dev/null ||
+      die "the $label build produced no cvc5 bindings"
+  fi
+
+  for lane in "${pending[@]}"; do
+    if [[ "$family" == loom ]]; then
+      if is_true "$RUN_LOOM" && lane_pending loom "$lane" LoomBackend.lean; then
+        record_metadata loom "$lane" "$ref" "$tree"
+        run_fixture "$lane" "$ref" "$tree"
+      fi
+      if is_true "$RUN_CASHMERE" &&
+          lane_pending cashmere "$lane" "${CASHMERE_FILES[@]}"; then
+        record_metadata cashmere "$lane" "$ref" "$tree"
+        run_files cashmere "$lane" "$ref" "$tree" "${CASHMERE_FILES[@]}"
+      fi
+    else
+      record_metadata velvet "$lane" "$ref" "$tree"
+      run_files velvet "$lane" "$ref" "$tree" "${VELVET_FILES[@]}"
+    fi
+  done
+  release_worktree "$tree"
+}
+
+shared_crush_lanes=()
+if is_true "$RUN_CRUSH"; then
+  shared_crush_lanes=("${CRUSH_LANES[@]}")
+fi
+if is_true "$RUN_GRIND"; then
+  shared_crush_lanes+=(grind)
+fi
+
 if is_true "$RUN_LOOM" || is_true "$RUN_CASHMERE"; then
   if is_true "$RUN_AUTO"; then
-    if [[ -n "$LOOM_AUTO_TREE" ]]; then
-      loom_auto_tree="$(cd "$LOOM_AUTO_TREE" && pwd)"
-    else
-      add_worktree "$LOOM_REPO" "$LOOM_AUTO_REF" "loom-auto"
-      loom_auto_tree="$ADDED_WORKTREE"
-    fi
-    [[ "$(git -C "$loom_auto_tree" rev-parse HEAD)" == \
-        "$(git -C "$loom_auto_tree" rev-parse "${LOOM_AUTO_REF}^{commit}")" ]] ||
-      die "LOOM_AUTO_TREE is not at $LOOM_AUTO_REF"
-    prepare_tree "loom-auto" "$loom_auto_tree" \
-      CaseStudies.Tactic CaseStudies.Cashmere.Syntax_Cashmere
+    run_backend_group loom auto "$LOOM_REPO" "$LOOM_AUTO_REF" "$LOOM_AUTO_TREE" auto
   fi
-  if is_true "$RUN_CRUSH" || is_true "$RUN_GRIND"; then
-    if [[ -n "$LOOM_CRUSH_TREE" ]]; then
-      loom_crush_tree="$(cd "$LOOM_CRUSH_TREE" && pwd)"
-    else
-      add_worktree "$LOOM_REPO" "$LOOM_CRUSH_REF" "loom-crush"
-      loom_crush_tree="$ADDED_WORKTREE"
-    fi
-    [[ "$(git -C "$loom_crush_tree" rev-parse HEAD)" == \
-        "$(git -C "$loom_crush_tree" rev-parse "${LOOM_CRUSH_REF}^{commit}")" ]] ||
-      die "LOOM_CRUSH_TREE is not at $LOOM_CRUSH_REF"
-    prepare_tree "loom-crush" "$loom_crush_tree" \
-      CaseStudies.Tactic CaseStudies.Cashmere.Syntax_Cashmere
+  if [[ "${#shared_crush_lanes[@]}" -gt 0 ]]; then
+    run_backend_group loom crush "$LOOM_REPO" "$LOOM_CRUSH_REF" "$LOOM_CRUSH_TREE" \
+      "${shared_crush_lanes[@]}"
   fi
   if is_true "$RUN_DUPER"; then
-    if [[ -n "$LOOM_DUPER_TREE" ]]; then
-      loom_duper_tree="$(cd "$LOOM_DUPER_TREE" && pwd)"
-    else
-      add_worktree "$LOOM_REPO" "$LOOM_DUPER_REF" "loom-duper"
-      loom_duper_tree="$ADDED_WORKTREE"
-    fi
-    [[ "$(git -C "$loom_duper_tree" rev-parse HEAD)" == \
-        "$(git -C "$loom_duper_tree" rev-parse "${LOOM_DUPER_REF}^{commit}")" ]] ||
-      die "LOOM_DUPER_TREE is not at $LOOM_DUPER_REF"
-    prepare_tree "loom-duper" "$loom_duper_tree" \
-      CaseStudies.Tactic CaseStudies.Cashmere.Syntax_Cashmere
+    run_backend_group loom duper "$LOOM_REPO" "$LOOM_DUPER_REF" "$LOOM_DUPER_TREE" duper
   fi
   if is_true "$RUN_SMT"; then
-    resolve_smt_tree "$LOOM_SMT_TREE" "$LOOM_REPO" "$LOOM_SMT_REF" "loom-smt"
-    loom_smt_tree="$RESOLVED_SMT_TREE"
-    [[ "$(git -C "$loom_smt_tree" rev-parse HEAD)" == \
-        "$(git -C "$loom_smt_tree" rev-parse "${LOOM_SMT_REF}^{commit}")" ]] ||
-      die "the loom-smt tree is not at $LOOM_SMT_REF"
-    provision_smt_tree "loom-smt" "$loom_smt_tree" "loom-smt"
-    prepare_tree "loom-smt" "$loom_smt_tree" \
-      CaseStudies.Tactic CaseStudies.Cashmere.Syntax_Cashmere Smt
-    smt_dynlib_path "$loom_smt_tree" >/dev/null ||
-      die "the loom-smt build produced no cvc5 bindings"
-  fi
-fi
-
-if is_true "$RUN_LOOM"; then
-  if is_true "$RUN_AUTO"; then
-    record_metadata "loom" "auto" "$LOOM_AUTO_REF" "$loom_auto_tree"
-    run_fixture "auto" "$LOOM_AUTO_REF" "$loom_auto_tree"
-  fi
-  if is_true "$RUN_CRUSH"; then
-    for lane in "${CRUSH_LANES[@]}"; do
-      record_metadata "loom" "$lane" "$LOOM_CRUSH_REF" "$loom_crush_tree"
-      run_fixture "$lane" "$LOOM_CRUSH_REF" "$loom_crush_tree"
-    done
-  fi
-  if is_true "$RUN_GRIND"; then
-    record_metadata "loom" "grind" "$LOOM_CRUSH_REF" "$loom_crush_tree"
-    run_fixture "grind" "$LOOM_CRUSH_REF" "$loom_crush_tree"
-  fi
-  if is_true "$RUN_DUPER"; then
-    record_metadata "loom" "duper" "$LOOM_DUPER_REF" "$loom_duper_tree"
-    run_fixture "duper" "$LOOM_DUPER_REF" "$loom_duper_tree"
-  fi
-  if is_true "$RUN_SMT"; then
-    record_metadata "loom" "$SMT_LANE" "$LOOM_SMT_REF" "$loom_smt_tree"
-    run_fixture "$SMT_LANE" "$LOOM_SMT_REF" "$loom_smt_tree"
-  fi
-fi
-
-if is_true "$RUN_CASHMERE"; then
-  if is_true "$RUN_AUTO"; then
-    record_metadata "cashmere" "auto" "$LOOM_AUTO_REF" "$loom_auto_tree"
-    run_files "cashmere" "auto" "$LOOM_AUTO_REF" "$loom_auto_tree" "${CASHMERE_FILES[@]}"
-  fi
-  if is_true "$RUN_CRUSH"; then
-    for lane in "${CRUSH_LANES[@]}"; do
-      record_metadata "cashmere" "$lane" "$LOOM_CRUSH_REF" "$loom_crush_tree"
-      run_files "cashmere" "$lane" "$LOOM_CRUSH_REF" "$loom_crush_tree" "${CASHMERE_FILES[@]}"
-    done
-  fi
-  if is_true "$RUN_GRIND"; then
-    record_metadata "cashmere" "grind" "$LOOM_CRUSH_REF" "$loom_crush_tree"
-    run_files "cashmere" "grind" "$LOOM_CRUSH_REF" "$loom_crush_tree" "${CASHMERE_FILES[@]}"
-  fi
-  if is_true "$RUN_DUPER"; then
-    record_metadata "cashmere" "duper" "$LOOM_DUPER_REF" "$loom_duper_tree"
-    run_files "cashmere" "duper" "$LOOM_DUPER_REF" "$loom_duper_tree" "${CASHMERE_FILES[@]}"
-  fi
-  if is_true "$RUN_SMT"; then
-    record_metadata "cashmere" "$SMT_LANE" "$LOOM_SMT_REF" "$loom_smt_tree"
-    run_files "cashmere" "$SMT_LANE" "$LOOM_SMT_REF" "$loom_smt_tree" \
-      "${CASHMERE_FILES[@]}"
+    run_backend_group loom smt "$LOOM_REPO" "$LOOM_SMT_REF" "$LOOM_SMT_TREE" "$SMT_LANE"
   fi
 fi
 
 if is_true "$RUN_VELVET"; then
   if is_true "$RUN_AUTO"; then
-    if [[ -n "$VELVET_AUTO_TREE" ]]; then
-      velvet_auto_tree="$(cd "$VELVET_AUTO_TREE" && pwd)"
-    else
-      add_worktree "$VELVET_REPO" "$VELVET_AUTO_REF" "velvet-auto"
-      velvet_auto_tree="$ADDED_WORKTREE"
-    fi
-    [[ "$(git -C "$velvet_auto_tree" rev-parse HEAD)" == \
-        "$(git -C "$velvet_auto_tree" rev-parse "${VELVET_AUTO_REF}^{commit}")" ]] ||
-      die "VELVET_AUTO_TREE is not at $VELVET_AUTO_REF"
-    prepare_tree "velvet-auto" "$velvet_auto_tree" Velvet.Std
+    run_backend_group velvet auto "$VELVET_REPO" "$VELVET_AUTO_REF" "$VELVET_AUTO_TREE" auto
   fi
-  if is_true "$RUN_CRUSH" || is_true "$RUN_GRIND"; then
-    if [[ -n "$VELVET_CRUSH_TREE" ]]; then
-      velvet_crush_tree="$(cd "$VELVET_CRUSH_TREE" && pwd)"
-    else
-      add_worktree "$VELVET_REPO" "$VELVET_CRUSH_REF" "velvet-crush"
-      velvet_crush_tree="$ADDED_WORKTREE"
-    fi
-    [[ "$(git -C "$velvet_crush_tree" rev-parse HEAD)" == \
-        "$(git -C "$velvet_crush_tree" rev-parse "${VELVET_CRUSH_REF}^{commit}")" ]] ||
-      die "VELVET_CRUSH_TREE is not at $VELVET_CRUSH_REF"
-    prepare_tree "velvet-crush" "$velvet_crush_tree" Velvet.Std
+  if [[ "${#shared_crush_lanes[@]}" -gt 0 ]]; then
+    run_backend_group velvet crush "$VELVET_REPO" "$VELVET_CRUSH_REF" "$VELVET_CRUSH_TREE" \
+      "${shared_crush_lanes[@]}"
   fi
   if is_true "$RUN_DUPER"; then
-    if [[ -n "$VELVET_DUPER_TREE" ]]; then
-      velvet_duper_tree="$(cd "$VELVET_DUPER_TREE" && pwd)"
-    else
-      add_worktree "$VELVET_REPO" "$VELVET_DUPER_REF" "velvet-duper"
-      velvet_duper_tree="$ADDED_WORKTREE"
-    fi
-    [[ "$(git -C "$velvet_duper_tree" rev-parse HEAD)" == \
-        "$(git -C "$velvet_duper_tree" rev-parse "${VELVET_DUPER_REF}^{commit}")" ]] ||
-      die "VELVET_DUPER_TREE is not at $VELVET_DUPER_REF"
-    prepare_tree "velvet-duper" "$velvet_duper_tree" Velvet.Std
+    run_backend_group velvet duper "$VELVET_REPO" "$VELVET_DUPER_REF" "$VELVET_DUPER_TREE" duper
   fi
   if is_true "$RUN_SMT"; then
-    resolve_smt_tree "$VELVET_SMT_TREE" "$VELVET_REPO" "$VELVET_SMT_REF" \
-      "velvet-smt"
-    velvet_smt_tree="$RESOLVED_SMT_TREE"
-    [[ "$(git -C "$velvet_smt_tree" rev-parse HEAD)" == \
-        "$(git -C "$velvet_smt_tree" rev-parse "${VELVET_SMT_REF}^{commit}")" ]] ||
-      die "the velvet-smt tree is not at $VELVET_SMT_REF"
-    provision_smt_tree "velvet-smt" "$velvet_smt_tree" "velvet-smt"
-    prepare_tree "velvet-smt" "$velvet_smt_tree" Velvet.Std Smt
-    smt_dynlib_path "$velvet_smt_tree" >/dev/null ||
-      die "the velvet-smt build produced no cvc5 bindings"
-  fi
-  if is_true "$RUN_AUTO"; then
-    record_metadata "velvet" "auto" "$VELVET_AUTO_REF" "$velvet_auto_tree"
-    run_files "velvet" "auto" "$VELVET_AUTO_REF" "$velvet_auto_tree" "${VELVET_FILES[@]}"
-  fi
-  if is_true "$RUN_CRUSH"; then
-    for lane in "${CRUSH_LANES[@]}"; do
-      record_metadata "velvet" "$lane" "$VELVET_CRUSH_REF" "$velvet_crush_tree"
-      run_files "velvet" "$lane" "$VELVET_CRUSH_REF" "$velvet_crush_tree" "${VELVET_FILES[@]}"
-    done
-  fi
-  if is_true "$RUN_GRIND"; then
-    record_metadata "velvet" "grind" "$VELVET_CRUSH_REF" "$velvet_crush_tree"
-    run_files "velvet" "grind" "$VELVET_CRUSH_REF" "$velvet_crush_tree" "${VELVET_FILES[@]}"
-  fi
-  if is_true "$RUN_DUPER"; then
-    record_metadata "velvet" "duper" "$VELVET_DUPER_REF" "$velvet_duper_tree"
-    run_files "velvet" "duper" "$VELVET_DUPER_REF" "$velvet_duper_tree" "${VELVET_FILES[@]}"
-  fi
-  if is_true "$RUN_SMT"; then
-    record_metadata "velvet" "$SMT_LANE" "$VELVET_SMT_REF" "$velvet_smt_tree"
-    run_files "velvet" "$SMT_LANE" "$VELVET_SMT_REF" "$velvet_smt_tree" \
-      "${VELVET_FILES[@]}"
+    run_backend_group velvet smt "$VELVET_REPO" "$VELVET_SMT_REF" "$VELVET_SMT_TREE" "$SMT_LANE"
   fi
 fi
-
 write_reports
 if ! python3 "$SCRIPT_DIR/benchmark-report.py" \
     --measurements "$MEASUREMENTS" --profiles "$PROFILES" \

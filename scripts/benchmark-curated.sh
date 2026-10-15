@@ -30,6 +30,9 @@ max_rec_depth="${MAX_RECURSION_DEPTH:-1000000}"
 crush_profile="${CRUSH_PROFILE:-true}"
 use_mathlib_cache="${USE_MATHLIB_CACHE:-true}"
 resume="${RESUME:-false}"
+# Standalone callers retain caches; the top-level runner releases them after
+# their last selected profile unless --keep_trees was requested.
+reclaim_build_trees="${RECLAIM_BUILD_TREES:-false}"
 out_dir="${OUT_DIR:-$crush_root/BenchmarkResults/curated-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "$out_dir"
 out_dir="$(cd "$out_dir" && pwd)"
@@ -69,8 +72,7 @@ if [[ "$runs_smt_lane" == "true" ]] &&
   exit 1
 fi
 
-# The branch trees survive the run on purpose: each carries its own Lake build,
-# and rebuilding five of them costs minutes. CURATED_TREES says where they live.
+# A prepared branch is shared by all of its profiles until its last use.
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
@@ -124,6 +126,57 @@ else
   # A local checkout still has to yield one tree per branch, so treat it as the
   # repository to add worktrees from rather than as a tree to measure in.
   managed_repo="$(cd "$curated_repo" && pwd)"
+fi
+
+# Read the case inventory from Git, before recreating any reclaimed build
+# trees. A completed resume must not provision five environments just to skip
+# every measurement. Failure checkpoints count as completed attempts too.
+completed_resume() {
+  [[ "$resume" == true && -f "$checkpoints" && -f "$measurements" ]] || return 1
+  local ref paths path name profile run
+  local cases=()
+  local selected_profiles=("${profiles[@]}")
+  [[ $# == 0 ]] || selected_profiles=("$@")
+  if [[ -n "${CURATED_CASES:-}" ]]; then
+    read -r -a cases <<< "$CURATED_CASES"
+  else
+    ref="$(benchmark_resolve_revision "$managed_repo" \
+      "$(branch_ref "${needed_branches[0]}")")" || return 1
+    paths="$(git -C "$managed_repo" ls-tree -r --name-only "$ref" -- Curated/Cases)" ||
+      return 1
+    while IFS= read -r path; do
+      [[ "$path" == *.lean ]] && cases+=("${path##*/}")
+    done <<< "$paths"
+  fi
+  [[ "${#cases[@]}" -gt 0 ]] || return 1
+  for profile in "${selected_profiles[@]}"; do
+    for name in "${cases[@]}"; do
+      name="${name%.lean}"
+      for ((run = 1; run <= repeats; run++)); do
+        awk -F '\t' -v lane="$profile" -v name="$name" -v run="$run" '
+          NR > 1 && $1 == lane && $2 == name && $3 == run { n++ }
+          END { exit (n != 1) }
+        ' "$checkpoints" || return 1
+        [[ -f "$logs/$profile-$name-$run.log" ]] || return 1
+        if [[ "$name" != 00_import_only ]]; then
+          awk -F '\t' -v lane="$profile" -v name="$name" -v run="$run" '
+            NR > 1 && $1 == "curated" && $2 == lane && $3 == run && $4 == name { n++ }
+            END { exit (n != 1) }
+          ' "$measurements" || return 1
+        fi
+      done
+    done
+  done
+}
+
+if completed_resume; then
+  printf 'checkpoint: all Curated measurements complete; skipping builds and measurements\n'
+  if [[ "$reclaim_build_trees" == true ]]; then
+    for branch in "${needed_branches[@]}"; do
+      benchmark_release_worktree "$managed_repo" "$curated_trees/$branch"
+    done
+  fi
+  exit 0
 fi
 
 mkdir -p "$logs"
@@ -236,10 +289,6 @@ provision_branch() {
   fi
 }
 
-for branch in "${needed_branches[@]}"; do
-  provision_branch "$branch" || exit 1
-done
-
 classify_failure_log() {
   awk '
     {
@@ -317,9 +366,11 @@ if [[ -n "$(git -C "$crush_root" status --porcelain -- \
     . ':(exclude)BenchmarkResults')" ]]; then
   crush_dirty=true
 fi
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-  "$(git -C "$(branch_tree "${needed_branches[0]}")" rev-parse HEAD)" \
-  "$(tr -d '\r\n' < "$(branch_tree "${needed_branches[0]}")/lean-toolchain")" \
+record_branch_metadata() {
+  local tree="$1"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  "$(git -C "$tree" rev-parse HEAD)" \
+  "$(tr -d '\r\n' < "$tree/lean-toolchain")" \
   "$duper_commit" \
   "$duper_timeout" \
   "$solver" \
@@ -333,6 +384,7 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
   "$smt_commit" \
   "$smt_timeout" \
   "$smt_mono" >> "$metadata"
+}
 
 checkpoint_complete() {
   local profile="$1"
@@ -368,8 +420,7 @@ remove_checkpoint_rows() {
     "$checkpoints" > "$temporary" && mv "$temporary" "$checkpoints"
 }
 
-# The cases are identical on every branch, so list them from the first tree
-# and address them by name from whichever tree a lane runs in.
+# Read the shared case inventory without provisioning a completed branch.
 case_names=()
 if [[ -n "${CURATED_CASES:-}" ]]; then
   read -r -a selected_cases <<< "$CURATED_CASES"
@@ -377,14 +428,41 @@ if [[ -n "${CURATED_CASES:-}" ]]; then
     case_names+=("${selected%.lean}")
   done
 else
-  for case_file in "$(branch_tree "${needed_branches[0]}")"/Curated/Cases/*.lean; do
-    case_names+=("$(basename "$case_file" .lean)")
-  done
+  inventory_ref="$(benchmark_resolve_revision "$managed_repo" \
+    "$(branch_ref "${needed_branches[0]}")")"
+  inventory="$(git -C "$managed_repo" ls-tree -r --name-only "$inventory_ref" -- Curated/Cases)"
+  while IFS= read -r case_file; do
+    [[ "$case_file" == *.lean ]] && case_names+=("$(basename "$case_file" .lean)")
+  done <<< "$inventory"
 fi
 
-for profile in "${profiles[@]}"; do
+prepared_branches=()
+for ((profile_index = 0; profile_index < ${#profiles[@]}; profile_index++)); do
+  profile="${profiles[$profile_index]}"
   branch="$(profile_branch "$profile")"
   tree="$(branch_tree "$branch")"
+  if completed_resume "$profile"; then
+    printf 'checkpoint: all %s measurements complete; skipping build\n' "$profile"
+    # An interrupted previous run may have completed a whole branch but not
+    # reached its cleanup. Retain it if any selected sibling is unfinished.
+    siblings=()
+    for candidate in "${profiles[@]}"; do
+      [[ "$(profile_branch "$candidate")" != "$branch" ]] || siblings+=("$candidate")
+    done
+    if [[ "$reclaim_build_trees" == true ]] && completed_resume "${siblings[@]}"; then
+      benchmark_release_worktree "$managed_repo" "$tree"
+    fi
+    continue
+  fi
+  prepared=false
+  for existing in ${prepared_branches[@]+"${prepared_branches[@]}"}; do
+    [[ "$existing" == "$branch" ]] && prepared=true
+  done
+  if [[ "$prepared" == false ]]; then
+    provision_branch "$branch" || exit 1
+    record_branch_metadata "$tree"
+    prepared_branches+=("$branch")
+  fi
   profile_marker="CRUSH_PROFILE"
   if [[ "$profile" == "smt-only" ]]; then
     profile_marker="SMT_PROFILE"
@@ -495,6 +573,18 @@ for profile in "${profiles[@]}"; do
         "$profile" "$case_name" "$run" "$status" "$tactic_ms"
     done
   done
+  # Profiles need not be adjacent. Keep the build until every later profile
+  # on this branch is either finished already or has consumed it.
+  needed_later=false
+  for ((later = profile_index + 1; later < ${#profiles[@]}; later++)); do
+    if [[ "$(profile_branch "${profiles[$later]}")" == "$branch" ]] &&
+        ! completed_resume "${profiles[$later]}"; then
+      needed_later=true
+    fi
+  done
+  if [[ "$reclaim_build_trees" == true && "$needed_later" == false ]]; then
+    benchmark_release_worktree "$managed_repo" "$tree"
+  fi
 done
 
 awk -F '\t' '

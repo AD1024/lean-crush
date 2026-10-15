@@ -42,10 +42,10 @@ Options:
   --skip_figures       measure and generate reports, without plotting
   --figures_only <dir> regenerate reports and redraw, measuring nothing
   --update_archive     also refresh scripts/benchmark-data/eval-data.zip from the run
-  --keep_trees         keep Curated/corpora build trees after measurement.
-                       They contain large Mathlib builds and are otherwise
-                       reclaimed between suites. The shared PLean environment
-                       is always retained for checkpointed resume.
+  --keep_trees         retain managed builds for reuse in future runs.
+                       Otherwise release each build after its last consumer.
+                       PLean sources, logs and checkpoints are always retained;
+                       externally supplied environments are never removed.
   --require-cache      stop if a corpus cannot fetch its Mathlib build cache,
                        rather than falling back to a source build. A miss is
                        not a correctness problem -- the build produces the
@@ -74,9 +74,9 @@ Environment:
                    1,000,000 heartbeats/recursion depth, and Crush trusted,
                    Alethe and portfolio modes. Auto retains Lean 4.24.0.
 
-Both tree directories are worth setting to a stable path: each holds a Lake
-build, and keeping them between runs is the difference between minutes and
-hours.
+Use stable tree paths with --keep_trees to reuse builds across runs. Within a
+run, all modes sharing a build finish before it is released. Builds from
+different revisions/toolchains remain separate.
 
 Examples:
   bash run-experiments.sh
@@ -204,56 +204,6 @@ else
   dataset="$(cd "$dataset" && pwd)"
 fi
 
-# A suite's trees are worth nothing once its measurements exist, and they are
-# the only thing on disk at this scale: each carries its own Mathlib build.
-# Removing them between suites is what keeps the peak at one suite's worth
-# rather than the sum of all three.
-reclaim_trees() {
-  local what="$1"
-  shift
-  local freed path shared_dependency
-  [[ "$keep_trees" == "true" ]] && return 0
-  for path in "$@"; do
-    [[ -d "$path" ]] || continue
-    # The shared PLean environment can reuse prepared dependencies. Never
-    # reclaim one of those builds between suites.
-    if run_suite plean && [[ -n "$plean_config" ]]; then
-      shared_dependency="$(python3 - "$plean_config" "$path" <<'PY'
-import json
-from pathlib import Path
-import sys
-config = json.loads(Path(sys.argv[1]).read_text())
-root = Path(sys.argv[2]).resolve()
-paths = [config['original_auto_loom'], config['solver_bin_dir']]
-for variant in ['modern', 'auto']:
-    settings = config[variant]
-    paths += [settings['tree'], settings['lean']]
-    paths += settings['lean_path'].split(':') + settings.get('dynlibs', [])
-print('yes' if any(root == Path(p).resolve() or root in Path(p).resolve().parents
-                   for p in paths) else 'no')
-PY
-      )" || die "cannot check shared PLean dependencies before cleanup"
-      if [[ "$shared_dependency" == yes ]]; then
-        printf 'Keeping shared PLean dependency: %s\n' "$path"
-        continue
-      fi
-    fi
-    freed="$(du -sh "$path" 2>/dev/null | cut -f1)"
-    # Worktrees are registered with their origin repository; pruning keeps that
-    # registry from accumulating entries pointing at directories now gone.
-    rm -rf "$path"
-    printf 'Reclaimed %s of %s build trees (%s)\n' "${freed:-?}" "$what" "$path"
-  done
-  git -C "$ROOT" worktree prune >/dev/null 2>&1 || true
-  if [[ -d "$source_cache_dir" ]]; then
-    local repo
-    for repo in "$source_cache_dir"/*/; do
-      [[ -d "$repo" ]] || continue
-      git -C "$repo" worktree prune >/dev/null 2>&1 || true
-    done
-  fi
-}
-
 run_suite() {
   local name="$1"
   local want
@@ -298,6 +248,12 @@ PY
   fi
 fi
 
+reclaim_build_trees=true
+[[ "$keep_trees" == false ]] || reclaim_build_trees=false
+# Every suite checks individual trees against these future dependencies;
+# never recursively delete a cache root containing caller-owned builds.
+export BENCHMARK_KEEP_PLEAN_CONFIG="$plean_config"
+
 printf 'Dataset: %s\n' "$dataset"
 printf 'Suites:  %s\n' "$suites"
 printf 'Lanes:   auto duper grind lean-smt %s\n' \
@@ -332,19 +288,21 @@ if run_suite curated; then
   done
   PROFILES="$curated_profiles" \
   CURATED_TREES="$CURATED_TREES" \
+  RECLAIM_BUILD_TREES="$reclaim_build_trees" \
   REPEATS="$REPEATS" SOLVER="$SOLVER" TIMEOUT="$TIMEOUT" \
   SMT_TIMEOUT=5 SMT_MONO=true DUPER_TIMEOUT="$DUPER_TIMEOUT" \
   MAX_HEARTBEATS="$MAX_HEARTBEATS" MAX_RECURSION_DEPTH="$MAX_RECURSION_DEPTH" \
   CRUSH_PROFILE=true \
   RESUME="$resume" OUT_DIR="$dataset/curated" \
     bash "$ROOT/scripts/benchmark-curated.sh"
-  reclaim_trees curated "$CURATED_TREES"
 fi
 
 if run_suite corpora; then
   printf '\n=== corpora (Loom, Cashmere, Velvet) ===\n'
+  # Shared Crush/grind and Loom/Cashmere consumers finish before cleanup.
   RUN_CURATED=false \
   RUN_AUTO=true RUN_DUPER=true RUN_CRUSH=true RUN_GRIND=true RUN_SMT=true \
+  KEEP_WORKTREES="$keep_trees" RECLAIM_BUILD_TREES="$reclaim_build_trees" \
   CRUSH_MODES="$CRUSH_MODES" \
   SMT_TREE_ROOT="$SMT_TREE_ROOT" \
   REPEATS="$REPEATS" SOLVER="$SOLVER" TIMEOUT="$TIMEOUT" \
@@ -353,17 +311,15 @@ if run_suite corpora; then
   CRUSH_PROFILE=true \
   RESUME="$resume" OUT_DIR="$dataset/corpora" \
     bash "$ROOT/scripts/benchmark-corpora.sh"
-  # The corpora harness removes its own temporary worktrees; the lean-smt trees
-  # it is told to keep are the ones that survive, and PLean does not reuse them.
-  reclaim_trees corpora "$SMT_TREE_ROOT"
 fi
 
 if run_suite plean; then
   printf '\n=== plean ===\n'
+  plean_environment="$dataset/plean-environment"
+  plean_cleanup_args=()
   # Provision only when this suite is reached: other suites may reclaim their
   # independent build trees first. Never reprovision a recorded resume.
   if [[ -z "$plean_config" ]]; then
-    plean_environment="$dataset/plean-environment"
     plean_setup_args=()
     if [[ "$REQUIRE_MATHLIB_CACHE" == true ]]; then
       plean_setup_args+=(--require-cache)
@@ -371,6 +327,19 @@ if run_suite plean; then
     python3 "$ROOT/scripts/setup-plean-shared.py" --out "$plean_environment" \
       ${plean_setup_args[@]+"${plean_setup_args[@]}"}
     plean_config="$plean_environment/run-config.json"
+  fi
+  # Only the automatically provisioned environment belongs to this dataset.
+  # A resume records the same config under plean/config.json. Explicit
+  # external environments remain caller-owned even after the final lane.
+  if [[ "$keep_trees" == false && -f "$plean_environment/run-config.json" ]] &&
+      python3 - "$plean_config" "$plean_environment/run-config.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+sys.exit(json.loads(Path(sys.argv[1]).read_text()) != json.loads(Path(sys.argv[2]).read_text()))
+PY
+  then
+    plean_cleanup_args=(--reclaim-builds "$plean_environment")
   fi
   plean_prepare_args=()
   if [[ "$resume" == true && -d "$dataset/plean" ]]; then
@@ -380,7 +349,8 @@ if run_suite plean; then
     --config "$plean_config" --out "$dataset/plean" --prepare-only \
     ${plean_prepare_args[@]+"${plean_prepare_args[@]}"}
   python3 "$ROOT/scripts/benchmark-plean-shared.py" \
-    --config "$plean_config" --out "$dataset/plean" --resume
+    --config "$plean_config" --out "$dataset/plean" --resume \
+    ${plean_cleanup_args[@]+"${plean_cleanup_args[@]}"}
 fi
 
 if [[ "$skip_figures" == "true" ]]; then

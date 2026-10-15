@@ -205,7 +205,68 @@ def consolidate(out):
     return summary
 
 
-def run(config, out):
+def reclaim_finished_builds(config, out, root, released):
+    """Drop owned build outputs only after all users of that variant finish.
+
+    Keep source trees for the existing resume audit. External environments,
+    toolchains, solver installations, logs and checkpoints are never deleted.
+    """
+    root = root.resolve()
+    manifest = json.loads((root / 'provisioning-manifest.json').read_text())
+    if not (root / 'setup-identity.json').is_file() or manifest['config'] != config:
+        raise ValueError('cleanup requires this dataset\'s provisioned environment')
+
+    def remove(path):
+        if not path.exists():
+            return
+        if path.is_symlink() or not path.resolve().is_relative_to(root) or path.resolve() == root:
+            raise ValueError(f'refusing cleanup outside owned environment: {path}')
+        shutil.rmtree(path)
+        print(f'Reclaimed completed build outputs: {path}', flush=True)
+
+    checkpoints_by_variant = {}
+    for variant in ['auto', 'modern']:
+        lanes = [lane for lane in LANES if (lane == 'auto') == (variant == 'auto')]
+        checkpoints_by_variant[variant] = [out / 'checkpoints' / f'{lane}-{stem}.json'
+                                           for lane in lanes for stem in FILES]
+    finished = {v for v, paths in checkpoints_by_variant.items() if all(p.is_file() for p in paths)}
+    for variant in finished - released:
+        # A failed proof is a completed measurement, but an absent/corrupt log
+        # is not sufficient evidence to discard its build environment.
+        for checkpoint in checkpoints_by_variant[variant]:
+            result = json.loads(checkpoint.read_text())
+            log = out / 'logs' / (checkpoint.stem + '.log')
+            if digest(log) != result['log_sha256']:
+                raise ValueError(f'checkpoint/log mismatch before cleanup: {checkpoint}')
+    for variant in ['auto', 'modern']:
+        if variant not in finished or variant in released:
+            continue
+        tree = Path(config[variant]['tree'])
+        expected_tree = root / ('modern' if variant == 'modern' else 'auto-compat')
+        if tree.resolve() != expected_tree:
+            raise ValueError(f'not an owned {variant} build: {tree}')
+        dependency_root = root / 'dependencies' / variant
+        builds = [tree / '.lake/build', *[p / 'build' for p in dependency_root.rglob('.lake')]]
+        # Be conservative if a custom config shares an import root or native
+        # library with a variant whose measurements still need it.
+        other = 'auto' if variant == 'modern' else 'modern'
+        live = [] if other in finished else [
+            Path(p).resolve() for p in
+            [config[other]['tree'], *config[other]['lean_path'].split(os.pathsep),
+             *config[other].get('dynlibs', [])] if p]
+        retained = False
+        for build in sorted(set(builds), key=lambda p: len(p.parts)):
+            if any(p == build.resolve() or p.is_relative_to(build.resolve())
+                   or build.resolve().is_relative_to(p) for p in live):
+                print(f'Keeping shared build outputs: {build}', flush=True)
+                retained = True
+                continue
+            remove(build)
+        if not retained:
+            released.add(variant)
+
+
+def run(config, out, reclaim_builds=None):
     recorded = json.loads((out / 'scaffold-audit.json').read_text())
     current = audit(config)
     if any(current[k] != recorded[k] for k in current):
@@ -216,6 +277,9 @@ def run(config, out):
     keys = expected_vc_keys()
     for folder in ['checkpoints', 'logs']:
         (out / folder).mkdir(exist_ok=True)
+    released = set()
+    if reclaim_builds is not None:
+        reclaim_finished_builds(config, out, reclaim_builds, released)
     env = dict(os.environ)
     env.pop('PLEAN_BENCH_VCS', None)
     env['PATH'] = config['solver_bin_dir'] + os.pathsep + env['PATH']
@@ -244,6 +308,8 @@ def run(config, out):
             dump(checkpoint, result)
             consolidate(out)
             print(f'Finished {lane}/{stem}: {sum(r["status"] == "pass" for r in result["rows"])}/{len(expected)}; {elapsed:.1f}s', flush=True)
+        if reclaim_builds is not None:
+            reclaim_finished_builds(config, out, reclaim_builds, released)
     summary = consolidate(out)
     if any(row['attempted'] != 192 for row in summary):
         raise RuntimeError('incomplete benchmark')
@@ -257,13 +323,15 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--prepare-only', action='store_true')
     parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--reclaim-builds', type=Path,
+                        help='release this owned setup directory\'s builds after their last lane')
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
     out = args.out.resolve()
     if not args.resume:
         prepare(config, out)
     if not args.prepare_only:
-        run(config, out)
+        run(config, out, args.reclaim_builds)
 
 
 if __name__ == '__main__':

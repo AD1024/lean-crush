@@ -79,6 +79,56 @@ benchmark_add_worktree() {
   git -C "$repository" worktree add --detach "$destination" "$revision"
 }
 
+# Exit 0 only when a managed tree is not referenced by a later suite or an
+# explicit input. Resolve symlinks before comparing dependency paths. A bad
+# config is an error, never permission to delete a tree.
+benchmark_tree_reclaimable() {
+  python3 - "$1" "${BENCHMARK_KEEP_PLEAN_CONFIG:-}" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+root = Path(sys.argv[1]).resolve()
+paths = []
+if sys.argv[2]:
+    config = json.loads(Path(sys.argv[2]).read_text())
+    paths += [config['original_auto_loom'], config['solver_bin_dir']]
+    for variant in ['modern', 'auto']:
+        settings = config[variant]
+        paths += [settings['tree'], settings['lean']]
+        paths += settings['lean_path'].split(os.pathsep) + settings.get('dynlibs', [])
+for name in ['CURATED_REPO', 'LOOM_REPO', 'VELVET_REPO', 'Z3_BIN', 'CVC5_BIN',
+             'LOOM_AUTO_TREE', 'LOOM_CRUSH_TREE', 'LOOM_DUPER_TREE', 'LOOM_SMT_TREE',
+             'VELVET_AUTO_TREE', 'VELVET_CRUSH_TREE', 'VELVET_DUPER_TREE', 'VELVET_SMT_TREE']:
+    if value := os.environ.get(name):
+        paths.append(value)
+for path in filter(None, paths):
+    dependency = Path(path).resolve()
+    if root == dependency or root in dependency.parents or dependency in root.parents:
+        print(f'Keeping shared/caller-owned dependency: {root}', file=sys.stderr)
+        sys.exit(10)
+PY
+}
+
+# Remove only a concrete linked worktree, never its cache parent or a checkout.
+benchmark_release_worktree() {
+  local repo="$1" tree="$2" status
+  [[ -d "$tree" ]] || return 0
+  if benchmark_tree_reclaimable "$tree"; then
+    :
+  else
+    status=$?
+    [[ "$status" == 10 ]] && return 0
+    return "$status"
+  fi
+  if [[ ! -f "$tree/.git" || -L "$tree" ]]; then
+    printf 'Keeping non-managed checkout: %s\n' "$tree"
+    return 0
+  fi
+  git -C "$repo" worktree remove --force "$tree" || return 1
+  printf 'Reclaimed completed build tree: %s\n' "$tree"
+}
+
 # Lake fetches each package's build outputs with `curl --retry 3` and no
 # `--max-time`. `--retry` only retries a request that fails, so a connection
 # that goes quiet without closing blocks forever: observed on 2026-09-03 as a

@@ -520,6 +520,9 @@ bash run-experiments.sh --resume BenchmarkResults/experiments-<timestamp>
 bash run-experiments.sh --figures_only BenchmarkResults/experiments-<timestamp>
 ```
 
+For an Ubuntu evaluation environment, see the
+[Docker instructions](scripts/README.md#ubuntu-docker-environment).
+
 Completed cases are checkpointed once all of their result and profiling rows
 are written, so a resumed run skips them and replaces any that were truncated.
 

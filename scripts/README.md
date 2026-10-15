@@ -80,6 +80,80 @@ The lean-smt lane is the exception to all of this. It calls cvc5 through the
 in-process bindings its Lake package links, so it uses neither the `cvc5` on
 `PATH` nor `CVC5_BIN`, and it refuses to run under `SOLVER=z3`.
 
+## Ubuntu Docker environment
+
+The root [`Dockerfile`](../Dockerfile) prepares Ubuntu 24.04 for native
+Linux amd64 or arm64 execution. It installs Lean 4.32.2 and 4.24.0 from the
+repository's pins, cvc5 1.3.4, Z3 5.1.0, Matplotlib 3.11.2, and the native
+build and PDF-rendering dependencies. In particular, lean-smt's C++ bindings
+require Clang, libc++ and libc++abi. Its embedded cvc5 remains the separately
+pinned 1.3.2 dependency.
+
+Build on the Linux evaluation machine, from the `tacas-evals` checkout:
+
+```sh
+docker build \
+  --build-arg EVAL_UID="$(id -u)" \
+  --build-arg EVAL_GID="$(id -g)" \
+  -t lean-crush-evals .
+
+docker run --rm --init \
+  --mount "type=bind,source=$(pwd),target=/workspace/lean-crush" \
+  lean-crush-evals \
+  bash run-experiments.sh --out BenchmarkResults/docker-eval
+```
+
+Use a fresh, standalone Git checkout for the container: do not mount an active
+experiment directory, a linked worktree whose Git directory is elsewhere, or
+a checkout containing macOS/other-architecture `.lake` builds. The UID/GID
+arguments let the container write files with the host user's ownership.
+The image contains only environment dependencies and pin metadata; source,
+results and benchmark build trees live in the mounted checkout. Keep the same
+container mount path when resuming, because environment files record absolute
+paths. Rebuild the image when the toolchain or solver pins change.
+
+Resume or regenerate reports and figures using the same mount:
+
+```sh
+docker run --rm --init \
+  --mount "type=bind,source=$(pwd),target=/workspace/lean-crush" \
+  lean-crush-evals \
+  bash run-experiments.sh --resume BenchmarkResults/docker-eval
+
+docker run --rm --init \
+  --mount "type=bind,source=$(pwd),target=/workspace/lean-crush" \
+  lean-crush-evals \
+  bash run-experiments.sh --figures_only BenchmarkResults/docker-eval
+```
+
+The implementation-effort table is generated separately, without measuring VCs:
+
+```sh
+docker run --rm --init \
+  --mount "type=bind,source=$(pwd),target=/workspace/lean-crush" \
+  lean-crush-evals \
+  python3 scripts/count_replay_effort.py --format latex
+```
+
+Both image construction and the first benchmark run need network access to
+the pinned GitHub dependencies and build caches. Public GitHub SSH URLs are
+rewritten to HTTPS inside the image; no credentials are copied into it.
+All referenced repositories must be accessible from the container. If a corpus
+is private, configure Git authentication at runtime rather than baking a token
+or SSH key into the image.
+Budget several hours and substantial disk space for a full run; 32 GB RAM and
+roughly 100 GB free disk are a practical starting point, not a tested minimum.
+Use native architecture for timing experiments rather than Docker emulation.
+The image pins the compilers, solver releases and Matplotlib, but Ubuntu
+packages and transitive Python dependencies can change between image builds;
+retain the built image if those need to remain identical. Python package
+versions are recorded at `/opt/lean-crush-env/python-packages.txt`.
+
+This Dockerfile has been source-reviewed but has not been built or executed
+as part of the current macOS reproduction. Linux coverage and timing still
+need to be validated on the target machine. No benchmark settings or
+scaffolding are changed by the container.
+
 ## 1. Run the experiments
 
 ```sh

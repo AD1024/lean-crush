@@ -1,0 +1,19 @@
+# The image copies pin metadata only. Keep local results, build caches, Git
+# internals and credentials out of the context, including renamed run backups.
+.git
+**/.git
+**/.lake
+BenchmarkResults*
+**/__pycache__
+**/.venv
+**/node_modules
+**/*.olean
+**/*.ilean
+**/*.trace
+.DS_Store
+.env
+.env.*
+.ssh
+.aws
+.codex
+scripts/benchmark-data/eval-data.zip
