@@ -523,6 +523,25 @@ bash run-experiments.sh --figures_only BenchmarkResults/experiments-<timestamp>
 For an Ubuntu evaluation environment, see the
 [Docker instructions](scripts/README.md#ubuntu-docker-environment).
 
+To resume a Docker evaluation after an interruption, wait until the previous
+evaluation process has stopped, then run this from the same host checkout:
+
+```sh
+docker run --rm --init \
+  --mount "type=bind,source=$(pwd),target=/workspace/lean-crush" \
+  lean-crush-evals \
+  bash run-experiments.sh --resume BenchmarkResults/docker-eval
+```
+
+Use the original dataset directory (replace `BenchmarkResults/docker-eval` if
+you chose another name), the same settings, and the same container mount path.
+Completed checkpoints are reused; interrupted measurements are resumed.
+An interrupted dependency setup is also resumed automatically. Keep the dataset
+and its `plean-environment` directory; do not start again with `--out`.
+If the interruption was caused by the older Docker image's Clang header error,
+rebuild the image from the updated `tacas-evals` Dockerfile first, then use the
+command above. No manual header-path exports or dependency patches are needed.
+
 Completed cases are checkpointed once all of their result and profiling rows
 are written, so a resumed run skips them and replaces any that were truncated.
 

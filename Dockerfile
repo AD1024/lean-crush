@@ -93,8 +93,65 @@ RUN python3 -m venv /opt/eval-python \
     && /opt/eval-python/bin/python -m pip freeze > /opt/lean-crush-env/python-packages.txt
 
 USER ${EVAL_UID}:${EVAL_GID}
-RUN elan-init -y --no-modify-path --default-toolchain none \
-    && python3 -c 'import json, pathlib, subprocess; root=pathlib.Path("/opt/lean-crush-env"); pins=json.loads((root / "plean-shared-lock.json").read_text()); versions={(root / "lean-toolchain").read_text().strip(), *pins["toolchains"].values()}; [subprocess.run(["elan", "toolchain", "install", v], check=True) for v in sorted(versions)]'
+RUN elan-init -y --no-modify-path --default-toolchain none
+
+# Lean ships Clang's builtin headers under include/clang, but its Linux Clang
+# looks in lib/clang/<version>/include. Lake prepends the toolchain's bin to
+# PATH, so installing Ubuntu's clang alone does not fix lean-cvc5's size_t
+# errors. Make each bundled compiler find its own headers, without mixing
+# toolchain versions or relying on shell-local CPLUS_INCLUDE_PATH exports.
+RUN python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+import subprocess
+
+root = Path('/opt/lean-crush-env')
+pins = json.loads((root / 'plean-shared-lock.json').read_text())
+versions = {(root / 'lean-toolchain').read_text().strip(), *pins['toolchains'].values()}
+for version in sorted(versions):
+    subprocess.run(['elan', 'toolchain', 'install', version], check=True)
+    env = dict(os.environ, ELAN_TOOLCHAIN=version)
+    lean = Path(subprocess.check_output(['elan', 'which', 'lean'], env=env, text=True).strip())
+    clang = lean.parent / 'clang'
+    builtin_headers = lean.parent.parent / 'include/clang'
+    resource = Path(subprocess.check_output([clang, '-print-resource-dir'], text=True).strip())
+    if not (resource / 'include').exists():
+        if not (builtin_headers / 'stddef.h').is_file():
+            raise RuntimeError(f'Missing bundled Clang headers: {builtin_headers}')
+        resource.mkdir(parents=True, exist_ok=True)
+        (resource / 'include').symlink_to(builtin_headers, target_is_directory=True)
+    # Exercise libc++ and Lean's C API with the same compiler used by Lake.
+    subprocess.run([clang, '-std=c++17', '-stdlib=libc++', '-fsyntax-only',
+                    '-I', lean.parent.parent / 'include', '-x', 'c++', '-'],
+                   input='#include <cstddef>\n#include <cstdint>\n#include <ostream>\n'
+                         '#include <lean/lean.h>\nstatic_assert(sizeof(std::size_t) > 0);\n',
+                   text=True, check=True)
+PY
+
+# Compile the pinned C++ binding during image construction, exercising the
+# exact FFI target that failed during PLean setup. The benchmark setup builds
+# the remaining Lean modules; this check runs no benchmarks and keeps no outputs.
+RUN python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+
+pins = json.loads(Path('/opt/lean-crush-env/plean-shared-lock.json').read_text())
+env = dict(os.environ, ELAN_TOOLCHAIN=pins['toolchains']['modern'])
+lean = Path(subprocess.check_output(['elan', 'which', 'lean'], env=env, text=True).strip())
+env['PATH'] = str(lean.parent) + os.pathsep + env['PATH']
+spec = pins['modern']['cvc5']
+with tempfile.TemporaryDirectory(prefix='lean-cvc5-check-') as folder:
+    def run(args, **kwargs):
+        return subprocess.run(args, cwd=folder, env=env, check=True, **kwargs)
+    run(['git', 'init', '--quiet'])
+    run(['git', 'fetch', '--depth=1', spec['url'], spec['rev']])
+    run(['git', 'checkout', '--detach', 'FETCH_HEAD'])
+    run([lean.parent / 'lake', 'build', 'cvc5Enums', 'ffi.o'])
+PY
 
 # No default toolchain override: Lake/Lean use the mounted lean-toolchain file,
 # and PLean explicitly selects its two locked compilers.

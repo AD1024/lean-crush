@@ -89,6 +89,13 @@ build and PDF-rendering dependencies. In particular, lean-smt's C++ bindings
 require Clang, libc++ and libc++abi. Its embedded cvc5 remains the separately
 pinned 1.3.2 dependency.
 
+The image makes Lean's bundled Clang find its own builtin headers for each
+pinned toolchain. This fixes the `size_t`/libc++ errors encountered when building
+lean-smt's C++ binding; installing system Clang alone is insufficient because
+the PLean setup uses Lean's bundled compiler. Image construction checks both
+toolchains' headers, then compiles the pinned lean-cvc5 C++ binding.
+These checks do not run benchmark measurements.
+
 Build on the Linux evaluation machine, from the `tacas-evals` checkout:
 
 ```sh
@@ -126,6 +133,13 @@ docker run --rm --init \
   bash run-experiments.sh --figures_only BenchmarkResults/docker-eval
 ```
 
+Only resume once the previous evaluation process has stopped. Keep the original
+dataset, dependency environment, mount path, and benchmark settings. Completed
+checkpoints are skipped, and unfinished setup or measurements are resumed.
+After a failure with the older image's Clang headers, rebuild `lean-crush-evals`
+using the updated Dockerfile above before resuming in a new container; shell
+exports in the old container are not required.
+
 The implementation-effort table is generated separately, without measuring VCs:
 
 ```sh
@@ -149,10 +163,9 @@ packages and transitive Python dependencies can change between image builds;
 retain the built image if those need to remain identical. Python package
 versions are recorded at `/opt/lean-crush-env/python-packages.txt`.
 
-This Dockerfile has been source-reviewed but has not been built or executed
-as part of the current macOS reproduction. Linux coverage and timing still
-need to be validated on the target machine. No benchmark settings or
-scaffolding are changed by the container.
+A successful image build checks the compiler headers and C++ binding compilation;
+it does not run the benchmarks. Evaluate Linux coverage and timing on the target
+machine. No benchmark settings or scaffolding are changed by the container.
 
 ## 1. Run the experiments
 
