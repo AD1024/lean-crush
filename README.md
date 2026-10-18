@@ -1,606 +1,336 @@
-# lean-crush
+# Artifact of Lean Crush
 
-**An SMT hammer for Lean 4.** Write `by crush` and an SMT solver does the tedious part of
-the proof for you.
+This branch contains the evaluation artifact for the Lean Crush paper. This guide
+sets up an Ubuntu environment, runs the experiments, and locates the outputs
+corresponding to the paper's evaluation figures and tables.
 
-Read the [lean-crush user manual](https://ad1024.github.io/lean-crush/) for installation,
-configuration, extension APIs, and complete examples.
-Maintainers should also read the
-[optimization and search-heuristic guide](Doc/OPTIMIZATIONS.md) before changing
-reconstruction or instantiation bounds.
+The artifact release is tagged **`tacas-ae`**. For general usage and extension APIs, see the
+[Lean Crush manual](https://ad1024.github.io/lean-crush/) (Note: it is still WIP).
 
-Lean's own automation is strong at goals that follow by rewriting and case analysis. It is
-weaker at goals that are really just *constraint solving* — chains of arithmetic
-inequalities, equalities pushed through uninterpreted functions, bitvector identities,
-combinations of a dozen hypotheses where only three matter. SMT solvers are very good at
-exactly that. lean-crush hands them the goal and turns the answer back into a Lean proof.
+1. [Set up the environment](#1-set-up-the-environment)
+2. [Run the evaluation and resume after an interruption](#2-run-the-evaluation)
+3. [Generate plots and tables](#3-generate-plots-and-tables)
+4. [Figures and Tables in the paper](#4-figures-and-tables-in-the-paper)
 
-Three things set it apart from existing Lean–SMT bridges:
+Commands marked **Host** run on the evaluation machine. Commands marked
+**Container** run in the container shell opened in Step 1.
 
-- **Higher-order goals survive the trip.** Functions passed as arguments, partial
-  applications, and lambdas are the point at which other bridges stop; lean-crush eliminates
-  them on the way out (or hands them to cvc5's higher-order solver directly).
-- **The solver's answer can be checked, not just trusted.** lean-crush can replay cvc5's
-  proof certificate inference by inference, or reconstruct the argument from the unsat core,
-  producing a proof the Lean kernel verifies. When it trusts instead, it says so in
-  `#print axioms`.
-- **You can teach it your own constants.** The Lean-to-SMT mapping is open: one line for
-  simple cases, or a metaprogram for full control — the same API the built-in theories use.
+## 1. Set up the environment
 
-```lean
-example (f : Int → Int) (a b : Int) (h : a = b) : f a = f b := by crush
+### Requirements
 
-example (x y : Int) (h1 : x ≤ y) (h2 : y ≤ x) : x = y := by crush
+- A Linux machine with Git and Docker installed, and permission to run Docker.
+- Native amd64 or arm64 execution.
+- Internet access to GitHub, package repositories, and Lean cache servers.
+- Time: ~8 hours, potentially overnight or longer when dependencies must build from source.
+  Budget approximately 32 GB RAM and 100 GB free disk space.
 
-example (g : Int → Int) (x : Int) (h : ∀ z, g z = z + 1) : g (g x) = x + 2 := by crush
+### Clone the artifact and build the image
 
--- a function taken as an argument, and a lambda passed to it
-example (g : (Int → Int) → Int) (h : ∀ k, g k = k 1) : g (fun x => x + 1) = 2 := by crush
+**Host:**
+
+```bash
+git clone --branch tacas-ae https://github.com/AD1024/lean-crush.git lean-crush-artifact
+cd lean-crush-artifact
+
+docker build \
+  --build-arg EVAL_UID="$(id -u)" \
+  --build-arg EVAL_GID="$(id -g)" \
+  --tag lean-crush-evals .
 ```
 
-When the solver satisfies the encoded facts, you get the model instead of a failure:
+The UID/GID arguments
+make files created in the mounted checkout belong to your host user.
 
-```lean
-example (x : Int) : x + 1 = x := by crush
--- crush: could not prove the goal — the solver found a model:
---   x := 0
--- The encoding is incomplete, so a model does not necessarily describe a Lean
--- counterexample.
-```
+The image installs Ubuntu 24.04, Lean 4.32.2 and 4.24.0, external cvc5 1.3.4,
+Z3 5.1.0, Matplotlib 3.11.2, and the native compilation and PDF-rendering tools.
 
-## Install
+### Start a container and open its shell
 
-Requires the Lean toolchain in [`lean-toolchain`](lean-toolchain) and at least one solver on
-your `PATH` — `z3` (≥ 4.15.4), `cvc5` (≥ 1.3.4), or `bitwuzla`. CI pins z3 5.1.0 and
-cvc5 1.3.4. z3 4.13 and older reject `sbv_to_int`,
-which the translator emits for `BitVec.toInt`, so those goals report a refused command
-there rather than a proof. z3 is the default and enough to start; cvc5 additionally enables
-proof replay and native higher-order support.
-Selecting a backend whose executable is not installed fails with that diagnosis and names
-the backends this machine does have, rather than reporting a solver verdict.
+**Host, from the checkout directory:**
 
-Add to your `lakefile.lean`:
-
-```lean
-require crush from git "https://github.com/AD1024/lean-crush" @ "main"
-```
-
-Then `import Crush` and the `crush` tactic is available. The package has no third-party
-Lean dependencies; Mathlib integration tests live in a separate package.
-
-```sh
-lake build              # the library
-lake build Test.Smoke   # smoke tests (needs z3 for the round-trip)
-```
-
-Maintainers can run the optional Mathlib integration suite separately:
-
-```sh
-cd MathlibTest
-lake exe cache get
-lake build
-```
-
-## Using it
-
-`crush` reads every hypothesis in context, so a bare call is usually what you want. To go
-further:
-
-```lean
-crush [h, myLemma]   -- use exactly these facts (lemmas need not be in context)
-crush [*, myLemma]   -- everything in context, plus a lemma
-crush u[myFn]        -- unfold `myFn` via its equation lemmas
-```
-
-Explicit lemmas are also instantiated at relevant ground terms before SMT
-translation. This lets one lemma create the term that triggers another, including
-existential-witness chains that SMT E-matching cannot start on its own. The pass is
-bounded by `crush.inst.fuel` and `crush.inst.rounds`. When Lean can simplify the
-ground consequences to useful propositions without discarding terms needed as
-witnesses, they replace the unrestricted quantifier and avoid solver instantiation
-loops. Other lemmas remain quantified as fallbacks. Set either option to `0` to
-disable this pass and send the original quantifiers directly.
-
-Selected definitions are rewritten in the actual hypotheses and goal before SMT
-translation; their equations also remain available as fallback solver facts. This
-makes `u[...]` useful without depending entirely on SMT quantifier instantiation.
-
-Mark a definition and its equations come along automatically, with no `u[…]` needed:
-
-```lean
-@[crush_unfold]
-def myFn : Nat → Nat
-  | 0 => 0
-  | n + 1 => myFn n + 2
-```
-
-Predicates marked with Lean's standard `@[reducible]` attribute are also normalized
-automatically, but their equations are not added as quantified SMT facts. Recursive
-predicates use only constructor-specific rewrite equations; use `@[crush_unfold]`
-when SMT also needs their quantified fallback.
-
-You can also enable automatic unfolding for definitions from Lean or another library:
-
-```lean
-attribute [local crush_unfold] List.length
-
-example (l : List Int) : l.length = 0 ↔ l = [] := by crush
-```
-
-Use `local` to keep the setting in the current section or file. Omit it when the setting
-should be exported to modules that import yours. The same approach works for definitions
-such as `Monotone` and `Function.Injective`.
-
-`crush` proves goals, not inductions — so drive the induction yourself and let it close the
-cases:
-
-```lean
-inductive N where | Z | S (n : N)
-
-@[crush_unfold]
-def N.add : N → N → N
-  | x, .Z   => x
-  | x, .S y => .S (N.add x y)
-
-theorem zero_add (x : N) : N.add .Z x = x := by
-  induction x with
-  | Z => crush            -- @[crush_unfold] on N.add supplies its equations
-  | S x ih => crush [ih]  -- feed the induction hypothesis as a fact
-```
-
-By default `crush` takes the solver at its word. To demand a proof the Lean kernel checks —
-so the goal fails rather than closing if none can be built:
-
-```lean
-set_option crush.trust "reconstruct" in
-theorem checked (x y : Int) (h1 : x = y) (h2 : y = 3) : x = 3 := by crush
-
-#print axioms checked
--- 'checked' depends on axioms: [propext, Classical.choice, Quot.sound]
-```
-
-A trusted SMT discharge records `Crush.crushSorry` in `#print axioms`. Some calls
-close with a checked proof before reaching SMT, even under the default policy;
-use `"reconstruct"` to require a checked proof when solving is needed too.
-
-If SMT can prove a domain-specific fact but checked reconstruction needs a bridge theorem,
-register that theorem for bounded reconstruction search:
-
-```lean
-inductive Phase where
-  | initial
-  | next (previous : Phase)
-
-def Advances (source target : Phase) : Prop :=
-  target = .next source
-
-@[crush_reconstruct]
-theorem advancesNext (phase : Phase) : Advances phase (.next phase) :=
-  rfl
-```
-
-`@[crush_reconstruct]` affects only kernel-checked core reconstruction. It does not send
-the theorem to SMT or participate in Alethe replay; use `crush [...]`,
-`@[crush_unfold]`, or a lowering when the solver also needs the fact's semantics.
-Rules are indexed by their conclusion and searched to a fixed depth, so rules for
-unrelated datatypes are not added wholesale to `grind`.
-
-Other behaviour is controlled by `set_option`s (`crush.backend`, `crush.timeout`, and
-others); each carries its own documentation where it is declared.
-
-Library premise selection is opt-in and uses Lean's registered
-`LibrarySuggestions` engine:
-
-```lean
-set_option crush.premises true
-set_option crush.premises.max 32
-```
-
-It applies to bare `crush` calls. An explicit `[...]` list remains a strict
-restriction and disables automatic premise selection.
-
-## How it works
-
-The tactic collects your hypotheses together with the negation of your goal, translates that
-package to SMT, and runs a solver under a strict time budget. If the package is
-contradictory, your goal follows. If the solver instead finds a model, that model is your
-counterexample.
-
-Trusting that verdict is the fast path, and what hammers normally do. Building a real Lean
-proof from it takes one of two routes:
-
-- **replaying the solver's proof** — cvc5 can emit its refutation as a certificate, and
-  lean-crush walks it one inference at a time, proving each in Lean. Since the solver
-  already found the argument, each step is small, which reaches goals no single Lean tactic
-  cracks in one shot. Replay covers propositional logic, EUF, integer and Nat arithmetic,
-  strings, bitvectors, datatype injectivity, quantified formulas, and defunctionalized
-  higher-order terms, including nested Alethe subproof blocks.
-- **reconstructing from the unsat core** — the solver reports which few hypotheses actually
-  mattered, and a Lean tactic redoes the argument from just those. This needs no
-  certificate, but it does require a backend-provided unsat core. Z3 and cvc5 provide
-  one; Bitwuzla currently does not.
-
-Beyond plain logic and arithmetic, lean-crush covers bitvectors, string length,
-append, emptiness, String-pattern prefix/suffix/containment, and your own
-inductive types. It keeps
-functions-as-arguments alive all the way to the solver — the case where Lean-to-SMT
-bridges usually give up. Polymorphic lemmas are specialized to the types a goal
-mentions, so a general lemma still applies to your concrete instance.
-
-You can also teach it to translate your own constants, which is how the built-in theory
-mappings are themselves written:
-
-```lean
-crush_map Nat.add => "+"
-crush_map_sort Nat => "Int"
-```
-
-For pattern-based rules, use the same registration style as proof replay:
-
-```lean
-register_lowering term <<
-  (Int.sign (term x)) =>
-    (smt| (ite (> $x 0) 1 (ite (= $x 0) 0 (- 1))))
->>
-```
-
-The three forms share one pattern language and the existing attribute registries:
-
-| Command | Matches | Registry | RHS value |
-|---|---|---|---|
-| `register_lowering term` | The Lean expression | `crush_lower` | `SMT.Term` |
-| `register_lowering result-type` | Its complete inferred type | `crush_lower_result` | `SMT.Term` |
-| `register_lowering sort` | The Lean type being translated | `crush_translate_sort` | `SMT.SSort` |
-
-A bare argument `x` binds the original `Lean.Expr`. `(term x)` calls
-`ctx.emitTerm` and binds an `SMT.Term`; `(sort α)` calls `ctx.emitSort` and
-binds an `SMT.SSort`. `_` ignores one argument, and `(Constant patterns...)`
-matches a nested constant application; `(Int)` therefore matches the exact
-constant `Int`. `(term x : Int)` additionally matches the captured expression's
-inferred type against the structural pattern `Int`.
-
-Patterns match exact elaborated arities, including implicit type, instance, and
-proof arguments. They do not insert implicit arguments or unfold definitions.
-Capture names must be distinct. Add `with ctx` before `<<` to explicitly bind
-the original `TranslationCtx` on the RHS; any binder name may be used, provided
-it differs from the pattern captures. No context name is bound implicitly.
-Result-type patterns inspect the complete inferred type,
-without peeling dependent function binders. Use an attribute handler for more
-complex matching. Each registration contains one pattern; multiple registrations
-can share a head. Add `high`, `low`, or a numeric priority after the command kind.
-General `crush_translate` handlers still run before these term lowerings.
-
-The RHS may also be a pure helper call, a `TranslateM` computation, or a helper
-returning `TranslateM (Option ...)` to decline with `none`:
-
-```lean
-register_lowering term with ctx <<
-  (Int.sign x) => do
-    let sx ← ctx.emitTerm x
-    return (smt| (ite (> $sx 0) 1 (ite (= $sx 0) 0 (- 1))))
->>
-```
-
-Sort quotations use the expected `SMT.SSort` type, including inside helper
-functions. For example, a parameterized map representation can use:
-
-```lean
-structure TotalMap (key value : Type) where
-  get : key → value
-
-register_lowering sort <<
-  (TotalMap (sort key) (sort value)) => (smt| (Array $key $value))
->>
-```
-
-Result-type rules use a type pattern on the left and produce a *term* on the
-right. With `register_lowering result-type with ctx`, the RHS can inspect
-`ctx.fn` and `ctx.args` to distinguish the original
-expressions sharing that type. As with attribute handlers, operation lowerings
-must agree with the chosen sort representation and check overloaded dictionaries
-before assigning built-in semantics. Registrations supply translations, not
-proofs of their correctness. The `<< ... >>` fence reserves `>>`; put helpers
-using that token in named definitions.
-
-The original attributes remain available for full control:
-
-```lean
-@[crush_lower Int.sign]
-def lowerSign : Crush.LoweringHandler := fun ctx => do
-  let #[x] := ctx.args | return none
-  let sx ← ctx.emitTerm x
-  return some (smt| (ite (> $sx 0) 1 (ite (= $sx 0) 0 (- 1))))
-```
-
-Use `@[crush_lower_result T]` when the application head is unstable but the
-result-family head is stable. The dispatcher first matches the immediate head of
-the term's type; for a syntactic dependent function type, it peels binders and
-matches the codomain head. Named aliases are separate keys, so the built-in
-decision lowering registers both `Decidable` and `DecidableEq`. It represents
-decision evidence with an axiomatized singleton SMT sort and lowers `decide p`
-to `p`; equality decisions therefore become SMT equality without depending on a
-particular procedure implementation. Pair a result lowering with a compatible
-`@[crush_translate_sort]` handler whenever it changes representation.
-
-The `(smt| ...)` quotation is a shallow embedding of SMT-LIB terms. Symbols,
-applications, numerals, Booleans, and strings use SMT-LIB syntax; `$term` splices an
-existing `Crush.SMT.Term`. The result is a structured term representation, not an
-unchecked string; lean-crush sort-checks the final SMT script.
-
-When a custom lowering emits an SMT operator that checked replay does not know,
-register its inverse with the replay DSL:
-
-```lean
-def MultipleOfThree (x : Int) : Prop := x % 3 = 0
-
-@[crush_lower MultipleOfThree]
-def lowerMultipleOfThree : Crush.LoweringHandler := fun ctx => do
-  let #[x] := ctx.args | return none
-  return some (.app (.indexed "divisible" #[.inr 3]) #[← ctx.emitTerm x])
-
-register_crush_replay term <<
-  ((_ divisible (int divisor)) (term value : Int)) |
-  (divisible (term divisor : Int) (term value : Int)) =>
-    value % divisor = 0
->>
-```
-
-The two patterns accept indexed SMT-LIB and cvc5's normalized ordinary form.
-`term`, `nat`, `int`, `string`, `atom`, `sexp`, `sort`, and `prop` introduce
-typed Lean names for the right-hand side; `_` matches one item and a final `..`
-matches the remainder. Alternatives must bind the same names.
-
-Certificate inference rules are extensible in the same style:
-
-```lean
-register_crush_replay rule low <<
-  (my_arithmetic_rule (term x : Int) (term y : Int) ..) =>
-    by omega
->>
-```
-
-The tactic sees only the replayed premises, its captures, and the step target.
-Every proof and generated auxiliary declaration is kernel-checked. Add `high`,
-`low`, or a numeric priority after `term` or `rule` when handlers overlap.
-
-Rule registrations can also use a typeclass-dispatched, metaprogrammed
-condition:
-
-```lean
-structure RuleArgumentIs where
-  expected : String
-
-instance : Crush.ReplayCondition RuleArgumentIs where
-  check condition ctx :=
-    return ctx.args[0]? == some (.atom condition.expected)
-
-def enabledRule : RuleArgumentIs where
-  expected := "enabled"
-
-register_crush_replay rule <<
-  (my_conditional_rule ..) if enabledRule =>
-    by exact True.intro
->>
-```
-
-The condition is not a proposition and creates no proof obligation.
-It runs after pattern matching; `false` delegates to the next registration.
-The `ReplayRuleContext` exposes the target, premises, raw arguments, and named
-captures through `binding?`.
-
-For dynamic matching, use `@[crush_replay "operator"]` on a
-`Crush.ReplayTermHandler` or `@[crush_replay_rule "rule"]` on a
-`Crush.ReplayRuleHandler`; returning `none` defers to the next handler. See
-[`Test/AletheExtension.lean`](Test/AletheExtension.lean) for an Alethe-only
-end-to-end example.
-
-Array-backed operations can reuse Crush's finite Array representation instead of
-reimplementing its length/data encoding:
-
-```lean
-def overwriteFirst {α : Type} (xs : Array α) (value : α) : Array α :=
-  xs.setIfInBounds 0 value
-
-@[crush_lower overwriteFirst]
-def lowerOverwriteFirst : Crush.LoweringHandler := fun ctx => do
-  let #[elem, xs, value] := ctx.args | return none
-  let svalue ← ctx.emitTerm value
-  Crush.withFiniteArray ctx elem xs fun view => do
-    let data := (smt| (store $(view.data) 0 $svalue))
-    let updated := view.mkValue view.length data
-    return (smt| (ite (> $(view.length) 0) $updated $(view.value)))
-```
-
-`withFiniteArray` returns `none` if another sort handler has replaced Array's
-representation, and inserts an SMT `let` so nested updates are not duplicated.
-The built-in lowerings use this API for `replicate`, `size`, bounded/defaulting/optional
-indexing, `set`/`setIfInBounds`/`set!`, `push`, `pop`, `swap`/
-`swapIfInBounds`, `isEmpty`, `back!`, and `back?`.
-
-## Limitations
-
-- **No induction.** A goal needing an inductive hypothesis will not be solved merely by
-  increasing the timeout. Drive the `induction` yourself and let `crush` close each case —
-  that is the intended workflow.
-- **Not every function translates.** Arithmetic, canonical divisibility, `Bool`, `String`,
-  `BitVec`, and your own inductive types do; some library operations such as `Finset.card`
-  do not, and an untranslated one becomes uninterpreted — so the solver reports a
-  *counterexample*, not an error. Definitions such as `|·|`, `List.length`, and `Monotone`
-  work after enabling `crush_unfold` as shown above. Otherwise, provide a suitable lemma,
-  state the needed property directly, or add a custom lowering. Array operations that
-  copy a symbolic range (`append`, `extract`, `map`, `filter`) still need lemmas or custom
-  lowerings; unlike `push`/`pop`, they require quantified element-wise encodings.
-  String replacement, character-pattern search, slice/position operations,
-  numeric parsing, and lexicographic order are also untranslated: Lean's
-  empty-pattern replacement differs from SMT `str.replace_all`, symbolic `Char`
-  values do not yet have a codepoint encoding, positions are UTF-8 byte offsets,
-  numeric parsers accept underscores, and SMT-LIB's string alphabet ends at
-  `U+2FFFF` while Lean's does not.
-- **A goal is only as strong as its premises.** A missing premise usually leaves the
-  encoded negation satisfiable, and quantifiers can instead make the solver return
-  `unknown` — so check the goal actually follows before blaming the solver.
-- **Reconstruction is narrower than solving.** Under `crush.trust "reconstruct"`, some goals
-  the solver proves cannot be replayed as a Lean proof. In particular, cvc5 1.3 does not emit
-  Alethe certificates for finite-datatype exhaustiveness, finite-array reasoning, or native
-  higher-order proofs, and rejects certificates containing signed bitvector-to-`Int`
-  conversion; automatic mode may still reconstruct these from the unsat core.
-  `"reconstructOrTrust"` falls back to the axiom with a warning when both checked paths fail.
-  For bit-vector-heavy reconstruction, `crush.reconstruct.trustBvDecide true` enables
-  `bv_decide` as an explicit native-code-trusting fallback. The resulting theorem names an
-  auditable `_native.bv_decide.ax_*` dependency; the option is off by default, preserving
-  kernel-only reconstruction.
-  `crush.reconstruct.trustNativeDecide true` enables the broader `native_decide` fallback
-  for finite or computational goals. It trusts Lean's native compiler, runtime, and all
-  executable definitions reached by the decision procedure; accepted proofs expose an
-  `_native.native_decide.ax_*` dependency. This option is also off by default.
-- **Rough edges.** Indirectly recursive datatypes (`Rose` with a `List Rose` field) become an
-  opaque sort; Alethe replay needs cvc5 ≥ 1.3.
-
-## Relation to lean-auto
-
-lean-crush is a from-scratch redesign in the spirit of
-[lean-auto](https://github.com/leanprover-community/lean-auto). The three points above are
-exactly where it diverges, and in each case lean-auto's limitation is visible in its source:
-it reifies into a higher-order logic but then hard-fails (`"Higher order input?"`) on any
-function-typed argument while emitting SMT; its Lean→SMT mapping is closed, so extending it
-means forking; and its SMT backend has no proof reconstruction yet, either producing no
-proof or closing the goal with the `autoSMTSorry` axiom.
-
-## Examples and case studies
-
-[`Test/`](Test/) has runnable examples across every supported theory, including recursive
-functions and nested datatypes ([`Test/Recursive.lean`](Test/Recursive.lean)) and the harder
-reconstruction cases for both routes
-([`Test/AletheReplay.lean`](Test/AletheReplay.lean),
-[`Test/ReconstructHard.lean`](Test/ReconstructHard.lean)).
-
-[`Test/CaseStudies/`](Test/CaseStudies/) runs `crush` against lean-auto's test suite and
-Loom/Velvet/Cashmere verification conditions. The optional
-[`MathlibTest`](MathlibTest/) package checks Mathlib lemma statements restated at `Int`,
-with operations that have *no* first-order translation pinned as expected failures so the
-boundary is recorded rather than implied.
-
-Complete downstream integrations are available in the
-[Loom `crush-backend` branch](https://github.com/AD1024/loom/tree/crush-backend) and
-[Velvet `crush-backend` branch](https://github.com/AD1024/velvet/tree/crush-backend).
-
-The Curated suite -- twenty hand-written obligations over mixed theories, used
-as the fourth case study -- lives in
-[Lean-SMT-Benchmarks](https://github.com/AD1024/Lean-SMT-Benchmarks), one
-backend per branch.
-They show lean-crush wired into verification-condition generation and used on
-real array, arithmetic, and quantified proof obligations.
-
-To reproduce every published figure and table -- every backend measured on
-every case study into one dataset, then the figures drawn from it -- run:
-
-```sh
-bash run-experiments.sh
-```
-
-That writes `BenchmarkResults/experiments-<timestamp>/`, holding `curated/`,
-`corpora/` and `plean/` beside the figures under `figures/`. Every lane the
-paper reports is measured in that one pass: Auto, Duper, `grind`,
-[lean-smt](https://github.com/ufmg-smite/lean-smt), and Crush's trusted,
-strict-Alethe and portfolio lanes.
-
-Measuring them together is deliberate. When the lanes were split across
-separate studies, a `(suite, lane)` could be measured in more than one of them,
-and the copies drifted apart; here each is measured once and the figures are
-drawn from that one dataset.
-
-The first run provisions every corpus and builds a Lake tree per backend, so
-budget hours for it. `--suites curated` narrows it to the smallest case study
-while checking the path, `--resume <dir>` continues an interrupted run in place,
-and `--figures_only <dir>` redraws a finished dataset without measuring:
-
-```sh
-bash run-experiments.sh --suites curated
-bash run-experiments.sh --resume BenchmarkResults/experiments-<timestamp>
-bash run-experiments.sh --figures_only BenchmarkResults/experiments-<timestamp>
-```
-
-For an Ubuntu evaluation environment, see the
-[Docker instructions](scripts/README.md#ubuntu-docker-environment).
-
-To resume a Docker evaluation after an interruption, wait until the previous
-evaluation process has stopped, then run this from the same host checkout:
-
-```sh
-docker run --rm --init \
+```bash
+docker run --detach --interactive --tty --init \
+  --name lean-crush-eval \
   --mount "type=bind,source=$(pwd),target=/workspace/lean-crush" \
-  lean-crush-evals \
-  bash run-experiments.sh --resume BenchmarkResults/docker-eval
+  lean-crush-evals bash
+
+docker attach lean-crush-eval
 ```
 
-Use the original dataset directory (replace `BenchmarkResults/docker-eval` if
-you chose another name), the same settings, and the same container mount path.
-Completed checkpoints are reused; interrupted measurements are resumed.
-An interrupted dependency setup is also resumed automatically. Keep the dataset
-and its `plean-environment` directory; do not start again with `--out`.
-If the interruption was caused by the older Docker image's Clang header error,
-rebuild the image from the updated `tacas-evals` Dockerfile first, then use the
-command above. No manual header-path exports or dependency patches are needed.
+The checkout is mounted at `/workspace/lean-crush`. Results are stored in this
+checkout and persist on the host independently of the container. Keep the same
+mount path when resuming: dependency environments record absolute paths.
 
-Completed cases are checkpointed once all of their result and profiling rows
-are written, so a resumed run skips them and replaces any that were truncated.
+**Container:**
 
-The figures come from the same renderer that produced the published ones, so a
-reproduction and the committed artifacts cannot drift apart. Timings depend on
-the host and will not match ours; coverage should.
-
-The Curated suite keeps one backend per branch of
-[Lean-SMT-Benchmarks](https://github.com/AD1024/Lean-SMT-Benchmarks). For
-Velvet, Cashmere and PLean the lean-smt lane applies a recorded patch from
-[`scripts/patches`](scripts/patches) that adds the dependency to the pinned
-revision, then verifies that resolving it moved nothing else. See the
-[script guide](scripts/README.md) for the per-suite harnesses underneath and
-for every option.
-
-Plot closed and reconstructed VCs against time with matplotlib, from any
-completed result directory:
-
-```sh
-python3 -m pip install matplotlib
-
-python3 scripts/plot-time-coverage.py \
-  BenchmarkResults/experiments-<timestamp>/curated \
-  --out-dir BenchmarkResults/figures
+```bash
+cd /workspace/lean-crush
+lean --version
+cvc5 --version
+z3 --version
+python3 -c 'import matplotlib; print(matplotlib.__version__)'
+rsvg-convert --version
 ```
 
-Every other script uses only the Python standard library, and no harness calls
-this one.
+These checks should succeed before starting the evaluation. The root checkout
+uses Lean 4.32.2; the benchmark scripts select the other toolchain where needed.
 
-The harnesses clone and build pinned source revisions, check them out in
-temporary worktrees, and overlay the local lean-crush build. Set
-`Z3_BIN`/`CVC5_BIN` when the solvers are not on `PATH`; the lean-smt lane is
-the exception, since it drives cvc5 through the in-process bindings its own
-Lake package links. Exact settings and
-output definitions are in the [benchmark script guide](scripts/README.md). See
-[`BENCHMARKS.md`](BENCHMARKS.md) for the latest recorded comparison.
-The user manual also presents the
-[coverage, outcome, and reconstruction figures](https://ad1024.github.io/lean-crush/Benchmarks/).
+## 2. Run the evaluation
 
-The [Cedar `crush-backend` branch](https://github.com/AD1024/cedar-spec/tree/crush-backend)
-contains a
-[`CedarCrushCaseStudy`](https://github.com/AD1024/cedar-spec/blob/crush-backend/cedar-lean/CedarCrushCaseStudy.lean)
-module built on `Cedar.Thm`. It demonstrates `crush` as an interactive leaf tactic
-for Cedar foundation proofs, using kernel reconstruction rather than
-`Crush.crushSorry`.
+### Smaller tests and examples
 
-## Acknowledgements
+Before launching the full evaluation, build Crush and its core test suite using
+the same target as the project's CI.
 
-lean-crush builds on ideas and test material from several projects:
+**Container:**
 
-- [lean-auto](https://github.com/leanprover-community/lean-auto) — the tool this redesigns;
-  its monomorphization approach, typed SMT IR shape, and test corpus informed the design,
-  and its `SmtTranslation` suite is ported in the case studies.
-- [Loom](https://github.com/verse-lab/loom) and its verifiers
-  [Velvet](https://github.com/verse-lab/velvet) (Dafny-style imperative) and Cashmere
-  (effectful monadic) — the source of the verification-condition case study.
-- [Cedar](https://github.com/cedar-policy/cedar-spec) — the formal specification and
-  Lean foundation used by the Cedar case study.
-- [Strata](https://github.com/strata-org/Strata) — its Lambda type matcher and proof
-  structure underpin the extracted soundness, completeness, and occurs-check case study.
-- [Veil](https://github.com/verse-lab/veil) — its model-minimization approach (`z3model.py`)
-  informs the planned counterexample minimization.
+```bash
+cd /workspace/lean-crush
+set -o pipefail
+mkdir -p BenchmarkResults
+
+lake build Test 2>&1 | tee BenchmarkResults/sanity-check.log
+ae_sanity_status=$?
+printf '%s\n' "$ae_sanity_status" > BenchmarkResults/sanity-check-exit-status.txt
+```
+
+If it fails, error messages are stored in `BenchmarkResults/sanity-check.log`.
+
+> [!NOTE]
+> The running example of the paper is shown in `Test/CaseStudies/Demo.lean`.
+
+### Build Proof of Metatheory
+
+Formalized metatheory is under `Crush/Metatheory`. To build this, simply run
+
+```bash
+lake build Crush.Metatheory
+```
+
+#### Main Theorems and Lemmas
+
+The declarations below are in the namespace
+`Crush.Metatheory.Defunctionalization`.
+
+| Result in the paper (§4.2) | Corresponding Lean theorem | Detailed proof in the paper |
+|---|---|---|
+| Lemma 1: Preservation of denotations | [translate_denote](Crush/Metatheory/Defunctionalization/Denotation.lean#L395) | Appendix B.3 |
+| Lemma 2: Validity of generated axioms | [generatedFormulas_valid](Crush/Metatheory/Defunctionalization/Theory.lean#L1031) | Appendix B.4 |
+| Theorem 1: Soundness | [target_theories_unsat_implies_source_unsat](Crush/Metatheory/Soundness.lean#L28) | Appendix B.5 |
+
+Theorem 1 uses the finite-theory result. The single-formula variant is
+[target_unsat_implies_source_unsat](Crush/Metatheory/Soundness.lean#L19).
+
+### Start a fresh run
+
+**Container:**
+
+```bash
+set -o pipefail
+mkdir -p BenchmarkResults/docker-eval
+
+bash run-experiments.sh --out BenchmarkResults/docker-eval \
+  2>&1 | tee BenchmarkResults/docker-eval/run.log
+ae_status=$?
+printf '%s\n' "$ae_status" > BenchmarkResults/docker-eval/exit-status.txt
+```
+
+Use `--out` once for a new output directory. The script automatically provisions the benchmark dependencies, measures all seven backends, and generates reports and plots from the new measurements.
+
+The 4 paper benchmark suites are Curated (20 VCs), Cashmere (38), Velvet (504), and PLean
+(192): **754 VCs per backend**. The 7 backends are lean-auto,
+Duper, `grind`, lean-smt, Crush trusting SMT results, Crush with Alethe replay,
+and Crush combining Alethe replay with core-guided reconstruction. The harness
+also measures four Loom VCs, which are excluded from the paper plots and tables.
+
+Leave the benchmark settings at their defaults. The five-second limit applies
+to each SMT query (a VC may be split into multiple queries by the VCG backend). Preprocessing, proof
+reconstruction, and multiple solver calls can make an attempt take longer.
+
+> [!TIP]
+> To leave the attached container session without interrupting a run, press **Ctrl-P, then Ctrl-Q**. Do not use Ctrl-C or stop the container just to detach.
+
+**Host, to reconnect:**
+
+```bash
+docker attach lean-crush-eval
+```
+
+**Host, to inspect progress from another terminal:**
+
+```bash
+tail -f BenchmarkResults/docker-eval/run.log
+```
+
+A complete run ends with `Experiments complete: ...` and exit status `0` in
+`exit-status.txt`. Individual failed proof attempts are expected benchmark
+outcomes; a setup, build, or reporting error that stops the script is different
+and must be resolved before treating the run as complete.
+
+### Resume after an error or interruption
+
+First resolve the cause, such as unavailable network access or insufficient disk
+space. Preserve the existing result directory and dependency environments. Only
+resume once the previous evaluation process has stopped.
+
+If the container is still running, attach with `docker attach lean-crush-eval`.
+If it has stopped, use the following **Host** command:
+
+```bash
+docker start --attach --interactive lean-crush-eval
+```
+
+Then run the following in the **Container**:
+
+```bash
+cd /workspace/lean-crush
+set -o pipefail
+
+bash run-experiments.sh --resume BenchmarkResults/docker-eval \
+  2>&1 | tee -a BenchmarkResults/docker-eval/run.log
+ae_status=$?
+printf '%s\n' "$ae_status" > BenchmarkResults/docker-eval/resume-exit-status.txt
+```
+
+This reuses completed checkpoints and resumes unfinished setup or measurements.
+An interrupted measurement without a complete checkpoint may be repeated. Do not
+delete `plean-environment`, edit the checkpoints, or start over with `--out`.
+
+For diagnosis, keep `run.log`, `build-crush.log`, the affected suite's logs, and
+`plean-environment/setup.log` when present. If only plotting failed after all
+measurements completed, use Step 3 instead of starting another measurement run.
+
+## 3. Generate plots and tables
+
+### Generate or redraw plots from your measurements
+
+The full run already draws the plots. To regenerate reports and plots without
+measuring any VCs, run in the **Container**:
+
+```bash
+bash run-experiments.sh --figures_only BenchmarkResults/docker-eval
+```
+
+Outputs are written to `BenchmarkResults/docker-eval/figures/`.
+
+To postpone plotting during the initial run, add `--skip_figures` to the fresh-run command in Step 2, then use `--figures_only` afterward.
+
+### Generate Table 4: replay implementation effort
+
+This table is computed from annotated Lean source, separately from the benchmark
+run. The top-level evaluation command does not generate it.
+
+**Container:**
+
+```bash
+mkdir -p BenchmarkResults/docker-eval/figures
+python3 scripts/count_replay_effort.py --format markdown \
+  | tee BenchmarkResults/docker-eval/figures/implementation-effort.md
+python3 scripts/count_replay_effort.py --format latex \
+  > BenchmarkResults/docker-eval/figures/implementation-effort.tex
+python3 scripts/count_replay_effort.py --format json \
+  > BenchmarkResults/docker-eval/figures/implementation-effort.json
+```
+
+The expected totals are **55 handlers, 256 handler LoC, 797 lemma LoC, and 1,053
+total LoC**. The Markdown file is directly readable; the TeX file is an includable
+table, not a standalone document. JSON records the source revision and counted
+regions. The counting conventions are described in
+[`scripts/replay-effort.md`](scripts/replay-effort.md) under “Scope and units.”
+
+### Generate the trusted comparison for Table 5 (Appendix D)
+
+The default pairwise report uses Crush with proof reconstruction (Table 2).
+The following optional command uses the existing reporting functions to select
+trusted Crush for Table 5. It reads your saved measurements and writes a separate
+TSV; it does not modify the original results or run benchmarks. Run it after the
+full evaluation and report generation have completed.
+
+**Container:**
+
+```bash
+python3 - <<'PY'
+import csv
+from pathlib import Path
+import runpy
+
+root = Path('BenchmarkResults/docker-eval')
+report = runpy.run_path('scripts/benchmark-report.py')
+with (root / 'curated/comparison.tsv').open(newline='') as stream:
+    columns = next(csv.reader(stream, delimiter='\t'))
+rows = []
+for group in ('curated', 'corpora', 'plean'):
+    source = root / group / 'measurements.tsv'
+    if not source.is_file():
+        raise SystemExit(f'Missing measurements: {source}')
+    measurements = [row for row in report['read_tsv'](source)
+                    if row['suite'] != 'loom' and row['lane'] != 'crush-portfolio']
+    attempts = report['grouped_attempts'](measurements)
+    report['validate_uniform_headline'](attempts)
+    rows.extend(report['comparison_rows'](attempts))
+output = root / 'figures/comparison-trusted.tsv'
+report['write_tsv'](output, columns, rows)
+print(output)
+PY
+```
+
+The `crush_lane` column should be `crush-verify`. Tables 2 and 5 are provided as
+numerical TSV/Markdown reports.
+
+## 4. Figures and Tables in the paper
+
+All paths below are relative to **`BenchmarkResults/docker-eval/`**, visible both
+inside the container and in the host checkout. Open the PDFs and Markdown files
+on the host; no graphical viewer is required inside the container.
+
+### Matching tables and figures
+
+In figures and tables shown in the following files, `crush-portfolio` enables both core-guided and Alethe replay proof reconstruction; `crush-alethe` enables only Alethe replay; `crush-verify` trusts the SMT verdict.
+
+| Paper location | Output to inspect | How to read it |
+|---|---|---|
+| **Figure 11, §6.1:** verification coverage and runtime | `figures/coverage-over-time-curated.pdf`, `figures/coverage-over-time-cashmere.pdf`, `figures/coverage-over-time-velvet.pdf`, `figures/coverage-over-time-plean.pdf` | The four panels are separate PDFs, in paper reading order. Curve coordinates are in `figures/coverage-over-time.tsv`. |
+| **Table 2, §6.2:** pairwise comparison with proof reconstruction | `figures/tables.md`, heading **Pairwise Matched VCs**; `comparison.tsv` in each of `curated/`, `corpora/`, and `plean/` | Use `crush-portfolio`. Read Crush-only, baseline-only, both-solved counts, and mean/SD times on the both-solved VCs. Exclude the raw TSV rows for `loom`. |
+| **Figure 12, §6.3:** proof reconstruction coverage | `figures/reconstruction-over-time-curated.pdf`, `figures/reconstruction-over-time-cashmere.pdf`, `figures/reconstruction-over-time-velvet.pdf`, `figures/reconstruction-over-time-plean.pdf` | Separate PDFs for the four panels. Curve coordinates are in `figures/reconstruction-over-time.tsv`. |
+| **Table 3, §6.3:** proof reconstruction failures | `figures/reconstruction-failures-table.pdf`; `figures/tables.md`, heading **Reconstruction Failures**; each suite directory's `reconstruction-failures.tsv` | The artifact breaks failures down by suite. The paper aggregates across its four suites, separately for Alethe replay and combined reconstruction. Use `reconstruction-summary.tsv` for the SMT-discharged cohort denominators. |
+| **Table 4, §6.3:** replay implementation effort | `figures/implementation-effort.md`, `.tex`, and `.json` | Generated separately by the Table 4 commands in Step 3; no benchmark measurements are needed. |
+| **Table 5, Appendix D:** trusted SMT pairwise comparison | `figures/comparison-trusted.tsv` | Generated by the optional Table 5 command in Step 3; uses `crush-verify` rather than `crush-portfolio`. |
+
+### Raw results and completeness checks
+
+| Location | Contents |
+|---|---|
+| `run.log`, `exit-status.txt`, `resume-exit-status.txt` when applicable | Console output and exit status recorded by the commands above. Check the most recent invocation's status. |
+| `curated/`, `corpora/`, `plean/` | Measurements, reports, profiling data, logs, and checkpoints. Cashmere and Velvet share `corpora/`, distinguished by the `suite` column. |
+| Each group's `measurements.tsv` | Per-VC backend, identity, final status, elapsed time, and diagnostics. |
+| Each group's `coverage-summary.tsv` | Expected, attempted, solved, failed, and missing VC counts for each suite/backend. |
+| Each group's `reconstruction-comparison.tsv` | Final kernel-checked proof counts for the compared reconstruction methods. |
+| Each group's `profile-events.tsv` | Intermediate translation, solver, and reconstruction events for detailed inspection. |
+| `plean-environment/` | Automatically provisioned PLean environment and setup records; preserve it for resuming. |
+
+> [!NOTE]
+> The paper reports measurements from an Apple M1 Pro with 32 GB memory. Ubuntu
+> timings will vary with hardware and load, and timeout-sensitive proof outcomes may vary between runs.
+
+### Optional: Reference results
+
+To render the archived reference measurements rather than your new results,
+run the following in the **Container**:
+
+```bash
+bash scripts/render-paper-artifacts.sh BenchmarkResults/reference-figures
+```
+
+This reads `scripts/benchmark-data/eval-data.zip` and writes a separate directory.
+It is useful for inspecting the supplied results, but is **not a fresh
+reproduction**. Keep it separate from `BenchmarkResults/docker-eval/`; do not
+use archived rows to fill missing measurements in a new run.
+
+## Further information
+
+- [Benchmark scripts](scripts/README.md): individual runners and advanced options.
+- [Dockerfile](Dockerfile): environment setup and compiler-header fix.
+- [Pinned PLean environment](scripts/benchmark-data/plean-shared-lock.json):
+  dependency revisions and toolchain settings.
+- [Mechanized metatheory](Crush/Metatheory/README.md) and [Lean examples](Test/).
