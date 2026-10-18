@@ -10,7 +10,7 @@ cd "$CRUSH_ROOT"
 
 # Every recorded measurement ships as one archive rather than several hundred
 # loose TSVs, so refreshing the data is a single binary change instead of a
-# repo-wide add/delete churn. It holds main/, crush-modes/ and reconstruction/.
+# repo-wide add/delete churn. It holds curated/, corpora/ and plean/.
 # Unpack it unless the caller pointed PAPER_DATA_ROOT at loose data of their own.
 DATA_ARCHIVE="${PAPER_DATA_ARCHIVE:-scripts/benchmark-data/eval-data.zip}"
 DATA_ROOT="${PAPER_DATA_ROOT:-}"
