@@ -262,13 +262,19 @@ The curated suite keeps one backend per branch of
 [Lean-SMT-Benchmarks](https://github.com/AD1024/Lean-SMT-Benchmarks), so that no
 backend's dependencies reach another's environment:
 
-| Branch | Lane |
-|---|---|
-| `main` | `grind-only` |
-| `auto` | `auto-smt` (lean-auto translating to SMT-LIB and querying cvc5) |
-| `duper` | `duper-only` |
-| `lean-smt` | `smt-only` |
-| `crush` | `crush-verify`, `crush-core`, `crush-alethe`, `crush-portfolio` |
+| Branch | Lane | Pinned commit |
+|---|---|---|
+| `main` | `grind-only` | `cda392a8cac1bd700c6569e981a55c7bc6f6977f` |
+| `auto` | `auto-smt` (lean-auto translating to SMT-LIB and querying cvc5) | `e4f8b0cade774a6d0e766fa51736ac3e0a61f3af` |
+| `duper` | `duper-only` | `57b04df805a28fa985cc414de5d1e43c728865fc` |
+| `lean-smt` | `smt-only` | `ecd10eb07e1c4bcc693c114882a20b7b0e0ff396` |
+| `crush` | `crush-verify`, `crush-core`, `crush-alethe`, `crush-portfolio` | `84227919d3bfdb5b6e840a5e810800b4cfa8b908` |
+
+These are the revisions used in the experiments and recorded again in the
+2026-10-15 reproduction log. The runner uses these commits even if the upstream
+branches move. The `CURATED_REF_MAIN`, `CURATED_REF_AUTO`, `CURATED_REF_DUPER`,
+`CURATED_REF_SMT`, and `CURATED_REF_CRUSH` environment variables allow explicit
+overrides for other experiments; leave them unset when reproducing the paper.
 
 Each branch needs its own Lake build, kept under `CURATED_TREES`. The harness
 clones over SSH; set `CURATED_REPO_URL` to the `https://` form to clone

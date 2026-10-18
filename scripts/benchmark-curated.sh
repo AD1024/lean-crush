@@ -8,13 +8,13 @@ source "$script_dir/benchmark-common.sh"
 
 curated_repo="${CURATED_REPO:-}"
 curated_url="${CURATED_REPO_URL:-git@github.com:AD1024/Lean-SMT-Benchmarks.git}"
-# Each backend is a branch, so a revision here is a branch tip rather than one
-# commit the whole suite shares. Pin per branch instead.
-curated_ref_main="${CURATED_REF_MAIN:-main}"
-curated_ref_auto="${CURATED_REF_AUTO:-auto}"
-curated_ref_duper="${CURATED_REF_DUPER:-duper}"
-curated_ref_crush="${CURATED_REF_CRUSH:-crush}"
-curated_ref_smt="${CURATED_REF_SMT:-lean-smt}"
+# Pin each backend to the benchmark revision used in the experiments, rather
+# than a moving branch tip. See scripts/README.md for the lane correspondence.
+curated_ref_main="${CURATED_REF_MAIN:-cda392a8cac1bd700c6569e981a55c7bc6f6977f}"
+curated_ref_auto="${CURATED_REF_AUTO:-e4f8b0cade774a6d0e766fa51736ac3e0a61f3af}"
+curated_ref_duper="${CURATED_REF_DUPER:-57b04df805a28fa985cc414de5d1e43c728865fc}"
+curated_ref_crush="${CURATED_REF_CRUSH:-84227919d3bfdb5b6e840a5e810800b4cfa8b908}"
+curated_ref_smt="${CURATED_REF_SMT:-ecd10eb07e1c4bcc693c114882a20b7b0e0ff396}"
 # Every branch needs its own Lake build, so keeping the trees between runs is
 # the difference between seconds and minutes of rebuilding.
 curated_trees="${CURATED_TREES:-$crush_root/BenchmarkResults/curated-trees}"
@@ -209,9 +209,7 @@ provision_branch() {
 
   if [[ -d "$tree/.git" || -f "$tree/.git" ]]; then
     git -C "$tree" fetch --quiet origin "$ref" >/dev/null 2>&1 || true
-    # A tree is a build cache for one branch, never a place to edit: forcing
-    # keeps a stale checkout from silently measuring something other than the
-    # branch. Change the branch and let the tree follow.
+    # Restore the requested revision before reusing this managed build cache.
     git -C "$tree" checkout --quiet --force --detach "origin/$ref" 2>/dev/null ||
       git -C "$tree" checkout --quiet --force --detach "$ref" || {
         printf 'error: could not check out %s in %s\n' "$ref" "$tree" >&2
