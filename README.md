@@ -7,6 +7,8 @@ corresponding to the paper's evaluation figures and tables.
 The artifact release is tagged **`tacas-ae`**. For general usage and extension APIs, see the
 [Lean Crush manual](https://ad1024.github.io/lean-crush/) (Note: it is still WIP).
 
+Archived artifact on Zenodo: [10.5281/zenodo.23456989](https://doi.org/10.5281/zenodo.23456989).
+
 1. [Set up the environment](#1-set-up-the-environment)
 2. [Run the evaluation and resume after an interruption](#2-run-the-evaluation)
 3. [Generate plots and tables](#3-generate-plots-and-tables)
