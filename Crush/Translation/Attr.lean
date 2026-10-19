@@ -2,52 +2,22 @@ import Lean
 import Crush.SMT.Syntax
 import Crush.Translation.Monad
 import Crush.Translation.Instances
-open Lean Elab Meta
 
 /-!
 # User-extensible translation: handlers and head-indexed lowerings
 
-This is lean-crush's central new capability. A user annotates a Lean declaration
-with a metaprogram describing how to translate a matched `Expr` into SMT. Handlers
-are ordinary Lean terms of type `TranslationHandler`, evaluated **at elaboration
-time** (via `evalConst`) when the tactic runs. This means the "SMT code" is
-produced *programmatically*, with the full power of `MetaM` and recursion back
-into the default translator, rather than being a fixed table baked into the tool.
+Register metaprograms for general term translation, head-indexed lowerings,
+result-indexed lowerings, and sort translation. Handlers receive elaborated spines
+and recursive translation callbacks; `none` defers to the next applicable handler.
+General term handlers have first refusal, and priorities order each registry.
 
-Four extension surfaces are provided:
-
-1. `@[crush_translate]` on a `def h : TranslationHandler` — the general form. `h`
-   inspects the head `Expr` and either returns `some smtTerm` or defers (`none`).
-
-2. `@[crush_lower Target.constant]` on a `def h : LoweringHandler` — the targeted
-   form. The registry dispatches `h` only for applications of `Target.constant`,
-   so the handler can focus on argument validation and SMT construction without
-   matching every term itself. Multiple lowerings for one head use priorities.
-
-3. `@[crush_lower_result Target.type]` on a `def h : LoweringHandler` — the
-   result-indexed form. It dispatches on the immediate result head when one is
-   present, or peels a syntactic dependent function type to find its codomain
-   head. Register named aliases separately when both forms must be handled; the
-   built-in decision lowering registers both `Decidable` and `DecidableEq`.
-
-4. `crush_map`/`crush_map_sort` macros (see `Crush/Translation/Builtins.lean`) —
-   sugar for the common cases of "map this constant to this SMT symbol/sort", which
-   desugar to a `TranslationHandler`.
-
-A handler receives:
-* the instantiated expression's syntactic head,
-* its original elaborated argument spine,
-* callbacks `emitSort`/`emitTerm` to recurse,
-all bundled in `TranslationCtx`. Handlers are tried in priority order; the first
-returning `some` wins within that dispatch layer. The translator does not
-weak-head-normalize the term before constructing this context; a handler that
-needs reduction must request it through `MetaM`. If no extension claims the
-term, the default structural translator runs.
-
-Sort handlers are additionally offered the weak-head-normalized type when the
-un-normalized one is declined, so a handler may be registered against either an alias
-or its expansion.
+Term dispatch preserves the syntactic head. Result dispatch uses the immediate type
+head or a syntactic dependent codomain, so aliases remain distinct keys. Sort handlers
+also see the weak-head-normalized type after declining the original. These extensions
+are part of the trusted translation boundary under the trusting discharge policies.
 -/
+
+open Lean Elab Meta
 
 namespace Crush
 
@@ -218,15 +188,8 @@ def hasTranslationHandlers : TranslateM Bool := do
 
 /-! ## Head-indexed lowerings (`@[crush_lower target]`)
 
-The general handler extension above intentionally permits dynamic matching, but it
-requires every handler to inspect every translated term. Lowerings cover the common
-case where one Lean constant has a custom SMT encoding: the persistent extension is
-indexed by the head constant, so only relevant callbacks are evaluated.
-
-General handlers run before targeted lowerings in `emitTerm`, preserving the original
-contract that `@[crush_translate]` can override every built-in mapping. Within the
-targeted registry, higher priority runs first, so applications can override a default
-lowering with `@[crush_lower Target high]`.
+Index callbacks by the application head. General handlers retain first refusal;
+higher-priority targeted handlers run before defaults for that head.
 -/
 
 /-- Serializable entry for one head-indexed lowering. -/
@@ -305,12 +268,9 @@ opaque getLoweringsFor (head : Name) : TranslateM (Array LoweringHandler)
 
 /-! ## Result-indexed lowerings (`@[crush_lower_result target]`)
 
-Some operations have no stable application head to register: a generated
-decision procedure may be a lambda or an auxiliary declaration. Its result family
-is stable, however. This registry first uses the immediate head of the term's type.
-If the type is syntactically a dependent `∀`, it peels the binders and uses the
-codomain head. A named alias is therefore a distinct dispatch key and should also
-be registered when callers may retain that alias in the inferred type. -/
+Dispatch by the immediate result head or the codomain of a syntactic dependent
+function type. Register named aliases separately when they must also be recognized.
+-/
 
 initialize crushResultLoweringExt :
     SimplePersistentEnvExtension LoweringEntry (NameMap (Array HandlerEntry)) ←
@@ -377,8 +337,9 @@ def hasResultLowerings : TranslateM Bool := do
 
 /-! ## Sort handlers (`@[crush_translate_sort]`)
 
-The sort-level counterpart of the above, with an independent extension so a sort
-handler and a term handler for the same type do not interfere. -/
+Use an independent registry so term and sort handlers for the same type do not
+interfere.
+-/
 
 initialize crushTranslateSortExt :
     SimplePersistentEnvExtension HandlerEntry (Array HandlerEntry) ←

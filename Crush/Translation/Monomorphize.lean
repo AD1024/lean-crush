@@ -3,64 +3,20 @@ import Crush.Frontend.Config
 import Crush.Frontend.Collect
 import Crush.Translation.Monad
 import Crush.Translation.Pattern
-open Lean Meta
 
 /-!
 # Lemma-instantiation monomorphization
 
-Datatype monomorphization (in `Crush/Translation/Translate.lean`) turns a
-fully-applied parametric *type* into a real SMT datatype. This module handles the
-other half: a *polymorphic fact* is specialized to the concrete types the query
-actually mentions.
-
-## Why this is needed
-
-The translation keys each SMT symbol on a constant *together with its type
-arguments*, so `@app Int` and `@app α` are different symbols with different sorts —
-they have to be, since their SMT sorts genuinely differ. That means a polymorphic
-fact is, before this pass, **disconnected from the goal it is meant to support**.
-For a polymorphic `app`, the equation lemma and a goal about `app` at `Int` emit as:
-
-```smtlib
-; the equation lemma, at an abstract instantiation
-(assert (forall ((q_1 s_0)) (= (app2_6 List_2_nil q_5) q_5)))
-; the goal, at Int
-(assert (not (= (app2_19 List_20_nil y_24) y_24)))
-```
-
-Two unrelated function symbols over two unrelated datatypes, so the lemma cannot
-possibly discharge the goal. Worth stressing that this bites **even when the goal is
-ground**: it is the *fact* being polymorphic that breaks the connection, not the
-goal. That is why a hand-written monomorphic `append : List Int → List Int → List Int`
-worked where the polymorphic one did not.
-
-This pass rewrites `∀ (α : Type), P α` into `P Int`, `P Bool`, … for the types the
-query mentions, so the resulting facts talk about the *same* symbols as the goal.
-
-## Soundness direction
-
-Instantiation only ever *weakens* the asserted set: `P Int` is a consequence of
-`∀ α, P α`, and a polymorphic fact that gets instantiated is dropped in favour of its
-instances. Asserting weaker facts can make `unsat` *harder* to reach, never easier,
-so this pass cannot cause a false `unsat` — it can only cost completeness. That is
-the safe direction to err in, and it is why exhausting the fuel budget is a
-completeness matter (reported as a diagnostic) rather than a soundness one.
-
-## Bounds and reporting
-
-`crush.mono.fuel` caps the total number of generated instances and
-`crush.mono.rounds` caps the saturation rounds; either at `0` disables the pass.
-On exhaustion the caller is told what was dropped rather than being handed a
-silently truncated set.
-
-## Known boundary
-
-Only the *leading* binder telescope is instantiated: in `∀ α, P α → ∀ β, Q β` the
-`β` is not reached, because instantiating it would mean going under the `P α`
-binder and re-abstracting. Every equation lemma and essentially every real
-polymorphic lemma has its type binders up front, so this covers the payload case;
-the nested position is a documented gap rather than a silent one.
+Specialize leading type and instance binders at query-relevant instantiations so
+facts and goals refer to the same structurally keyed SMT symbols. Generated facts
+apply their original proofs; replacing a universal fact by these consequences may
+lose completeness but cannot strengthen the query.
+Fuel and round limits bound saturation, and provenance prevents recursive type growth.
+Report exhaustion and certification failures. Binders beneath intervening hypotheses
+are outside this pass; unused polymorphic facts remain available to later translation.
 -/
+
+open Lean Meta
 
 namespace Crush
 
@@ -99,9 +55,8 @@ private partial def collectCandidates (e : Expr) : MetaM (Array Expr) := do
   return out.1
 where
   go (e : Expr) : StateRefT (Array Expr × Std.HashSet Expr) MetaM Unit := do
-    -- Record `e` itself when it is a type; then recurse into its structure. A type
-    -- can contain another (`List Int` contains `Int`), so both happen. Membership is
-    -- hashed: the traversal covers whole expressions, where a linear scan is quadratic.
+    -- Record types and their nested components; hashed membership avoids
+    -- quadratic scans during whole-expression traversal.
     if ← isGroundType e then
       unless (← get).2.contains e do
         modify fun (out, seen) => (out.push e, seen.insert e)
@@ -152,9 +107,7 @@ private partial def collectTypePatterns (e : Expr) (binders : Array Expr) :
   let typePatterns ← IO.mkRef (#[] : Array Expr)
   let appPatterns ← IO.mkRef (#[] : Array AppPattern)
   let rec go (e : Expr) (typePosition : Bool := false) : MetaM Unit := do
-    -- Binder domains and declared result types are known type positions. Avoid
-    -- asking `inferType`/`whnf` about arbitrary open terms: Lean treats a loose
-    -- value bvar there as a panic rather than a recoverable error.
+    -- Inspect known type positions only; inferType on a loose value bvar can panic.
     if typePosition && !e.hasLooseBVars && Pattern.containsBinder e binders && !e.isForall then
       let patterns ← typePatterns.get
       unless patterns.contains e do typePatterns.set (patterns.push e)
@@ -165,9 +118,8 @@ private partial def collectTypePatterns (e : Expr) (binders : Array Expr) :
       if fn.isConst || fn.isFVar then
         for i in [0:args.size] do
           let arg := args[i]!
-          -- Explicit type arguments contain the opened type fvars syntactically.
-          -- Ordinary value arguments do not; `matchPattern` additionally requires
-          -- any binder target to be a ground type before accepting the evidence.
+          -- Type arguments contain opened type variables; matchPattern accepts
+          -- binder evidence only when the target is itself a ground type.
           if !arg.hasLooseBVars && Pattern.containsBinder arg binders then
             let patterns ← appPatterns.get
             unless patterns.any (fun p =>
@@ -344,8 +296,7 @@ exists to remove); one that yields none is kept as-is and named in `dropped`. -/
 def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := do
   if cfg.monoFuel == 0 || cfg.monoRounds == 0 then
     return { facts }
-  -- Split the fact set: polymorphic facts are the ones to specialize. The negated
-  -- goal is never instantiated — it is the thing being refuted.
+  -- Specialize polymorphic premises, never the negated goal being refuted.
   let mut fixed : Array Fact := #[]
   let mut poly : Array Fact := #[]
   for f in facts do
@@ -355,9 +306,8 @@ def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := 
       fixed := fixed.push f
   if poly.isEmpty then
     return { facts }
-  -- Seed type shapes and same-head application occurrences from the fixed query
-  -- (above all the negated goal). Generated instances may extend these indices,
-  -- but only pattern matches against them can produce another substitution.
+  -- Seed from the fixed query. Generated shapes can extend the indices,
+  -- but new substitutions still require pattern evidence.
   let mut queryTypes : Array TypeOccurrence := #[]
   let mut queryApps : Array AppOccurrence := #[]
   for f in fixed do
@@ -385,10 +335,8 @@ def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := 
         break
       let some proof := f.proof | continue
       let ty ← instantiateMVars f.prop
-      -- A generated shape may activate another fact, but never a fact already in
-      -- its provenance. This preserves useful cross-fact saturation while ruling
-      -- out self- and mutual-recursive type growth such as
-      -- `List Int`, `List (List Int)`, ...
+      -- Provenance forbids feeding generated shapes back into their producers,
+      -- preventing self- and mutual-recursive type growth.
       let eligibleTypes := queryTypes.filter fun occurrence =>
         !occurrence.origins.contains factIndex
       let eligibleApps := queryApps.filter fun occurrence =>
@@ -400,20 +348,9 @@ def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := 
         let t ← instantiateMVars t
         if seen.contains t then continue
         seen := seen.insert t
-        -- **Optionally certify the instance before trusting it** (`crush.mono.certify`,
-        -- off by default). `p` is `proof` applied to the chosen type/instance arguments
-        -- and `t` is the corresponding instantiated proposition, so `p : t` holds by
-        -- construction — but only if `specializations` built the two in lock-step.
-        -- Nothing downstream re-checks this cheaply: `buildScript` translates `t` and
-        -- never looks at `p` (the proof is consumed only during reconstruction). So
-        -- under `trust`/`reconstructOrTrust` a defect here would translate a proposition
-        -- with no valid Lean witness — an unsoundness the solver could not catch.
-        -- Verifying `inferType p` is defeq `t` makes "every asserted instance is
-        -- entailed by its stated proof" checked rather than argued. It is off by default
-        -- because the default `reconstruct` policy already re-checks each proof through
-        -- the kernel during replay, making the `isDefEq` redundant there; it earns its
-        -- cost only under the trusting policies. A mismatch is a bug in this pass, so
-        -- the instance is dropped and named loudly, never emitted.
+        -- Optional early certification localizes proof/proposition mismatches to
+        -- specialization. Report and omit a failed instance; trusted discharge and
+        -- reconstruction still perform their own proof checks.
         if cfg.monoCertify then
           let ok ←
             try isDefEqReadOnly (← inferType p) t
@@ -426,9 +363,7 @@ def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := 
         instantiated := instantiated.set! factIndex true
         out := out.push { f with prop := t, proof := some p, descr := s!"{f.descr}@inst" }
         let origins := Pattern.mergeOrigins substitution.origins #[factIndex]
-        -- Pattern-directed saturation: the new instance may expose a type shape or
-        -- same-head application another fact requires. Its provenance prevents a
-        -- dependency cycle from feeding the shape back into any producer.
+        -- Expose new patterns to other facts while provenance prevents dependency cycles.
         for c in ← collectCandidates t do
           unless queryTypes.any (fun occurrence =>
               occurrence.expr == c && occurrence.origins == origins) do
@@ -441,12 +376,10 @@ def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := 
       if generated >= cfg.monoFuel then
         exhausted := true
         break
-    -- Fixpoint: a round that adds nothing will never add anything later either,
-    -- since candidates only grow when an instance is added.
+    -- No new instance means no new candidates for a later round.
     if newThisRound == 0 then break
   if generated >= cfg.monoFuel then exhausted := true
-  -- A polymorphic fact that produced no instance is kept verbatim: it is useless to
-  -- the solver but harmless, and dropping it silently would hide the gap.
+  -- Retain uninstantiated facts for later translation instead of silently dropping them.
   let mut dropped : Array String := #[]
   for i in [0:poly.size] do
     let f := poly[i]!

@@ -3,36 +3,18 @@ import Crush.Translation.Instances
 import Crush.SMT.Syntax
 import Crush.SMT.Quote
 import Crush.Translation.Monad
-open Lean Meta
 
 /-!
 # Theory helpers: bit-vectors and strings
 
-Non-recursive helpers shared by the translation driver. The interesting content
-here is not the symbol tables — it is the **semantic gap analysis** between Lean's
-total functions and SMT-LIB's theory operators.
-
-Every entry below was checked empirically against Lean and against `z3` — the
-values were measured in both, not read off either specification. Two classes of
-gap show up:
-
-* **Underspecified in SMT** (e.g. `Int` `div`/`mod` by zero). SMT-LIB leaves the
-  value of `(div x 0)` to the model, so *any* Lean interpretation — including
-  Lean's `x / 0 = 0` — is a valid instantiation. An `unsat` therefore still
-  implies Lean validity: this direction is **sound but incomplete**. We close the
-  gap with an explicit `ite` so the encoding is exact rather than merely safe.
-
-* **Specified and *different*** (e.g. `bvudiv x 0` is all-ones, while Lean's
-  `x / 0` is `0`). Here SMT fixes a value that contradicts Lean, so a false goal
-  can be *proved*. This is a genuine **unsoundness** and must be guarded. See
-  `bvDivGuard`.
-
-Operators verified to agree exactly (no guard needed): `bvurem`/`bvsrem`/`bvsmod`
-at a zero divisor (all return the dividend, as Lean does), `bvlshr`/`bvshl`/
-`bvashr` for shift amounts ≥ width, `concat` operand order, `extract`,
-`zero_extend`/`sign_extend`, the signed/unsigned comparisons, and `str.len`
-(codepoints, matching `String.length`).
+Shared helpers reconcile Lean's total operations with SMT theory semantics.
+Integer division and remainder by zero are underspecified in SMT and are guarded
+for exactness; bit-vector division by zero has a conflicting specified value and
+requires a guard for soundness. Remainders, shifts, resizing, concatenation, and
+string lengths must preserve the corresponding Lean interpretation.
 -/
+
+open Lean Meta
 
 namespace Crush
 

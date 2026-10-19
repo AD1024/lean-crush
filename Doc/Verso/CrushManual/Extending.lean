@@ -551,7 +551,8 @@ Before registering a lowering:
 Under `crush.trust "reconstruct"`, Lean checks the final proof, but an incorrect
 lowering still causes confusing failures.
 Under the default trust policy, translation correctness is part of the trusted
-computing base.
+translation boundary, including custom term and sort handlers. Registration
+does not supply a kernel-checked proof that a lowering preserves Lean semantics.
 
 # Extending Checked Reconstruction
 %%%

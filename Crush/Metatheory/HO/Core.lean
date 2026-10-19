@@ -1,20 +1,11 @@
 /-!
 # Typed higher-order core language
 
-This is the proof-facing source language for the metatheory of lean-crush's
-defunctionalization encoding. It deliberately contains only the higher-order logical
-structure needed by that proof:
-
-* opaque base sorts and Booleans;
-* typed uninterpreted constants;
-* nondependent function types, lambda abstraction, and application;
-* Boolean connectives, typed equality, and first-order or higher-order quantification.
-
-`Term` is intrinsically typed. Its indices record the constant signature, local
-context, and result type, so malformed applications and equalities cannot be
-constructed. Variables and constants use typed de Bruijn references. Keeping this
-language independent of `Lean.Expr` and `Crush.SMT.Term` lets its semantics and the
-defunctionalization transformation be total, pure definitions.
+An intrinsically typed source language for defunctionalization: opaque base sorts,
+Booleans, typed constants, nondependent arrows, lambdas, applications, logical
+connectives, equality, and quantifiers. Typed de Bruijn references preserve signature,
+context, and result types. Independence from `Lean.Expr` and the SMT IR keeps the
+semantics and transformation total and pure.
 -/
 
 namespace Crush.Metatheory

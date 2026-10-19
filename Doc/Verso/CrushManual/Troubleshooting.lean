@@ -33,6 +33,13 @@ The user-visible result identifies the failing pipeline stage:
 * A `kernel-reject` during replay means a generated proof term was invalid.
   This is an implementation or extension defect, not a difficult proof.
 
+Solver queries may omit a hypothesis that fails translation. The failed attempt
+is rolled back, including generated declarations, retained encoding evidence,
+and Lean metavariable assignments; `trace.crush` reports the omitted fact and
+its error. This can reduce the facts available to the solver. Failure to
+translate the negated goal remains fatal, and backend `"none"` reports every
+hypothesis translation failure as an error too.
+
 Enable profiling before tuning performance:
 
 ```
@@ -200,6 +207,19 @@ or a lemma that crush uses mentions a type such as `Fin n` or a function of type
 has no sound way to translate these types. Restate the goal so that the type does
 not appear, for example by stating a fact about `Fin n` as a fact about natural
 numbers below `n`, or prove the goal without `crush`.
+
+Built-in sort keys also cannot capture a variable bound inside a translated
+quantifier or lambda. This includes quantified type variables: the translation
+cannot use one fixed SMT sort for all their possible instantiations. It also
+includes function domains containing bound propositions, such as `p → Int`
+under `∀ p : Prop`, or `(x > 0) → Int` under `∀ x : Int`.
+
+Function values with proof domains, such as `p → Int` for `p : Prop`, are refused
+even when closed. Ordinary function sorts do not model proof irrelevance or the
+distinction between an impossible premise and a true one. Fully applied functions
+may still erase proof arguments when the existing guards permit it, and logical
+implications remain supported. Use those forms or supply a custom handler with a
+sound encoding.
 
 Native higher-order solving is cvc5-only and has certificate gaps.
 Defunctionalization supports more backends, but its encoded function sorts need

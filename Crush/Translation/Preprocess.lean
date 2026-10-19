@@ -3,28 +3,18 @@ import Lean.Meta.Injective
 import Crush.Frontend.Collect
 import Crush.Translation.Attr
 
-open Lean Meta
-
 /-!
 # Proof-producing selected-definition normalization
 
-Equation lemmas requested through `u[...]`, `d[...]`, or relevant
-`@[crush_unfold]`/`@[crush_defeq]` attributes are useful in two different ways:
-
-* quantified fallback facts let the SMT solver instantiate equations;
-* direct rewriting exposes the exact applications already present in the query
-  before monomorphization and translation.
-
-The second path avoids depending on SMT quantifier instantiation for definitions
-such as `List.Equiv`. This module builds a `simp only`-style context from the
-selected equations and rewrites each non-equation fact. Rewritten hypotheses carry
-kernel-checkable proofs produced by `simp`.
-
-The negated goal has no proof until reconstruction introduces `hneg : ¬ goal`.
-For it we retain a lambda `¬ goal → normalizedNegation`; Alethe replay applies that
-lambda to `hneg` before associating the normalized assertion with its certificate
-assumption.
+Rewrite facts with selected definition equations in a restricted simplifier before
+specialization and translation, while retaining the equations as fallback facts.
+Successful rewrites carry proof terms. A rewritten negated goal instead carries an
+implication from the original negation for reconstruction to apply.
+Normalization failures retain the original fact, and general translation handlers
+preserve first refusal over semantics that preprocessing would otherwise expose.
 -/
+
+open Lean Meta
 
 namespace Crush
 
@@ -36,9 +26,8 @@ structure NormalizeReport where
 
 private partial def constructorEqLemmas (facts : Array Fact) : MetaM (Array Name) := do
   let env ← getEnv
-  -- A general handler can intentionally reinterpret any subterm. Rewriting by
-  -- Lean constructor semantics before translation would bypass that first-refusal
-  -- contract (for example, a custom `Nat.succ` encoding).
+  -- General handlers may reinterpret subterms; constructor rewriting must
+  -- not bypass their first-refusal contract.
   if hasTranslationHandlersInEnv env then return #[]
   let found ← IO.mkRef (#[] : Array Name)
   let seen ← IO.mkRef ({} : Std.HashSet Name)

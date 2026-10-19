@@ -1,38 +1,18 @@
 import Lean
 import Crush.Translation.Attr
-open Lean Elab Meta
 
 /-!
 # User-facing translation sugar
 
-The `crush_map`/`crush_map_sort` macros make the common "this constant ↦ this SMT
-symbol/sort" case a one-liner, desugaring to the corresponding term or sort
-handler:
-
-```
-crush_map Nat.add    => "+"          -- map a Lean constant to an SMT symbol
-crush_map_sort MyT   => "MySort"     -- map a Lean type to an SMT sort symbol
-```
-
-Both dispatch through the same extension paths as hand-written
-`@[crush_translate]` and `@[crush_translate_sort]` definitions, so they run
-before the built-in structural translator and override it for their head
-constant.
-
-**Scope.** The target string is emitted verbatim as an SMT symbol with **no**
-`declare-fun`, so it must be a symbol the solver already knows: an SMT-LIB theory
-operator (`+`, `abs`, `str.++`, …) or a sort/symbol declared elsewhere in the
-script. Mapping to a fresh name the solver has never seen yields an
-"unknown constant" error from the backend. To introduce a genuinely new
-uninterpreted symbol (with its declaration), write a full handler and use the
-`declare` callback in `TranslationCtx`.
-
-Core logical forms and heavily type-directed theory mappings remain in the
-structural translator in `Crush/Translation/Translate.lean`. Library-level defaults
-that fit head dispatch, including the supported `String` operations, dogfood
-`@[crush_lower]` in `Crush/Translation/DefaultLowerings.lean`. A general user handler
-still runs before both paths and can override either.
+`crush_map` and `crush_map_sort` register simple symbol mappings through the same
+extension paths as handwritten term and sort handlers, before built-in translation.
+They emit no declarations: the mapped symbol must already be known to the solver.
+Use a full handler and its `declare` callback to introduce an uninterpreted symbol.
+Library operation lowerings live in `DefaultLowerings`; structural forms remain in
+`Translate`. General handlers may override either path.
 -/
+
+open Lean Elab Meta
 
 namespace Crush.Builtins
 

@@ -14,47 +14,36 @@ import Crush.Solver.Alethe
 import Crush.SMT.Check
 import Crush.SMT.Print
 import Crush.SMT.Result
-open Lean Elab Tactic Meta
 
 /-!
 # The `crush` tactic
 
-The end-to-end path:
+The driver validates configuration, collects and preprocesses facts, specializes
+polymorphic lemmas, generates bounded instances, translates and checks the SMT script,
+and runs the solver. Checked shortcuts may close the goal earlier, except in
+script-only mode. A weakened ground query retries with the full facts unless unsat.
 
-1. read `Config` from the option environment;
-2. collect local `Prop` hypotheses, selected premises, and the negated goal;
-3. normalize facts with selected definition equations, then monomorphize them;
-4. translate each fact to an `SMT.Term`, asserting it with a `:named crush_fact_N`
-   attribute so an unsat core maps back to provenance (`Crush.emitTerm`);
-5. build the script (`set-logic`, declarations, assertions, `check-sat`), optionally
-   saving/tracing it;
-6. run the backend with a hard timeout (`Crush.Solver.runQuery`);
-7. discharge: on `unsat`, close the goal per `crush.trust`; on `sat`, report the
-   model as a counterexample; on `unknown`/timeout, say so.
-
-Three discharge policies, selected by `crush.trust`:
-
-* `trust` (default) — close with the `crushSorry` axiom. Fast, and what every deployed
-  hammer does; the solver and its translation are in the trusted computing base. The
-  axiom is auditable, so `#print axioms` names it on any theorem closed this way.
-* `reconstruct` — replay the verdict as a checked Lean proof, from the solver's proof
-  certificate when there is one (`tryProofReplay`) and otherwise from the unsat core
-  (`Crush.tryReconstruct`); error if both fail, so the axiom is never used. A
-  translation bug yielding a false `unsat` cannot close a false goal here: it fails
-  reconstruction and errors instead.
-* `reconstructOrTrust` — reconstruct if possible, else fall back to the axiom with a
-  warning, so the fallback is visible rather than silent. The middle ground when a goal
-  is genuinely beyond the finishers (nonlinear arithmetic, finite-domain exhaustiveness).
+Discharge follows `crush.trust`: `trust` uses `crushSorry` while retaining fact and
+encoding dependencies; `reconstruct` requires a kernel-checked replay or core proof;
+`reconstructOrTrust` warns before falling back to the axiom. Reconstruction shares
+one declaration snapshot taken before hint elaboration. Models describe the encoding,
+and unknown or timeout results never discharge a goal.
 -/
+
+open Lean Elab Tactic Meta
 
 namespace Crush
 
 /-- The trust axiom, used only under `crush.trust`. Deliberately `Prop`-only (not
 `Sort u`), so it cannot be used to fabricate data, and auditable via
 `#print axioms`: any theorem closed by trusting the solver names it. The proof
-argument retains the asserted facts, so trusting SMT does not hide their axioms,
-`sorry`s, unsafe constants, or recursive calls from Lean's declaration checks. -/
-axiom crushSorry (P : Prop) {Q : Prop} (dependencies : Q) : P
+dependencies are retained by `crushSorryWith`, so trusting SMT does not hide
+axioms, `sorry`s, unsafe constants, or recursive calls from declaration checks. -/
+axiom crushSorry (P : Prop) : P
+
+/-- Retain the query's logical dependencies in an opaque application, including
+the evidence that justified its encoding. -/
+theorem crushSorryWith (P : Prop) {Q : Prop} (_dependencies : Q) : P := crushSorry P
 
 initialize registerTraceClass `crush
 initialize registerTraceClass `crush.script
@@ -74,11 +63,7 @@ def resolveLogic (cfg : Config) : String :=
   match cfg.logic with
   | some l => l
   | none =>
-    -- cvc5 gates its higher-order solver on the *logic-string prefix*: `HO_ALL`
-    -- turns it on, plain `ALL` does not (its `enableEverything` checks for `HO_`).
-    -- Only cvc5 understands the prefix — z3 warns "ignoring unsupported logic" and
-    -- carries on, then fails on the function sorts — so we emit it solely when it
-    -- will actually be honoured.
+    -- Only cvc5 enables native function solving through an HO_-prefixed logic.
     let dflt :=
       if cfg.hoMode == .native && (cfg.backend == .cvc5 || cfg.backend == .none) then
         "HO_ALL"
@@ -93,16 +78,32 @@ provenance, prepended by the declarations they induce. Returns the full script
 (minus `check-sat`) and the final `TranslateState` (for provenance lookup). -/
 def buildScript (cfg : Config) (facts : Array Fact) :
     MetaM (Array SMT.Command × TranslateState) := do
+  -- Specialization has finished. Fix unused universe arguments consistently in
+  -- propositions and their proofs before allocating any universe-sensitive keys.
+  for fact in facts do
+    for expression in #[some fact.prop, fact.proof, fact.negationTransform,
+        fact.reconstructionProof, fact.instanceOf] do
+      let some expression := expression | continue
+      for id in (collectLevelMVars {} (← instantiateMVars expression)).result do
+        assignLevelMVar id .zero
   let (_, st) ← TranslateM.run cfg do
     for fact in facts do
-      let id ← TranslateM.recordFact fact.descr fact.proof (some fact.prop)
-        fact.negationTransform fact.reconstructionProof fact.instanceOf
-      let body ← emitTerm fact.prop
-      let named := Term.annot body #[.named s!"{factNamePrefix}{id}"]
-      TranslateM.emitCommand (.assert named)
-  -- Prepend set-logic. Declarations are emitted eagerly on first use (before the
-  -- assertion that references them), so command order already satisfies SMT-LIB's
-  -- declare-before-reference rule.
+      let saved ← Meta.saveState
+      let previous ← get
+      tryCatchRuntimeEx (do
+        let id ← TranslateM.recordFact fact.descr fact.proof (some fact.prop)
+          fact.negationTransform fact.reconstructionProof fact.instanceOf
+        let body ← emitTerm fact.prop
+        let named := Term.annot body #[.named s!"{factNamePrefix}{id}"]
+        TranslateM.emitCommand (.assert named)
+      ) fun exception => do
+        saved.restore
+        set previous
+        -- Script-only mode reports translation failures directly. Solver queries
+        -- may discard a premise, but must translate the negated goal faithfully.
+        if fact.negated || cfg.backend == .none then throw exception
+        trace[crush] "skipping fact {fact.descr}: {exception.toMessageData}"
+  -- Declarations precede their uses; prepend only the logic selection.
   let script := #[Command.setLogic (resolveLogic cfg)] ++ st.commands
   match checkScript script with
   | .ok () => return (script, st)
@@ -436,14 +437,22 @@ proof depth for large contexts; no dependency is hidden behind a reducible let. 
 private def trustedProof (goalType : Expr) (st : TranslateState) : MetaM Expr := do
   let mut seen : Std.HashSet Expr := {}
   let mut dependencies : Array (Expr × Expr) := #[]
+  let mut candidates := st.encodingEvidence
   for fact in st.facts do
-    for candidate in #[fact.proof, fact.negationTransform,
-        fact.reconstructionProof, fact.instanceOf] do
+    if let some proof := fact.proof then
+      let some prop := fact.prop
+        | throwError "crush: asserted proof has no recorded proposition"
+      candidates := candidates.push (mkExpectedPropHint proof prop)
+    for candidate in #[fact.negationTransform, fact.reconstructionProof, fact.instanceOf] do
       let some proof := candidate | continue
-      let proof ← instantiateMVars proof
-      if seen.contains proof then continue
-      seen := seen.insert proof
-      dependencies := dependencies.push (← inferType proof, proof)
+      candidates := candidates.push proof
+  for proof in candidates do
+    let proof ← instantiateMVars proof
+    if proof.hasMVar then
+      throwError "crush: trusted dependency contains unresolved metavariables"
+    if seen.contains proof then continue
+    seen := seen.insert proof
+    dependencies := dependencies.push (← inferType proof, proof)
   if dependencies.isEmpty then
     dependencies := #[(mkConst ``True, mkConst ``True.intro)]
   while dependencies.size > 1 do
@@ -458,33 +467,33 @@ private def trustedProof (goalType : Expr) (st : TranslateState) : MetaM Expr :=
         combined := combined.push (leftType, leftProof)
     dependencies := combined
   let (dependencyType, dependencyProof) := dependencies[0]!
-  return mkApp3 (mkConst ``crushSorry) goalType dependencyType dependencyProof
+  return mkApp3 (mkConst ``crushSorryWith) goalType dependencyType dependencyProof
 
 /-- The core driver, given a resolved goal, config, and collected hints. -/
 def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
     (reconstructionHints : Array (Expr × String) := #[])
     (reconstructionFinisher? : Option (TSyntax `tactic) := none)
     (snapshot? : Option KernelCheckSnapshot := none) : TacticM Unit :=
+  withOptions (fun options => options
+    |>.setBool `crush.reconstruct.trustBvDecide cfg.trustBvDecide
+    |>.setBool `crush.reconstruct.trustNativeDecide cfg.trustNativeDecide) <|
   goal.withContext do
-  let snapshot ← snapshot?.getDM KernelCheckSnapshot.capture
+  cfg.validate
+  let snapshot := (← snapshot?.getDM KernelCheckSnapshot.capture).withConfig cfg
   let forceAlethe := cfg.trust != .trust && cfg.reconstruct == .alethe
   if cfg.reconstruct == .alethe && cfg.backend != .cvc5 then
     throwError "crush: `crush.reconstruct alethe` requires the cvc5 backend, but \
                 `crush.backend` is `{cfg.backend}`"
-  -- `native` HO mode needs cvc5, or `none` when the script is only being emitted.
-  -- z3 prints "ignoring unsupported logic" and then chokes on the function sorts,
-  -- so fall back to the portable encoding rather than sending it an invalid query.
-  let cfg :=
-    if cfg.hoMode == .native && !nativeSupported cfg.backend then
-      { cfg with hoMode := .defunctionalize }
-    else cfg
-  if (← getOptions) |> (fun o => crush.ho.mode.get o == HOMode.native) then
-    unless nativeSupported cfg.backend do
+  -- Native mode requires cvc5 for execution; other solvers use defunctionalization.
+  -- Backend none may still emit a native script.
+  let cfg ←
+    if cfg.hoMode == .native && !nativeSupported cfg.backend then do
       logWarning m!"crush: `crush.ho.mode native` requires a higher-order capable \
                     backend (cvc5); `{cfg.backend}` is first-order only. Falling \
                     back to `defunctionalize`."
-  -- Profiling is session-backed so all completed phases remain available when a later
-  -- solver or reconstruction path declines.
+      pure { cfg with hoMode := .defunctionalize }
+    else pure cfg
+  -- Retain completed phase timings when later work declines.
   let prof ← Profiler.Session.start cfg.profile
   let profileContext? ←
     if cfg.profile then some <$> captureRunProfileContext goal else pure none
@@ -501,9 +510,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
       reportRunProfile cfg prof profileContext? "selected-fact" "not-attempted"
         "closed from a selected Lean fact"
       return
-    -- The pass itself is policy-independent, and so is the rule-search setting: the
-    -- stages up to the solver call must not depend on whether a kernel-checked proof is
-    -- required, or the two policies are not measuring the same pipeline.
+    -- Keep pre-solver search settings independent of the discharge trust policy.
     let saved ← saveState
     let closed ← prof.time "pre-reconstruct" <| tryCatchRuntimeEx
       (tryPreReconstruct goal collected.facts (selectedRuleSearch := cfg.preRuleSearch)
@@ -522,26 +529,20 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
   trace[crush] "normalized {normalized.rewritten} fact(s) with \
                 {collected.rewriteLemmas.size} selected equation lemma(s)"
   let facts := normalized.facts
-  -- Specialize polymorphic facts at the types the query mentions. Without this a
-  -- polymorphic lemma is emitted at an abstract instantiation, giving SMT symbols
-  -- disjoint from the goal's, so it cannot discharge anything — even for a ground
-  -- goal (see `Crush.monomorphizeFacts`).
+  -- Specialize facts so their SMT symbols match the query's concrete instantiations.
   let mono ← prof.time "monomorphize" (monomorphizeFacts cfg facts)
   let facts := mono.facts
   trace[crush.mono] "generated {mono.generated} instance(s); \
                      dropped: {mono.dropped}; rejected: {mono.rejected}; \
                      exhausted: {mono.exhausted}"
-  -- Truncation is never silent: a hit bound is a completeness loss the user can act
-  -- on by raising `crush.mono.fuel`/`rounds`.
+  -- Report completeness losses from monomorphization bounds.
   if mono.exhausted then
     logWarning m!"crush: monomorphization hit its bound after {mono.generated} \
                   instance(s) (`crush.mono.fuel` = {cfg.monoFuel}, \
                   `crush.mono.rounds` = {cfg.monoRounds}); the fact set may be \
                   incomplete. Raise the bound if the goal is not provable."
-  -- A certification failure (only possible with `crush.mono.certify`) means the pass
-  -- built an instance whose proof did not match its proposition — a bug in
-  -- monomorphization, not the user's goal. Loud, since it would otherwise be a silent
-  -- soundness hole under a trusting policy.
+  -- A proof/proposition mismatch is an internal specialization error;
+  -- report it rather than silently omitting the failed instance.
   unless mono.rejected.isEmpty do
     logWarning m!"crush: monomorphization produced {mono.rejected.size} \
                   instance(s) that failed certification and were dropped \
@@ -607,19 +608,13 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
       reportRunProfile cfg prof profileContext? "verified" "not-requested"
         "solver returned unsat; closed under the trust policy"
     | .reconstruct | .reconstructOrTrust =>
-      -- Solver-as-oracle: the core tells us *which* hypotheses matter, and a Lean
-      -- finishing tactic re-proves the goal from just those. On success the solver
-      -- leaves the trusted computing base — it was only a search heuristic.
       let coreProofs := coreHypotheses st coreIds
       let mut reconstructionProofs := coreProofs
       for (proof, _) in reconstructionHints do
         unless reconstructionProofs.contains proof do
           reconstructionProofs := reconstructionProofs.push proof
       trace[crush.result] "reconstructing from core: {coreDescriptions st coreIds}"
-      -- Certificate replay first (unless `crush.reconstruct core` opts out): it closes
-      -- goals the single-shot ladder cannot (long chains of trivial steps — Boolean
-      -- pigeonhole, deep EUF conflicts) because the chain is already found. A step it
-      -- cannot replay falls through to the ladder below.
+      -- Replay certificates before core reconstruction unless core-only mode is requested.
       let replayAttempt ← prof.time "replay" (tryProofReplay goal cfg st proofSexps (snapshot? := some snapshot))
       if let .success certificate := replayAttempt then
         trace[crush.result] "proof replay succeeded; no axiom used"
@@ -632,8 +627,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
         | .success _ => none
         | .declined failure => failure
       let replayLabel := replayDeclineLabel cfg proofSexps replayFailure?
-      -- `alethe` mode deliberately has no fallback: it is for working on replay itself,
-      -- where the ladder silently closing the goal would hide whether replay worked.
+      -- Forced Alethe mode forbids fallback so another finisher cannot mask replay failure.
       if cfg.reconstruct == .alethe then
         if let some reason := Alethe.proofError? proofSexps then
           reportRunProfile cfg prof profileContext? "reconstruction-failed"
@@ -721,20 +715,11 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
 crush [h₁, …, hₙ, *] u[f₁, …] d[g₁, …] with [r₁, …] using <tactic>
 ```
 
-* bare `crush` — assert every local `Prop` hypothesis plus the negated goal;
-* `[…]` — an explicit hint list. A `term` element is a lemma or hypothesis to
-  assert (this is how you point `crush` at a lemma that is *not* in context — the
-  gap that made the tactic argumentless before). A `*` element additionally sweeps
-  in all local hypotheses. An explicit list *without* `*` restricts to exactly the
-  listed facts (plus the goal), matching Sledgehammer/`auto`;
-* `u[f, …]` — unfold: add each `f`'s equation lemmas (`getEqnsFor?`);
-* `d[f, …]` — definitional equality: add each `f`'s unfold equation
-  (`getUnfoldEqnFor?`, the `f x = body` form).
-* `with [r, …]` — make proof terms available only to checked reconstruction;
-* `using <tactic>` — try a user finisher on the original goal with only the isolated
-  unsat-core reconstruction context. The resulting proof is kernel-checked.
-
-The grammar mirrors lean-auto's so the muscle memory transfers. -/
+Bare `crush` selects all local facts. A list without `*` restricts selection to its
+terms; `*` adds the local context. `u[...]` adds equation lemmas and `d[...]` adds
+unfold equations. `with [...]` supplies reconstruction-only proofs, and `using`
+tries a finisher in the isolated reconstruction context before kernel validation.
+-/
 
 syntax crushHintElem := term <|> "*"
 syntax crushHints := ("[" crushHintElem,* "]")?
@@ -770,8 +755,7 @@ private def parseUOrDs (stxs : Array (TSyntax ``crushUOrD)) : TacticM (Array Nam
         match ← getEqnsFor? n with
         | some eqns => names := names ++ eqns
         | none =>
-          -- No equation lemmas (e.g. a non-recursive `def`): fall back to the
-          -- unfold equation (`nonRec` so non-recursive defs are covered too).
+          -- Fall back to an unfold equation when no clause equations are available.
           match ← getUnfoldEqnFor? n (nonRec := true) with
           | some eqn => names := names.push eqn
           | none => throwError "crush: `{n}` has no equational lemmas to unfold."
@@ -783,6 +767,15 @@ private def parseUOrDs (stxs : Array (TSyntax ``crushUOrD)) : TacticM (Array Nam
         | none => throwError "crush: `{n}` has no unfold equation."
     | _ => throwUnsupportedSyntax
   return names
+
+private def elaborateHint (term : TSyntax `term) : TacticM Expr := do
+  let errorsBefore := (← Core.getMessageLog).toList.filter (·.severity == .error) |>.length
+  let proof ← Tactic.withoutRecover <| Tactic.elabTerm term none
+  let proof ← instantiateMVars proof
+  let errorsAfter := (← Core.getMessageLog).toList.filter (·.severity == .error) |>.length
+  if proof.hasSyntheticSorry || errorsAfter > errorsBefore then
+    throwError "crush: hint elaboration failed or left unsolved goals"
+  return proof
 
 /-- Parse the `[…]` hint list into elaborated proof terms and local-hypothesis flags. -/
 private def parseHintList (goal : MVarId) (stx : TSyntax ``crushHints) :
@@ -799,7 +792,7 @@ private def parseHintList (goal : MVarId) (stx : TSyntax ``crushHints) :
       match elem with
       | `(crushHintElem| *) => allHyps := true
       | `(crushHintElem| $t:term) =>
-        let e ← Tactic.withoutRecover <| Tactic.elabTerm t none
+        let e ← elaborateHint t
         let descr := (t.raw.reprint.getD "hint").trimAscii.toString
         terms := terms.push (e, s!"hint {descr}")
       | _ => throwUnsupportedSyntax
@@ -815,7 +808,7 @@ private def parseReconstructionHints (goal : MVarId)
     | throwUnsupportedSyntax
   let mut hints : Array (Expr × String) := #[]
   for term in terms do
-    let proof ← Tactic.withoutRecover <| Tactic.elabTerm term none
+    let proof ← elaborateHint term
     let proof ←
       if proof.hasExprMVar || proof.hasLevelMVar then
         pure (← abstractMVars proof (levels := false)).expr
@@ -850,7 +843,7 @@ def evalCrush : Tactic := fun stx => do
         $[$reconstructionHintsStx:crushReconstructionHints]?
         $[$reconstructionFinisherStx:crushReconstructionFinisher]?) := stx
     | throwUnsupportedSyntax
-  let cfg ← Config.ofOptions (← getOptions)
+  let cfg ← Config.ofOptionsChecked (← getOptions)
   let goal ← getMainGoal
   discard <| getPropositionalGoalType goal
   -- Intro any leading binders so ∀-goals become closed props under hypotheses.

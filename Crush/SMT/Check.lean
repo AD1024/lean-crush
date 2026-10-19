@@ -4,19 +4,10 @@ import Crush.SMT.Print
 /-!
 # SMT IR sort validation
 
-A conservative sort checker for the SMT fragment emitted by `crush`.
-
-`SMT.Term` is intentionally lightweight and does not carry a sort at every node.
-That makes construction ergonomic, but previously let malformed applications reach
-the backend, where they surfaced as solver-specific parser errors. This pass checks:
-
-* every application of a declared function, constructor, or selector;
-* the core Bool, Int, BitVec, String, and Array theory operators emitted by crush;
-* binder, `let`, lambda, assertion, and definition result sorts.
-
-Unknown undeclared symbols are left unclassified rather than rejected. Translation
-extensions may target additional SMT theories, so treating every symbol outside the
-core table as an error would make the public lowering API artificially closed.
+Validate declared functions, constructors, selectors, supported theory operators,
+binders, and command result sorts before sending the lightweight IR to a solver.
+Unknown undeclared symbols remain unclassified so extensions can introduce theories
+outside the built-in table; this check does not certify translation semantics.
 -/
 
 namespace Crush.SMT

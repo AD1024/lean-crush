@@ -1,12 +1,12 @@
 import Lean
 
-open Lean
-
 /-!
 Shared pattern matching and provenance management for type monomorphization and
 ground-term instantiation. The traversal is monad-polymorphic so each pass retains its
 own groundness, type-inference, and definitional-equality policy.
 -/
+
+open Lean
 
 namespace Crush.Pattern
 

@@ -5,23 +5,12 @@ import Crush.Metatheory.FO.FamilySemantics
 /-!
 # Metatheory notation
 
-This file centralizes the mathematical notation shared by the higher-order source
-language, first-order target language, and defunctionalization proofs. The notation is
-scoped: import this module and use `open scoped Crush.Metatheory` to enable it.
-The later `𝓕⟦e⟧` notation is declared beside the total translator because its
-definition cannot be imported here without introducing an import cycle.
-
-Mathematical binders follow one convention throughout theorem-facing notation.
-LaTeX uses `Σ` for signatures; Lean uses the descriptive name `signature`
-because `Σ` is dependent-pair syntax. Lean uses `Γ` for contexts, `τ` for
-types/sorts, `e` for terms, `φ` for formulas, `T` for theories, `M` for models,
-and `ρ` for valuations. Longer
-English names remain preferable in executable code where the role is operational
-rather than mathematical.
-
-The object-language symbol `⊢` is intentionally not declared here. It is reserved
-for syntactic entailment in a proof calculus; typed terms and datatype references
-are represented by their indexed Lean types instead.
+Enable the shared mathematical notation with `open scoped Crush.Metatheory`.
+The translator defines `𝓕⟦e⟧` separately to avoid an import cycle.
+Theorem-facing binders use `signature`, `Γ`, `τ`, `e`, `φ`, `T`, `M`, and `ρ` for
+signatures, contexts, types, terms, formulas, theories, models, and valuations.
+Lean reserves `Σ` for dependent pairs; `⊢` remains reserved for proof-calculus entailment
+rather than the indexed types representing syntax.
 -/
 
 namespace Crush.Metatheory
