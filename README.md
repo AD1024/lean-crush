@@ -102,6 +102,39 @@ If it fails, error messages are stored in `BenchmarkResults/sanity-check.log`.
 > [!NOTE]
 > The running example of the paper is shown in `Test/CaseStudies/Demo.lean`.
 
+#### Run Curated with one backend
+
+To try the 20 Curated VCs with a single backend, run the following from the
+checkout root in the **Container**. This example uses Crush with combined
+Alethe replay and core-guided reconstruction:
+
+```bash
+CURATED_REPO_URL=https://github.com/AD1024/Lean-SMT-Benchmarks.git \
+PROFILES=crush-portfolio \
+OUT_DIR=BenchmarkResults/curated-crush/curated \
+bash scripts/benchmark-curated.sh
+```
+
+The script provisions dependencies and writes measurements and reports under
+`BenchmarkResults/curated-crush/curated/`. The initial dependency build may take
+longer than the measurements.
+
+Choose a `PROFILES` value below and use a separate output directory for each run:
+
+| `PROFILES` | Backend or mode |
+|---|---|
+| `crush-portfolio` | Crush with Alethe replay and core-guided reconstruction |
+| `crush-verify` | Crush trusting SMT results |
+| `crush-alethe` | Crush with Alethe replay |
+| `auto-smt` | lean-auto |
+| `duper-only` | Duper |
+| `grind-only` | grind |
+| `smt-only` | lean-smt |
+
+To resume an interrupted run after resolving the error and stopping the previous
+process, prepend `RESUME=true` to the same command, retaining its `PROFILES` and
+`OUT_DIR` values. Completed checkpoints are reused.
+
 ### Build Proof of Metatheory
 
 Formalized metatheory is under `Crush/Metatheory`. To build this, simply run

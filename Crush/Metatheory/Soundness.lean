@@ -5,9 +5,7 @@ import Crush.Metatheory.Defunctionalization.Theory
 
 This module exposes the semantic consequence of the model-extension theorem:
 unsatisfiability of the complete generated first-order theory reflects to the
-higher-order source. It is deliberately independent of Lean-expression
-reification, custom datatype semantics, SMT command semantics, and solver
-certificates.
+higher-order source.
 -/
 
 namespace Crush.Metatheory.Defunctionalization
