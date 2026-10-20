@@ -88,6 +88,10 @@ fallback; Z3 uses core reconstruction. Some goals close with a checked proof
 before SMT even under the default trust policy. Use `#print axioms` to inspect
 dependencies.
 
+Checked reconstruction rejects dependencies on `sorryAx` or `Crush.crushSorry`,
+including definitions mentioned in the goal. Goal diagnostics identify the
+forbidden axiom and the definition that depends on it.
+
 Common settings include:
 
 ```lean
@@ -139,7 +143,7 @@ and [`Test/AletheExtension.lean`](Test/AletheExtension.lean) for complete exampl
 - **Unsupported premises can be omitted.** Solver queries skip hypotheses that
   fail translation, undoing their translation state and reporting them under
   `trace.crush`. Failure to translate the negated goal remains an error.
-  Script-only mode (`crush.backend "none"`) reports premise failures too.
+  Script-only mode (`crush.backend "none"`) warns about each omitted premise.
 - **Solving can exceed reconstruction.** A solver may prove a goal whose
   certificate or core cannot yet be reconstructed in Lean.
 - **Models describe the encoding.** A satisfiable SMT model is not necessarily a

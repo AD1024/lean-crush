@@ -76,6 +76,6 @@ run_meta do
     expectProofDomainRefused do
       discard <| buildScript cfg #[{ unsupported with negated := true }]
     expectProofDomainRefused do
-      discard <| buildScript { cfg with backend := .none } #[unsupported]
+      discard <| buildScript { cfg with backend := .none } #[{ unsupported with negated := true }]
 
 end SoundnessProofDomains

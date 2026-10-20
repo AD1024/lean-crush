@@ -51,8 +51,8 @@ The available values are `"z3"`, `"cvc5"`, `"bitwuzla"`, and `"none"`.
 The `"none"` backend performs collection, normalization, monomorphization,
 instantiation, and translation, but does not start a solver or close the goal.
 It is intended for inspecting or exporting the generated SMT-LIB.
-Unlike solver queries, this mode reports a hypothesis translation failure
-directly instead of omitting that hypothesis.
+Unsupported hypotheses are omitted with a warning naming the fact and its
+translation failure. Failure to translate the negated goal remains an error.
 
 For example, `crush` can emit a query while an ordinary Lean proof closes the
 goal afterward:

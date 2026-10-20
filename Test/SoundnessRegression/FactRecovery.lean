@@ -21,6 +21,23 @@ example (y : Int) (h : y > 2) : y > 1 := by
   let F : Type → Type := List
   crush
 
+set_option crush.backend "none" in
+/-- warning: crush: skipping unsupported premise let F: -/
+#guard_msgs(warning, drop info, substring := true) in
+example (x : Int) (h : x > 0) : x ≥ 0 := by
+  let F := List
+  crush
+  have : F Nat := []
+  omega
+
+set_option crush.backend "none" in
+/-- warning: crush: skipping unsupported premise let k: -/
+#guard_msgs(warning, drop info, substring := true) in
+example (x : Int) (h : x > 0) : x ≥ 0 := by
+  let k : Fin 5 := 3
+  crush
+  omega
+
 structure Pt where
   x : Int
   y : Int
@@ -56,9 +73,9 @@ def rollbackLowering : LoweringHandler := fun ctx => do
     nonemptyCarriers := state.nonemptyCarriers.insert (mkConst ``Empty) true }
   throwError "deliberate unsupported fact"
 
-run_meta do
+private def checkRollback (backend : Backend) : MetaM Unit := do
   let argument ← mkFreshExprMVar (mkConst ``Int)
-  let (_, state) ← buildScript {} #[
+  let (_, state) ← buildScript { backend } #[
     { prop := mkApp (mkConst ``rollbackFact) argument, proof := none, descr := "failed fact" },
     { prop := mkNot (mkConst ``False), proof := none, descr := "negated goal", negated := true }]
   if ← argument.mvarId!.isAssigned then
@@ -68,6 +85,12 @@ run_meta do
     throwError "a failed fact retained translation state"
   unless SMT.commandToString state.commands[0]! == "(assert (! (not false) :named crush_fact_0))" do
     throwError "a failed fact retained logical commands"
+
+run_meta checkRollback .z3
+
+/-- warning: crush: skipping unsupported premise failed fact: deliberate unsupported fact -/
+#guard_msgs in
+run_meta checkRollback .none
 
 universe u
 axiom universeHint : (PUnit.{u+1} = PUnit.{u+1}) ∧ (0 : Int) = 1

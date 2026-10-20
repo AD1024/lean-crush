@@ -73,19 +73,39 @@ def resolveLogic (cfg : Config) : String :=
     | some spec => spec.logic dflt
     | none => dflt
 
+/-- Resolve leftover lemma universes in fact copies without specializing the caller's
+goal or local context. Provenance must use the same universe choices as its proposition. -/
+private def resolveFactUniverses (facts : Array Fact) : MetaM (Array Fact) := do
+  let mut callerLevels := {}
+  for decl in ← getLCtx do
+    callerLevels := collectLevelMVars callerLevels (← instantiateMVars decl.type)
+    if let some value := decl.value? then
+      callerLevels := collectLevelMVars callerLevels (← instantiateMVars value)
+  for fact in facts do
+    if !fact.negated then continue
+    for expression in #[some fact.prop, fact.proof, fact.negationTransform,
+        fact.reconstructionProof, fact.instanceOf] do
+      if let some expression := expression then
+        callerLevels := collectLevelMVars callerLevels (← instantiateMVars expression)
+  let resolve : Expr → MetaM Expr := fun expression => do
+    let expression ← instantiateMVars expression
+    return expression.replaceLevel fun
+      | .mvar id => if callerLevels.result.contains id then none else some .zero
+      | _ => none
+  facts.mapM fun fact => do
+    return { fact with
+      prop := ← resolve fact.prop
+      proof := ← fact.proof.mapM resolve
+      negationTransform := ← fact.negationTransform.mapM resolve
+      reconstructionProof := ← fact.reconstructionProof.mapM resolve
+      instanceOf := ← fact.instanceOf.mapM resolve }
+
 /-- Translate all facts into assertion commands, each `:named` for unsat-core
 provenance, prepended by the declarations they induce. Returns the full script
 (minus `check-sat`) and the final `TranslateState` (for provenance lookup). -/
 def buildScript (cfg : Config) (facts : Array Fact) :
     MetaM (Array SMT.Command × TranslateState) := do
-  -- Specialization has finished. Fix unused universe arguments consistently in
-  -- propositions and their proofs before allocating any universe-sensitive keys.
-  for fact in facts do
-    for expression in #[some fact.prop, fact.proof, fact.negationTransform,
-        fact.reconstructionProof, fact.instanceOf] do
-      let some expression := expression | continue
-      for id in (collectLevelMVars {} (← instantiateMVars expression)).result do
-        assignLevelMVar id .zero
+  let facts ← resolveFactUniverses facts
   let (_, st) ← TranslateM.run cfg do
     for fact in facts do
       let saved ← Meta.saveState
@@ -99,9 +119,10 @@ def buildScript (cfg : Config) (facts : Array Fact) :
       ) fun exception => do
         saved.restore
         set previous
-        -- Script-only mode reports translation failures directly. Solver queries
-        -- may discard a premise, but must translate the negated goal faithfully.
-        if fact.negated || cfg.backend == .none then throw exception
+        -- Omitting a premise weakens the query; omitting the negated goal is unsound.
+        if fact.negated then throw exception
+        if cfg.backend == .none then
+          logWarning m!"crush: skipping unsupported premise {fact.descr}: {exception.toMessageData}"
         trace[crush] "skipping fact {fact.descr}: {exception.toMessageData}"
   -- Declarations precede their uses; prepend only the logic selection.
   let script := #[Command.setLogic (resolveLogic cfg)] ++ st.commands
@@ -448,8 +469,10 @@ private def trustedProof (goalType : Expr) (st : TranslateState) : MetaM Expr :=
       candidates := candidates.push proof
   for proof in candidates do
     let proof ← instantiateMVars proof
-    if proof.hasMVar then
+    if proof.hasExprMVar then
       throwError "crush: trusted dependency contains unresolved metavariables"
+    if proof.hasLevelMVar then
+      checkDependencyUniverses proof
     if seen.contains proof then continue
     seen := seen.insert proof
     dependencies := dependencies.push (← inferType proof, proof)
@@ -480,6 +503,8 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
   goal.withContext do
   cfg.validate
   let snapshot := (← snapshot?.getDM KernelCheckSnapshot.capture).withConfig cfg
+  if cfg.trust == .reconstruct && cfg.backend != .none then
+    checkReconstructionGoalAxioms (← goal.getType)
   let forceAlethe := cfg.trust != .trust && cfg.reconstruct == .alethe
   if cfg.reconstruct == .alethe && cfg.backend != .cvc5 then
     throwError "crush: `crush.reconstruct alethe` requires the cvc5 backend, but \

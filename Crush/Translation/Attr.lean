@@ -64,6 +64,8 @@ private def packHandlers (handlers : Array TranslationHandler) : Array Dynamic :
 /-- Whether argument `i` is the fixed library instance of an operator supported by
 the structural translator. Unsupported operations return `false`. Extension
 lowerings should use `hasExpectedInstance` to specify the dictionary they model. -/
+@[deprecated "Use `hasExpectedInstance` with the exact dictionary your lowering implements; \
+  `hasCanonicalInstance` supports only built-in operators." (since := "2026-10-20")]
 def TranslationCtx.hasCanonicalInstance (ctx : TranslationCtx) (i : Nat) :
     TranslateM Bool := do
   return ← hasExpectedOverloadInstance (mkAppN ctx.fn ctx.args) i

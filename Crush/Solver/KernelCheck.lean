@@ -270,6 +270,38 @@ def collectProofParams (exprs : Array Expr) : MetaM (Array Expr) := do
       indexed := indexed.push (decl.index, mkFVar fvarId)
   return (indexed.qsort (fun left right => left.1 < right.1)).map (·.2)
 
+/-- Report admissions in the goal before speculative reconstruction can hide the
+diagnostic. Only dependencies of the goal itself are included. -/
+def checkReconstructionGoalAxioms (expected : Expr) : MetaM Unit := do
+  let expected ← instantiateMVars expected
+  let params ← collectProofParams #[expected]
+  let closedExpected ← instantiateMVars (← mkForallFVars params expected)
+  ensureAxiomClosure "reconstructed goal type" closedExpected
+
+/-- Validate a trusted dependency with open caller universes at every universe
+instantiation. Rigid parameters prevent kernel validation from solving the caller's
+levels; expression metavariables remain forbidden. Admissions stay in the returned
+dependency's axiom closure, as required by the trusting policy. -/
+def checkDependencyUniverses (proof : Expr) : MetaM Unit :=
+    withoutModifyingState <| withNewMCtxDepth do
+  let proof ← instantiateMVars proof
+  let expected ← instantiateMVars (← inferType proof)
+  let params ← collectProofParams #[expected, proof]
+  let expected ← instantiateMVars (← mkForallFVars params expected)
+  let proof ← instantiateMVars (← mkLambdaFVars params proof)
+  let levels := collectLevelMVars (collectLevelMVars {} expected) proof
+  let mut replacements : Std.HashMap LMVarId Level := {}
+  for id in levels.result do
+    replacements := replacements.insert id (.param (← mkFreshId))
+  let abstractLevels := fun (expression : Expr) => expression.replaceLevel fun
+    | .mvar id => replacements.get? id
+    | _ => none
+  let expected := abstractLevels expected
+  let proof := abstractLevels proof
+  if expected.hasMVar || proof.hasMVar then
+    throwError "crush: trusted dependency contains unresolved expression metavariables"
+  kernelCheckExpected (← getEnv) {} expected proof "universe-polymorphic dependency"
+
 /-- Validate a generated declaration and every generated declaration it references. -/
 private partial def checkGeneratedDeclaration (baseline current : Environment)
     (trustBvDecide trustNativeDecide : Bool) (name : Name)

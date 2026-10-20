@@ -37,8 +37,13 @@ Solver queries may omit a hypothesis that fails translation. The failed attempt
 is rolled back, including generated declarations, retained encoding evidence,
 and Lean metavariable assignments; `trace.crush` reports the omitted fact and
 its error. This can reduce the facts available to the solver. Failure to
-translate the negated goal remains fatal, and backend `"none"` reports every
-hypothesis translation failure as an error too.
+translate the negated goal remains fatal. Backend `"none"` also omits unsupported
+hypotheses, with a warning for each omitted fact.
+
+Checked reconstruction rejects transitive dependencies on `sorryAx` and
+`Crush.crushSorry`, including dependencies in the goal's own definitions. An error
+such as “depends on forbidden axiom `sorryAx` through `c`” means that `c` must first
+be replaced with a definition whose proof dependencies pass this policy.
 
 Enable profiling before tuning performance:
 
