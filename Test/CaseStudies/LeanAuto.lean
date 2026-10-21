@@ -188,23 +188,18 @@ theorem church_tower
 
 /-! ## Handled: the Paxos consensus goal (`SmtTranslation/Names.lean`)
 
-lean-auto's largest SMT goal: a Paxos safety obligation with typeclasses, six-level
-quantifier nesting, and `fun`-valued state updates. It translates cleanly, but the
-≈60 ∀ / 14 ∃ alternation defeats both solvers' default E-matching. cvc5 with
-`--full-saturate-quant` (via `crush.additionalArgs`) closes it in ~0.2 s — reachable
-with the right flag, not blocked on the `trigger` support lean-auto uses. Under
-`trust`: like the Church tower, the verdict is a heavy quantified UF proof no
-core-directed finisher replays.
-
-The proof is plain modus ponens — `h` discharges the premise of `hinv`'s 6th conjunct,
-whose conclusion is the goal — so it uses `TotalOrder`/`Quorum` only as uninterpreted
-symbols and depends on *none* of their class laws (`le_total` etc. never reach the
-query). Weakening a law therefore leaves it provable, correctly. -/
+This Paxos safety obligation combines quantified invariants with function-valued
+state updates. An explicit instance of the sixth invariant avoids an unstable
+quantifier search over the goal's rounds, values, and quorum. Its witness survives
+the max-vote update; proposals and votes are unchanged. The full invariant and
+transition remain selected to exercise their translation. A fixed solver seed and
+short timeout guard against expensive search. No `TotalOrder` or `Quorum` class laws
+are needed. -/
 
 section Paxos
 set_option crush.backend "cvc5"
-set_option crush.additionalArgs "--full-saturate-quant"
-set_option crush.timeout 30
+set_option crush.additionalArgs "--full-saturate-quant --seed=1"
+set_option crush.timeout 5
 
 class TotalOrder (t : Type) where
   le (x y : t) : Bool
@@ -267,7 +262,7 @@ theorem extracted_paxos_goal {node : Type} [inst : DecidableEq node] {value : Ty
     ∃ n r3 rmax v,
       Quorum.member n q = true ∧
         ¬TotalOrder.le r3 r1 = true ∧ st'_one_b_max_vote n r3 rmax v = true ∧ ¬st'_vote n r1 v1 = true := by
-  crush [hnext, hinv, h]
+  crush [hnext, hinv, hinv.2.2.2.2.2.1 r1 r2 v1 v2 q, h]
 end Paxos
 
 /-! ## Remaining gap: Church numerals over an *abstract* universe (`Test_Regression.lean`)

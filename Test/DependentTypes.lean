@@ -3,8 +3,9 @@ import Crush
 /-!
 # Dependent types are refused
 
-crush has no sound way to translate a dependent type to SMT, so it refuses one
-with an error instead. A dependent type is either
+crush has no sound way to translate a dependent type to SMT. An unsupported
+premise is dropped from the query; an unsupported goal is refused with an error.
+A dependent type is either
 
 * a type that depends on a value, such as `Fin n`, `Fin 5`, `BitVec k` or `β 0`, or
 * a function type whose result type depends on its argument, such as
@@ -41,21 +42,21 @@ comment on each one explains why it is false. -/
 
 -- The hypothesis is true: `Fin 0` and `Fin 1` have at most one element, and
 -- `Fin n` contains both `0` and `1` when `n ≥ 2`. So `False` does not follow.
-/-- error: crush: cannot translate the dependent type -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 example (h : ∀ n : Nat, (∀ x y : Fin n, x = y) ↔ n ≤ 1) : False := by
   crush
 
 -- The same problem with a bitvector whose width is a variable. The hypothesis is
 -- true: `BitVec 0` has one element, and `BitVec k` has at least two when `k ≥ 1`.
-/-- error: crush: cannot translate the dependent type -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 example (h : ∀ k : Nat, (∀ a b : BitVec k, a = b) ↔ k = 0) : False := by
   crush
 
 -- The same problem with any family of types. The hypothesis holds when
 -- `β := fun n => Fin (n + 1)`, so `False` does not follow.
-/-- error: crush: cannot translate the dependent type -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 example (β : Nat → Type) (h : ∀ n, (∀ x y : β n, x = y) ↔ n = 0) : False := by
   crush
@@ -83,11 +84,12 @@ example (G : ((α : Type) → α → Nat) → Nat) (F : Nat → Nat)
 
 /-! ## Settings do not change the result
 
-The check runs during translation, before any solver is called, so the trust
-policy, the solver and the higher-order mode make no difference. The last two
-examples need `cvc5` on `PATH`, like `Test/Cvc5.lean`. -/
+Translation rejects these types under every trust policy, solver, and
+higher-order mode. Dropping an unsupported premise still cannot prove `False`,
+and an unsupported goal still fails before solving. The last two examples need
+`cvc5` on `PATH`, like `Test/Cvc5.lean`. -/
 
-/-- error: crush: cannot translate the dependent type -/
+/-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 set_option crush.trust "reconstruct" in
 example (h : ∀ n : Nat, (∀ x y : Fin n, x = y) ↔ n ≤ 1) : False := by
@@ -110,7 +112,7 @@ example (β : Nat → Type) (F : β 0 → Int) (G : ((n : Nat) → β n) → Int
     (h : ∀ k : (n : Nat) → β n, G k = F (k 0)) : G c = G d := by
   crush
 
-/-! ## Every occurrence is refused, not only quantifiers
+/-! ## Unsupported goal types are refused in every position
 
 These goals are false, so no checked proof can close them before translation, and
 each one reaches the check. -/

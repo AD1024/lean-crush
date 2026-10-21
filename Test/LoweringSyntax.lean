@@ -109,7 +109,7 @@ private def handlerResult (head : Name) (expression : Expr) :
 run_meta do
   checkTerm (mkApp (mkConst ``bumpPure) (mkIntLit 2)) "(+ 2 5)"
   checkTerm (mkApp (mkConst ``bumpDo) (mkIntLit 2)) "(+ 2 6)"
-  checkTerm (mkApp2 (mkConst ``typed [.zero]) (mkConst ``Int) (mkIntLit 2)) "2"
+  checkTerm (mkApp2 (mkConst ``typed) (mkConst ``Int) (mkIntLit 2)) "2"
   checkTerm (mkApp2 (mkConst ``nested) (mkNatLit 2)
     (mkApp (mkConst ``Nat.succ) (mkNatLit 3))) "(+ 2 (+ 3 1))"
   -- Wrong arity and a late nested mismatch both decline before translating x.
@@ -119,7 +119,7 @@ run_meta do
     unless result.isNone && state.commands.isEmpty do
       throwError "a mismatched pattern was accepted or emitted commands"
   let (result, state) ← handlerResult ``guardedType <|
-    mkApp2 (mkConst ``guardedType [.zero]) (mkConst ``Bool) (mkConst ``Bool.true)
+    mkApp2 (mkConst ``guardedType) (mkConst ``Bool) (mkConst ``Bool.true)
   unless result.isNone && state.commands.isEmpty do
     throwError "a mismatched type was accepted or emitted commands"
 

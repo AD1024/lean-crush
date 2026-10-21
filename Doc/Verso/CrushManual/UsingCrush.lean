@@ -326,6 +326,10 @@ the goal from the unsat core with Lean tactics. Use `"alethe"` to require
 certificate replay, or `"core"` for core reconstruction alone. Z3 supports the
 core path; Bitwuzla currently supplies neither cores nor certificates.
 
+Checked reconstruction rejects transitive dependencies on `sorryAx` and
+`Crush.crushSorry`, including definitions mentioned in the goal. The diagnostic
+names the forbidden axiom and the definition that depends on it.
+
 `crush.trust "reconstructOrTrust"` allows an axiom-backed fallback with a
 warning, except in strict Alethe mode. Inspect `#print axioms` to audit the
 result. The {ref "configuration-reconstruction"}[configuration reference]

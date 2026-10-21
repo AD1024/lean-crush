@@ -1,46 +1,21 @@
 import Crush.Solver.Alethe.Parser
 import Crush.Solver.Alethe.ReplayRules
-open Lean Meta Elab Tactic
 
 /-!
 # Replaying an Alethe proof as a Lean proof
 
-The core-directed finisher (`Crush/Solver/Reconstruct.lean`) hands the *whole* goal to one
-Lean tactic. That works surprisingly often, but fails when the argument needs a long chain
-of small inferences no tactic re-finds in one shot.
+Traverse certificates, decode clauses, construct structural proofs, and dispatch
+inferences to registered handlers. Each step is checked before reuse, and the final
+proof passes kernel validation. Unknown rules, including solver holes, succeed only
+when Lean proves their concrete clauses; otherwise replay declines.
 
-An Alethe proof is exactly that chain, already found: cvc5 reports ~20–60 steps, each a
-*trivial* clause following from one or two earlier ones. So instead of re-searching, we
-replay: restate each step's clause as a Lean proposition, prove it from the premises'
-proofs, carry the result forward. The last clause is empty (`False`), contradicting the
-negated goal.
-
-Built-in tactic handlers and their lemmas live in `ReplayRules` and
-`ArithmeticRules`; this module owns certificate traversal, scoped premises,
-structural proof construction, diagnostics, and final kernel validation.
-
-## Why this is sound regardless of rule coverage
-
-Each step is type-checked by the elaborator before reuse, and the complete replayed proof is
-kernel-checked before assignment. The rule name is only a *hint* for which tactic to try
-first: a wrong guess makes a step fail, never succeed wrongly. Any step that cannot be
-replayed makes `replay?` return `none`, and the caller falls back to the finisher ladder.
-
-## Subproof blocks
-
-An anchor may bind multiple local assumptions before its steps. Replay introduces each as a
-real Lean hypothesis, recursively replays nested anchors, abstracts every discharged
-hypothesis with `mkLambdaFVars`, and proves the closing clause from that implication. Only
-the discharged closing proof escapes the block, so local assumptions cannot leak into the
-outer proof environment.
-
-## Known limits
-
-An unmappable term or a concrete inference that the checked tactic portfolio cannot
-prove makes replay decline and fall back to core reconstruction. A solver `hole` is
-treated like any other untrusted rule name: it is usable only when Lean independently
-proves its concrete clause.
+Anchors introduce scoped Lean assumptions. Nested blocks abstract every discharged
+hypothesis before exporting their closing proof, preventing local assumptions from
+escaping. Built-in handlers live in `ReplayRules` and `ArithmeticRules`; the caller
+controls whether a failed replay may fall back to core reconstruction.
 -/
+
+open Lean Meta Elab Tactic
 
 namespace Crush.Alethe
 
@@ -335,7 +310,7 @@ private def proveStepCore (target : Expr) (premises : Array Expr) (rule : String
   for candidate in tactics do
     let tactic := candidate.tactic
     let saved ← saveState
-    try
+    let result ← tryCatchRuntimeEx (do
       let mv ← withLCtx {} {} do mkFreshExprMVar closedImpl
       let gs ← Tactic.run mv.mvarId! <|
         Tactic.withSuppressedMessages <|
@@ -347,8 +322,11 @@ private def proveStepCore (target : Expr) (premises : Array Expr) (rule : String
         let proof ← validateProofCandidate target proof
         return some { proof, method := candidate.label }
       restoreState saved
-    catch _ =>
+      return none
+    ) fun _ => do
       restoreState saved
+      return none
+    if result.isSome then return result
   return none
 
 private def proveStep (target : Expr) (premises : Array Expr) (rule : String)
@@ -1053,8 +1031,7 @@ private def proveTransStep? (target : Expr) (premises : Array ClauseProof) :
 partial def replay (proof : AletheProof) (rawSexps : Array Sexp)
     (facts : Std.HashMap String Expr) (symbols : Std.HashMap String Expr) :
     TacticM (Except ReplayFailure Expr) := do
-  -- Collected from the *unstripped* text: the parser drops the annotations, which is
-  -- exactly what `@p_k` references need.
+  -- Collect named bindings before annotation stripping discards their definitions.
   let named := rawSexps.foldl (fun acc s => collectNamed s acc) {}
   let decoders ← getReplayTermHandlers
   let replayRules ← getReplayRuleHandlers
@@ -1086,12 +1063,9 @@ where
     while h : i < cmds.size do
       match cmds[i] with
       | .assume id term =>
-        -- A top-level assumption is one of our asserted facts, so its Lean proof is already
-        -- in hand. Decode its asserted SMT formula and check the semantic bridge from the
-        -- source fact before adding it to the clause environment. Unnamed encoding axioms
-        -- are accepted only when Lean can prove their translated statement in an empty
-        -- context; an unused, untranslatable axiom may be skipped because no later step can
-        -- consume it without a proof.
+        -- Bridge each decoded assumption to its source proof before storing it.
+        -- Encoding axioms require proofs in an empty context. Skipped untranslatable
+        -- axioms remain unavailable to every later inference.
         match facts.get? id with
         | some sourceProof =>
           let some target ← toExpr? ctx 64 term

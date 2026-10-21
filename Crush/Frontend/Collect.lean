@@ -2,31 +2,19 @@ import Lean
 import Lean.LibrarySuggestions.Default
 import Crush.Translation.Monad
 import Crush.Translation.Unfold
-open Lean Meta
+import Crush.Solver.KernelCheck
 
 /-!
 # Collecting facts from the goal
 
-Gathers the propositions to send to the solver: local hypotheses (those of type
-`Prop`), explicit user-provided term hints, equation lemmas from unfold/defeq hints,
-and the goal itself. The goal is *negated* — `crush` proves `G` by asserting the
-hypotheses together with `¬G` and checking for `unsat`, the standard refutation
-setup.
-
-The set of facts is governed by `Hints` (parsed from the tactic's argument grammar,
-see `Crush/Frontend/Tactic.lean`):
-
-* bare `crush` collects **all** local `Prop` hypotheses (the common case);
-* `crush [t₁, …]` collects only the listed terms (plus the goal), matching
-  Sledgehammer/`auto` semantics where an explicit list is a *restriction*;
-* `crush [t₁, …, *]` collects the listed terms **and** all local hypotheses;
-* `crush u[f]` adds `f`'s equation lemmas (definitional unfolding);
-* `crush d[f]` adds `f`'s unfold equation (`f x = …`) as a definitional equality.
-
-Each collected fact carries a `descr` for provenance, so an unsat core or a failure
-message can name its source. Optional premise selection uses Lean core's
-`LibrarySuggestions` engine.
+Collect local propositions, visible local data equations, explicit hints, relevant
+unfolding equations, optional library premises, and the negated goal. Bare `crush`
+uses all local facts; an explicit list restricts them unless it contains `*`.
+Each fact retains its proof and source description for trusted discharge,
+reconstruction, and diagnostics. Polymorphic hints are prepared for specialization.
 -/
+
+open Lean Meta
 
 namespace Crush
 
@@ -109,6 +97,13 @@ private def premiseAppliesToGoal (goal : MVarId) (declName : Name) : MetaM Bool 
       restoreState saved
       return false
 
+/-- Require a proposition before forming the negated SMT goal. -/
+def getPropositionalGoalType (goal : MVarId) : MetaM Expr := goal.withContext do
+  let goalType ← instantiateMVars (← goal.getType)
+  unless ← isProp goalType do
+    throwError "crush: expected a proposition, but the goal has type `{goalType}`"
+  return goalType
+
 /-- Collect assertable facts from `goal` under `hints`, plus the (negated) goal.
 Returns the facts and leaves the goal untouched (the tactic decides how to close
 it). Only `Prop` propositions are collected; the goal's type is negated. -/
@@ -116,14 +111,11 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
     (autoUnfold : Bool := true) (premiseMax : Nat := 0) : MetaM FactCollection :=
   goal.withContext do
     let mut facts := #[]
-    -- Constants seen across goal + hypotheses + hints, seeding auto-unfold relevance.
-    -- The goal/hyp types are instantiated first: after a tactic like `induction` the
-    -- goal type carries unassigned metavariables that `getUsedConstants` does not
-    -- traverse, so without this a constant like the recursive function under proof is
-    -- invisible to relevance and its `@[crush_unfold]` equations never get folded in.
+    -- Instantiate goal and hypothesis types before collecting relevance seeds;
+    -- getUsedConstants does not follow assigned metavariables.
     let mut seeds : Array Name := #[]
     let mut seenPremises : Std.HashSet Name := {}
-    let goalType ← instantiateMVars (← goal.getType)
+    let goalType ← getPropositionalGoalType goal
     seeds := seeds ++ goalType.getUsedConstants
     -- Local hypotheses, unless an explicit `[…]` list without `*` restricts us.
     if hints.allHyps then
@@ -137,18 +129,22 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
             proof := decl.toExpr
             descr := s!"hyp {decl.userName}"
             instantiateTerms := hints.instantiateHyps }
+        else if !ty.consumeMData.isSort then
+          -- Retain the defining equality of visible data lets; value? hides opaque have values.
+          if let some value := decl.value? then
+            let value ← instantiateMVars value
+            let prop ← mkEq decl.toExpr value
+            let proof := mkApp2 (mkConst ``id [0]) prop (← mkEqRefl value)
+            seeds := seeds ++ prop.getUsedConstants
+            facts := facts.push {
+              prop
+              proof := some proof
+              descr := s!"let {decl.userName}" }
     -- Explicit term hints (lemmas or hypotheses the user named).
     for (proof, descr) in hints.terms do
-      -- Re-abstract leftover mvars into leading binders. Elaborating a bare
-      -- polymorphic lemma (`crush [List.append_assoc]`) auto-binds its `{α}` into a
-      -- metavariable, so the fact arrives as `∀ (as … : List ?m), …` — the leading
-      -- type binder gone, reading as monomorphic over an abstract sort disconnected
-      -- from the goal, which monomorphization then can't specialize. `abstractMVars`
-      -- restores the `∀ α`-binder (sound: the abstracted term proves the more general
-      -- proposition by construction); a hint with no leftover mvars is unchanged.
-      -- `levels := false` keeps each unassigned universe an mvar, not a rigid param —
-      -- else `Type u` would not unify with a candidate's `Type 0` and the fact would
-      -- stay un-instantiable, the very failure this fixes.
+      -- Restore leading binders for implicit hint parameters so monomorphization
+      -- can specialize them. Keep universe metavariables flexible with levels := false;
+      -- rigid universe parameters would prevent matching concrete query types.
       let proof ← if proof.hasExprMVar || proof.hasLevelMVar
                   then do pure (← abstractMVars proof (levels := false)).expr
                   else pure proof
@@ -165,24 +161,25 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
       else
         throwError "crush: {descr} has type `{ty}`, which is not a `Prop`; \
                     only propositions can be asserted as facts."
-    -- Lean core's premise selector supplies relevant library theorems. Keep this
-    -- bounded and proposition-only; selected polymorphic theorems flow through
-    -- the same monomorphization path as explicit hints.
+    -- Bound library suggestions and send selected polymorphic proofs through specialization.
     let mut selectedPremises := 0
     if premiseMax > 0 && hints.allowPremiseSelection then
-      -- Selectors are allowed to ignore `Config.filter`, so ask for a small surplus and
-      -- enforce applicability ourselves below. This prevents irrelevant high-ranked
-      -- suggestions from crowding every usable rule out of the requested prefix.
+      -- Request a small surplus because selectors may ignore Config.filter;
+      -- otherwise irrelevant suggestions can crowd usable rules out of the prefix.
       let candidateMax := min 128 (premiseMax * 4)
       let suggestions ← Lean.LibrarySuggestions.select goal {
         maxSuggestions := candidateMax
         caller := some "crush"
         filter := fun name => do
           let some info := (← getEnv).find? name | return false
-          isProp info.type }
+          unless ← isProp info.type do return false
+          return (← forbiddenReconstructionAxiom? name).isNone }
       for suggestion in suggestions do
         if selectedPremises >= premiseMax then break
         if seenPremises.contains suggestion.name then continue
+        -- Selectors may ignore their filter. Never automatically select an
+        -- admitted theorem; ordinary user axioms remain eligible premises.
+        if (← forbiddenReconstructionAxiom? suggestion.name).isSome then continue
         unless ← premiseAppliesToGoal goal suggestion.name do continue
         seenPremises := seenPremises.insert suggestion.name
         let proof ← mkConstWithFreshMVarLevels suggestion.name
@@ -195,14 +192,10 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
           descr := s!"premise {suggestion.name}"
           instantiateTerms := true }
         selectedPremises := selectedPremises + 1
-    -- Equation lemmas from `u[…]`/`d[…]` hints. Fresh level metavariables so a
-    -- universe-polymorphic equation lemma instantiates at use.
+    -- Fresh universe metavariables let explicit equation hints specialize at use.
     let mut eqnLemmas := hints.eqnLemmas
     let mut rewriteLemmas := hints.eqnLemmas
-    -- Auto-unfold: equation lemmas of `@[crush_unfold]`/`@[crush_defeq]` definitions
-    -- reachable from the collected constants. Relevance-filtered so an unrelated marked
-    -- definition contributes nothing (see `relevantAutoUnfoldLemmas`). Explicit hints
-    -- still win — a name already requested by `u[…]`/`d[…]` is de-duplicated below.
+    -- Collect only reachable marked equations; explicit unfolding hints take precedence.
     if autoUnfold then
       eqnLemmas := eqnLemmas ++ (← relevantAutoUnfoldLemmas seeds)
       rewriteLemmas := eqnLemmas ++ (← relevantReducibleRewriteLemmas seeds)

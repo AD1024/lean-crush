@@ -3,25 +3,12 @@ import Crush.Metatheory.HO.Core
 /-!
 # First-order target sorts and symbol declarations
 
-This is the proof-facing target of Crush's defunctionalization pass.  Unlike the
-higher-order source language, the target has neither arrows, lambdas, nor a
-distinguished application constructor.  Function values inhabit an opaque `.fn`
-sort, and application and closure construction are ordinary first-order symbol
-declarations.
-
-The declarations deliberately follow the emitted SMT encoding in
-`Crush.Translation.HOEncoding` and `Crush.Translation.Translate`:
-
-* every complete source arrow type has its own function-value sort;
-* its generated `app` symbol takes the function value followed by the *fully
-  flattened* source arguments;
-* a closure constructor takes its captured values and returns the function-value
-  sort for the lambda's complete arrow type.
-
-Target *terms* over these declarations are `FO.FamilyTerm` (`FO/Family.lean`),
-indexed by an abstract symbol family rather than by positions in a finite
-signature.  Symbol names, the finite allocation, and Lean expression reification
-remain outside this development.
+The proof-facing target has opaque function-value sorts and ordinary first-order
+symbols for flattened application and captured closures. Each complete source arrow
+type has its own sort; application consumes the function value and its full argument
+telescope. `FamilyTerm` supplies syntax over an abstract typed symbol family.
+Concrete symbol names, finite allocation, and Lean-expression reification are outside
+this development.
 -/
 
 namespace Crush.Metatheory.FO

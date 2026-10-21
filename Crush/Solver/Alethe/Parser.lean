@@ -3,28 +3,11 @@ import Crush.SMT.Sexp
 /-!
 # Parsing Alethe proof certificates
 
-cvc5, run with `--dump-proofs --proof-format-mode=alethe`, emits its refutation as an
-**Alethe** proof: a list of `assume`/`step`/`anchor` commands over clauses, ending in
-the empty clause. This module turns that text into a structured `AletheProof`, and stops
-there: parsing decides nothing, so this layer is sound on its own. Checking a proof is
-`Crush/Solver/Alethe/Replay.lean`'s job — it turns a parsed proof into a kernel-checked
-Lean term.
-
-## The Alethe surface we parse
-
-An Alethe proof is a sequence of commands (SMT-LIB S-expressions):
-
-* `(assume H term)` — an input assumption `H` with its formula.
-* `(step id (cl t₁ … tₙ) :rule R :premises (…) :args (…))` — a derived clause `id`,
-  the disjunction `t₁ ∨ … ∨ tₙ` (empty = `false`), justified by rule `R` from the
-  named premises and arguments.
-* `(anchor :step id …)` opening a subproof, matched by a later `step id` whose rule is
-  `subproof`. We record anchors so the block structure survives, but flatten steps
-  into one list keyed by their (possibly dotted, e.g. `t17.t10.t16`) ids.
-
-`:named` annotations (`(! term :named @p_1)`) appear throughout to share subterms; we
-keep the term and drop the annotation when normalizing, so a `@p_k` reference and its
-definition are the same parsed term.
+Parse cvc5 Alethe certificates into assumptions, clause steps, and anchored subproofs.
+Step identifiers preserve references while anchors retain scope. Named annotations
+are stripped from normalized terms; replay collects their bindings from the original
+text before decoding references. Parsing does not validate an inference or discharge
+a goal; replay must construct and check the Lean proof.
 -/
 
 namespace Crush.Alethe

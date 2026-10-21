@@ -42,7 +42,9 @@ example (g : (Int → Int) → Int) (h : ∀ f, g f = f 1) :
 ```
 
 By default, an SMT discharge trusts the solver using the `Crush.crushSorry`
-axiom. To require a Lean proof, use the reconstruction policy below.
+axiom. Its proof retains dependencies from the asserted facts and from encoding
+evidence, including `Nonempty` and `LawfulBEq` proofs, for `#print axioms` to
+report. To require a Lean proof, use the reconstruction policy below.
 
 ## Facts and unfolding
 
@@ -86,6 +88,10 @@ fallback; Z3 uses core reconstruction. Some goals close with a checked proof
 before SMT even under the default trust policy. Use `#print axioms` to inspect
 dependencies.
 
+Checked reconstruction rejects dependencies on `sorryAx` or `Crush.crushSorry`,
+including definitions mentioned in the goal. Goal diagnostics identify the
+forbidden axiom and the definition that depends on it.
+
 Common settings include:
 
 ```lean
@@ -115,6 +121,8 @@ example (x : Int) : addThree x = x + 3 := by crush
 `(term x)` recursively translates the captured expression; a bare `x` captures
 its `Lean.Expr`. The RHS can also be a metaprogram. The same syntax supports
 `register_lowering result-type` and `register_lowering sort`.
+Custom lowerings are part of the trusted translation boundary: their authors
+must preserve the Lean operation's semantics.
 
 Use `register_crush_replay` for custom Alethe term decoding and inference rules,
 and `@[crush_reconstruct]` for core reconstruction lemmas. See
@@ -127,7 +135,15 @@ and [`Test/AletheExtension.lean`](Test/AletheExtension.lean) for complete exampl
   the cases using the induction hypotheses.
 - **Translation is incomplete.** Unsupported operations may remain uninterpreted;
   supply lemmas, unfold definitions, or add a lowering. Native SMT bitvectors
-  require concrete widths.
+  require concrete widths. Built-in sorts cannot depend on variables bound
+  inside translated quantifiers or lambdas, including type variables and
+  propositions occurring in function domains. Function values with proof domains
+  (`p → β` for `p : Prop`) are also refused, even when closed; fully applied
+  functions may still erase proof arguments when the existing guards permit it.
+- **Unsupported premises can be omitted.** Solver queries skip hypotheses that
+  fail translation, undoing their translation state and reporting them under
+  `trace.crush`. Failure to translate the negated goal remains an error.
+  Script-only mode (`crush.backend "none"`) warns about each omitted premise.
 - **Solving can exceed reconstruction.** A solver may prove a goal whose
   certificate or core cannot yet be reconstructed in Lean.
 - **Models describe the encoding.** A satisfiable SMT model is not necessarily a

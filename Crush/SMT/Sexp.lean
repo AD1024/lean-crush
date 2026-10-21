@@ -3,22 +3,10 @@ import Lean
 /-!
 # S-expression parser for SMT-LIB solver output
 
-Solver responses (`get-unsat-core`, `get-model`, `get-proof`) come back as
-S-expressions. We parse them into a small `Sexp` tree so downstream code can walk
-them structurally instead of slicing the output with string operations.
-
-The parser recognizes bare and `|…|`-quoted symbols, string literals (with SMT-LIB
-`""` escaping), and parenthesized lists, and skips `;` line comments and whitespace.
-Malformed or truncated trailing input rejects the complete parse rather than
-returning a misleading prefix. It does not interpret atoms — that is the caller's
-job.
-
-The scanner reads UTF-8 bytes directly and produces atoms and quoted symbols with a
-single `String.extract` over the matched span. SMT-LIB's structural characters and
-whitespace are ASCII, so scanning bytes avoids decoding every non-structural character.
-Recursion is bounded by an explicit fuel argument — one unit per remaining byte, and
-every step consumes at least one — so these are total definitions rather than `partial`
-ones.
+Parse solver responses into S-expression trees, preserving atoms for callers to
+interpret. Recognize quoted symbols, doubled-quote string escapes, lists, whitespace,
+and line comments. Malformed or truncated trailing input rejects the whole parse.
+The UTF-8 scanner uses byte spans and decreasing fuel to keep parsing total.
 -/
 
 namespace Crush.SMT
@@ -33,8 +21,7 @@ inductive Sexp where
 
 namespace Sexp
 
--- Nested inductive over `Array`, so the recursion goes through a list helper to
--- make the descent structural (see the note in `SMT/Print.lean`).
+-- The list helper exposes structural descent through nested arrays.
 mutual
   /-- Render back to text (round-trips structurally, not byte-for-byte). -/
   def toString : Sexp → String

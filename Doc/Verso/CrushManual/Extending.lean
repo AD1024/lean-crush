@@ -292,8 +292,11 @@ A handler must decline any shape it cannot encode exactly.
 In particular, lowerings for overloaded operations should verify argument types
 and call `ctx.hasExpectedInstance` with the exact dictionary whose semantics they
 implement before assigning a standard typeclass operation its SMT meaning.
-`ctx.hasCanonicalInstance` only compares against ambient global typeclass
-synthesis; a higher-priority global instance can change that baseline.
+`ctx.hasCanonicalInstance` is deprecated: it recognizes only the fixed built-in
+operator dictionaries and returns `false` for other operators. Custom lowerings
+must use `ctx.hasExpectedInstance` with a `mkConst` expression naming their own
+dictionary declaration. Comparing against ambient typeclass synthesis is unsafe:
+a higher-priority instance can change the operation's meaning.
 `ctx.hasInstanceHead` is available for dependent dictionaries whose proof
 parameters make full definitional equality impractical.
 
@@ -551,7 +554,8 @@ Before registering a lowering:
 Under `crush.trust "reconstruct"`, Lean checks the final proof, but an incorrect
 lowering still causes confusing failures.
 Under the default trust policy, translation correctness is part of the trusted
-computing base.
+translation boundary, including custom term and sort handlers. Registration
+does not supply a kernel-checked proof that a lowering preserves Lean semantics.
 
 # Extending Checked Reconstruction
 %%%

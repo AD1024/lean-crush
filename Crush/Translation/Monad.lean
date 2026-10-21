@@ -1,26 +1,18 @@
 import Lean
 import Crush.SMT.Syntax
 import Crush.Frontend.Config
-open Lean
 
 /-!
 # The translation monad `TranslateM`
 
-`TranslateM` is the shared context in which a Lean `Expr` is turned into a
-`Crush.SMT.Term`. It is the monad that **user translation metaprograms run in**,
-so its public surface is part of lean-crush's extension API and must stay stable
-and ergonomic.
-
-Responsibilities:
-* Allocate and remember SMT symbols for Lean atoms (sorts, constants, e-vars),
-  keeping a bijective high↔low name map.
-* Accumulate the `Command` list (declarations, definitions, assertions).
-* Provide the recursive entry points (`emitSort`, `emitTerm`) that user handlers
-  call to translate sub-expressions, so a handler can translate a constant while
-  delegating its arguments back to the default machinery.
-* Track provenance so `:named` assertions map back to source lemmas for unsat
-  cores and error reporting.
+Shared translation state for structural translation and user handlers. Track
+structural symbol identities, emitted commands, source provenance, binder mappings,
+encoding caches, and evidence used to justify representation choices.
+Retain the original local context so translation-only binders cannot justify
+unconditional inhabitation or escape into trusted proof dependencies.
 -/
+
+open Lean
 
 namespace Crush
 
@@ -100,6 +92,16 @@ structure RegistryCache where
 /-- Mutable translation state. -/
 structure TranslateState where
   cfg        : Config
+  /-- The real query context, before translation introduces hypothetical constructor
+      fields, lambda parameters, or quantifier binders. Only this context may justify
+      representing a Lean type by a nonempty, unguarded SMT carrier. -/
+  inputLCtx : LocalContext := {}
+  inputLocalInstances : LocalInstances := #[]
+  /-- Inhabitation evidence is stable because it is checked only in `inputLCtx`. -/
+  nonemptyCarriers : Std.HashMap Expr Bool := {}
+  /-- Proofs used to justify encoding choices, ascribed to their expected propositions.
+      These are retained by trusted discharge just like asserted fact proofs. -/
+  encodingEvidence : Array Expr := #[]
   /-- Bijection between high-level atoms and emitted SMT symbols. -/
   atomToName : Std.HashMap String String := {}
   /-- Structural identities for expression-derived symbols. Kept separate from
@@ -155,12 +157,36 @@ def isDefEqReadOnly (left right : Expr) : MetaM Bool :=
   withoutModifyingState do
     Meta.isDefEqGuarded left right
 
+/-- Test equality without even temporarily specializing caller metavariables.
+Semantic encoding eligibility needs this stronger check; pattern matching may
+instead use `isDefEqReadOnly` to test whether an instantiation is possible. -/
+def isDefEqRigid (left right : Expr) : MetaM Bool :=
+  withoutModifyingState <| Meta.withNewMCtxDepth do
+    Meta.isDefEqGuarded left right
+
 namespace TranslateM
 
-def run {α : Type} (cfg : Config) (x : TranslateM α) : MetaM (α × TranslateState) :=
-  StateRefT'.run x { cfg := cfg }
+def run {α : Type} (cfg : Config) (x : TranslateM α) : MetaM (α × TranslateState) := do
+  StateRefT'.run x {
+    cfg
+    inputLCtx := ← getLCtx
+    inputLocalInstances := ← Meta.getLocalInstances }
 
 @[inline] def getConfig : TranslateM Config := return (← get).cfg
+
+/-- Retain evidence only when it is valid in the original query context.
+Hypotheses introduced while translating a binder cannot justify unconditional
+encoding decisions or escape into the final proof. -/
+def recordEncodingEvidence (expected proof : Expr) : TranslateM Bool := do
+  let proof ← instantiateMVars (Meta.mkExpectedPropHint proof expected)
+  if proof.hasMVar then return false
+  let st ← get
+  for id in (Lean.collectFVars {} proof).fvarIds do
+    let some decl := st.inputLCtx.find? id | return false
+    if decl.isImplementationDetail then return false
+  unless st.encodingEvidence.contains proof do
+    modify fun s => { s with encodingEvidence := s.encodingEvidence.push proof }
+  return true
 
 /-- Emit a command into the running script. -/
 def emitCommand (c : SMT.Command) : TranslateM Unit :=

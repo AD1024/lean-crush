@@ -1,15 +1,14 @@
 import Lean
-open Lean
 
 /-!
 # Configuration options for lean-crush
 
-Every knob is a real `register_option` so it participates in `set_option`,
-tab-completion, and `#help option`. Options are grouped by subsystem with the
-`crush.*` prefix. The tactic reads these into a `Crush.Config` record once at
-entry (see `Crush/Frontend/Tactic.lean`) so downstream code passes a value
-rather than repeatedly touching the option environment.
+Registered `crush.*` options support `set_option`, completion, and option help.
+`Config.ofOptions` resolves them into a pure record while retaining parse errors;
+`Config.validate` rejects invalid configurations before proof automation begins.
 -/
+
+open Lean
 
 namespace Crush
 
@@ -295,19 +294,39 @@ structure Config where
   profileMachine : Bool      := false
   premises       : Bool      := false
   premiseMax     : Nat       := 32
+  /-- Retained parser failure, checked before running proof automation. -/
+  optionError?   : Option String := none
   deriving Inhabited
 
-/-- Read the current option environment into a `Config`. -/
-def Config.ofOptions (opts : Options) : Config :=
+/-- Retain invalid values so pure configuration parsing cannot silently select a default. -/
+private def readEnumOption {α : Type} [KVMap.Value α]
+    (opts : Options) (opt : Lean.Option α) (choices : String) : α × Option String :=
+  match opts.find? opt.name with
+  | none => (opt.defValue, none)
+  | some raw =>
+    match KVMap.Value.ofDataValue? raw with
+    | some value => (value, none)
+    | none =>
+      (opt.defValue, some s!"crush: invalid value '{toString raw}' for option '{opt.name}'; expected {choices}")
+
+/-- Read options into a `Config`, retaining invalid enum values for `Config.validate`.
+`runCrush` validates the resulting configuration before attempting any proof, even
+when the parsed options differ from the ambient option environment. -/
+def Config.ofOptions (opts : Options) : Config := Id.run do
+  let (backend, backendError?) := readEnumOption opts crush.backend "z3, cvc5, bitwuzla, or none"
+  let (trustMode, trustError?) := readEnumOption opts crush.trust "trust, reconstruct, or reconstructOrTrust"
+  let (hoMode, hoError?) := readEnumOption opts crush.ho.mode "defunctionalize or native"
+  let (reconstruct, reconstructError?) := readEnumOption opts crush.reconstruct "auto, alethe, or core"
   let split (s : String) : Array String :=
     (s.splitOn " ").toArray.filterMap (fun w =>
       let w := w.trimAscii.toString
       if w.isEmpty then none else some w)
   let logicStr := crush.logic.get opts
-  { backend        := crush.backend.get opts
+  return {
+    backend        := backend
     timeout        := crush.timeout.get opts
-    trust          := crush.trust.get opts
-    hoMode         := crush.ho.mode.get opts
+    trust          := trustMode
+    hoMode         := hoMode
     monoFuel       := crush.mono.fuel.get opts
     monoRounds     := crush.mono.rounds.get opts
     monoCertify    := crush.mono.certify.get opts
@@ -319,12 +338,26 @@ def Config.ofOptions (opts : Options) : Config :=
     traceScript    := crush.trace.script.get opts
     autoUnfold     := crush.autoUnfold.get opts
     preRuleSearch  := crush.preReconstruct.ruleSearch.get opts
-    reconstruct    := crush.reconstruct.get opts
+    reconstruct    := reconstruct
     trustBvDecide  := crush.reconstruct.trustBvDecide.get opts
     trustNativeDecide := crush.reconstruct.trustNativeDecide.get opts
     profile        := crush.profile.get opts
     profileMachine := crush.profile.machine.get opts
     premises       := crush.premises.get opts
-    premiseMax     := crush.premises.max.get opts }
+    premiseMax     := crush.premises.max.get opts
+    optionError?   := backendError?.orElse fun _ => trustError?.orElse fun _ =>
+      hoError?.orElse fun _ => reconstructError? }
+
+/-- Reject a configuration parsed from invalid options before it can authorize a proof. -/
+def Config.validate {m : Type → Type} [Monad m] [MonadError m] (cfg : Config) : m Unit := do
+  if let some error := cfg.optionError? then
+    throwError "{error}"
+
+/-- Parse and immediately validate options when a monadic entry point is convenient. -/
+def Config.ofOptionsChecked {m : Type → Type} [Monad m] [MonadError m]
+    (opts : Options) : m Config := do
+  let cfg := Config.ofOptions opts
+  cfg.validate
+  return cfg
 
 end Crush
