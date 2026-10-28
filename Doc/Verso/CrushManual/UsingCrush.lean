@@ -327,11 +327,15 @@ certificate replay, or `"core"` for core reconstruction alone. Z3 supports the
 core path; Bitwuzla currently supplies neither cores nor certificates.
 
 Checked reconstruction rejects transitive dependencies on `sorryAx` and
-`Crush.crushSorry`, including definitions mentioned in the goal. The diagnostic
-names the forbidden axiom and the definition that depends on it.
+`Crush.crushSorry`, including definitions mentioned in the goal or hypotheses
+used by a proof. If an admission blocks reconstruction, the error names the
+forbidden axiom and the definition that depends on it. A later proof candidate
+without that dependency can still succeed.
 
 `crush.trust "reconstructOrTrust"` allows an axiom-backed fallback with a
-warning, except in strict Alethe mode. Inspect `#print axioms` to audit the
+warning, except in strict Alethe mode. When a candidate was rejected for an
+admission, the warning reports that dependency instead of a generic search
+failure. Inspect `#print axioms` to audit the
 result. The {ref "configuration-reconstruction"}[configuration reference]
 explains early proofs, strict Alethe behavior, and optional native decision
 procedures.

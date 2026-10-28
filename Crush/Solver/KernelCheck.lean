@@ -23,13 +23,22 @@ structure KernelCheckSnapshot where
   private env : Environment
   private trustBvDecide : Bool
   private trustNativeDecide : Bool
+  /-- Keep an actual candidate's admission error across speculative state restores.
+  A later successful proof may still be accepted; this is only a failure diagnostic. -/
+  private axiomFailure : IO.Ref (Option MessageData)
 
 def KernelCheckSnapshot.capture : CoreM KernelCheckSnapshot :=
   return {
     env := ← getEnv
     trustBvDecide := crush.reconstruct.trustBvDecide.get (← getOptions)
     trustNativeDecide := crush.reconstruct.trustNativeDecide.get (← getOptions)
+    axiomFailure := ← IO.mkRef none
   }
+
+/-- The first admission rejected during this invocation's proof attempts. -/
+def KernelCheckSnapshot.axiomFailure? (snapshot : KernelCheckSnapshot) :
+    BaseIO (Option MessageData) :=
+  snapshot.axiomFailure.get
 
 /-- Keep the declaration boundary while applying the caller's resolved trust policy. -/
 def KernelCheckSnapshot.withConfig (snapshot : KernelCheckSnapshot) (cfg : Config) :
@@ -75,10 +84,15 @@ def forbiddenReconstructionAxiom? (name : Name) : CoreM (Option Name) := do
       return some axiomName
   return none
 
-private def ensureAxiomClosure (label : String) (e : Expr) : MetaM Unit := do
+private def ensureAxiomClosure (label : String) (e : Expr)
+    (snapshot? : Option KernelCheckSnapshot := none) : MetaM Unit := do
   for name in e.getUsedConstants do
     if let some axiomName ← forbiddenReconstructionAxiom? name then
-      throwError "crush: {label} depends on forbidden axiom `{axiomName}` through `{name}`"
+      let diagnostic := m!"{label} depends on forbidden axiom `{axiomName}` through `{name}`"
+      if let some snapshot := snapshot? then
+        if (← snapshot.axiomFailure?).isNone then
+          snapshot.axiomFailure.set (some diagnostic)
+      throwError "crush: {diagnostic}"
 
 /-- Check a replay fragment with the elaborator before the complete proof reaches the kernel. -/
 def validateProofCandidate (expected proof : Expr) : MetaM Expr := do
@@ -354,8 +368,8 @@ def kernelCheckProofWithParams (snapshot : KernelCheckSnapshot) (params : Array 
   ensureComplete "reconstructed proof" closedProof
   -- Baseline declarations are already kernel-checked, but their proofs may still
   -- depend on an admission. Check the complete closure before skipping that baseline.
-  ensureAxiomClosure "reconstructed goal type" closedExpected
-  ensureAxiomClosure "reconstructed proof" closedProof
+  ensureAxiomClosure "reconstructed goal type" closedExpected (some snapshot)
+  ensureAxiomClosure "reconstructed proof" closedProof (some snapshot)
   let current ← getEnv
   let mut checked : Std.HashSet Name := {}
   for name in closedExpected.getUsedConstants do

@@ -41,9 +41,15 @@ translate the negated goal remains fatal. Backend `"none"` also omits unsupporte
 hypotheses, with a warning for each omitted fact.
 
 Checked reconstruction rejects transitive dependencies on `sorryAx` and
-`Crush.crushSorry`, including dependencies in the goal's own definitions. An error
-such as “depends on forbidden axiom `sorryAx` through `c`” means that `c` must first
-be replaced with a definition whose proof dependencies pass this policy.
+`Crush.crushSorry`, including dependencies in the goal's own definitions and in
+hypotheses used by a proof. An error such as “depends on forbidden axiom `sorryAx`
+through `c`” identifies a rejected proof candidate's dependency. Replace `c` with
+a definition whose proof dependencies pass this policy, or provide a proof that
+does not use it. Unrelated hypotheses do not block a successful checked proof.
+If all attempts fail, `reconstructOrTrust` reports the same dependency in its
+fallback warning. Its result trusts the solver for the whole goal, even when an
+ordinary Lean tactic could prove the goal using only a definition whose
+termination proof already depends on `Crush.crushSorry`.
 
 Enable profiling before tuning performance:
 

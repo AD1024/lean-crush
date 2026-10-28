@@ -89,8 +89,10 @@ before SMT even under the default trust policy. Use `#print axioms` to inspect
 dependencies.
 
 Checked reconstruction rejects dependencies on `sorryAx` or `Crush.crushSorry`,
-including definitions mentioned in the goal. Goal diagnostics identify the
-forbidden axiom and the definition that depends on it.
+including definitions mentioned in the goal or hypotheses used by a proof.
+When an admission blocks reconstruction, the error or `reconstructOrTrust`
+fallback warning identifies the forbidden axiom and the definition that depends
+on it. A rejected candidate does not prevent a later checked proof from succeeding.
 
 Common settings include:
 

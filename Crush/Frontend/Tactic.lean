@@ -688,7 +688,13 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
         reportRunProfile cfg prof profileContext? "core-reconstructed" replayLabel
           "core-directed reconstruction succeeded"
       else if cfg.trust == .reconstructOrTrust then
-        logWarning m!"crush: solver reported `unsat`, but no finishing tactic could \
+        if let some diagnostic ← snapshot.axiomFailure? then
+          logWarning m!"crush: solver reported `unsat`, but checked reconstruction \
+                        rejected a proof: {diagnostic}; \
+                        closing with the `crushSorry` axiom (trusting the solver). \
+                        Set `crush.trust` to `reconstruct` to make this an error."
+        else
+          logWarning m!"crush: solver reported `unsat`, but no finishing tactic could \
                       replay it from the {coreProofs.size} core \
                       hypothes{if coreProofs.size == 1 then "is" else "es"} and \
                       {reconstructionHints.size} reconstruction \
@@ -700,6 +706,11 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
         reportRunProfile cfg prof profileContext? "trusted-fallback" replayLabel
           "core-directed reconstruction failed; closed under the trust policy"
       else
+        if let some diagnostic ← snapshot.axiomFailure? then
+          reportRunProfile cfg prof profileContext? "reconstruction-failed" replayLabel
+            (← diagnostic.toString)
+          throwError "crush: solver reported `unsat`, but checked reconstruction \
+                      rejected a proof: {diagnostic}"
         let details ← reconstructionFailureDetails
           goal st coreIds reconstructionProofs reconstructionHints
         reportRunProfile cfg prof profileContext? "reconstruction-failed" replayLabel
