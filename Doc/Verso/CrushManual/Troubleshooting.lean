@@ -107,6 +107,21 @@ More facts are not always better.
 An unrelated quantified lemma can trigger an unbounded solver matching loop.
 Prefer the smallest explicit set that contains the needed argument.
 
+Lean types may be empty, while every SMT sort is inhabited. Translation uses
+validity predicates, visible as `wf_...` guards in the script, to restrict padded
+sorts to values representing Lean inhabitants. These guards are required for
+correctness and can substantially slow quantified solving even when translation
+itself is fast.
+
+For an opaque type `T` already known to be inhabited, explicit `[Nonempty T]`
+evidence lets translation omit its carrier guard. An existing local value
+`x : T` is also sufficient. If a hypothesis `h : ∃ x : T, P x` supplies the
+evidence, expose it with `haveI : Nonempty T := h.nonempty` before `crush`.
+This helps the Paxos case study, whose transition hypothesis already entails node
+nonemptiness; the size of the improvement depends on the solver version and query.
+Use this only when nonemptiness follows from the problem's assumptions: adding an
+unjustified assumption changes the theorem being proved.
+
 # Inspecting SMT-LIB
 %%%
 tag := "troubleshooting-smt"

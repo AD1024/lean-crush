@@ -189,12 +189,12 @@ theorem church_tower
 /-! ## Handled: the Paxos consensus goal (`SmtTranslation/Names.lean`)
 
 This Paxos safety obligation combines quantified invariants with function-valued
-state updates. An explicit instance of the sixth invariant avoids an unstable
-quantifier search over the goal's rounds, values, and quorum. Its witness survives
-the max-vote update; proposals and votes are unchanged. The full invariant and
-transition remain selected to exercise their translation. A fixed solver seed and
-short timeout guard against expensive search. No `TotalOrder` or `Quorum` class laws
-are needed. -/
+state updates. The full invariant and transition remain selected so the solver
+must instantiate the safety invariant itself. Its witness survives the max-vote
+update; proposals and votes are unchanged. Explicit node nonemptiness avoids
+padding this carrier with invalid values; `hnext` already entails that assumption.
+A fixed solver seed and short timeout guard against expensive search. No
+`TotalOrder` or `Quorum` class laws are needed. -/
 
 section Paxos
 set_option crush.backend "cvc5"
@@ -214,7 +214,7 @@ class Quorum (node : Type) (quorum : outParam Type) where
   quorum_intersection :
     ∀ (q1 q2 : quorum), ∃ (a : node), member a q1 ∧ member a q2
 
-theorem extracted_paxos_goal {node : Type} [inst : DecidableEq node] {value : Type}
+theorem extracted_paxos_goal {node : Type} [Nonempty node] [inst : DecidableEq node] {value : Type}
     [inst_1 : DecidableEq value] {quorum : Type} [inst_2 : Quorum node quorum]
     {round : Type} [inst_3 : DecidableEq round] [inst_4 : TotalOrder round]
     (st_one_a : round → Bool) (st_one_b_max_vote : node → round → round → value → Bool)
@@ -262,7 +262,7 @@ theorem extracted_paxos_goal {node : Type} [inst : DecidableEq node] {value : Ty
     ∃ n r3 rmax v,
       Quorum.member n q = true ∧
         ¬TotalOrder.le r3 r1 = true ∧ st'_one_b_max_vote n r3 rmax v = true ∧ ¬st'_vote n r1 v1 = true := by
-  crush [hnext, hinv, hinv.2.2.2.2.2.1 r1 r2 v1 v2 q, h]
+  crush [hnext, hinv, h]
 end Paxos
 
 /-! ## Remaining gap: Church numerals over an *abstract* universe (`Test_Regression.lean`)

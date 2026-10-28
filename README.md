@@ -146,6 +146,11 @@ and [`Test/AletheExtension.lean`](Test/AletheExtension.lean) for complete exampl
   fail translation, undoing their translation state and reporting them under
   `trace.crush`. Failure to translate the negated goal remains an error.
   Script-only mode (`crush.backend "none"`) warns about each omitted premise.
+- **Empty-carrier guards can slow quantified solving.** Lean types may be empty,
+  while SMT sorts are always inhabited. The required validity guards can increase
+  solver search substantially. For an opaque type `T`, justified `[Nonempty T]`
+  evidence or an existing local value `x : T` lets translation omit its guard.
+  Expose nonemptiness only when it follows from the problem's assumptions.
 - **Solving can exceed reconstruction.** A solver may prove a goal whose
   certificate or core cannot yet be reconstructed in Lean.
 - **Models describe the encoding.** A satisfiable SMT model is not necessarily a
