@@ -1,24 +1,16 @@
 import Lean
-open Lean
 
 /-!
 # SMT-LIB 2.6 Abstract Syntax
 
-A typed representation of the fragment of SMT-LIB we emit and parse. This is the
-*target language* of translation: everything upstream (reification, HO encoding,
-user annotations) ultimately produces `Crush.SMT.Command`s.
-
-Design notes:
-* We keep sorts, terms, and commands as plain inductives with `ToString`, but we
-  additionally derive `Repr` everywhere so failures print structurally.
-* `Term` carries an optional annotation slot (`.annot`) used for `:named`
-  bindings so we can recover unsat-core provenance without string surgery.
-* Higher-order function *values* never appear here — they are eliminated upstream
-  by the encoding layer (see `Crush/Translation/HOEncoding.lean`). This module is
-  deliberately first-order so that it maps 1:1 onto what solvers accept.
-* The SMT sort type is named `SSort` (not `Sort`) to avoid clashing with Lean's
-  universe keyword.
+Sorts, terms, attributes, and commands form the target IR shared by translation,
+printing, and solver-output handling. Named annotations preserve unsat-core provenance.
+The IR includes native higher-order lambdas as well as first-order forms;
+defunctionalization removes function syntax before emission when that mode is selected.
+`SSort` avoids Lean's `Sort` keyword, and the separate checker validates sort consistency.
 -/
+
+open Lean
 
 namespace Crush.SMT
 

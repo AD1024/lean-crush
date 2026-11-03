@@ -33,6 +33,24 @@ The user-visible result identifies the failing pipeline stage:
 * A `kernel-reject` during replay means a generated proof term was invalid.
   This is an implementation or extension defect, not a difficult proof.
 
+Solver queries may omit a hypothesis that fails translation. The failed attempt
+is rolled back, including generated declarations, retained encoding evidence,
+and Lean metavariable assignments; `trace.crush` reports the omitted fact and
+its error. This can reduce the facts available to the solver. Failure to
+translate the negated goal remains fatal. Backend `"none"` also omits unsupported
+hypotheses, with a warning for each omitted fact.
+
+Checked reconstruction rejects transitive dependencies on `sorryAx` and
+`Crush.crushSorry`, including dependencies in the goal's own definitions and in
+hypotheses used by a proof. An error such as “depends on forbidden axiom `sorryAx`
+through `c`” identifies a rejected proof candidate's dependency. Replace `c` with
+a definition whose proof dependencies pass this policy, or provide a proof that
+does not use it. Unrelated hypotheses do not block a successful checked proof.
+If all attempts fail, `reconstructOrTrust` reports the same dependency in its
+fallback warning. Its result trusts the solver for the whole goal, even when an
+ordinary Lean tactic could prove the goal using only a definition whose
+termination proof already depends on `Crush.crushSorry`.
+
 Enable profiling before tuning performance:
 
 ```
@@ -88,6 +106,21 @@ The remedy depends on the expensive phase:
 More facts are not always better.
 An unrelated quantified lemma can trigger an unbounded solver matching loop.
 Prefer the smallest explicit set that contains the needed argument.
+
+Lean types may be empty, while every SMT sort is inhabited. Translation uses
+validity predicates, visible as `wf_...` guards in the script, to restrict padded
+sorts to values representing Lean inhabitants. These guards are required for
+correctness and can substantially slow quantified solving even when translation
+itself is fast.
+
+For an opaque type `T` already known to be inhabited, explicit `[Nonempty T]`
+evidence lets translation omit its carrier guard. An existing local value
+`x : T` is also sufficient. If a hypothesis `h : ∃ x : T, P x` supplies the
+evidence, expose it with `haveI : Nonempty T := h.nonempty` before `crush`.
+This helps the Paxos case study, whose transition hypothesis already entails node
+nonemptiness; the size of the improvement depends on the solver version and query.
+Use this only when nonemptiness follows from the problem's assumptions: adding an
+unjustified assumption changes the theorem being proved.
 
 # Inspecting SMT-LIB
 %%%
@@ -200,6 +233,19 @@ or a lemma that crush uses mentions a type such as `Fin n` or a function of type
 has no sound way to translate these types. Restate the goal so that the type does
 not appear, for example by stating a fact about `Fin n` as a fact about natural
 numbers below `n`, or prove the goal without `crush`.
+
+Built-in sort keys also cannot capture a variable bound inside a translated
+quantifier or lambda. This includes quantified type variables: the translation
+cannot use one fixed SMT sort for all their possible instantiations. It also
+includes function domains containing bound propositions, such as `p → Int`
+under `∀ p : Prop`, or `(x > 0) → Int` under `∀ x : Int`.
+
+Function values with proof domains, such as `p → Int` for `p : Prop`, are refused
+even when closed. Ordinary function sorts do not model proof irrelevance or the
+distinction between an impossible premise and a true one. Fully applied functions
+may still erase proof arguments when the existing guards permit it, and logical
+implications remain supported. Use those forms or supply a custom handler with a
+sound encoding.
 
 Native higher-order solving is cvc5-only and has certificate gaps.
 Defunctionalization supports more backends, but its encoded function sorts need

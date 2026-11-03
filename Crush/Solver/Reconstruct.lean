@@ -4,44 +4,21 @@ import Crush.Frontend.Collect
 import Crush.SMT.Result
 import Crush.Solver.KernelCheck
 import Crush.Solver.ReconstructRules
-open Lean Meta Elab Tactic
 
 /-!
 # Turning an `unsat` verdict into a checked Lean proof
 
-The `trust` policy closes a goal with an axiom: the solver said `unsat`, we believe
-it. That is fast and it is what every deployed hammer does by default, but the
-solver's translation and the solver itself both sit in the trusted computing base.
+Use an unsat core to select facts, close the target over exactly their required
+local parameters, and try registered rules, finishing tactics, and bounded datatype
+search. Failed attempts restore state; successful terms pass kernel validation and
+the reconstruction trust checks before assignment.
 
-This module implements the *solver-as-oracle* model instead. The solver's real
-contribution is not the proof object — it is the **selection**: out of a context
-with dozens of hypotheses, the unsat core names the two or three that actually
-matter. That is exactly the information a Lean-side automated tactic lacks. So:
-
-1. take the unsat core, mapping each `crush_fact_<n>` back to its Lean hypothesis;
-2. build a goal whose context is *only* those hypotheses;
-3. hand it to a Lean finishing tactic (`grind`, then `omega`).
-
-If the finisher succeeds we have a kernel-checked proof and the solver drops out of
-the trusted base entirely — it was only a search heuristic. If it fails we report
-that honestly rather than silently falling back to the axiom (unless the policy
-explicitly says to).
-
-Why this works when calling the finisher on the *whole* context often does not:
-automated tactics degrade badly as the hypothesis count grows, and irrelevant
-arithmetic facts are exactly what makes them time out. Core-directed selection
-turns a 40-hypothesis goal into a 3-hypothesis goal.
-
-Some verdicts turn on a constructor case analysis instead, which no fixed tactic string can
-perform — the required step names a variable. Those are handled after the ladder by the
-programmatic pre-pass below.
-
-This path is attempted for every backend, but assumption-dependent reconstruction
-requires a backend-provided unsat core. It also depends on a Lean tactic re-finding
-the argument, which fails for long inference chains; when cvc5 supplies an Alethe
-certificate, `Crush/Solver/Alethe/Replay.lean` runs first and replays the chain step by
-step instead. Both end in a kernel-checked term, so they differ only in reach.
+Assumption-dependent reconstruction requires a backend-provided core. Alethe replay
+is handled separately and may run first. This module returns checked proofs or
+failure; the caller controls any explicit fallback to the SMT trust axiom.
 -/
+
+open Lean Meta Elab Tactic
 
 namespace Crush
 
@@ -65,9 +42,8 @@ def coreHypotheses (st : TranslateState) (coreIds : Array Nat) : Array Expr := I
         unless seenProofs.contains proof do
           seenProofs := seenProofs.insert proof
           out := out.push proof
-  -- Preserve compatibility with fact producers that emit a quantified parent
-  -- together with generated instances. Ground instantiation replaces eligible
-  -- successful parents, so those generated proofs are selected directly above.
+  -- Also support producers that retain a quantified parent beside its instances;
+  -- ground instantiation's replacement proofs were selected directly above.
   for src in st.facts do
     if let some parent := src.instanceOf then
       if seenProofs.contains parent then
@@ -75,10 +51,8 @@ def coreHypotheses (st : TranslateState) (coreIds : Array Nat) : Array Expr := I
           unless seenProofs.contains proof do
             seenProofs := seenProofs.insert proof
             out := out.push proof
-  -- Preprocessing can make the negated assertion independent of the equations
-  -- that produced it, so the solver omits them from the core. Supply the exact,
-  -- specialized equality between the original and normalized negated goals
-  -- rather than every raw polymorphic equation.
+  -- The core may omit equations used only during normalization. Supply the
+  -- specialized equality to the original negation, not every polymorphic equation.
   for src in st.facts do
     if let some proof := src.reconstructionProof then
       unless seenProofs.contains proof do
@@ -223,19 +197,11 @@ private def useGlobalSimpPrepass (proofs : Array Expr) : Bool :=
 
 /-! ## Bounded datatype case search
 
-Some verdicts turn on a *constructor case analysis*: datatype exhaustiveness
-(`t = .leaf ∨ ∃ l v r, t = .node l v r`) and structure eta
-(`p.x = q.x → p.y = q.y → p = q`). No rung reaches these, because the step they need is
-`cases t` — naming a variable a *fixed* tactic string cannot know.
-
-The search is datatype-generic: it considers every constructor-bearing local value that
-occurs in the target, including theory-backed inductives such as `Nat` and `Bool`. It tries
-each candidate independently instead of committing to the first one; this is important for
-goals such as `f (n - 1)`, where splitting another `Nat` in the target is useless but
-splitting `n` exposes exactly the zero/successor boundary.
-
-Depth, candidate, constructor, and branch caps make recursive or high-arity datatypes a
-bounded fallback rather than an accidental induction procedure. -/
+Try constructor-bearing local values independently, including theory-backed Nat and
+Bool values. Constructor splitting can expose exhaustiveness, structure eta, or the
+boundary of a recursive operation. Depth, candidate, constructor, and branch caps
+keep the search bounded rather than performing induction.
+-/
 
 private def isConstructorPattern (e : Expr) : MetaM Bool := do
   let e := e.consumeMData
@@ -350,9 +316,8 @@ normalization exposes a small arithmetic or datatype boundary, but large atomic 
 as nested array updates are rejected before recursive splitting. `approxDepth` is stored on
 `Expr`, so this gate is constant-time. Field-free finite enums are handled separately. -/
 private def exposesConstructorStructure (target : Expr) : MetaM Bool := do
-  -- Preserve logical wrappers before `whnf`: `Ne` and `Not` unfold to function
-  -- types, which would otherwise make a disequality look like an atomic target and
-  -- hide constructor-bearing values nested in its operands.
+  -- Inspect Ne and Not before whnf turns them into arrows and hides
+  -- constructor-bearing operands from target traversal.
   let rawExposesStructure :=
     target.isEq || target.isHEq ||
     target.isAppOfArity ``Ne 3 || target.isAppOfArity ``Not 1 ||
@@ -496,15 +461,18 @@ mutual
     if ← g.isAssigned then return true
     unless ← isProp (← instantiateMVars (← g.getType)) do return false
     let saved ← saveState
-    try
+    let closed ← tryCatchRuntimeEx (do
       if ← g.assumptionCore then
         let proof ← instantiateMVars (mkMVar g)
         unless proof.hasSorry || proof.hasMVar do return true
       restoreState saved
-    catch _ => restoreState saved
-    -- A premise with unconstrained theorem parameters must be anchored by an exact
-    -- contextual fact before recursive search. Sending such a goal to `grind` can explore
-    -- arbitrary instantiations and turn an unrelated generic rule into a major slowdown.
+      return false
+    ) fun _ => do
+      restoreState saved
+      return false
+    if closed then return true
+    -- Anchor unconstrained theorem parameters with an exact contextual fact
+    -- before recursive search, avoiding arbitrary instantiation by general tactics.
     if (← instantiateMVars (← g.getType)).hasMVar then
       trace[crush.reconstruct] "declined unanchored rule premise: {← g.getType}"
       return false
@@ -513,12 +481,16 @@ mutual
       if ← finishWithRegisteredRules g finishers ruleFuel then return true
     for tac in finishers do
       let saved ← saveState
-      try
+      let closed ← tryCatchRuntimeEx (do
         if (← Tactic.run g (evalTactic tac)).isEmpty then
           let proof ← instantiateMVars (mkMVar g)
           unless proof.hasSorry || proof.hasMVar do return true
         restoreState saved
-      catch _ => restoreState saved
+        return false
+      ) fun _ => do
+        restoreState saved
+        return false
+      if closed then return true
     if ruleFuel > 0 then
       if ← finishWithEqualitySplits g then return true
     return false
@@ -558,9 +530,8 @@ mutual
           let (equal, unequal) ← g.byCases proposition `hEq
           trace[crush.reconstruct] "split target equality {proposition}"
           let cheapFinishers ← equalityFinisherTactics
-          -- The unequal branch must be justified by a quantified local rule whose
-          -- premises become cheap consequences of the new disequality. Falling back to
-          -- the full ladder here made speculative splits saturate unrelated array VCs.
+          -- Require a quantified local rule with cheap premises for the unequal branch;
+          -- a full fallback search would saturate unrelated contexts during speculative splits.
           if (← finishOne equal.mvarId cheapFinishers 0) &&
               (← finishWithLocalRules unequal.mvarId cheapFinishers 1) then
             let proof ← instantiateMVars (mkMVar g)
@@ -640,7 +611,7 @@ private def finishSelectedRulePremise (g : MVarId)
     g.withContext do
   if ← finishOne g finishers ruleFuel then return true
   let saved ← saveState
-  try
+  tryCatchRuntimeEx (do
     let normalizedGoals ← Tactic.run g (evalTactic (← guardNormalizationTactic))
     trace[crush.reconstruct] "guard normalization left {normalizedGoals.length} goal(s)"
     if normalizedGoals.isEmpty then
@@ -650,7 +621,7 @@ private def finishSelectedRulePremise (g : MVarId)
         return true
     restoreState saved
     return false
-  catch e =>
+  ) fun e => do
     trace[crush.reconstruct] "guard normalization declined: {e.toMessageData}"
     restoreState saved
     return false
@@ -761,12 +732,9 @@ private partial def splitSearch (g : MVarId) (finishers : Array (TSyntax `tactic
 
 /-! ## Constructor-guided existential witnesses
 
-An SMT refutation can establish an existential goal without returning a witness, while a
-direct Lean proof needs one. Hard-coding arithmetic witnesses does not generalize beyond
-`Nat`. Instead, collect target-independent subterms from the predicate and close over the
-witness type's constructors for two bounded rounds. For `∃ n, t < n`, this discovers
-`Nat.succ t`; the same search builds `some x`, list constructors, or downstream inductive
-values when their fields are present in the goal.
+Build witnesses from target-independent predicate subterms and two bounded rounds
+of constructor closure. This discovers values such as `Nat.succ t`, `some x`, and
+list constructors without datatype-specific witness rules.
 -/
 
 private partial def collectSubterms (e : Expr) (terms : Array Expr := #[]) :
@@ -831,8 +799,7 @@ private def termsOfType (pool : Array Expr) (type : Expr) (limit : Nat := 32) :
 /-- Existing terms plus two constructor-closure rounds for an inductive witness type. -/
 private def witnessCandidates (target witnessType : Expr) : TacticM (Array Expr) := do
   let witnessType ← whnf witnessType
-  -- Exact in-scope values are cheaper and generally more relevant than rebuilding
-  -- the same datatype from a broad Cartesian product of field subterms.
+  -- Prefer existing values to Cartesian products of constructor-field candidates.
   let mut pool := #[]
   for localDecl in ← getLCtx do
     if localDecl.isImplementationDetail || pool.size >= 48 then continue
@@ -846,15 +813,13 @@ private def witnessCandidates (target witnessType : Expr) : TacticM (Array Expr)
   let typeArgs := witnessType.getAppArgs
   for _ in [0:2] do
     let roundPool := pool
-    -- Constructors carrying target data are generally more informative witnesses than
-    -- defaults (`succ t` before `zero`, `some x` before `none`, `cons` before `nil`).
+    -- Prefer constructors carrying target data over nullary defaults.
     for withFields in [true, false] do
       for ctorName in inductInfo.ctors do
         if witnesses.size >= 32 then break
         let some (.ctorInfo ctorInfo) := (← getEnv).find? ctorName | continue
         if (ctorInfo.numFields > 0) != withFields then continue
-        -- Larger constructors are still handled by datatype splitting. Witness synthesis
-        -- limits field combinations because the target subterm pool is intentionally broad.
+        -- Bound field combinations here; datatype splitting handles larger constructors.
         if ctorInfo.numFields > 3 then continue
         let ctor := mkAppN (mkConst ctorName levels)
           typeArgs[*...min ctorInfo.numParams typeArgs.size]
@@ -916,17 +881,13 @@ private def tryExistentialWitness (g : MVarId) (useGlobalSimp := true) :
     try
       trace[crush.reconstruct] "trying witness {witness}"
       let proofGoal ← g.existsIntro witness
-      -- A concrete constructor often exposes recursive `@[reducible]` wrappers that
-      -- were stuck on the symbolic existential (`path h x [] y`, downstream tree
-      -- predicates, and so on). Normalize definitionally before invoking the bounded
-      -- closers; this is constructor-generic and emits no quantified SMT equations.
+      -- Normalize reducible wrappers exposed by the concrete witness before
+      -- bounded closure; this requires no quantified SMT equations.
       let normalizedGoal ← unfoldReducibleTarget proofGoal
       let normalizedTarget ← normalizedGoal.getType
       trace[crush.reconstruct] "normalized witness target: {normalizedTarget}"
-      -- This pass synthesizes one constructor witness. If its body still needs a
-      -- second witness, broad simplification is both unlikely to close it and can
-      -- index a large quantified context. Leave nested existentials to SMT or the
-      -- full post-verdict reconstruction path.
+      -- Leave nested existentials to SMT or post-verdict reconstruction;
+      -- this pass supplies only one constructor witness.
       if containsExistential normalizedTarget then
         trace[crush.reconstruct] "declined witness with nested existential body"
         restoreState saved
@@ -941,11 +902,25 @@ private def tryExistentialWitness (g : MVarId) (useGlobalSimp := true) :
 
 /-- `t₁ → … → tₙ → concl`. The binders are non-dependent — each hypothesis is a
 closed `Prop` — so a plain `mkForall` chain suffices. -/
-def mkArrowChain (tys : Array Expr) (concl : Expr) : Expr := Id.run do
+def mkArrowChain (tys : Array Expr) (concl : Expr) (names : Array Name := #[]) :
+    Expr := Id.run do
   let mut result := concl
-  for ty in tys.reverse do
-    result := mkForall `h .default ty result
+  for i in [:tys.size] do
+    let index := tys.size - 1 - i
+    result := mkForall (names[index]?.getD `h) .default tys[index]! result
   return result
+
+/-- Keep accessible names for selected local proofs. Shadowed locals and compound
+proof terms receive fresh names, so they cannot hide another selected hypothesis
+that the user's finisher could name in the original context. -/
+private def proofBinderNames (proofs : Array Expr) : MetaM (Array Name) := do
+  let lctx ← getLCtx
+  proofs.mapM fun proof => do
+    if let .fvar fvarId := proof.consumeMData then
+      let decl ← fvarId.getDecl
+      if (lctx.findFromUserName? decl.userName).any (·.fvarId == fvarId) then
+        return decl.userName
+    mkFreshUserName `h
 
 /-- Try bounded constructor witnesses using only explicitly selected facts.
 
@@ -965,7 +940,7 @@ private def trySelectedExistentialWitness (snapshot : KernelCheckSnapshot)
   let params ← collectProofParams #[target]
   let closedTarget ← mkForallFVars params target
   let saved ← saveState
-  try
+  tryCatchRuntimeEx (do
     let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
     let (_, g) ← mv.mvarId!.intros
     if ← tryExistentialWitness g (useGlobalSimpPrepass proofs) then
@@ -975,7 +950,7 @@ private def trySelectedExistentialWitness (snapshot : KernelCheckSnapshot)
       return true
     restoreState saved
     return false
-  catch e =>
+  ) fun e => do
     trace[crush.reconstruct] "pre-SMT witness synthesis declined: {e.toMessageData}"
     restoreState saved
     return false
@@ -1000,7 +975,7 @@ private def trySelectedConstructorSplit (snapshot : KernelCheckSnapshot)
   let params ← collectProofParams #[target]
   let closedTarget ← mkForallFVars params target
   let saved ← saveState
-  try
+  tryCatchRuntimeEx (do
     let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
     let (_, g) ← mv.mvarId!.intros
     if (← splittableFVars g (onlyComputationallyScrutinized := true)).isEmpty then
@@ -1024,7 +999,7 @@ private def trySelectedConstructorSplit (snapshot : KernelCheckSnapshot)
       return true
     restoreState saved
     return false
-  catch e =>
+  ) fun e => do
     trace[crush.reconstruct] "pre-SMT constructor split declined: {e.toMessageData}"
     restoreState saved
     return false
@@ -1052,7 +1027,7 @@ private def trySelectedFactRulesOnce (snapshot : KernelCheckSnapshot)
   let params ← collectProofParams #[target]
   let closedTarget ← mkForallFVars params target
   let saved ← saveState
-  try
+  tryCatchRuntimeEx (do
     let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
     let (introduced, g) ← mv.mvarId!.intros
     if introduced.size < proofs.size then
@@ -1094,7 +1069,7 @@ private def trySelectedFactRulesOnce (snapshot : KernelCheckSnapshot)
         restoreState candidateSaved
     restoreState saved
     return false
-  catch e =>
+  ) fun e => do
     trace[crush.reconstruct] "pre-SMT selected-rule reconstruction declined: {e.toMessageData}"
     restoreState saved
     return false
@@ -1117,7 +1092,7 @@ private partial def trySelectedFactRules (snapshot : KernelCheckSnapshot)
   let goalType ← instantiateMVars (← goal.getType)
   let some guard ← firstUndecidedIteGuard? goal proofs | return false
   let saved ← saveState
-  try
+  tryCatchRuntimeEx (do
     let (positive, negative) ← goal.byCases guard `hUpdateGuard
     trace[crush.reconstruct] "split selected-rule update guard {guard}"
     for branch in #[positive, negative] do
@@ -1129,7 +1104,7 @@ private partial def trySelectedFactRules (snapshot : KernelCheckSnapshot)
     let assigned ← instantiateMVars (mkMVar goal)
     discard <| kernelCheckProof snapshot goalType assigned
     return true
-  catch e =>
+  ) fun e => do
     trace[crush.reconstruct] "selected-rule guard split declined: {e.toMessageData}"
     restoreState saved
     return false
@@ -1145,21 +1120,20 @@ time out.
 Returns `true` if the goal was closed; leaves `goal` untouched otherwise. -/
 def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
     (finishers : Array (TSyntax `tactic))
-    (manualFinisher? : Option (TSyntax `tactic) := none) : TacticM Bool :=
+    (manualFinisher? : Option (TSyntax `tactic) := none)
+    (snapshot? : Option KernelCheckSnapshot := none) : TacticM Bool :=
   goal.withContext do
-    let snapshot ← KernelCheckSnapshot.capture
+    let snapshot ← snapshot?.getDM KernelCheckSnapshot.capture
     let goalType ← instantiateMVars (← goal.getType)
     let hypTypes ← coreProofs.mapM fun p => do instantiateMVars (← inferType p)
-    let target := mkArrowChain hypTypes goalType
-    -- Abstract exactly the local data/type variables that occur in the target
-    -- (plus their dependencies). Proposition hypotheses not selected by the SMT
-    -- core are absent from `target` and therefore cannot enter the finisher's
-    -- context through metavariable creation.
+    let target := mkArrowChain hypTypes goalType (← proofBinderNames coreProofs)
+    -- Abstract only target parameters and their dependencies. Unselected
+    -- proposition hypotheses must not enter through the new metavariable context.
     let params ← collectProofParams #[target]
     let closedTarget ← mkForallFVars params target
     if let some tac := manualFinisher? then
       let saved ← saveState
-      try
+      let closed ← tryCatchRuntimeEx (do
         trace[crush.reconstruct] "trying manual finisher: {tac}"
         let ambientLCtx ← getLCtx
         let paramIds := params.foldl (init := ({} : FVarIdSet))
@@ -1171,7 +1145,7 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
         let restrictedInsts := (← getLocalInstances).filter fun inst =>
           paramIds.contains inst.fvar.fvarId!
         let mv ← withLCtx restrictedLCtx restrictedInsts do mkFreshExprMVar target
-        let (_, manualGoal) ← mv.mvarId!.introN coreProofs.size
+        let (_, manualGoal) ← mv.mvarId!.introNP coreProofs.size
         let gs ← Tactic.run manualGoal (evalTactic tac)
         if gs.isEmpty then
           let assigned ← instantiateMVars mv
@@ -1180,15 +1154,16 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
           return true
         trace[crush.reconstruct] "manual finisher left goals: {← gs.mapM (·.getType)}"
         restoreState saved
-      catch e =>
+        return false
+      ) fun e => do
         trace[crush.reconstruct] "manual finisher declined: {e.toMessageData}"
         restoreState saved
-    -- Try conclusion-indexed domain rules before the general tactic ladder. This path is
-    -- especially important for nonlinear or datatype-specific bridges: `grind` may spend
-    -- the whole command budget without discovering a theorem the user explicitly
-    -- registered for this purpose.
+        return false
+      if closed then return true
+    -- Try registered conclusion-indexed rules before general tactics can
+    -- consume the budget searching for the same specialized theorem.
     let saved ← saveState
-    try
+    let closed ← tryCatchRuntimeEx (do
       let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
       let (_, initialGoal) ← mv.mvarId!.intros
       let g ← destructAndHypotheses initialGoal
@@ -1215,14 +1190,16 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
         goal.assign (← kernelCheckProof snapshot goalType proof)
         return true
       restoreState saved
-    catch e =>
+      return false
+    ) fun e => do
       trace[crush.reconstruct] "rule-directed reconstruction declined: {e.toMessageData}"
       restoreState saved
+      return false
+    if closed then return true
     for tac in finishers do
-      -- Each attempt gets a fresh metavariable and a saved state, so a failed
-      -- finisher leaves nothing behind for the next one to trip over.
+      -- Isolate each finisher's metavariables and state from later attempts.
       let saved ← saveState
-      try
+      let closed ← tryCatchRuntimeEx (do
         trace[crush.reconstruct] "trying finisher: {tac}"
         let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
         let gs ← Tactic.run mv.mvarId! (evalTactic tac)
@@ -1233,15 +1210,16 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
           return true
         trace[crush.reconstruct] "finisher left goals: {← gs.mapM (·.getType)}"
         restoreState saved
-      catch e =>
+        return false
+      ) fun e => do
         trace[crush.reconstruct] "finisher declined: {e.toMessageData}"
         restoreState saved
-    -- Last resort: intro the core hypotheses, synthesize constructor-shaped existential
-    -- witnesses, then search bounded datatype splits. Only reached after every fixed rung
-    -- fails, so these more expensive generic searches strictly add reach.
+        return false
+      if closed then return true
+    -- After fixed finishers fail, try constructor witnesses and bounded datatype splits.
     trace[crush.reconstruct] "trying structured reconstruction"
     let saved ← saveState
-    try
+    let closed ← tryCatchRuntimeEx (do
       let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
       let (_, g) ← mv.mvarId!.intros
       let structuralFinishers ← structuralFinisherTactics
@@ -1249,8 +1227,7 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
         if ← tryExistentialWitness g then
           pure true
         else do
-          -- Field-free finite datatypes admit deeper exhaustive search without becoming an
-          -- induction procedure. The branch budget still bounds products of enum sizes.
+          -- Allow deeper finite-enum splitting while retaining the total branch budget.
           let enumCandidates ← splittableFVars g (onlyFiniteEnums := true)
           let enumFuel := min enumCandidates.size 6
           let enumBudget ← IO.mkRef 256
@@ -1275,9 +1252,12 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
         goal.assign (← kernelCheckProof snapshot goalType proof)
         return true
       restoreState saved
-    catch e =>
+      return false
+    ) fun e => do
       trace[crush.reconstruct] "structured reconstruction declined: {e.toMessageData}"
       restoreState saved
+      return false
+    if closed then return true
     return false
 
 /-- Try the checked Lean cases required before SMT for sound-but-incomplete encodings.
@@ -1294,9 +1274,9 @@ because first-order defunctionalization does not imply that every pointwise choi
 member in its encoded function sort. Other goals proceed directly to SMT, avoiding the full
 reconstruction ladder on the normal path. -/
 def tryPreReconstruct (goal : MVarId) (facts : Array Fact)
-    (selectedRuleSearch := true) : TacticM Bool :=
-    goal.withContext do
-  let snapshot ← KernelCheckSnapshot.capture
+    (selectedRuleSearch := true) (snapshot? : Option KernelCheckSnapshot := none) :
+    TacticM Bool := goal.withContext do
+  let snapshot ← snapshot?.getDM KernelCheckSnapshot.capture
   let goalType ← instantiateMVars (← goal.getType)
   for localDecl in ← getLCtx do
     if localDecl.isImplementationDetail then continue
@@ -1332,20 +1312,16 @@ def tryPreReconstruct (goal : MVarId) (facts : Array Fact)
     explicit rules: {explicitCandidateIndices.size}; \
     global simp: {useGlobalSimpPrepass selectedProofs}"
   if selectedRuleSearch then
-    -- Generated instances come first: their data parameters are anchored by query
-    -- patterns, unlike a quantified parent whose hidden parameter may not occur in its
-    -- conclusion and can be assigned from an irrelevant easy premise.
+    -- Prefer query-anchored instances to parents with unconstrained hidden parameters.
     if ← trySelectedFactRules snapshot goal selectedProofs generatedCandidateIndices 0 then
       return true
-    -- Reusing a quantified local invariant should not require a solver query. Keep this
-    -- first pass non-recursive: each generated premise must already be an assumption or a
-    -- cheap definitional/arithmetic consequence of the selected context.
+    -- Reuse local invariants without recursive premise search: every premise
+    -- must follow cheaply from the selected context.
     if ← trySelectedFactRules snapshot goal selectedProofs localCandidateIndices 0 then return true
     if ← trySelectedFactRules snapshot goal selectedProofs explicitCandidateIndices 0 then
       return true
   else
-    -- With the search off there is no speculative premise discharge, but direct reuse of
-    -- a local universal invariant is bounded and creates no proof obligations.
+    -- Disabling rule search still permits bounded direct reuse of local invariants.
     if ← trySelectedFactRulesOnce snapshot goal selectedProofs localCandidateIndices 0
         (premiseFreeOnly := true) then return true
   if ← trySelectedExistentialWitness snapshot goal selectedProofs then return true
@@ -1354,6 +1330,6 @@ def tryPreReconstruct (goal : MVarId) (facts : Array Fact)
   let args := target.getAppArgs
   unless target.getAppFn.isConstOf ``Exists && args.size == 2 do return false
   unless (← whnf args[0]!).isForall do return false
-  tryReconstruct goal selectedProofs #[]
+  tryReconstruct goal selectedProofs #[] (snapshot? := some snapshot)
 
 end Crush

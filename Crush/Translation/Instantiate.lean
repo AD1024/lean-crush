@@ -4,32 +4,18 @@ import Crush.Frontend.Config
 import Crush.Frontend.Collect
 import Crush.Translation.Pattern
 
-open Lean Meta
-
 /-!
 # Proof-producing ground term instantiation
 
-SMT E-matching only instantiates a quantified fact after a matching ground term
-already exists. This misses common forward chains where one lemma creates the term
-that triggers the next:
-
-```
-step : ∀ x, R x (next x)
-lift : ∀ x y, R x y → P (witness y)
-```
-
-This pass generates bounded ground instances of explicit hints and selected library
-premises before translation. Pattern matches are preferred: a generated `R a (next
-a)` fact directly determines the `x := a, y := next a` instance of `lift`. If no
-pattern matches yet, ground query terms seed triggerless lemmas such as `step`.
-
-Every generated proposition is obtained by applying the original Lean proof term.
-The pass therefore adds only logical consequences of user-supplied facts. A
-ground-first query may omit instantiated universal templates to prevent SMT
-E-matching from recreating unbounded term growth. The complete fallback always
-retains every original fact: finitely many ground instances cannot replace a
-universal fact when proving a quantified goal.
+Generate bounded ground instances from explicit hints and selected library premises.
+Application-pattern matches guide substitutions; ground query terms seed lemmas
+without matching triggers. Every instance applies its original Lean proof, so the
+pass adds only consequences of supplied facts.
+A ground-first query may omit universal templates to limit SMT instantiation, but
+only unsat is conclusive: the complete fallback retains the original quantified facts.
 -/
+
+open Lean Meta
 
 namespace Crush
 

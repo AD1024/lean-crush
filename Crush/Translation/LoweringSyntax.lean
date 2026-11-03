@@ -1,8 +1,6 @@
 import Crush.Translation.Attr
 import Crush.SMT.Quote
 
-open Lean Elab Command
-
 /-!
 # Pattern-based lowering registrations
 
@@ -12,6 +10,8 @@ elaborated application spines without unfolding. Matching finishes before any
 capture is translated, so a declined pattern emits no declarations.
 An optional `with ctx` explicitly binds the original `TranslationCtx` for the RHS.
 -/
+
+open Lean Elab Command
 
 namespace Crush
 

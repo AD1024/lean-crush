@@ -4,14 +4,10 @@ import Crush.Metatheory.Defunctionalization.ClosureCorrectness
 /-!
 # Total flattened higher-order translation
 
-This is the mathematical flattened transformation.  It is total over every
-constructor of the intrinsically typed HO language and returns both the FO term
-and all recursively generated output.
-
-The recursion has three modes.  Ordinary term translation may hand the same
-function-valued syntax to spine translation; lambda-body translation may do the
-same for a residual non-lambda function.  A numeric mode tag below the structural
-term size makes those handoffs well founded without `partial` definitions.
+The total mathematical transformation maps every intrinsically typed HO constructor
+to a first-order term and its generated output. Term, spine, and lambda-body modes
+may pass the same syntax between them; a mode tag below structural term size makes
+those handoffs well founded.
 -/
 
 namespace Crush.Metatheory.Defunctionalization

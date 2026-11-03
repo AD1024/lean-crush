@@ -3,21 +3,11 @@ import Lean
 /-!
 # Lightweight per-phase profiling
 
-A tiny wall-clock profiler for the `crush` pipeline, enabled by `crush.profile`. It
-records how long each phase (collect, normalize, monomorphize, instantiate,
-translate, solve, reconstruct) takes and prints a breakdown, so optimization
-targets the phase that actually dominates rather than a guess.
-
-Design notes:
-
-* **Wall-clock, not CPU.** `IO.monoMsNow` is a monotonic millisecond clock. The solver
-  runs in a child process, so only wall time captures it; and the Lean-side phases are
-  single-threaded, so wall ≈ CPU for them anyway.
-* **Zero cost when off.** The tactic checks `cfg.profile` before timing, so a
-  non-profiling run pays nothing beyond the branch. The profiler value is threaded
-  explicitly rather than kept in a reader state to keep this independent of `TranslateM`.
-* **Millisecond granularity** is enough: the phases we care about are tens to thousands
-  of ms. Sub-ms phases show as `0ms`, which is the right message (not the bottleneck).
+Record monotonic wall-clock timings for completed pipeline phases when profiling
+is enabled, including time spent in solver subprocesses. Sessions retain results
+across later failures and provide readable and machine-readable reports.
+Disabled profiling avoids clock reads; millisecond resolution may report short
+phases as zero.
 -/
 
 namespace Crush

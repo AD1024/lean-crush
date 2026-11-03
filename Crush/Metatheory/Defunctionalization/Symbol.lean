@@ -4,15 +4,9 @@ import Crush.Metatheory.FO.FamilySemantics
 /-!
 # Symbols for flattened defunctionalization
 
-The flattened transformation uses an abstract typed symbol family so recursive
-translation can allocate symbols structurally before choosing concrete SMT names.
-Constructors are classified by semantic role: source constants, flattened
-application, and exact-capture closures.
-
-`canonicalModel` gives every such symbol its intended interpretation in a model
-constructed from an HO source model. Interpreted translation hooks use the
-separate semantic contracts in `Hooks.lean`; they are not extra identities in
-the total structural translator's symbol family.
+Typed symbols distinguish source constants, flattened application, and exact-capture
+closures. Structural allocation is independent of concrete SMT names; `canonicalModel`
+interprets the family using a higher-order source model.
 -/
 
 namespace Crush.Metatheory.Defunctionalization

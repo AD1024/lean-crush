@@ -1,16 +1,15 @@
 import Lean
 import Crush.Solver.ReconstructAttr
 
-open Lean
-
 /-!
 # Built-in proof-reconstruction rules
 
-These are ordinary Lean theorems registered through the same public mechanism available
-to downstream libraries, and the reconstruction engine itself inspects none of them: it
-indexes whatever is registered by discrimination tree and does not know about `Nat`,
-multiplication, or a polynomial degree.
+Ordinary Lean theorems registered through the public reconstruction attribute.
+The engine indexes these rules by conclusion, so theory-specific lemmas can extend
+checked reconstruction without adding special cases to its search algorithm.
 -/
+
+open Lean
 
 namespace Crush
 

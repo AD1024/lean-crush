@@ -3,12 +3,10 @@ import Crush.SMT.Syntax
 /-!
 # Printing the SMT IR to SMT-LIB 2.6 text
 
-Rendering is separated from the IR so that alternative concrete syntaxes
-(e.g. a TPTP THF backend) can reuse the same abstract commands. De Bruijn
-`bvar`s are resolved against a binder stack passed down explicitly.
-
-Function names here avoid the `.toString` field name so they don't shadow the
-`ToString` instances used for interpolation.
+Render the IR as SMT-LIB, resolving de Bruijn variables through an explicit binder
+stack and escaping symbols and literals. Mutual list helpers expose structural
+descent through nested arrays, keeping the printers total and reducible.
+Renderer names avoid shadowing the `ToString` instances used by interpolation.
 -/
 
 namespace Crush.SMT
@@ -66,11 +64,6 @@ def identToString : Ident → String
 
 instance : ToString Ident := ⟨identToString⟩
 
--- `SSort` is a *nested* inductive (`app` carries `Array SSort`), and recursing
--- through `Array.map` hides the recursive call from the termination checker.
--- Recursing through an explicit mutual list helper exposes the structural descent,
--- so these are total definitions rather than `partial` — which matters because a
--- `partial` def is opaque to `decide`/`simp`/`rfl` and so cannot be reasoned about.
 mutual
   /-- Render a sort to SMT-LIB text. -/
   def sortToString (binders : List String) : SSort → String
@@ -104,8 +97,7 @@ parser as the character `a`.
 escape keeps lengths in agreement. `checkScript` rejects codepoints above SMT-LIB
 2.6's five-hex-digit escape range before this printer is called by `crush`. -/
 def escapeSmtString (s : String) : String :=
-  -- Appends into one accumulator with `push`/`append` rather than rebuilding it per
-  -- character, so escaping stays linear in the literal's length.
+  -- Append to one accumulator to keep escaping linear in the literal length.
   s.foldl (init := "") fun acc c =>
     if c == '"' then acc.append "\"\""
     else if c == '\\' then acc.append "\\u{5c}"
@@ -120,21 +112,15 @@ def literalToString : Literal → String
 
 instance : ToString Literal := ⟨literalToString⟩
 
--- `Term` and `Attr` are mutually nested inductives, each carrying `Array` of the
--- other. As with sorts above, the recursion goes through explicit list helpers so
--- the structural descent is visible and these are total rather than `partial`.
--- Note the `letE`/`quantToString` cases need their *own* helpers rather than reusing
--- `termListToStrings`: an intervening `.map (·.2)` to project the pair would itself
--- defeat the termination checker.
+-- Use separate helpers for binding pairs: projecting them with Array.map
+-- would hide structural descent from the termination checker.
 mutual
   /-- Render a term to SMT-LIB text, resolving `bvar`s against `binders`. -/
   def termToString (binders : List String) : Term → String
     | .lit l => literalToString l
     | .bvar i => binders[i]?.getD s!"?bv{i}"
-    -- A nullary application renders as the bare symbol. Written as an `if` on the
-    -- argument list rather than an `#[]` pattern: the latter compiles to a decidable
-    -- equality test on the array, which blocks Lean from deriving the unfold
-    -- equations a well-founded definition needs.
+    -- An empty-array pattern would introduce decidable equality and obstruct
+    -- unfold equations; test the argument list explicitly.
     | .app f args =>
       if args.isEmpty then identToString f
       else
@@ -153,10 +139,7 @@ mutual
         String.intercalate " " (attrListToStrings binders attrs.toList) ++ ")"
   termination_by t => sizeOf t
   decreasing_by
-    -- Each recursive call descends into a strict sub-term. The `Array → List`
-    -- conversions are the only non-obvious step: `sizeOf a.toList < sizeOf a` holds
-    -- because `sizeOf ⟨l⟩ = 1 + sizeOf l` (`Array.mk.sizeOf_spec`), so destructing
-    -- the array exposes the inequality to `omega`.
+    -- Destructing Array exposes sizeOf a.toList < sizeOf a to omega.
     all_goals first
       | omega
       | (obtain ⟨l⟩ := ts; simp [Array.mk.sizeOf_spec]; omega)

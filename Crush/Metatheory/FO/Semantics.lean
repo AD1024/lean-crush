@@ -3,13 +3,10 @@ import Crush.Metatheory.FO.Core
 /-!
 # Carriers and valuations for the first-order target
 
-Function-value sorts are interpreted by arbitrary carrier types.  In particular,
-they are *not* interpreted as Lean functions: generated `app` and closure symbols
-are uninterpreted until the defunctionalization theory constrains them.  This is
-the semantics required for the later model-extension proof.
-
-Models and term denotation live in `FO/FamilySemantics.lean`, over the abstract
-symbol family; this module holds only what both the sort and term layers share.
+Function-value sorts have arbitrary carrier types; application and closure symbols
+remain uninterpreted until constrained by the generated theory. This module supplies
+carriers and valuations shared with the abstract-symbol models and term denotation
+in `FO/FamilySemantics.lean`.
 -/
 
 namespace Crush.Metatheory.FO
