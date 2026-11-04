@@ -2,32 +2,18 @@ import Lean
 import Crush.SMT.Sexp
 import Crush.Solver.Alethe.ReplayAttr
 import Crush.Translation.Monad
-open Lean Meta
 
 /-!
 # Alethe terms → Lean `Expr`
 
-Proof replay (`Crush/Solver/Alethe/Replay.lean`) restates each Alethe step as a Lean
-proposition, so it needs the *inverse* of translation. Translation is one-directional, so
-this module reconstructs the inverse from two sources:
-
-* `TranslateState.nameToExpr` — the emitted-symbol → Lean-head map recorded during
-  translation, for uninterpreted symbols (`f`, `a`, `b`);
-* a fixed table for the theory operators and literals crush emits (`=`, `not`, `or`,
-  arithmetic, …), which are structural and so have no entry in that map.
-
-`toExpr?` is **partial by design**: `none` for anything it cannot map faithfully, which
-makes the caller decline the step. A returned `Expr` is only ever used as a goal statement
-Lean must then prove, so a bad translation loses a replay rather than fabricating one.
-
-## `:named` sharing
-
-cvc5 shares subterms via `(! t :named @p_1)` and later refers to `@p_1`. A definition can
-appear *inside* the very term that a later step references, so the bindings must be
-collected in a pre-pass (`collectNamed`) before any term is translated; `Alethe.stripAnnot`
-in the parser deliberately drops the annotations, which would otherwise leave `@p_k` as a
-dangling atom with no meaning.
+Recover Lean expressions from translation's symbol provenance and the supported
+theory operators. Decoding returns `none` when a faithful mapping is unavailable;
+returned expressions still require Lean proofs during replay.
+Collect named subterms from the original certificate before stripping annotations,
+including definitions nested inside terms that later steps reference.
 -/
+
+open Lean Meta
 
 namespace Crush.Alethe
 
@@ -508,8 +494,7 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
       return ← indexedApp ident (xs.extract 1 xs.size)
     let some (Sexp.atom head) := xs[0]? | return none
     let args := xs.extract 1 xs.size
-    -- Quantifiers bind variables, so they are handled before the argument pass (which
-    -- would translate the binder list as a term). `(forall ((x S) …) body)`.
+    -- Handle quantifiers before the argument pass can mistake binder lists for terms.
     if head == "forall" || head == "exists" then
       let some (Sexp.list binders) := args[0]? | return none
       let some body := args[1]? | return none
@@ -594,8 +579,7 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
       if ["+", "-", "*", "/", "=", "<", "<=", ">", ">=", "ite", "distinct"].contains head then
         alignRationalNumerals as
       else pure as
-    -- Right-nested n-ary connective, matching how the translator flattens `∨`/`∧`. The
-    -- operands sit in formula positions, so each is lifted to `Prop` first.
+    -- Right-nest connectives and lift every operand from Bool to Prop as needed.
     let nary (c : Name) (unit : Expr) : MetaM Expr := do
       if as.isEmpty then return unit
       let ps ← as.mapM toProp
@@ -606,9 +590,7 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
     match head, as.size with
     | "not", 1 => return some (mkApp (mkConst ``Not) (← toProp as[0]!))
     | "=", 2 =>
-      -- SMT `=` on two formulas is Lean `Iff`; on data it is `Eq`. Only *both* sides
-      -- being `Prop` makes it `Iff` — a `Bool`-sorted equation stays an `Eq` on `Bool`,
-      -- which is what the translator emitted and what `decide` can evaluate.
+      -- Use Iff only when both decoded sides are Prop; Bool data equality remains Eq.
       let t0 ← whnf (← inferType as[0]!)
       let t1 ← whnf (← inferType as[1]!)
       if t0.isProp && t1.isProp then return some (← mkAppM ``Iff #[as[0]!, as[1]!])
@@ -784,8 +766,7 @@ def clauseLiteralsToExprs? (ctx : TermCtx) (fuel : Nat)
   let mut out := #[]
   for l in lits do
     let some e ← toExpr? ctx fuel l | return none
-    -- Clause literals are formulas; a `Bool`-sorted one must be lifted before it can be
-    -- a disjunct (Lean's `Or` takes `Prop`s).
+    -- Lift Bool literals to Prop before using them as disjuncts.
     out := out.push (← instantiateMVars (← toProp e))
   return some out
 

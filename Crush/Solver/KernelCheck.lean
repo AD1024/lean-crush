@@ -1,6 +1,18 @@
 import Lean
 import Lean.Meta.Native
+import Lean.Compiler.ImplementedByAttr
+import Std.Tactic.BVDecide.Reflect
 import Crush.Frontend.Config
+
+/-!
+# Kernel validation and proof dependencies
+
+Validate reconstructed proofs against their expected types and audit transitive
+axiom dependencies, including declarations predating the invocation snapshot.
+Recheck generated declarations and reject admissions, unresolved metavariables, and
+unapproved native reflection. Bit-vector trust permits the standard certificate
+checker only with validated reflected data; general native trust is a separate policy.
+-/
 
 open Lean Meta
 
@@ -11,13 +23,29 @@ structure KernelCheckSnapshot where
   private env : Environment
   private trustBvDecide : Bool
   private trustNativeDecide : Bool
+  /-- Keep an actual candidate's admission error across speculative state restores.
+  A later successful proof may still be accepted; this is only a failure diagnostic. -/
+  private axiomFailure : IO.Ref (Option MessageData)
 
 def KernelCheckSnapshot.capture : CoreM KernelCheckSnapshot :=
   return {
     env := ← getEnv
     trustBvDecide := crush.reconstruct.trustBvDecide.get (← getOptions)
     trustNativeDecide := crush.reconstruct.trustNativeDecide.get (← getOptions)
+    axiomFailure := ← IO.mkRef none
   }
+
+/-- The first admission rejected during this invocation's proof attempts. -/
+def KernelCheckSnapshot.axiomFailure? (snapshot : KernelCheckSnapshot) :
+    BaseIO (Option MessageData) :=
+  snapshot.axiomFailure.get
+
+/-- Keep the declaration boundary while applying the caller's resolved trust policy. -/
+def KernelCheckSnapshot.withConfig (snapshot : KernelCheckSnapshot) (cfg : Config) :
+    KernelCheckSnapshot :=
+  { snapshot with
+    trustBvDecide := cfg.trustBvDecide
+    trustNativeDecide := cfg.trustNativeDecide }
 
 private def throwKernelFailure {α} (label : String) (ex : Kernel.Exception) : MetaM α := do
   throwError "crush: {label} failed kernel validation:\n{ex.toMessageData (← getOptions)}"
@@ -56,10 +84,15 @@ def forbiddenReconstructionAxiom? (name : Name) : CoreM (Option Name) := do
       return some axiomName
   return none
 
-private def ensureAxiomClosure (label : String) (e : Expr) : MetaM Unit := do
+private def ensureAxiomClosure (label : String) (e : Expr)
+    (snapshot? : Option KernelCheckSnapshot := none) : MetaM Unit := do
   for name in e.getUsedConstants do
     if let some axiomName ← forbiddenReconstructionAxiom? name then
-      throwError "crush: {label} depends on forbidden axiom `{axiomName}` through `{name}`"
+      let diagnostic := m!"{label} depends on forbidden axiom `{axiomName}` through `{name}`"
+      if let some snapshot := snapshot? then
+        if (← snapshot.axiomFailure?).isNone then
+          snapshot.axiomFailure.set (some diagnostic)
+      throwError "crush: {diagnostic}"
 
 /-- Check a replay fragment with the elaborator before the complete proof reaches the kernel. -/
 def validateProofCandidate (expected proof : Expr) : MetaM Expr := do
@@ -83,15 +116,87 @@ private def isNativeDecideAxiomName : Name → Bool
         (suffix == "ax" || suffix.startsWith "ax_")
   | _ => false
 
-private def isBvDecideAxiomType (type : Expr) : Bool :=
+private def isBooleanAssertion (type : Expr) : Bool :=
   let type := type.consumeMData
   type.isAppOfArity ``Eq 3 &&
     type.getAppArgs[0]!.isConstOf ``Bool &&
     type.getAppArgs[2]!.isConstOf ``Bool.true
 
+private def isBvDecideAxiomType (type : Expr) : Bool :=
+  isBooleanAssertion type &&
+    type.consumeMData.getAppArgs[1]!.isAppOfArity
+      ``Std.Tactic.BVDecide.Reflect.verifyBVExpr 2
+
 private def isNativeDecideAxiomType (type : Expr) : Bool :=
-  isBvDecideAxiomType type &&
+  isBooleanAssertion type &&
     type.getAppArgs[1]!.isAppOfArity ``decide 2
+
+private def isBvReflectionDataType (name : Name) : Bool :=
+  name == ``Nat || name == ``Bool || name == ``Eq ||
+    name == ``Std.Tactic.BVDecide.BVExpr || name == ``Std.Tactic.BVDecide.BVPred ||
+    name == ``Std.Tactic.BVDecide.BoolExpr || name == ``Std.Tactic.BVDecide.BVBinOp ||
+    name == ``Std.Tactic.BVDecide.BVUnOp || name == ``Std.Tactic.BVDecide.BVBinPred ||
+    name == ``Std.Tactic.BVDecide.Gate
+
+private def isBvNatLiteral (expr : Expr) : Bool :=
+  expr.isRawNatLit ||
+    (expr.isAppOfArity ``OfNat.ofNat 3 &&
+      expr.getAppArgs[1]!.isRawNatLit && expr == mkNatLitCore expr.getAppArgs[1]!)
+
+/-- The checker receives reflected constructor data and a literal certificate. In
+particular, arbitrary compiled computations must not hide behind its two arguments.
+The standard BV expression constructors have compiler-generated cached-field
+implementations; only their original implementations from the same module qualify. -/
+private partial def checkBvReflectionData (env : Environment) (expr : Expr)
+    (checked : Std.HashSet Expr := {}) : MetaM (Std.HashSet Expr) := do
+  let expr := expr.consumeMData
+  if checked.contains expr then return checked
+  let mut checked := checked.insert expr
+  if expr matches .lit _ then return checked
+  let .const name levels := expr.getAppFn
+    | throwError "crush: bit-vector native evaluation requires closed reflected data"
+  let some info := env.find? name
+    | throwError "crush: unknown bit-vector reflection dependency `{name}`"
+  if let some implementation := Compiler.getImplementedBy? env name then
+    let trustedConstructor := match info with
+      | .ctorInfo ctor => ctor.induct == ``Std.Tactic.BVDecide.BVExpr &&
+          implementation == name.str "_override" &&
+          (env.getModuleIdxFor? name).isSome &&
+          env.getModuleIdxFor? name == env.getModuleIdxFor? implementation &&
+          (Compiler.getImplementedBy? env implementation).isNone &&
+          !isExtern env implementation
+      | _ => false
+    unless trustedConstructor do
+      throwError "crush: bit-vector reflection dependency `{name}` has an implementation substitution"
+  if isExtern env name then
+    throwError "crush: bit-vector reflection dependency `{name}` has an external implementation"
+  match info with
+  | .ctorInfo ctor =>
+    unless isBvReflectionDataType ctor.induct do
+      throwError "crush: unsupported bit-vector reflection constructor `{name}`"
+  | .inductInfo _ =>
+    unless isBvReflectionDataType name do
+      throwError "crush: unsupported bit-vector reflection data type `{name}`"
+  | .defnInfo defn =>
+    -- This is the standard literal representation produced by `ToExpr (BitVec n)`.
+    if name == ``BitVec.ofNat && expr.getAppNumArgs == 2 &&
+        expr.getAppArgs.all isBvNatLiteral then
+      pure ()
+    else if name == ``OfNat.ofNat && isBvNatLiteral expr then
+      if (Compiler.getImplementedBy? env ``instOfNatNat).isSome ||
+          isExtern env ``instOfNatNat then
+        throwError "crush: reflected natural numeral has a substituted implementation"
+      return checked
+    else
+      unless defn.safety == .safe && expr.getAppNumArgs == 0 do
+        throwError "crush: bit-vector native evaluation requires constructor data, found `{name}`"
+      let value := defn.value.instantiateLevelParams defn.levelParams levels
+      return ← checkBvReflectionData env value checked
+  | _ =>
+    throwError "crush: bit-vector native evaluation requires constructor data, found `{name}`"
+  for arg in expr.getAppArgs do
+    checked ← checkBvReflectionData env arg checked
+  return checked
 
 private def checkGeneratedType (env : Environment) (type : Expr) (label : String) :
     MetaM Unit := do
@@ -101,9 +206,9 @@ private def checkGeneratedType (env : Environment) (type : Expr) (label : String
       throwError "crush: {label} has a kernel-inferred type that is not a sort"
   | .error ex => throwKernelFailure label ex
 
-/-- A native-looking name is only a candidate, not evidence that the asserted
-computation happened. Independently evaluate its Boolean assertion under the caller's
-explicit native-trust option. The temporary validation axiom is discarded. -/
+/-- A native-looking name is only a candidate. Bit-vector trust is restricted to
+the standard checker over reflected data; general native trust permits `decide`.
+Independently evaluate the assertion and discard the temporary validation axiom. -/
 private def checkNativeAxiom (env : Environment) (name : Name) : MetaM Unit := do
   let some (.axiomInfo info) := env.find? name
     | throwError "crush: native-decision dependency `{name}` is not an axiom"
@@ -115,6 +220,13 @@ private def checkNativeAxiom (env : Environment) (name : Name) : MetaM Unit := d
     throwError "crush: native-decision axiom `{name}` has an unexpected type"
   checkGeneratedType env type s!"native-decision axiom `{name}` type"
   let assertion := type.consumeMData.getAppArgs[1]!
+  if isBvDecideAxiomName name then
+    let checker := ``Std.Tactic.BVDecide.Reflect.verifyBVExpr
+    if (Compiler.getImplementedBy? env checker).isSome || isExtern env checker then
+      throwError "crush: bit-vector certificate checker has a substituted implementation"
+    let mut checked := {}
+    for argument in assertion.getAppArgs do
+      checked ← checkBvReflectionData env argument checked
   let result ← withoutModifyingEnv do
     nativeEqTrue `crush_native_validation assertion
   match result with
@@ -172,6 +284,38 @@ def collectProofParams (exprs : Array Expr) : MetaM (Array Expr) := do
       indexed := indexed.push (decl.index, mkFVar fvarId)
   return (indexed.qsort (fun left right => left.1 < right.1)).map (·.2)
 
+/-- Report admissions in the goal before speculative reconstruction can hide the
+diagnostic. Only dependencies of the goal itself are included. -/
+def checkReconstructionGoalAxioms (expected : Expr) : MetaM Unit := do
+  let expected ← instantiateMVars expected
+  let params ← collectProofParams #[expected]
+  let closedExpected ← instantiateMVars (← mkForallFVars params expected)
+  ensureAxiomClosure "reconstructed goal type" closedExpected
+
+/-- Validate a trusted dependency with open caller universes at every universe
+instantiation. Rigid parameters prevent kernel validation from solving the caller's
+levels; expression metavariables remain forbidden. Admissions stay in the returned
+dependency's axiom closure, as required by the trusting policy. -/
+def checkDependencyUniverses (proof : Expr) : MetaM Unit :=
+    withoutModifyingState <| withNewMCtxDepth do
+  let proof ← instantiateMVars proof
+  let expected ← instantiateMVars (← inferType proof)
+  let params ← collectProofParams #[expected, proof]
+  let expected ← instantiateMVars (← mkForallFVars params expected)
+  let proof ← instantiateMVars (← mkLambdaFVars params proof)
+  let levels := collectLevelMVars (collectLevelMVars {} expected) proof
+  let mut replacements : Std.HashMap LMVarId Level := {}
+  for id in levels.result do
+    replacements := replacements.insert id (.param (← mkFreshId))
+  let abstractLevels := fun (expression : Expr) => expression.replaceLevel fun
+    | .mvar id => replacements.get? id
+    | _ => none
+  let expected := abstractLevels expected
+  let proof := abstractLevels proof
+  if expected.hasMVar || proof.hasMVar then
+    throwError "crush: trusted dependency contains unresolved expression metavariables"
+  kernelCheckExpected (← getEnv) {} expected proof "universe-polymorphic dependency"
+
 /-- Validate a generated declaration and every generated declaration it references. -/
 private partial def checkGeneratedDeclaration (baseline current : Environment)
     (trustBvDecide trustNativeDecide : Bool) (name : Name)
@@ -224,8 +368,8 @@ def kernelCheckProofWithParams (snapshot : KernelCheckSnapshot) (params : Array 
   ensureComplete "reconstructed proof" closedProof
   -- Baseline declarations are already kernel-checked, but their proofs may still
   -- depend on an admission. Check the complete closure before skipping that baseline.
-  ensureAxiomClosure "reconstructed goal type" closedExpected
-  ensureAxiomClosure "reconstructed proof" closedProof
+  ensureAxiomClosure "reconstructed goal type" closedExpected (some snapshot)
+  ensureAxiomClosure "reconstructed proof" closedProof (some snapshot)
   let current ← getEnv
   let mut checked : Std.HashSet Name := {}
   for name in closedExpected.getUsedConstants do

@@ -188,23 +188,18 @@ theorem church_tower
 
 /-! ## Handled: the Paxos consensus goal (`SmtTranslation/Names.lean`)
 
-lean-auto's largest SMT goal: a Paxos safety obligation with typeclasses, six-level
-quantifier nesting, and `fun`-valued state updates. It translates cleanly, but the
-≈60 ∀ / 14 ∃ alternation defeats both solvers' default E-matching. cvc5 with
-`--full-saturate-quant` (via `crush.additionalArgs`) closes it in ~0.2 s — reachable
-with the right flag, not blocked on the `trigger` support lean-auto uses. Under
-`trust`: like the Church tower, the verdict is a heavy quantified UF proof no
-core-directed finisher replays.
-
-The proof is plain modus ponens — `h` discharges the premise of `hinv`'s 6th conjunct,
-whose conclusion is the goal — so it uses `TotalOrder`/`Quorum` only as uninterpreted
-symbols and depends on *none* of their class laws (`le_total` etc. never reach the
-query). Weakening a law therefore leaves it provable, correctly. -/
+This Paxos safety obligation combines quantified invariants with function-valued
+state updates. The full invariant and transition remain selected so the solver
+must instantiate the safety invariant itself. Its witness survives the max-vote
+update; proposals and votes are unchanged. Explicit node nonemptiness avoids
+padding this carrier with invalid values; `hnext` already entails that assumption.
+A fixed solver seed and short timeout guard against expensive search. No
+`TotalOrder` or `Quorum` class laws are needed. -/
 
 section Paxos
 set_option crush.backend "cvc5"
-set_option crush.additionalArgs "--full-saturate-quant"
-set_option crush.timeout 30
+set_option crush.additionalArgs "--full-saturate-quant --seed=1"
+set_option crush.timeout 5
 
 class TotalOrder (t : Type) where
   le (x y : t) : Bool
@@ -219,7 +214,7 @@ class Quorum (node : Type) (quorum : outParam Type) where
   quorum_intersection :
     ∀ (q1 q2 : quorum), ∃ (a : node), member a q1 ∧ member a q2
 
-theorem extracted_paxos_goal {node : Type} [inst : DecidableEq node] {value : Type}
+theorem extracted_paxos_goal {node : Type} [Nonempty node] [inst : DecidableEq node] {value : Type}
     [inst_1 : DecidableEq value] {quorum : Type} [inst_2 : Quorum node quorum]
     {round : Type} [inst_3 : DecidableEq round] [inst_4 : TotalOrder round]
     (st_one_a : round → Bool) (st_one_b_max_vote : node → round → round → value → Bool)

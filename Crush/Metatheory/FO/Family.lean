@@ -3,17 +3,12 @@ import Crush.Metatheory.FO.Core
 /-!
 # First-order syntax over an abstract typed symbol family
 
-Verified passes are cleaner over a symbol family indexed directly by declaration:
-constructing a generated symbol immediately proves its type, independently of
-where a later finite allocator places it, so the recursion carries no
-"the signature still contains this declaration" invariant and needs no weakening
-lemmas as the signature grows.
-
-Reifying a family term into a concrete finite signature is *not* part of this
-development.  It needs a resolver defined on the symbols a theory actually uses,
-together with a proof that the allocation is injective on them; a resolver total
-over the whole family cannot exist, since the family is inhabited at infinitely
-many declarations (one `appDecl` per source arrow) while a signature is a list.
+Symbols are indexed by declarations, so their types do not depend on positions in a
+growing finite signature. Translation therefore needs no signature-membership or
+signature-weakening invariant.
+Finite reification is outside this development: it requires an injective resolver
+only for the symbols actually used, since the full family contains infinitely many
+application declarations.
 -/
 
 namespace Crush.Metatheory.FO

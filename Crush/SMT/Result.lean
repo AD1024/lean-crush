@@ -3,15 +3,9 @@ import Crush.SMT.Sexp
 /-!
 # Interpreting solver output
 
-Turns the raw text captured from a solver's `get-unsat-core` / `get-model` into
-structured data the tactic can act on:
-
-* `unsatCoreFactIds` — the list of fact ids named `crush_fact_<n>` in the core, so
-  the discharge layer can select exactly the hypotheses the solver used
-  so a failure can name the hypotheses actually responsible.
-* `parseModel` — the `(define-fun …)` assignments from a `sat` answer, so a
-  failed goal can be reported as a concrete counterexample rather than a generic
-  "failed".
+Decode unsat-core fact identifiers and model assignments from parsed solver output.
+The identifiers select source facts for reconstruction; model entries support
+diagnostics about the SMT encoding.
 -/
 
 namespace Crush.SMT
@@ -20,8 +14,7 @@ namespace Crush.SMT
 suffix indexes back into `TranslateState.facts`. -/
 def factNamePrefix : String := "crush_fact_"
 
--- Nested inductive over `Array`; the recursion goes through a list helper so the
--- descent is structural and this is total rather than `partial`.
+-- The list helper exposes structural descent through nested arrays.
 mutual
   /-- All fact ids named `crush_fact_<n>` anywhere within an S-expression. -/
   private def collectFactIds : Sexp → Array Nat

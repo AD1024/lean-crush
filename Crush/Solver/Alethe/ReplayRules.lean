@@ -68,11 +68,8 @@ private def revertNonnegativeInts : TacticM Unit := withMainContext do
 
 register_crush_replay rule low <<
   (assume ..) => by
-    -- SMT Boolean equality decodes as Iff. This direct bridge avoids using
-    -- source equalities as contextual simplification rules under quantifiers.
-    -- Validity predicates decode to True on actual Lean values. Remove their
-    -- guards, then instantiate the source fact if replay introduced the target's
-    -- quantifier binders before entering this rule.
+    -- Bridge formula equality to Iff without contextual rewriting under binders.
+    -- Remove validity guards on Lean values, then instantiate any introduced binders.
     simp (failIfUnchanged := false) only [eq_iff_iff, true_implies, true_and, and_true] at *
     <;> first | assumption | solve_by_elim (maxDepth := 4)
 >>

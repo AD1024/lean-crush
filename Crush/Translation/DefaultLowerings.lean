@@ -2,19 +2,18 @@ import Crush.Translation.Attr
 import Crush.Translation.Theories
 import Crush.Translation.Translate
 import Crush.SMT.Quote
-open Lean Meta
 
 /-!
 # Default head-indexed SMT lowerings
 
-Encodings in this module use the same public `@[crush_lower target]` API available to
-downstream users. They are kept out of the structural translator so support for library
-constants can grow without extending its central pattern match.
-
-Each lowering is exact for Lean's semantics and declines applications it cannot identify
-soundly. In particular, overloaded operations check their type and canonical typeclass
-instance; an explicitly supplied custom instance remains uninterpreted.
+Built-in library encodings use the public lowering API. Each handler validates its
+application, carrier representation, and required canonical dictionary before
+assigning SMT semantics; unsupported applications defer to ordinary translation.
+The section contracts record where decision, string, and finite-array representations
+need more than a direct operator mapping.
 -/
+
+open Lean Meta
 
 namespace Crush.DefaultLowerings
 
@@ -22,14 +21,11 @@ open Crush SMT
 
 /-! ## Decisions and dependent decision procedures
 
-`Decidable p` is a subsingleton, but mapping it directly to SMT `Bool` would be
-unsound for quantifiers: SMT would add a second value that Lean's type does not
-have. All decision values and dependent functions ending in `Decidable` therefore
-share a singleton SMT sort. The singleton axiom makes quantification exact.
-
-The observable operation `decide p` is lowered separately to `p`. In particular,
-applying a `DecidableEq α` and then observing its decision is exactly SMT equality;
-the concrete decision-procedure implementation remains proof-irrelevant. -/
+Decision values and dependent decision procedures share a singleton SMT sort:
+using Bool would add values absent from Lean's subsingleton. Observing `decide p`
+lowers to `p`, and observing `DecidableEq` lowers to equality independently of the
+proof-irrelevant decision implementation.
+-/
 
 private def hasDecidableCodomain (ty : Expr) : MetaM Bool := do
   forallTelescopeReducing ty fun _ body => do
@@ -115,27 +111,14 @@ def dvd : LoweringHandler := fun ctx => do
 
 /-! ## String operations
 
-These are direct mappings to SMT's sequence-of-codepoints string theory. The
-overloaded append form is claimed only for the canonical `String` instance;
-custom dictionaries continue through the ordinary translator. Every handler
-also declines when a sort extension has replaced the built-in SMT `String`
-representation.
+Direct mappings require the built-in String representation and canonical append
+dictionary. Decline when a sort extension changes that representation.
 
-`String.replace` is deliberately absent: Lean inserts the replacement before
-each codepoint when the pattern is empty, while SMT `str.replace_all` returns
-the input unchanged. Character-pattern operations likewise require a dedicated
-`Char` codepoint encoding; `Char` is currently an opaque sort. Lean's validated
-string positions are UTF-8 byte offsets, while `String.take`/`drop` count
-codepoints but return `String.Slice`; both positions and slices therefore need
-a representation that relates them to the underlying SMT string. The numeric
-parsers accept underscore separators, so `String.toNat?`/`String.toInt?` also
-need more than direct symbol mappings.
-
-String order is also deliberately absent. SMT-LIB 2.6's string alphabet stops
-at `U+2FFFF`, while Lean strings admit Unicode scalar values through `U+10FFFF`.
-Mapping Lean's lexicographic order to `str.<` would expose that smaller domain:
-SMT can prove that every one-codepoint string is at most `U+2FFFF`, which is
-false in Lean.
+Several operations need additional encodings: empty-pattern replacement differs from
+SMT, Char needs a codepoint representation, positions use UTF-8 byte offsets, take/drop
+return slices, and numeric parsers accept underscores. String order is also omitted:
+SMT-LIB 2.6 stops at U+2FFFF while Lean admits scalar values through U+10FFFF, so
+exposing the smaller alphabet through order would prove false bounds.
 -/
 
 private def usesStringTheory (ctx : TranslationCtx) : TranslateM Bool := do

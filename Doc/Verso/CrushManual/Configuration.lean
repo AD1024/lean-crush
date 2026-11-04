@@ -51,6 +51,8 @@ The available values are `"z3"`, `"cvc5"`, `"bitwuzla"`, and `"none"`.
 The `"none"` backend performs collection, normalization, monomorphization,
 instantiation, and translation, but does not start a solver or close the goal.
 It is intended for inspecting or exporting the generated SMT-LIB.
+Unsupported hypotheses are omitted with a warning naming the fact and its
+translation failure. Failure to translate the negated goal remains an error.
 
 For example, `crush` can emit a query while an ordinary Lean proof closes the
 goal afterward:
@@ -102,6 +104,9 @@ tag := "configuration-reconstruction"
 This policy applies to solver `unsat` results. It does not prevent
 {ref "overview-pipeline"}[an early checked proof] from closing the goal before
 SMT. Inspect `#print axioms` to audit the resulting theorem's dependencies.
+A trusted discharge retains the proofs of asserted facts and evidence used to
+choose an encoding, including `Nonempty` and `LawfulBEq` proofs. Axioms used in
+that evidence therefore remain visible in the resulting theorem.
 
 {optionDocs crush.preReconstruct.ruleSearch}
 
@@ -128,7 +133,10 @@ testing replay extensions.
 {optionDocs crush.reconstruct.trustBvDecide}
 
 `bv_decide` adds a native LRAT-checking dependency, visible as
-`_native.bv_decide.ax_*` in `#print axioms`.
+`_native.bv_decide.ax_*` in `#print axioms`. This option permits only the standard
+bit-vector certificate checker with validated reflected inputs; it does not
+authorize arbitrary native Boolean assertions or custom implementation
+substitutions in those inputs.
 
 {optionDocs crush.reconstruct.trustNativeDecide}
 
@@ -260,6 +268,7 @@ set_option trace.crush.replay true
 Trace classes are separate from `crush.trace.script`.
 The option emits the script as an info message, while `trace.crush.script`
 uses Lean's trace mechanism and can be filtered with other traces.
+`trace.crush` reports hypotheses omitted after a translation failure.
 `trace.crush.replay` reports attempts, selected methods, and decode/dispatch
 timings by Alethe rule. It also prints the decoded inputs for steps taking at
 least 100 ms. Anchor timings are inclusive and overlap their nested steps.

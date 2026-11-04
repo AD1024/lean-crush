@@ -1,5 +1,14 @@
 import Crush.Translation.Monad
 
+/-!
+# Canonical theory-instance validation
+
+Validate numerals and overloaded operators against fixed library dictionaries,
+without instance synthesis choosing a user override as the reference. Rigid
+definitional equality admits canonical aliases without specializing metavariables;
+unsupported carriers, signatures, and dictionaries retain uninterpreted semantics.
+-/
+
 open Lean Meta
 
 namespace Crush

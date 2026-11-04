@@ -2,8 +2,6 @@ import Lean
 import Crush.SMT.Sexp
 import Crush.Solver.KernelCheck
 
-open Lean Elab Meta Tactic
-
 /-!
 # Extensible certificate replay
 
@@ -13,6 +11,8 @@ needed by checked certificate replay. Rule handlers registered with
 `@[crush_replay_rule "rule"]` prove individual Alethe inferences from their
 already-replayed premises.
 -/
+
+open Lean Elab Meta Tactic
 
 namespace Crush
 

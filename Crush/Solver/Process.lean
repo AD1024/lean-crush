@@ -3,36 +3,19 @@ import Crush.SMT.Syntax
 import Crush.SMT.Print
 import Crush.SMT.Sexp
 import Crush.Frontend.Config
-open Lean
 
 /-!
 # Solver process management
 
-Spawns and drives an SMT solver as a child process. The design points, each
-guarding against a way this layer commonly goes wrong:
-
-* **Wall-clock timeout is enforced by us**, not just delegated to the solver's
-  own `-T`/`--tlimit` flag. One deadline covers the whole query — the verdict line and
-  the model / core / proof that follows it — so a wedged or ignoring-its-own-limit
-  solver can never hang the elaborator and the worst case matches `crush.timeout`.
-* **Both output pipes are drained concurrently with the script write.** Writing to the
-  child's stdin while nothing reads its stdout deadlocks once the solver's replies fill
-  the pipe buffer; cvc5 answers `(error …)` per unsupported command, and z3 warns to
-  stderr for every unsupported construct.
-* **Guaranteed cleanup**: the child is killed in a `finally` block on every exit
-  path (success, `unknown`, exception), preventing the zombie processes that
-  accumulate when `emitCommand` throws mid-query.
-* **`unknown` is a first-class result**, distinct from `sat`/`unsat`, so the
-  tactic can report "solver gave up" instead of a misleading failure.
-* **A missing backend is a configuration error, not a verdict.** The executable is
-  resolved before spawning: `IO.Process.spawn` does not fail uniformly when it is absent
-  (on macOS the child starts, fails to `exec`, and exits), so the query would otherwise
-  come back verdictless and be read as `unknown`.
-* Backends and their flags are data-driven (`backendSpec`), so adding bitwuzla or
-  a portfolio is a table entry, not new control flow. A backend declares which optional
-  features it has, and only those options and follow-up queries are sent.
-* Solver output is parsed **once**, here, and handed downstream as S-expressions.
+Run each solver query under one wall-clock deadline covering the verdict and all
+follow-up output. Drain stdout and stderr concurrently with stdin writes to avoid
+pipe deadlocks, then kill and reap the child on every exit path.
+Resolve the executable before launch, distinguish missing backends and process errors
+from solver unknown results, and request only supported backend features. Parse the
+captured output once for downstream verdict, model, core, and certificate handling.
 -/
+
+open Lean
 
 namespace Crush.Solver
 
@@ -72,12 +55,8 @@ def backendSpec (b : Backend) : Option BackendSpec :=
       logic := id }
   | .cvc5 => some {
       exe := "cvc5"
-      -- `--proof-format-mode=alethe` makes `(get-proof)` emit the format
-      -- `Crush.Alethe` parses (cvc5's native format is a different language), and
-      -- `--proof-granularity=dsl-rewrite` expands the coarse `hole` steps
-      -- ("untranslated rewrite") into checkable ones — measured 4 holes → 0 on a small
-      -- linear goal. A `hole` is a gap replay must reject, so the granularity flag is
-      -- what makes proofs replayable at all.
+      -- Request Alethe certificates and expand coarse rewrite steps to improve
+      -- checked replay coverage. Replay must independently prove any remaining holes.
       args := fun t => #[s!"--tlimit={t * 1000}", "--produce-models",
                           "--produce-unsat-cores", "--enum-inst", "--incremental",
                           "--proof-format-mode=alethe", "--proof-granularity=dsl-rewrite"]
@@ -184,8 +163,7 @@ def spawn (cfg : Config) : MetaM SolverProc := do
   unless ← backendAvailable cfg.backend do
     throwError (← missingSolverMessage cfg.backend spec.exe)
   let args := spec.args cfg.timeout ++ cfg.additionalArgs
-  -- Launched by name so the OS still performs its own lookup; the resolution above is a
-  -- check, not a substitution.
+  -- Keep OS lookup at launch; prior resolution only checks availability.
   try
     IO.Process.spawn { stdin := .piped, stdout := .piped, stderr := .piped,
                        cmd := spec.exe, args }
@@ -236,9 +214,8 @@ def runQuery (cfg : Config) (script : Array SMT.Command) : MetaM Result := do
   let some spec := backendSpec cfg.backend
     | throwError "crush: backend `{cfg.backend}` does not spawn a solver process"
   let p ← spawn cfg
-  -- A small grace margin over the solver's internal limit, so a well-behaved solver's
-  -- own timeout fires first (yielding `unknown` rather than a hard kill). One deadline
-  -- for the whole query, verdict line and follow-up output together.
+  -- Allow the solver's own timeout a grace margin, within one deadline
+  -- covering both the verdict and follow-up output.
   let start ← IO.monoMsNow
   let deadline := start + (cfg.timeout + 2) * 1000
   let timerTask ← IO.asTask (prio := .dedicated) do
@@ -278,8 +255,7 @@ def runQuery (cfg : Config) (script : Array SMT.Command) : MetaM Result := do
         let rejected := rejectionDiagnostics noise
         return .unknown (if rejected.isEmpty then reason else s!"{reason}; {rejected}")
       | _ =>
-        -- No verdict at all: stderr is the only evidence of why, so a solver that could
-        -- not start or crashed is not reported as one that gave up.
+        -- Report startup or process failure from stderr when no verdict was produced.
         let errDetail ← stderrExcerpt errTask timerTask
         if errDetail.contains launchFailureMarker then
           throwError "crush: backend `{cfg.backend}` could not run the `{spec.exe}` \
@@ -300,9 +276,7 @@ def runQuery (cfg : Config) (script : Array SMT.Command) : MetaM Result := do
     -- Reap the process after killing it; otherwise repeated tactic calls can
     -- accumulate zombies on Unix.
     try discard p.wait catch _ => pure ()
-    -- `errTask` is left to finish on its own: the kill above closes stderr, so it reaches
-    -- EOF, and its content is only ever needed to keep the child from blocking on a full
-    -- pipe.
+    -- Killing closes stderr; its drain task can finish at EOF without blocking cleanup.
     pure ()
 where
   /-- Excerpt of the child's stderr; empty when it cannot be read before the query's
