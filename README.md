@@ -186,6 +186,19 @@ Use `--suites curated` for the smallest suite; see the
 [benchmark script guide](scripts/README.md) for prerequisites, resuming runs,
 plotting, and individual harnesses.
 
+## Citation
+```bibtex
+@misc{he2026crushextensibleproofautomation,
+  title={crush: Extensible Proof Automation for Lean},
+  author={Mike He and Dexin Zhang and Aarti Gupta},
+  year={2026},
+  eprint={2610.40538},
+  archivePrefix={arXiv},
+  primaryClass={cs.LO},
+  url={https://arxiv.org/abs/2610.40538},
+}
+```
+
 ## Acknowledgements
 
 [lean-auto](https://github.com/leanprover-community/lean-auto) informed the design
