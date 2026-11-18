@@ -26,3 +26,7 @@ __pycache__/
 # and stays; tracked files ignore these patterns regardless.
 /BenchmarkResults/*
 !/BenchmarkResults/recorded/
+
+# Internal documents, kept local.
+/Doc/PLAN.md
+/Doc/OPTIMIZATIONS.md
