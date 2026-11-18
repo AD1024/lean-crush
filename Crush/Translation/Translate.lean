@@ -666,6 +666,20 @@ where
       if inner.consumeMData.isLambda then go inner (remaining + 1) peeled else (e, peeled)
     | _ + 1, _ => (e, peeled)
 
+/-- Numerals and atoms, which a `let` gains nothing by naming. -/
+def isLiteralValue (e : Expr) : Bool :=
+  match e.consumeMData with
+  | .lit _ | .const .. | .fvar _ => true
+  | e =>
+    isNumeral e
+      || (e.isAppOfArity ``Neg.neg 3 && isNumeral e.appArg!.consumeMData)
+      || (e.isAppOfArity ``BitVec.ofNat 2
+          && isNumeral e.appFn!.appArg!.consumeMData && isNumeral e.appArg!.consumeMData)
+where
+  isNumeral (e : Expr) : Bool :=
+    e.isRawNatLit
+      || (e.isAppOfArity ``OfNat.ofNat 3 && e.appFn!.appArg!.consumeMData.isRawNatLit)
+
 /-- The number of occurrences of loose bound variable 0 in `e`, counting up to `limit`. -/
 def countLooseBVar0 (e : Expr) (limit : Nat) : Nat :=
   go e 0 0
@@ -709,14 +723,29 @@ def withRefusalRollback {α : Type} (k : TranslateM α) : TranslateM (Option α)
     set previous
     return none
 
+/-- Tag of the error raised when a sort or erased argument depends on an SMT-bound
+variable. -/
+def boundRefusalTag : Name := `crush.boundRefusal
+
+/-- Whether `e` is a bound-dependency refusal (see `boundRefusalTag`). -/
+def isBoundRefusal : Exception → Bool
+  | .error _ msg => msg.hasTag (· == boundRefusalTag)
+  | _ => false
+
+/-- Refuse `term` if it mentions an SMT-bound variable, recording which ones. -/
+private def refuseBoundDependency (term : Expr) (msg : MessageData) : TranslateM Unit := do
+  let st ← get
+  let bound := (Lean.collectFVars {} term).fvarIds.filter
+    (fun id => st.boundVars.contains id || st.funVars.contains id)
+  unless bound.isEmpty do
+    set { st with refusedBoundVars := bound }
+    throwError (MessageData.tagged boundRefusalTag m!"{msg}{indentExpr term}")
+
 /-- Built-in SMT sorts are fixed across quantifier and lambda instantiations.
 Even a type binder must not occur in a sort key: type equality can distinguish
 empty and inhabited instantiations of the same quantified type variable. -/
-private def checkSortClosed (ty : Expr) : TranslateM Unit := do
-  let st ← get
-  if (Lean.collectFVars {} ty).fvarIds.any
-      (fun id => st.boundVars.contains id || st.funVars.contains id) then
-    throwError "crush: cannot translate a sort depending on a bound variable:{indentExpr ty}"
+private def checkSortClosed (ty : Expr) : TranslateM Unit :=
+  refuseBoundDependency ty "crush: cannot translate a sort depending on a bound variable:"
 
 mutual
   /-- Sort translation. Interpreted Lean types map to SMT theory sorts; supported
@@ -1528,13 +1557,16 @@ mutual
   /-- Translate `let x := value; body` as `(let ((x value)) body)` when `value` is data
   and `body` uses `x` more than once. The body is translated with `x` as an SMT-bound
   name, which is exactly substitution, so this agrees with zeta-reduction wherever the
-  body treats `x` as an opaque value. Where it cannot — `x` occurring in a sort or an
-  erased argument — translation throws, the state is rolled back, and the caller
-  zeta-reduces instead. -/
+  body treats `x` as an opaque value. Where it cannot — `x` in a sort or an erased
+  argument — translation refuses the dependency on `x`; the state is rolled back and
+  `none` makes the caller zeta-reduce. Other body failures propagate, since
+  substitution would hit them again (and retrying each nested let is exponential). -/
   partial def emitLetBinding? (name : Name) (type value body : Expr) :
       TranslateM (Option SMT.Term) := do
     unless countLooseBVar0 body 2 ≥ 2 do return none
     if value.hasLooseBVars || type.hasLooseBVars then return none
+    -- Substituting a literal is free, and lowerings read literal operands.
+    if isLiteralValue value then return none
     if ← isProp type then return none
     if ← isTypeArgument type then return none
     let typeWhnf ← whnf type
@@ -1542,16 +1574,27 @@ mutual
     if (← isClass? typeWhnf).isSome then return none
     let saved ← Meta.saveState
     let previous ← get
-    try
-      let smtValue ← emitTerm value
-      let smtName ← TranslateM.freshSymbol "let"
-      let smtBody ← withLocalDeclD name type fun x =>
-        TranslateM.withBoundVar x.fvarId! smtName (emitTerm (body.instantiate1 x))
-      return some (.letE #[(smtName, smtValue)] smtBody)
-    catch _ =>
-      saved.restore
-      set previous
-      return none
+    let rollback : TranslateM Unit := do saved.restore; set previous
+    let smtValue? ← try some <$> emitTerm value catch _ => pure none
+    let some smtValue := smtValue? | rollback; return none
+    let smtName ← TranslateM.freshSymbol "let"
+    let attempt : Except (Exception × Bool) SMT.Term ← withLocalDeclD name type fun x => do
+      try
+        return .ok (← TranslateM.withBoundVar x.fvarId! smtName
+          (emitTerm (body.instantiate1 x)))
+      catch ex =>
+        let onX := isBoundRefusal ex && (← get).refusedBoundVars.contains x.fvarId!
+        return .error (ex, onX)
+    match attempt with
+    | .ok smtBody => return some (.letE #[(smtName, smtValue)] smtBody)
+    | .error (ex, onX) =>
+      rollback
+      -- Substitution removes the dependency only if `value` has no SMT binder.
+      let st ← get
+      let valueBound := (Lean.collectFVars {} value).fvarIds.any
+        (fun id => st.boundVars.contains id || st.funVars.contains id)
+      if onX && !valueBound then return none
+      throw ex
 
   /-- Higher-order forms: λ-abstractions, partial applications, applications whose
   head is a function *value*, and equations between function-typed terms. Returns
@@ -2123,11 +2166,9 @@ mutual
     -- Every SMT binder dependency must be an explicit argument of this symbol.
     -- A dependency hidden in the head or an erased type/instance would
     -- collapse distinct binder instantiations into a single SMT constant.
-    let st ← get
-    let checkClosed (term : Expr) : TranslateM Unit := do
-      if (Lean.collectFVars {} term).fvarIds.any
-          (fun id => st.boundVars.contains id || st.funVars.contains id) then
-        throwError "crush: cannot erase a bound-variable dependency in an uninterpreted application:{indentExpr term}"
+    let checkClosed (term : Expr) : TranslateM Unit :=
+      refuseBoundDependency term
+        "crush: cannot erase a bound-variable dependency in an uninterpreted application:"
     checkClosed fn
     for i in [:args.size] do
       unless partition.valuePositions.contains i || (← isProof args[i]!) do

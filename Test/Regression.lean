@@ -434,4 +434,27 @@ theorem let_used_twice_checked (h : ∀ x : Int, let y := x + 1; y * y ≥ 0 ∧
 theorem let_in_type_falls_back (h : ∀ n : Nat, let m := n + 1; (Fin.last m).val = m ∧ m + m > 0)
     (k : Nat) : k + 1 > 0 := by crush
 
+-- A literal is substituted, so the rotations stay indexed.
+theorem let_literal_operand (x : BitVec 8) :
+    (let n := 1; (x.rotateLeft n).rotateRight n) = x := by crush
+
+-- A refused width dependency on `n` falls back to substitution.
+set_option crush.trust "reconstruct" in
+theorem let_width_falls_back (p : Nat → Prop)
+    (h : ∀ y : Nat, let n := 2 + 3; (∀ v : BitVec n, v &&& v = v) → p y) (z : Nat) : p z := by
+  crush
+
+-- An unrelated failure (`Fin 5`) is not retried once per enclosing let.
+set_option linter.unusedVariables false in
+theorem let_failure_not_retried (f g : Nat → Nat)
+    (h : ∀ y : Nat, let a1 := g 1; let a2 := g 2; let a3 := g 3; let a4 := g 4; let a5 := g 5;
+      let a6 := g 6; let a7 := g 7; let a8 := g 8; let a9 := g 9; let a10 := g 10;
+      let a11 := g 11; let a12 := g 12; let a13 := g 13; let a14 := g 14; let a15 := g 15;
+      let a16 := g 16; let a17 := g 17; let a18 := g 18; let a19 := g 19; let a20 := g 20;
+      (∀ i : Fin 5, f i.val = y) ∨ (f a1 = f a1 ∧ f a2 = f a2 ∧ f a3 = f a3 ∧ f a4 = f a4 ∧
+      f a5 = f a5 ∧ f a6 = f a6 ∧ f a7 = f a7 ∧ f a8 = f a8 ∧ f a9 = f a9 ∧ f a10 = f a10 ∧
+      f a11 = f a11 ∧ f a12 = f a12 ∧ f a13 = f a13 ∧ f a14 = f a14 ∧ f a15 = f a15 ∧
+      f a16 = f a16 ∧ f a17 = f a17 ∧ f a18 = f a18 ∧ f a19 = f a19 ∧ f a20 = f a20))
+    (z : Nat) : z + 1 > 0 := by crush
+
 end NestedLets

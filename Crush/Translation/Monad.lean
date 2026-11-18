@@ -157,6 +157,8 @@ structure TranslateState where
   /-- Normalized forms of structural-key type components, which every symbol lookup
       would otherwise recompute with `reduceAll`. -/
   normalizedTypes : Std.HashMap Expr Expr := {}
+  /-- SMT-bound variables named by the latest bound-dependency refusal. -/
+  refusedBoundVars : Array FVarId := #[]
   deriving Inhabited
 
 /-- The translation monad. `MetaM` at the bottom gives us `whnf`, unification,
