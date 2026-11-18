@@ -666,6 +666,20 @@ where
       if inner.consumeMData.isLambda then go inner (remaining + 1) peeled else (e, peeled)
     | _ + 1, _ => (e, peeled)
 
+/-- The number of occurrences of loose bound variable 0 in `e`, counting up to `limit`. -/
+def countLooseBVar0 (e : Expr) (limit : Nat) : Nat :=
+  go e 0 0
+where
+  go (e : Expr) (depth count : Nat) : Nat :=
+    if count ≥ limit || !e.hasLooseBVars then count else
+    match e with
+    | .bvar i => if i == depth then count + 1 else count
+    | .app f a => go a depth (go f depth count)
+    | .lam _ t b _ | .forallE _ t b _ => go b (depth + 1) (go t depth count)
+    | .letE _ t v b _ => go b (depth + 1) (go v depth (go t depth count))
+    | .mdata _ b | .proj _ _ b => go b depth count
+    | _ => count
+
 /-- Tag of the error `emitSort` raises when it refuses a type it cannot translate
 soundly (a dependent type). A datatype or finite-array declaration that meets it in
 a field rolls back and leaves its type opaque; other errors propagate. -/
@@ -1416,9 +1430,14 @@ mutual
     -- hypothetical proof of False must not generate an unconditional witness.
     if ← isProof e then
       throwError "crush: cannot translate a proof-valued term as an SMT value"
-    -- Zeta-reduce a let (including one in application-head position) before it
-    -- can become an opaque symbol and lose dependencies on enclosing binders.
-    if let .letE _ _ value body _ := e.getAppFn.consumeMData then
+    -- A data-valued let used more than once becomes an SMT `let`, so nested lets stay
+    -- linear instead of being zeta-expanded exponentially. Otherwise zeta-reduce (also
+    -- in application-head position) before the let can become an opaque symbol and
+    -- lose dependencies on enclosing binders.
+    if let .letE name type value body _ := e.getAppFn.consumeMData then
+      if e.getAppArgs.isEmpty then
+        if let some t ← emitLetBinding? name type value body then
+          return t
       return ← emitTerm (mkAppN (body.instantiate1 value) e.getAppArgs)
     -- A quantifier-bound variable renders as its SMT name, never a declaration.
     if let .fvar fid := e then
@@ -1505,6 +1524,34 @@ mutual
         if let some t ← primitiveProjection? structName idx structArg args then
           return t
       defaultApp fn args
+
+  /-- Translate `let x := value; body` as `(let ((x value)) body)` when `value` is data
+  and `body` uses `x` more than once. The body is translated with `x` as an SMT-bound
+  name, which is exactly substitution, so this agrees with zeta-reduction wherever the
+  body treats `x` as an opaque value. Where it cannot — `x` occurring in a sort or an
+  erased argument — translation throws, the state is rolled back, and the caller
+  zeta-reduces instead. -/
+  partial def emitLetBinding? (name : Name) (type value body : Expr) :
+      TranslateM (Option SMT.Term) := do
+    unless countLooseBVar0 body 2 ≥ 2 do return none
+    if value.hasLooseBVars || type.hasLooseBVars then return none
+    if ← isProp type then return none
+    if ← isTypeArgument type then return none
+    let typeWhnf ← whnf type
+    if typeWhnf.isForall then return none
+    if (← isClass? typeWhnf).isSome then return none
+    let saved ← Meta.saveState
+    let previous ← get
+    try
+      let smtValue ← emitTerm value
+      let smtName ← TranslateM.freshSymbol "let"
+      let smtBody ← withLocalDeclD name type fun x =>
+        TranslateM.withBoundVar x.fvarId! smtName (emitTerm (body.instantiate1 x))
+      return some (.letE #[(smtName, smtValue)] smtBody)
+    catch _ =>
+      saved.restore
+      set previous
+      return none
 
   /-- Higher-order forms: λ-abstractions, partial applications, applications whose
   head is a function *value*, and equations between function-typed terms. Returns

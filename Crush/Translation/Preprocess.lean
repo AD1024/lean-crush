@@ -75,7 +75,9 @@ private def selectedSimpContext (lemmas : Array Name) : MetaM Simp.Context := do
     seen := seen.insert lemma
     theorems ← theorems.addConst lemma
   Simp.mkContext
-    (config := { maxSteps := localSimpMaxSteps })
+    -- Keep `let`s: translation emits a data-valued `let` as an SMT `let`, while
+    -- zeta-reducing a nested chain here doubles the term per level.
+    (config := { maxSteps := localSimpMaxSteps, zeta := false })
     (simpTheorems := #[theorems])
     (congrTheorems := ← getSimpCongrTheorems)
 

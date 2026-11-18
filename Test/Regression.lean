@@ -411,3 +411,27 @@ theorem exists_eta (p : Int → Prop) (h : p 3) : Exists p := by crush
 theorem exists_eta_needs_witness (p : Int → Prop) : Exists p := by crush
 
 end PrimitiveProjections
+
+
+/-! ## Nested lets stay linear (review round 3, P2)
+
+A data-valued `let` used more than once is emitted as an SMT `let`, and normalization
+no longer zeta-reduces, so a chain of 32 doubling lets translates in linear size
+instead of 2^32. A `let` whose value occurs in a type falls back to zeta-reduction. -/
+
+namespace NestedLets
+
+theorem nested_lets_linear (h : ∀ a0 : Int, let a1 := a0 + a0; let a2 := a1 + a1; let a3 := a2 + a2; let a4 := a3 + a3; let a5 := a4 + a4; let a6 := a5 + a5; let a7 := a6 + a6; let a8 := a7 + a7; let a9 := a8 + a8; let a10 := a9 + a9; let a11 := a10 + a10; let a12 := a11 + a11; let a13 := a12 + a12; let a14 := a13 + a13; let a15 := a14 + a14; let a16 := a15 + a15; let a17 := a16 + a16; let a18 := a17 + a17; let a19 := a18 + a18; let a20 := a19 + a19; let a21 := a20 + a20; let a22 := a21 + a21; let a23 := a22 + a22; let a24 := a23 + a23; let a25 := a24 + a24; let a26 := a25 + a25; let a27 := a26 + a26; let a28 := a27 + a27; let a29 := a28 + a28; let a30 := a29 + a29; let a31 := a30 + a30; let a32 := a31 + a31; a32 = a32) (y : Int) (hy : y > 2) : y > 1 := by
+  crush
+
+theorem let_used_twice (f : Int → Int) (h : ∀ x : Int, let y := f x; y + y = 2 * f x)
+    (z : Int) : f z + f z = 2 * f z := by crush
+
+set_option crush.trust "reconstruct" in
+theorem let_used_twice_checked (h : ∀ x : Int, let y := x + 1; y * y ≥ 0 ∧ y - 1 = x)
+    (z : Int) : z + 1 - 1 = z := by crush
+
+theorem let_in_type_falls_back (h : ∀ n : Nat, let m := n + 1; (Fin.last m).val = m ∧ m + m > 0)
+    (k : Nat) : k + 1 > 0 := by crush
+
+end NestedLets
