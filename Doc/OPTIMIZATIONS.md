@@ -231,6 +231,48 @@ bounded reconstruction-rule mechanism.
   Replacement, character patterns, byte positions, numeric parsing, and lexicographic
   order remain uninterpreted where the domains or edge cases differ.
 
+## Solver requests and the per-call deadline
+
+A query asks the solver only for what the configuration reads
+(`Crush/Solver/Process.lean`, `SolverRequest`):
+
+| Policy | Unsat core | Proof |
+|---|---|---|
+| `trust` | only with `trace.crush.result` | never |
+| `reconstruct`, `reconstructOrTrust` | always (z3, cvc5) | cvc5, unless `crush.reconstruct "core"` |
+
+z3's proofs are never requested, since replay reads only cvc5's Alethe format, and
+cvc5 runs without `--incremental` because each process issues one `check-sat`.
+Requesting cores and proofs is expensive for hard queries. A/B on one host
+(2026-11-18, z3 5.1.0, cvc5 1.3.4, `lake lean`, default trust policy, two runs each,
+`solve` phase):
+
+| Goal | Backend | Cores and proofs (before) | Verdict only (after) |
+|---|---|---:|---:|
+| 8 pigeons into 7 holes over `f : Int → Int` | z3 | 2504–2618 ms | 652–685 ms |
+| `(x ^^^ y) + 2#32 * (x &&& y) = x + y`, `BitVec 32` | cvc5 | 8795–8851 ms | 18–21 ms |
+| same | z3 | 45 ms | 26–28 ms |
+| 8 pigeons, `crush.timeout 20` | cvc5 | `unknown` at 20 s | `unsat`, 8669–8847 ms |
+
+Flags also change heuristics in the other direction. On the query of
+`pre_smt_witness_respects_clear` (`Test/Reconstruct.lean`), a validity predicate
+defined with `define-funs-rec`, z3 5.1.0 answers `sat` at once with
+`:produce-unsat-cores` and times out without it. That goal is false, so only the
+error kind changes. The corpus-level A/B of both policies is still to be run on the
+benchmark host before M4 merges.
+
+`crush.timeout` is a per-call limit. The ground-first query gets it as the solver's
+own limit, and every query of the call is killed `killGraceMs` (2 s) after it. A
+quantified fallback gets only the time left before that deadline and is skipped below
+`fallbackFloorMs` (1 s). The worst case is therefore `crush.timeout` plus 2 s instead
+of twice that. When the ground query uses its whole limit, the fallback still gets
+the grace window; `Test/Cashmere.lean` has a goal that only the fallback closes, in
+24 ms after a 3 s ground-query timeout. The `solve` and `solve-fallback` profile
+phases stay separate so the benchmark can count goals that only the fallback closes.
+
+A deadline reached while reading the core, proof, or model keeps the verdict. Without
+a core, reconstruction starts from every asserted fact.
+
 ## Reproducing the comparisons
 
 Install `z3` and `cvc5`, then run the corpus harness directly:
