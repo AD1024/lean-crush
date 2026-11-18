@@ -113,3 +113,29 @@ attribute, not silently ignored. -/
 /-- error: @[crush_unfold] expects a definition with equational lemmas -/
 #guard_msgs(error, substring := true) in
 @[crush_unfold] opaque noEqns : Nat → Nat
+
+/-! ## Callees of n-ary well-founded definitions (review round 3, C4)
+
+The body of a well-founded `f7` mentions only its `_unary` worker, so the traversal
+follows the constants of `f7`'s equation lemmas, which expose the marked `g7`. -/
+
+namespace WellFoundedCallees
+
+@[crush_unfold] def g7 (n : Nat) : Nat := n + 1
+@[crush_unfold] def f7 (a b : Nat) : Nat := if a = 0 then g7 b else f7 (a - 1) (b + 1)
+termination_by a
+decreasing_by omega
+@[crush_unfold] def unrelated7 (n : Nat) : Nat := n * 3
+
+theorem wf_callee_unfolds : f7 0 5 = 6 := by crush
+
+open Lean Meta Crush in
+run_meta do
+  let lemmas ← relevantAutoUnfoldLemmas #[``f7]
+  let has (n : Name) := lemmas.any (·.getPrefix == n)
+  unless has ``f7 && has ``g7 do
+    throwError "the callee of a well-founded definition was not reached: {lemmas}"
+  if has ``unrelated7 then
+    throwError "an unrelated marked definition was collected: {lemmas}"
+
+end WellFoundedCallees
