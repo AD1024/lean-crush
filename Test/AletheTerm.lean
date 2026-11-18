@@ -113,8 +113,7 @@ private def cachedCtx (named : List (String × String)) (symbols : Std.HashMap S
   let mut defs : Std.HashMap String Sexp := {}
   for (name, source) in named do
     defs := defs.insert name (← parseTerm source)
-  return { symbols, named := defs, namedCache := some (← IO.mkRef {}),
-           namedNeed := some (← IO.mkRef 0) }
+  return { symbols, named := defs, namedCache := some (← NamedCache.new) }
 
 -- A cached `:named` term is reused only within its fuel need, whatever ran first.
 run_meta do

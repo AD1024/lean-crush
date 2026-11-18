@@ -49,6 +49,15 @@ partial def stripAnnots : Sexp → Sexp
     else .list (xs.map stripAnnots)
   | s => s
 
+/-- Decoded `:named` references for one binder scope, with the fuel each decoding needs,
+and the largest need among references decoded under the current one (shared by scopes). -/
+structure NamedCache where
+  values : IO.Ref (Std.HashMap String (Expr × Nat))
+  need : IO.Ref Nat
+
+def NamedCache.new : BaseIO NamedCache :=
+  return { values := ← IO.mkRef {}, need := ← IO.mkRef 0 }
+
 /-- Context for translating Alethe terms back to Lean. -/
 structure TermCtx where
   /-- Emitted SMT symbol → Lean head term (from `TranslateState.nameToExpr`). -/
@@ -69,15 +78,13 @@ structure TermCtx where
   decoding needs. Every `@p_k` reference would otherwise re-decode its definition, which
   is exponential in a shared DAG. A scope that binds a new local gets a fresh cache
   (`TermCtx.bindLocal`). -/
-  namedCache : Option (IO.Ref (Std.HashMap String (Expr × Nat))) := none
-  /-- The largest fuel need among `:named` references decoded under the current one. -/
-  namedNeed : Option (IO.Ref Nat) := none
+  namedCache : Option NamedCache := none
 
 /-- Bind an Alethe variable for a nested scope, with a fresh `:named` cache: a named
 term may decode differently once the variable is in scope. -/
 def TermCtx.bindLocal (ctx : TermCtx) (name : String) (value : Expr) : BaseIO TermCtx := do
-  let namedCache ←
-    if ctx.namedCache.isSome then pure (some (← IO.mkRef {})) else pure none
+  let namedCache ← ctx.namedCache.mapM fun cache =>
+    return { cache with values := ← IO.mkRef {} }
   return { ctx with locals := ctx.locals.insert name value, namedCache }
 
 /-- Expand Alethe `:named` references while preserving the surrounding term shape, with
@@ -109,7 +116,7 @@ private partial def expandNamed? (ctx : TermCtx) (fuel : Nat) (term : Sexp) :
 
 /-- Record that the term being decoded needs `need` fuel. -/
 private def TermCtx.noteNeed (ctx : TermCtx) (need : Nat) : BaseIO Unit := do
-  if let some ref := ctx.namedNeed then ref.modify (max · need)
+  if let some cache := ctx.namedCache then cache.need.modify (max · need)
 
 /-- Decode an SMT-LIB string literal's escapes in one left-to-right pass: `\u{h…}`
 (one to five hex digits) and `\uhhhh` denote code points; any other backslash is a
@@ -616,20 +623,20 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
       | some t =>
         if fuel == 0 || ctx.expanding.contains a then return none
         let inner := { ctx with expanding := ctx.expanding.insert a }
-        let (some cache, some needRef) := (ctx.namedCache, ctx.namedNeed)
+        let some cache := ctx.namedCache
           | toExpr? inner (fuel - 1) (stripAnnots t)
         -- A cached value is used only within its fuel need, as a fresh decoding would.
-        if let some (value, need) := (← cache.get).get? a then
+        if let some (value, need) := (← cache.values.get).get? a then
           if need > fuel then return none
           ctx.noteNeed need
           return some value
-        let outer ← needRef.get
-        needRef.set 0
+        let outer ← cache.need.get
+        cache.need.set 0
         let decoded ← toExpr? inner (fuel - 1) (stripAnnots t)
-        let need := (← needRef.get) + 1
-        needRef.set (max outer need)
+        let need := (← cache.need.get) + 1
+        cache.need.set (max outer need)
         if let some value := decoded then
-          cache.modify (·.insert a (value, need))
+          cache.values.modify (·.insert a (value, need))
         return decoded
       | none => return none
     else if a == "true" then return some (mkConst ``True)
