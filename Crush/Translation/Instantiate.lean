@@ -3,6 +3,7 @@ import Lean.Meta.Sym
 import Crush.Frontend.Config
 import Crush.Frontend.Collect
 import Crush.Translation.Pattern
+import Crush.Util.Budget
 
 /-!
 # Proof-producing ground term instantiation
@@ -427,6 +428,7 @@ private def instantiateGroundFactsS (cfg : Config) (facts : Array Fact)
   let simpTheorems := excluded.foldl (init := ← getSimpTheorems) fun theorems name =>
     (theorems.eraseCore (.decl name (inv := false))).eraseCore (.decl name (inv := true))
   let simpContext ← Simp.mkContext
+    (config := { maxSteps := localSimpMaxSteps })
     (simpTheorems := #[simpTheorems])
     (congrTheorems := ← getSimpCongrTheorems)
   let env ← getEnv
@@ -465,11 +467,13 @@ private def instantiateGroundFactsS (cfg : Config) (facts : Array Fact)
   let addInstance (templateIndex : Nat) (template : Fact) (proof prop : Expr)
       (origins : Array Nat) : Sym.SymM Bool := do
     let prop ← preprocessExprS prop
-    let (simpResult, _) ← simp prop simpContext
+    -- Simplification is optional: a failing or looping simp set keeps the instance.
+    let simplified? ← withLocalBudget (simp prop simpContext)
     let (proof, prop) ←
-      match simpResult.proof? with
+      match simplified? with
       | none => pure (proof, prop)
-      | some _ =>
+      | some (simpResult, _) =>
+        if simpResult.proof?.isNone then pure (proof, prop) else
         let simplified ← preprocessExprS simpResult.expr
         let originalConstructors := collectGroundConstructors env prop
         let simplifiedConstructors := collectGroundConstructors env simplified

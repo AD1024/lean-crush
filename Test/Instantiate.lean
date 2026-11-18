@@ -433,3 +433,23 @@ theorem instances_do_not_strengthen (x : Int) :
   crush [step]
 
 end GroundInstantiation
+
+/-! ## A failing simp set keeps the unsimplified instance (review round 3, C3)
+
+Ground instantiation simplifies each new instance with the default simp set. A
+looping simp set must not abort `crush`: the instance is kept as generated. -/
+
+namespace LoopingSimp
+
+def lf (n : Nat) : Nat := n
+def lg (n : Nat) : Nat := n
+theorem lf_lg (n : Nat) : lf n = lg n := rfl
+theorem lg_lf (n : Nat) : lg n = lf n := rfl
+theorem lf_pos (n : Nat) : lf n + 1 > 0 := by omega
+
+example (a : Nat) : lf a + 1 > 0 := by crush [lf_pos]
+
+attribute [local simp] lf_lg lg_lf in
+example (a : Nat) : lf a + 1 > 0 := by crush [lf_pos]
+
+end LoopingSimp
