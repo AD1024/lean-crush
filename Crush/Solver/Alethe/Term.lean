@@ -59,22 +59,133 @@ structure TermCtx where
   locals  : Std.HashMap String Expr := {}
   /-- Inverse term handlers, resolved once for this replay. -/
   decoders : ReplayTermRegistry := {}
+  /-- `:named` references being expanded on the current path; re-entering one is a
+  cycle, which only a malformed certificate can contain. -/
+  expanding : Std.HashSet String := {}
+  /-- Proofs of `Nonempty T`, for decoding `choice` over a type without a
+  `Nonempty` instance (see `nonemptyEvidence`). -/
+  nonempty : Array Expr := #[]
 
-/-- Expand Alethe `:named` references while preserving the surrounding term shape. -/
+/-- Expand Alethe `:named` references while preserving the surrounding term shape.
+`fuel` bounds nested `:named` expansions only; term nesting costs nothing. -/
 private partial def expandNamed? (ctx : TermCtx) (fuel : Nat) (term : Sexp) :
     Option Sexp := do
-  if fuel == 0 then failure
   match term with
   | .atom name =>
     if name.startsWith "@" then
       match ctx.named.get? name with
-      | some value => expandNamed? ctx (fuel - 1) (stripAnnots value)
+      | some value =>
+        if fuel == 0 || ctx.expanding.contains name then failure
+        expandNamed? { ctx with expanding := ctx.expanding.insert name } (fuel - 1)
+          (stripAnnots value)
       | none => return term
     else
       return term
   | .list parts =>
-    return .list (← parts.mapM fun part => expandNamed? ctx (fuel - 1) part)
+    return .list (← parts.mapM fun part => expandNamed? ctx fuel part)
   | .str _ => return term
+
+/-- Decode an SMT-LIB string literal's escapes in one left-to-right pass: `\u{h…}`
+(one to five hex digits) and `\uhhhh` denote code points; any other backslash is a
+literal character. One pass matters: the printer writes a backslash as `\u{5c}`, so
+the Lean string `\u{41}` arrives as `\u{5c}u{41}` and must not become `A`. -/
+def decodeSmtString (s : String) : String := Id.run do
+  let chars := s.toList.toArray
+  let hexValue? (c : Char) : Option Nat :=
+    if c.isDigit then some (c.toNat - '0'.toNat)
+    else if 'a' ≤ c && c ≤ 'f' then some (c.toNat - 'a'.toNat + 10)
+    else if 'A' ≤ c && c ≤ 'F' then some (c.toNat - 'A'.toNat + 10)
+    else none
+  -- The code point of the hex digits `chars[start:stop]`, if all are hex.
+  let hexRun? (start stop : Nat) : Option Nat := Id.run do
+    let mut value := 0
+    for i in [start:stop] do
+      let some digit := chars[i]?.bind hexValue? | return none
+      value := value * 16 + digit
+    return some value
+  let mut out := ""
+  let mut i := 0
+  while i < chars.size do
+    let c := chars[i]!
+    if c == '\\' && chars[i + 1]? == some 'u' then
+      -- `\u{h…}` with one to five hex digits.
+      if chars[i + 2]? == some '{' then
+        let mut close := i + 3
+        while close < chars.size && close < i + 9 && chars[close]! != '}' do
+          close := close + 1
+        if chars[close]? == some '}' && close > i + 3 && close ≤ i + 8 then
+          if let some code := hexRun? (i + 3) close then
+            if code ≤ 0x2FFFF then
+              out := out.push (Char.ofNat code)
+              i := close + 1
+              continue
+      -- `\uhhhh` with exactly four hex digits.
+      else if i + 6 ≤ chars.size then
+        if let some code := hexRun? (i + 2) (i + 6) then
+          out := out.push (Char.ofNat code)
+          i := i + 6
+          continue
+    out := out.push c
+    i := i + 1
+  return out
+
+/-- A type with a value `¬ ∀ x, p x` refutes is inhabited. -/
+theorem nonempty_of_not_forall.{u} {α : Sort u} {p : α → Prop} (h : ¬ ∀ x, p x) :
+    Nonempty α :=
+  Classical.byContradiction fun empty => h fun x => absurd ⟨x⟩ empty
+
+/-- A type with a witness is inhabited. -/
+theorem nonempty_of_witness.{u} {α : Sort u} {p : α → Prop} (h : ∃ x, p x) : Nonempty α :=
+  let ⟨x, _⟩ := h; ⟨x⟩
+
+/-- `Nonempty T` proofs derivable from `proofs`: `Nonempty T` itself, `∃ x : T, _`, and
+`¬ ∀ x : T, _`, plus `⟨x⟩` for each data local `x : T` in context. cvc5 skolemizes
+exactly such quantifiers into `choice` terms, so this seeds their decoding when `T` has
+no `Nonempty` instance. -/
+def nonemptyEvidence (proofs : Array Expr) : MetaM (Array Expr) := do
+  let mut out := #[]
+  for proof in proofs do
+    try
+      let type ← whnfR (← instantiateMVars (← inferType proof))
+      if type.isAppOfArity ``Nonempty 1 then
+        out := out.push proof
+      else if type.isAppOfArity ``Exists 2 then
+        out := out.push (← mkAppM ``nonempty_of_witness #[proof])
+      else if type.isAppOfArity ``Not 1 then
+        if (← whnfR type.appArg!).isForall then
+          out := out.push (← mkAppM ``nonempty_of_not_forall #[proof])
+    catch _ => pure ()
+  for decl in ← getLCtx do
+    if decl.isImplementationDetail then continue
+    try
+      let type ← instantiateMVars decl.type
+      if (← isProp type) || (← whnf type).isSort then continue
+      out := out.push (← mkAppM ``Nonempty.intro #[decl.toExpr])
+    catch _ => pure ()
+  return out
+
+/-- A proof of `Nonempty ty`: an instance, or evidence from the replay context. -/
+def nonemptyProof? (ctx : TermCtx) (ty : Expr) : MetaM (Option Expr) := do
+  let level ← getLevel ty
+  let expected := mkApp (mkConst ``Nonempty [level]) ty
+  if let some inst ← (try some <$> synthInstance expected catch _ => pure none) then
+    return some inst
+  for evidence in ctx.nonempty do
+    let evidenceType ← whnfR (← inferType evidence)
+    unless evidenceType.isAppOfArity ``Nonempty 1 do continue
+    if ← isDefEqGuarded evidenceType.appArg! ty then return some evidence
+  return none
+
+/-- `∀ x, P x` is equivalent to `P` at the choice of a counterexample (`sko_forall`). -/
+theorem forall_iff_epsilon.{u} {α : Sort u} (h : Nonempty α) (P : α → Prop) :
+    (∀ x, P x) ↔ P (@Classical.epsilon α h fun x => ¬ P x) :=
+  ⟨fun all => all _, fun atChoice x => Classical.byContradiction fun hx =>
+    Classical.epsilon_spec (p := fun x => ¬ P x) ⟨x, hx⟩ atChoice⟩
+
+/-- `∃ x, P x` is equivalent to `P` at the choice of a witness (`sko_ex`). -/
+theorem exists_iff_epsilon.{u} {α : Sort u} (h : Nonempty α) (P : α → Prop) :
+    (∃ x, P x) ↔ P (@Classical.epsilon α h P) :=
+  ⟨fun ex => Classical.epsilon_spec ex, fun atChoice => ⟨_, atChoice⟩⟩
 
 /-- Integer literal, if `s` is one. cvc5 uses both `(- n)` and signed atoms such as `-1`
 in Alethe certificates. -/
@@ -466,16 +577,19 @@ def sortToType? (ctx : TermCtx) : Sexp → MetaM (Option Expr)
 /-- Translate an Alethe term to the Lean term it denotes, or `none` if any part of it
 cannot be mapped. Operators are matched by their SMT-LIB names and rebuilt with the
 standard instances, matching what the translator consumed on the way out. `fuel` bounds
-recursion through `:named` indirection, which a malformed proof could otherwise cycle. -/
-partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr) := do
-  if fuel == 0 then return none
+nested `:named` expansions, and re-entering a name being expanded (a cycle, possible
+only in a malformed proof) declines. Term nesting is bounded by `maxRecDepth`. -/
+partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr) :=
+    withIncRecDepth do
   match s with
-  | .str value => return some (Lean.toExpr value)
+  | .str value => return some (Lean.toExpr (decodeSmtString value))
   | .atom a =>
     -- A `:named` reference expands to its definition.
     if a.startsWith "@" then
       match ctx.named.get? a with
-      | some t => toExpr? ctx (fuel - 1) (stripAnnots t)
+      | some t =>
+        if fuel == 0 || ctx.expanding.contains a then return none
+        toExpr? { ctx with expanding := ctx.expanding.insert a } (fuel - 1) (stripAnnots t)
       | none => return none
     else if a == "true" then return some (mkConst ``True)
     else if a == "false" then return some (mkConst ``False)
@@ -502,7 +616,7 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
       let rec goBinders (i : Nat) (ctx : TermCtx) (fvars : Array Expr) :
           MetaM (Option Expr) := do
         if i ≥ binders.size then
-          let some b ← toExpr? ctx (fuel - 1) body | return none
+          let some b ← toExpr? ctx fuel body | return none
           let b ← toProp b
           if head == "forall" then return some (← mkForallFVars fvars b)
           else
@@ -528,11 +642,15 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
       let some (Sexp.atom vname) := bind[0]? | return none
       let some sortSexp := bind[1]? | return none
       let some ty ← sortToType? ctx sortSexp | return none
-      return ← withLocalDeclD (Name.mkSimple vname) ty fun v => do
+      let predicate? ← withLocalDeclD (Name.mkSimple vname) ty fun v => do
         let localCtx := { ctx with locals := ctx.locals.insert vname v }
-        let some predicate ← toExpr? localCtx (fuel - 1) body | return none
-        let predicate ← mkLambdaFVars #[v] (← toProp predicate)
-        mkAppChecked? ``Classical.epsilon #[predicate]
+        let some predicate ← toExpr? localCtx fuel body | return none
+        return some (← mkLambdaFVars #[v] (← toProp predicate))
+      let some predicate := predicate? | return none
+      -- Without a `Nonempty` instance, use inhabitation evidence from the replay context.
+      let some nonempty ← nonemptyProof? ctx ty | return none
+      let level ← getLevel ty
+      return some (mkApp3 (mkConst ``Classical.epsilon [level]) ty nonempty predicate)
     if head == "let" then
       let some (Sexp.list bindings) := args[0]? | return none
       let some body := args[1]? | return none
@@ -542,11 +660,11 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
         let Sexp.list pair := binding | return none
         let some (Sexp.atom name) := pair[0]? | return none
         let some value := pair[1]? | return none
-        let some value ← toExpr? ctx (fuel - 1) value | return none
+        let some value ← toExpr? ctx fuel value | return none
         values := values.push (name, value)
       for (name, value) in values do
         localCtx := { localCtx with locals := localCtx.locals.insert name value }
-      return ← toExpr? localCtx (fuel - 1) body
+      return ← toExpr? localCtx fuel body
     if head == "@bbterm" then
       return ← bitBlastTerm args
     if head == "@bv" && args.size == 2 then
@@ -556,7 +674,7 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
       let some width := width.toNat? | return none
       return some (mkBitVecLit width value)
     if head == "@bvsize" && args.size == 1 then
-      let some value ← toExpr? ctx (fuel - 1) args[0]! | return none
+      let some value ← toExpr? ctx fuel args[0]! | return none
       let some width ← bitVecWidth? value | return none
       return some (Lean.toExpr (Int.ofNat width))
     if head == "_" && args.size == 2 then
@@ -570,7 +688,7 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
     let mkArgs : MetaM (Option (Array Expr)) := do
       let mut out := #[]
       for a in args do
-        let some e ← toExpr? ctx (fuel - 1) a | return none
+        let some e ← toExpr? ctx fuel a | return none
         out := out.push e
       return some out
     let some as ← mkArgs | return none
@@ -652,7 +770,7 @@ where
     let some (Sexp.atom head) := ident[1]? | return none
     let mut values := #[]
     for arg in args do
-      let some value ← toExpr? ctx (fuel - 1) arg | return none
+      let some value ← toExpr? ctx fuel arg | return none
       values := values.push value
     let builtin ← match head, ident.size, values.size with
     | "@bit_of", 3, 1 =>
@@ -709,7 +827,7 @@ where
     if let some result := patternResult then return some result
     let mut bits := #[]
     for arg in args do
-      let some bit ← toExpr? ctx (fuel - 1) arg | return none
+      let some bit ← toExpr? ctx fuel arg | return none
       let some bit ← boolArgument? bit | return none
       bits := bits.push bit
     let list ← mkListLit (mkConst ``Bool) bits.toList
@@ -722,7 +840,7 @@ where
       if ident.size == 3 && ident[0]? == some (.atom "_") &&
           ident[1]? == some (.atom "@bit_of") && ident[2]? == some (.atom "#") &&
           parts.size == 2 then
-        return ← toExpr? ctx (fuel - 1) parts[1]!
+        return ← toExpr? ctx fuel parts[1]!
       return none
     let some (Sexp.atom head) := parts[0]? | return none
     let mut operands := #[]

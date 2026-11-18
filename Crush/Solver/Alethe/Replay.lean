@@ -335,6 +335,30 @@ private def proveStep (target : Expr) (premises : Array Expr) (rule : String)
 
 private abbrev ClauseProof := Crush.ReplayClause
 
+/-- `symm`: `b = a` from `a = b`, `b ↔ a` from `a ↔ b`, and the negated forms. -/
+private def proveSymmStep? (target : Expr) (premise : ClauseProof) : MetaM (Option Expr) := do
+  let target ← whnfR target
+  let premiseType ← whnfR premise.clause
+  try
+    if target.isAppOfArity ``Not 1 && premiseType.isAppOfArity ``Not 1 then
+      let inner := premiseType.appArg!
+      let flipped ← withLocalDeclD `h target.appArg! fun h => do
+        let back ←
+          if inner.isAppOfArity ``Iff 2 then mkAppM ``Iff.symm #[h] else mkEqSymm h
+        mkLambdaFVars #[h] (mkApp premise.proof back)
+      return some flipped
+    if premiseType.isAppOfArity ``Iff 2 then
+      return some (← mkAppM ``Iff.symm #[premise.proof])
+    if premiseType.isAppOfArity ``Eq 3 then
+      return some (← mkEqSymm premise.proof)
+    return none
+  catch _ => return none
+
+/-- `validateProofCandidate`, declining instead of throwing. -/
+private def validatedOrNone (target proof : Expr) : MetaM (Option Expr) := do
+  try return some (← validateProofCandidate target proof) catch _ => return none
+
+
 private def unitClauseProof (proof : Expr) : MetaM ClauseProof := do
   let clause ← instantiateMVars (← inferType proof)
   return { proof, clause, literals := #[clause] }
@@ -1023,18 +1047,97 @@ private def proveTransStep? (target : Expr) (premises : Array ClauseProof) :
     return some (← reverseRelation current).proof
   return none
 
+/-- `subproof`, structurally: prove the clause `target` = `¬A₁ ∨ … ∨ ¬Aₙ ∨ C…` from
+`impl : A₁ → … → Aₙ → D` by cases on each `Aᵢ` (`Classical.em`). A false `Aᵢ` injects
+its literal `¬Aᵢ`; when all hold, `D` (literals `bodyLiterals`) weakens into `target`. -/
+private partial def proveSubproofStructurally? (target : Expr) (targetLiterals : Array Expr)
+    (bodyLiterals : Array Expr) (impl : Expr) (assumptions : Nat) : MetaM (Option Expr) := do
+  if assumptions == 0 then
+    let body ← instantiateMVars (← inferType impl)
+    if let some proof ← weakenClause body bodyLiterals impl target targetLiterals then
+      return some proof
+    return ← injectProposition? target body impl
+  let .forallE _ hypothesis _ _ ← whnfR (← inferType impl) | return none
+  unless ← isProp hypothesis do return none
+  let some holds ← withLocalDeclD `hsub hypothesis fun h => do
+      let some proof ← proveSubproofStructurally? target targetLiterals bodyLiterals
+          (mkApp impl h) (assumptions - 1) | return none
+      return some (← mkLambdaFVars #[h] proof)
+    | return none
+  let negated := mkNot hypothesis
+  let some fails ← withLocalDeclD `hnsub negated fun h => do
+      let some proof ← injectLiteral target targetLiterals negated h | return none
+      return some (← mkLambdaFVars #[h] proof)
+    | return none
+  return some (mkApp6 (mkConst ``Or.elim) hypothesis negated target
+    (mkApp (mkConst ``Classical.em) hypothesis) holds fails)
+
+/-- `bind`, structurally: from `impl : ∀ x₁ … xₙ, A ↔ B`, prove `(Q x̄, A) ↔ (Q x̄, B)`
+for quantifiers `Q` read off `lhs`, by `forall_congr'` and `exists_congr`. -/
+private partial def proveBindStructurally? (lhs impl : Expr) (binders : Nat) :
+    MetaM (Option Expr) := do
+  if binders == 0 then return some impl
+  let lhs ← whnfR lhs
+  if let .forallE name domain body _ := lhs then
+    let some congruence ← withLocalDeclD name domain fun x => do
+        let some inner ← proveBindStructurally? (body.instantiate1 x) (mkApp impl x)
+            (binders - 1) | return none
+        return some (← mkLambdaFVars #[x] inner)
+      | return none
+    return some (← mkAppM ``forall_congr' #[congruence])
+  if lhs.isAppOfArity ``Exists 2 then
+    let domain := lhs.appFn!.appArg!
+    let predicate := lhs.appArg!
+    let some congruence ← withLocalDeclD `x domain fun x => do
+        let some inner ← proveBindStructurally? (mkApp predicate x).headBeta (mkApp impl x)
+            (binders - 1) | return none
+        return some (← mkLambdaFVars #[x] inner)
+      | return none
+    return some (← mkAppM ``exists_congr #[congruence])
+  return none
+
+/-- `sko_forall` and `sko_ex`, structurally: from `body : P ε ↔ ψ`, where `ε` is the
+anchor's choice term for each of `binders` quantifiers, prove `(Q x, P x) ↔ ψ` with
+`forall_iff_epsilon` or `exists_iff_epsilon`. -/
+private def proveSkolemStructurally? (ctx : TermCtx) (rule : String) (conclusion body : Expr)
+    (binders : Nat) : MetaM (Option Expr) := do
+  let some (lhs, _) := (← whnfR conclusion).iff? | return none
+  let mut current := lhs
+  let mut chain : Option Expr := none
+  for _ in [:binders] do
+    let current' ← whnfR current
+    let (domain, predicate, lemma) ←
+      if rule == "sko_forall" then
+        let .forallE name domain body _ := current' | return none
+        pure (domain, Expr.lam name domain body .default, ``forall_iff_epsilon)
+      else
+        unless current'.isAppOfArity ``Exists 2 do return none
+        pure (current'.appFn!.appArg!, current'.appArg!, ``exists_iff_epsilon)
+    let some nonempty ← nonemptyProof? ctx domain | return none
+    let step ← mkAppM lemma #[nonempty, predicate]
+    let some (_, next) := (← inferType step).iff? | return none
+    chain ← match chain with
+      | none => pure (some step)
+      | some previous => pure (some (← mkAppM ``Iff.trans #[previous, step]))
+    current := next.headBeta
+  let some steps := chain | return none
+  try return some (← mkAppM ``Iff.trans #[steps, body]) catch _ => return none
+
 /-- Replay a parsed Alethe proof into a Lean proof of `False`.
 
 `facts` maps a `crush_fact_<n>` assumption id to the Lean proof of that hypothesis (from
 `TranslateState.facts`); `symbols` is the emitted-symbol → Lean-term map. -/
 partial def replay (proof : AletheProof) (rawSexps : Array Sexp)
-    (facts : Std.HashMap String Expr) (symbols : Std.HashMap String Expr) :
+    (facts : Std.HashMap String Expr) (symbols : Std.HashMap String Expr)
+    (encodingEvidence : Array Expr := #[]) :
     TacticM (Except ReplayFailure Expr) := do
   -- Collect named bindings before annotation stripping discards their definitions.
   let named := rawSexps.foldl (fun acc s => collectNamed s acc) {}
   let decoders ← getReplayTermHandlers
   let replayRules ← getReplayRuleHandlers
-  let ctx : TermCtx := { symbols, named, decoders }
+  -- Inhabitation evidence for `choice` terms over types without a `Nonempty` instance.
+  let nonempty ← nonemptyEvidence (encodingEvidence ++ facts.toArray.map (·.2))
+  let ctx : TermCtx := { symbols, named, decoders, nonempty }
   let failureRef ← IO.mkRef none
   let telemetry ← ReplayTelemetrySession.start
   let referenceCounts := premiseReferenceCounts proof.commands
@@ -1230,7 +1333,10 @@ where
         else
           pure none
       else if premiseProofs.size == 1 then
-        if rule == "implies" then
+        if rule == "symm" then
+          let proof? ← proveSymmStep? target premiseProofs[0]!
+          pure (proof?.map fun proof : Expr => (proof, "structural:symm"))
+        else if rule == "implies" then
           let proof? ← proveImplicationPremiseClause? target premiseProofs[0]!
           pure (proof?.map fun proof : Expr => (proof, "structural:implies-elim"))
         else if rule == "not_and" then
@@ -1253,7 +1359,8 @@ where
       else if rule == "trans" then
         let proof? ← proveTransStep? target premiseProofs
         pure (proof?.map fun proof : Expr => (proof, "structural:transitivity"))
-      else if rule == "resolution" && premiseProofs.size > 1 then
+      else if (rule == "resolution" || rule == "th_resolution") &&
+          premiseProofs.size > 1 then
         let proof? ← proveResolutionStep target targetLiterals premiseProofs
         pure (proof?.map fun proof : Expr => (proof, "structural:resolution"))
       else if (rule == "reordering" || rule == "contraction") &&
@@ -1302,11 +1409,15 @@ where
     telemetry.recordPhase id rule s!"dispatch:{replayed.method}" dispatchStarted
     let pf := replayed.proof
     let pf ←
-      if rule == "resolution" &&
+      if (rule == "resolution" || rule == "th_resolution") &&
           (referenceCounts.getD id 0 > 1 ||
             premiseProofs.size >= wideResolutionThreshold) then
-        mkAuxTheorem target pf (zetaDelta := true)
-          (kind? := some `crushAletheStep)
+        -- Synchronous and uncached: under `Elab.async`, `addDecl` checks in the
+        -- background and re-adds a rejected theorem as an axiom, and the type-keyed
+        -- cache could hand this call a theorem created by an earlier `crush` call.
+        withOptions (Elab.async.set · false) <|
+          mkAuxTheorem target pf (zetaDelta := true)
+            (kind? := some `crushAletheStep) (cache := false)
       else
         pure pf
     return some ({ proof := pf, clause := target, literals := targetLiterals }, replayed.method)
@@ -1411,6 +1522,15 @@ where
               | trace[crush.result] "alethe replay: declined (subproof {stepId} body)"
                 return none
             let implication ← mkLambdaFVars locals body
+            let structural ← tryCatchRuntimeEx
+              (proveSubproofStructurally? conclusion conclusionLiterals
+                (conclusionLiterals.extract locals.size conclusionLiterals.size)
+                implication locals.size)
+              fun _ => pure none
+            if let some proof := structural then
+              if let some proof ← validatedOrNone conclusion proof then
+                trace[crush.replay] "subproof {stepId} discharged structurally"
+                return some proof
             proveRegisteredStep ctx replayRules stepId "subproof" conclusion
               (#[implication] ++ scopedProofs) conclusionLiterals
         bindAssumptions 0 env #[]
@@ -1458,6 +1578,14 @@ where
                 | trace[crush.result] "alethe replay: declined (bind anchor {stepId} body)"
                   return none
               let generalized ← mkLambdaFVars locals body
+              let structural ← tryCatchRuntimeEx (do
+                  let some (lhs, _) := (← whnfR conclusion).iff? | return none
+                  proveBindStructurally? lhs generalized locals.size)
+                fun _ => pure none
+              if let some proof := structural then
+                if let some proof ← validatedOrNone conclusion proof then
+                  trace[crush.replay] "bind {stepId} discharged structurally"
+                  return some proof
               proveStep conclusion (#[generalized] ++ scopedProofs) "bind"
         bindVariables 0 ctx #[]
       else if closeRule == "sko_forall" || closeRule == "sko_ex" then
@@ -1488,6 +1616,13 @@ where
             | trace[crush.result] "alethe replay: declined ({closeRule} anchor \
                                    {stepId} body)"
               return none
+          let structural ← tryCatchRuntimeEx
+            (proveSkolemStructurally? assignedCtx closeRule conclusion body assignments.size)
+            fun _ => pure none
+          if let some proof := structural then
+            if let some proof ← validatedOrNone conclusion proof then
+              trace[crush.replay] "{closeRule} {stepId} discharged structurally"
+              return some proof
           proveStep conclusion (#[body] ++ scopedProofs) closeRule
       else
         trace[crush.result] "alethe replay: declined (unsupported anchor rule \

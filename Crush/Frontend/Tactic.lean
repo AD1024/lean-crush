@@ -395,7 +395,7 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
             let proof := src.negationTransform.map (fun transform => mkApp transform hneg)
               |>.getD hneg
             facts := facts.insert name proof
-        match ← Alethe.replay proof proofSexps facts st.nameToExpr with
+        match ← Alethe.replay proof proofSexps facts st.nameToExpr st.encodingEvidence with
         | .ok falseProof => return .ok (← mkLambdaFVars #[hneg] falseProof)
         | .error failure => return .error failure
     ) fun e => do
