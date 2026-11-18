@@ -532,7 +532,8 @@ private def runCrushCore (goal : MVarId) (cfg : Config) (hints : Hints)
   if cfg.trust == .reconstruct && cfg.backend != .none then
     checkReconstructionGoalAxioms (← goal.getType)
   let forceAlethe := cfg.trust != .trust && cfg.reconstruct == .alethe
-  if cfg.reconstruct == .alethe && cfg.backend != .cvc5 then
+  -- `crush.reconstruct` is not consulted under trust, and backend `none` runs no solver.
+  if forceAlethe && cfg.backend != .cvc5 && cfg.backend != .none then
     throwError "crush: `crush.reconstruct alethe` requires the cvc5 backend, but \
                 `crush.backend` is `{cfg.backend}`"
   -- Native mode requires cvc5 for execution; other solvers use defunctionalization.

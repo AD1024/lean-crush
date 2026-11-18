@@ -60,3 +60,28 @@ run_meta do
     { backend := .cvc5, hoMode := .native, trust := .reconstruct }
 
 end SoundnessConfigTrust
+
+/-! ## `crush.reconstruct "alethe"` is checked only where it is used (review round 3, C6)
+
+Under trust the reconstruct mode is never consulted, and backend `none` runs no
+solver; a reconstructing policy still needs cvc5. -/
+
+namespace SoundnessConfigTrustAlethe
+
+set_option crush.reconstruct "alethe" in
+example (x : Int) (h : x > 2) : x > 1 := by crush
+
+set_option crush.reconstruct "alethe" in
+set_option crush.backend "none" in
+set_option crush.trust "reconstruct" in
+example (x : Int) (h : x > 2) : x > 1 := by
+  crush
+  omega
+
+/-- error: crush: `crush.reconstruct alethe` requires the cvc5 backend -/
+#guard_msgs(error, substring := true) in
+set_option crush.reconstruct "alethe" in
+set_option crush.trust "reconstruct" in
+example (x : Int) (h : x > 2) : x > 1 := by crush
+
+end SoundnessConfigTrustAlethe
