@@ -176,14 +176,19 @@ def isSupportedDatatypeApp (n : Name) (levels : List Level) (typeArgs : Array Ex
     return false
   -- Instantiated fields must be data with non-function SMT sorts. Direct
   -- positive recursion is supported; proof and function fields remain opaque.
+  -- A field whose type mentions an earlier field (`x : α` after `α : Type`) has no
+  -- single SMT selector sort, so its type stays opaque as well.
   let fieldsOk ← iv.ctors.allM fun ctorName => do
     let ctorTy ← instantiateCtorType ctorName levels typeArgs
-    forallTelescopeReducing ctorTy fun args _ =>
-      args.allM fun a => do
-        let ty ← whnf (← inferType a)
+    forallTelescopeReducing ctorTy fun args _ => do
+      for i in [:args.size] do
+        let ty ← whnf (← inferType args[i]!)
         if ty.isForall then return false
         if ← isProp ty then return false
-        return true
+        let ty ← Core.betaReduce (← instantiateMVars ty)
+        if (args.extract 0 i).any (fun earlier => ty.containsFVar earlier.fvarId!) then
+          return false
+      return true
   unless fieldsOk do return false
   -- Emit only Lean's own mutual block. Recursion through an external datatype
   -- would require a larger SMT declaration block and otherwise forward-reference
@@ -661,6 +666,35 @@ where
       if inner.consumeMData.isLambda then go inner (remaining + 1) peeled else (e, peeled)
     | _ + 1, _ => (e, peeled)
 
+/-- Tag of the error `emitSort` raises when it refuses a type it cannot translate
+soundly (a dependent type). A datatype or finite-array declaration that meets it in
+a field rolls back and leaves its type opaque; other errors propagate. -/
+def sortRefusalTag : Name := `crush.sortRefusal
+
+/-- Whether `e` is a sort refusal (see `sortRefusalTag`). -/
+def isSortRefusal : Exception → Bool
+  | .error _ msg => msg.hasTag (· == sortRefusalTag)
+  | _ => false
+
+/-- Structural identity of a datatype instantiation: its head, universe levels, and
+parameters. -/
+def datatypeKey (n : Name) (levels : List Level) (typeArgs : Array Expr) : StructuralKey :=
+  { tag := "datatype", name := n, exprs := #[mkConst n levels], typeExprs := typeArgs }
+
+/-- Run a declaration that may be refused because a component sort cannot be
+translated. A refusal restores the translation and metavariable state and returns
+`none`; any other error propagates. -/
+def withRefusalRollback {α : Type} (k : TranslateM α) : TranslateM (Option α) := do
+  let saved ← Meta.saveState
+  let previous ← get
+  try
+    return some (← k)
+  catch e =>
+    unless isSortRefusal e do throw e
+    saved.restore
+    set previous
+    return none
+
 /-- Built-in SMT sorts are fixed across quantifier and lambda instantiations.
 Even a type binder must not occur in a sort key: type equality can distinguish
 empty and inhabited instantiations of the same quantified type variable. -/
@@ -702,9 +736,12 @@ mutual
                  else declareUninterpretedSort e
     | _ =>
     -- Encode finite arrays by a length and a theory array for native read/write semantics.
+    -- An element sort that cannot be translated leaves the array opaque (arrays are
+    -- inhabited, so no validity guard is lost).
     if let some elem ← finiteArrayElem? e then
-      let enc ← declareFiniteArray elem
-      return .app (.symb enc.sortName) #[]
+      match ← declareFiniteArray? elem with
+      | some enc => return .app (.symb enc.sortName) #[]
+      | none => return ← declareUninterpretedSort e
     -- Literal widths use indexed SMT bit-vector sorts; symbolic widths are refused below.
     match ← bvWidthOfType? e with
     | some w => return bvSort w
@@ -717,22 +754,22 @@ mutual
         return nativeArrowSort (← shape.args.mapM emitSort) (← emitSort shape.res)
       let (sort, _) ← declareArrowSort e
       return sort
-    -- Supported inductives receive distinct SMT datatypes for each type instantiation.
-    match ← supportedDatatypeType? e with
-    | some (n, levels, typeArgs) =>
-      let name ← declareDatatype n levels typeArgs
-      return .app (.symb name) #[]
+    -- Supported inductives receive distinct SMT datatypes for each type instantiation,
+    -- unless a field sort is refused, in which case the type is opaque in this query.
+    match ← datatypeSort? e with
+    | some (_, _, _, name) => return .app (.symb name) #[]
     | none =>
       -- An opaque sort cannot vary with a value binder, and dependent function
       -- applications cannot use a fixed arrow signature. Refuse unsupported dependent
       -- types, including fixed instances such as Fin 5; earlier handlers may encode them.
       if ← isDependentType e then
-        throwError "crush: cannot translate the dependent type{indentExpr e}\n\
-                    A dependent type is a type that depends on a value, such as \
-                    `Fin n`, or a function type whose result type depends on its \
-                    argument, such as `(n : Nat) → β n`. crush cannot translate \
-                    these types to SMT without risking false proofs. Restate the \
-                    goal without this type, or prove it another way."
+        throwError (MessageData.tagged sortRefusalTag
+          m!"crush: cannot translate the dependent type{indentExpr e}\n\
+            A dependent type is a type that depends on a value, such as \
+            `Fin n`, or a function type whose result type depends on its \
+            argument, such as `(n : Nat) → β n`. crush cannot translate \
+            these types to SMT without risking false proofs. Restate the \
+            goal without this type, or prove it another way.")
       declareUninterpretedSort e
 
   /-- Declare the `Fn` sort and `app` symbol for an arrow type `σ₁ → … → τ`, once.
@@ -1048,6 +1085,21 @@ mutual
     let some sortName ← TranslateM.structuralSymbol? key | return false
     return actual == SSort.app (.symb sortName) #[]
 
+  /-- `declareFiniteArray`, or `none` when the element sort is refused. The refusal
+  is remembered, so the array type is opaque everywhere in the query. -/
+  partial def declareFiniteArray? (elem : Expr) : TranslateM (Option FiniteArrayEncoding) := do
+    let elem ← instantiateMVars elem
+    let key : StructuralKey := {
+      tag := "finite-array", name := ``Array, typeExprs := #[elem]
+    }
+    if (← TranslateM.structuralSymbol? key).isSome then
+      return some (← declareFiniteArray elem)
+    if ← TranslateM.isOpaqueStructural key then return none
+    if let some enc ← withRefusalRollback (declareFiniteArray elem) then
+      return some enc
+    TranslateM.markOpaqueStructural key
+    return none
+
   /-- Declare the finite representation of `Array elem`.
 
   Every well-formed value has a nonnegative length, well-formed elements at
@@ -1139,8 +1191,7 @@ mutual
     let levels ← levels.mapM instantiateLevelMVars
     -- Universe levels and type instantiations must distinguish sorts, constructors,
     -- and selectors. `exprs` normalizes the levels of the head constant.
-    let memberKey (m : Name) : StructuralKey :=
-      { tag := "datatype", name := m, exprs := #[mkConst m levels], typeExprs := typeArgs }
+    let memberKey (m : Name) : StructuralKey := datatypeKey m levels typeArgs
     if let some name ← TranslateM.structuralSymbol? (memberKey n) then
       return name
     -- Emit the complete Lean mutual block together: selectors and validity
@@ -1197,6 +1248,36 @@ mutual
       | throwError "crush: internal — `{n}` missing from its own mutual block"
     return nSort
 
+  /-- `declareDatatype` under rollback. When a field sort is refused (a dependent
+  field such as `Fin 5`), the state is restored, every member of the block is
+  recorded as opaque for the rest of the query, and the result is `none`; the caller
+  then uses an opaque sort, which carries a validity guard unless the type is known
+  to be inhabited. A type already declared skips the check. The fallback is local: a
+  structure with such a datatype as a field remains a datatype over the opaque sort. -/
+  partial def declareDatatype? (n : Name) (levels : List Level) (typeArgs : Array Expr) :
+      TranslateM (Option String) := do
+    let typeArgs ← typeArgs.mapM instantiateMVars
+    let levels ← levels.mapM instantiateLevelMVars
+    let key := datatypeKey n levels typeArgs
+    if let some name ← TranslateM.structuralSymbol? key then return some name
+    if ← TranslateM.isOpaqueStructural key then return none
+    if let some name ← withRefusalRollback (declareDatatype n levels typeArgs) then
+      return some name
+    for m in (← getConstInfoInduct n).all do
+      TranslateM.markOpaqueStructural (datatypeKey m levels typeArgs)
+    return none
+
+  /-- The SMT datatype for the type `ty`: its head, levels, parameters, and sort
+  symbol, declared on first use. `none` when `ty` is not a supported datatype or its
+  declaration was refused in this query. Every site that treats a type as a datatype
+  goes through here, so within one query a type is either a datatype everywhere or
+  opaque everywhere. -/
+  partial def datatypeSort? (ty : Expr) :
+      TranslateM (Option (Name × List Level × Array Expr × String)) := do
+    let some (n, levels, typeArgs) ← supportedDatatypeType? ty | return none
+    let some sortName ← declareDatatype? n levels typeArgs | return none
+    return some (n, levels, typeArgs, sortName)
+
   /-- Whether values of `ty` occupy a *proper subset* of their SMT sort, so a
   quantifier over them needs a guard. True for `Nat` (encoded as `Int`) and for any
   datatype that transitively contains such a field.
@@ -1217,7 +1298,7 @@ mutual
       else if ← knownNonemptyDefunctionalizedArrow ty shape then
         return false
       return ← needsWFGuard shape.res visiting
-    let some (n, levels, typeArgs) ← supportedDatatypeType? ty | do
+    let some (n, levels, typeArgs, _) ← datatypeSort? ty | do
       discard <| emitSort ty
       let key : StructuralKey := { tag := "opaque-sort", typeExprs := #[ty] }
       if (← TranslateM.structuralSymbol? key).isSome then
@@ -1307,7 +1388,7 @@ mutual
       let .app (.symb sortName) _ := sort | return none
       let wf ← reserveWfSymbol sortName
       return some (.app (.symb wf) #[t])
-    let some (n, levels, typeArgs) ← supportedDatatypeType? ty | do
+    let some (_, _, _, sortName) ← datatypeSort? ty | do
       discard <| emitSort ty
       let key : StructuralKey := { tag := "opaque-sort", typeExprs := #[ty] }
       let some sortName ← TranslateM.structuralSymbol? key | return none
@@ -1315,7 +1396,6 @@ mutual
       let wf ← reserveWfSymbol sortName
       return some (.app (.symb wf) #[t])
     if !(← needsWFGuard ty) then return none
-    let sortName ← declareDatatype n levels typeArgs
     let wf ← reserveWfSymbol sortName
     return some (.app (.symb wf) #[t])
 
@@ -1592,9 +1672,8 @@ mutual
     let some structArg := args[info.numParams]? | return none
     let structTy ← whnf (← inferType structArg)
     if (← finiteArrayElem? structTy).isSome then return none
-    let some (n, levels, typeArgs) ← supportedDatatypeType? structTy | return none
+    let some (n, _, _, sortName) ← datatypeSort? structTy | return none
     unless n == (← getConstInfoCtor info.ctorName).induct do return none
-    let sortName ← declareDatatype n levels typeArgs
     let sel ← reserveSelSymbol sortName info.ctorName info.i
     let extraArgs := args.extract (info.numParams + 1) args.size
     let sarg ← emitTerm structArg
@@ -1611,9 +1690,8 @@ mutual
     let some (.ctorInfo ci) := env.find? cn | return none
     let resTy ← whnf (← inferType (mkAppN fn args))
     if (← finiteArrayElem? resTy).isSome then return none
-    let some (n, levels, typeArgs) ← supportedDatatypeType? resTy | return none
+    let some (n, _, _, sortName) ← datatypeSort? resTy | return none
     unless n == ci.induct do return none
-    let sortName ← declareDatatype n levels typeArgs
     let valueArgs := args.extract ci.numParams args.size
     let sargs ← valueArgs.mapM emitTerm
     let ctor ← reserveCtorSymbol sortName cn

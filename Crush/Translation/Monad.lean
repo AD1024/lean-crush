@@ -150,6 +150,10 @@ structure TranslateState where
       up a library declaration's own universe parameter through an uninstantiated type,
       so it is rejected with an internal error. `none` (direct API use) skips the check. -/
   levelParams : Option (List Name) := none
+  /-- Datatype (and finite-array) instantiations whose declaration was refused in
+      this query because a field sort cannot be translated. They are opaque sorts
+      everywhere in the query. Keys are normalized like `structuralToName`. -/
+  opaqueDatatypes : Std.HashSet StructuralKey := {}
   deriving Inhabited
 
 /-- The translation monad. `MetaM` at the bottom gives us `whnf`, unification,
@@ -308,6 +312,16 @@ def symbolForStructural (key : StructuralKey) (hint : String) : TranslateM Strin
 def structuralSymbol? (key : StructuralKey) : TranslateM (Option String) := do
   let key ← normalizeStructuralKey key
   return (← get).structuralToName.get? key
+
+/-- Record that a structural datatype identity is opaque for the rest of the query. -/
+def markOpaqueStructural (key : StructuralKey) : TranslateM Unit := do
+  let key ← normalizeStructuralKey key
+  modify fun s => { s with opaqueDatatypes := s.opaqueDatatypes.insert key }
+
+/-- Whether a structural datatype identity was made opaque earlier in the query. -/
+def isOpaqueStructural (key : StructuralKey) : TranslateM Bool := do
+  let key ← normalizeStructuralKey key
+  return (← get).opaqueDatatypes.contains key
 
 /-- Record that SMT symbol `name` stands for the Lean term `e`, for proof replay.
 Idempotent; the first recording wins, so a symbol reused across occurrences keeps its
