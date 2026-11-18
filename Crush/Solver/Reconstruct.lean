@@ -937,15 +937,14 @@ private def trySelectedExistentialWitness (snapshot : KernelCheckSnapshot)
       targetHead.getAppArgs.size == 2 do return false
   let hypTypes ← proofs.mapM fun proof => do instantiateMVars (← inferType proof)
   let target := mkArrowChain hypTypes goalType
-  let params ← collectProofParams #[target]
-  let closedTarget ← mkForallFVars params target
+  let closedTarget ← closeTarget target
   let saved ← saveState
   tryCatchRuntimeEx (do
-    let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
+    let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget.type
     let (_, g) ← mv.mvarId!.intros
     if ← tryExistentialWitness g (useGlobalSimpPrepass proofs) then
       let assigned ← instantiateMVars mv
-      let proof := mkAppN (mkAppN assigned params) proofs
+      let proof := mkAppN (mkAppN assigned closedTarget.args) proofs
       goal.assign (← kernelCheckProof snapshot goalType proof)
       return true
     restoreState saved
@@ -972,11 +971,10 @@ private def trySelectedConstructorSplit (snapshot : KernelCheckSnapshot)
   unless ← supportsStructuralSplitting goalType do return false
   let hypTypes ← proofs.mapM fun proof => do instantiateMVars (← inferType proof)
   let target := mkArrowChain hypTypes goalType
-  let params ← collectProofParams #[target]
-  let closedTarget ← mkForallFVars params target
+  let closedTarget ← closeTarget target
   let saved ← saveState
   tryCatchRuntimeEx (do
-    let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
+    let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget.type
     let (_, g) ← mv.mvarId!.intros
     if (← splittableFVars g (onlyComputationallyScrutinized := true)).isEmpty then
       restoreState saved
@@ -994,7 +992,7 @@ private def trySelectedConstructorSplit (snapshot : KernelCheckSnapshot)
         (finishCurrent := false) (onlyComputationallyScrutinized := true)
         (ruleFuel := 0) then
       let assigned ← instantiateMVars mv
-      let proof := mkAppN (mkAppN assigned params) proofs
+      let proof := mkAppN (mkAppN assigned closedTarget.args) proofs
       goal.assign (← kernelCheckProof snapshot goalType proof)
       return true
     restoreState saved
@@ -1024,11 +1022,10 @@ private def trySelectedFactRulesOnce (snapshot : KernelCheckSnapshot)
   let goalType ← instantiateMVars (← goal.getType)
   let hypTypes ← proofs.mapM fun proof => do instantiateMVars (← inferType proof)
   let target := mkArrowChain hypTypes goalType
-  let params ← collectProofParams #[target]
-  let closedTarget ← mkForallFVars params target
+  let closedTarget ← closeTarget target
   let saved ← saveState
   tryCatchRuntimeEx (do
-    let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
+    let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget.type
     let (introduced, g) ← mv.mvarId!.intros
     if introduced.size < proofs.size then
       restoreState saved
@@ -1061,7 +1058,7 @@ private def trySelectedFactRulesOnce (snapshot : KernelCheckSnapshot)
             break
         if closed then
           let assigned ← instantiateMVars mv
-          let proof := mkAppN (mkAppN assigned params) proofs
+          let proof := mkAppN (mkAppN assigned closedTarget.args) proofs
           goal.assign (← kernelCheckProof snapshot goalType proof)
           return true
         restoreState candidateSaved
@@ -1130,7 +1127,7 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
     -- Abstract only target parameters and their dependencies. Unselected
     -- proposition hypotheses must not enter through the new metavariable context.
     let params ← collectProofParams #[target]
-    let closedTarget ← mkForallFVars params target
+    let closedTarget ← closeTarget target
     if let some tac := manualFinisher? then
       let saved ← saveState
       let closed ← tryCatchRuntimeEx (do
@@ -1164,7 +1161,7 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
     -- consume the budget searching for the same specialized theorem.
     let saved ← saveState
     let closed ← tryCatchRuntimeEx (do
-      let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
+      let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget.type
       let (_, initialGoal) ← mv.mvarId!.intros
       let g ← destructAndHypotheses initialGoal
       let g ← destructConstructorEqualities g
@@ -1186,7 +1183,7 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
           break
       if closed then
         let assigned ← instantiateMVars mv
-        let proof := mkAppN (mkAppN assigned params) coreProofs
+        let proof := mkAppN (mkAppN assigned closedTarget.args) coreProofs
         goal.assign (← kernelCheckProof snapshot goalType proof)
         return true
       restoreState saved
@@ -1201,11 +1198,11 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
       let saved ← saveState
       let closed ← tryCatchRuntimeEx (do
         trace[crush.reconstruct] "trying finisher: {tac}"
-        let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
+        let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget.type
         let gs ← Tactic.run mv.mvarId! (evalTactic tac)
         if gs.isEmpty then
           let assigned ← instantiateMVars mv
-          let proof := mkAppN (mkAppN assigned params) coreProofs
+          let proof := mkAppN (mkAppN assigned closedTarget.args) coreProofs
           goal.assign (← kernelCheckProof snapshot goalType proof)
           return true
         trace[crush.reconstruct] "finisher left goals: {← gs.mapM (·.getType)}"
@@ -1220,7 +1217,7 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
     trace[crush.reconstruct] "trying structured reconstruction"
     let saved ← saveState
     let closed ← tryCatchRuntimeEx (do
-      let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget
+      let mv ← withLCtx {} {} do mkFreshExprMVar closedTarget.type
       let (_, g) ← mv.mvarId!.intros
       let structuralFinishers ← structuralFinisherTactics
       let closed ←
@@ -1248,7 +1245,7 @@ def tryReconstruct (goal : MVarId) (coreProofs : Array Expr)
         let assigned ← instantiateMVars mv
         trace[crush.reconstruct] "structured result: sorry={assigned.hasSorry}, \
           metavariables={assigned.hasMVar}"
-        let proof := mkAppN (mkAppN assigned params) coreProofs
+        let proof := mkAppN (mkAppN assigned closedTarget.args) coreProofs
         goal.assign (← kernelCheckProof snapshot goalType proof)
         return true
       restoreState saved

@@ -301,8 +301,7 @@ private def proveStepCore (target : Expr) (premises : Array Expr) (rule : String
     TacticM (Option StepProof) := do
   let hypTypes ← premises.mapM fun p => do instantiateMVars (← inferType p)
   let impl := hypTypes.foldr (fun ty acc => mkForall `h .default ty acc) target
-  let stepParams ← collectProofParams #[impl]
-  let closedImpl ← instantiateMVars (← mkForallFVars stepParams impl)
+  let closedImpl ← closeTarget impl
   let hint ← ReplayRules.protocolHint? rule
   let hinted := match hint with | some tactic => #[tactic] | none => #[]
   let fallbacks ← stepTactics
@@ -311,14 +310,14 @@ private def proveStepCore (target : Expr) (premises : Array Expr) (rule : String
     let tactic := candidate.tactic
     let saved ← saveState
     let result ← tryCatchRuntimeEx (do
-      let mv ← withLCtx {} {} do mkFreshExprMVar closedImpl
+      let mv ← withLCtx {} {} do mkFreshExprMVar closedImpl.type
       let gs ← Tactic.run mv.mvarId! <|
         Tactic.withSuppressedMessages <|
           Tactic.withoutRecover (evalTactic
             (← `(tactic| (intros; $tactic))))
       if gs.isEmpty then
         let assigned ← instantiateMVars mv
-        let proof := mkAppN (mkAppN assigned stepParams) premises
+        let proof := mkAppN (mkAppN assigned closedImpl.args) premises
         let proof ← validateProofCandidate target proof
         return some { proof, method := candidate.label }
       restoreState saved

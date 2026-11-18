@@ -261,7 +261,11 @@ private def ensureNativeAxiomClosure (snapshot : KernelCheckSnapshot)
 
 /-- Collect the local declarations needed to close `exprs`, without scanning unrelated
 entries in the ambient context. Visible let values contribute dependencies; nondependent
-lets are generalized and therefore contribute only their types. -/
+lets are generalized and therefore contribute only their types.
+
+The result includes let-bound locals. `mkForallFVars` turns a (dependent) let-bound
+local into a `let` binder, not a `∀` binder, so a proof of the closed proposition must
+not be applied to it: use `closeTarget`, whose `args` are exactly the `∀` parameters. -/
 def collectProofParams (exprs : Array Expr) : MetaM (Array Expr) := do
   let lctx ← getLCtx
   let mut used : CollectFVars.State := {}
@@ -283,6 +287,24 @@ def collectProofParams (exprs : Array Expr) : MetaM (Array Expr) := do
       retained := retained.insert fvarId
       indexed := indexed.push (decl.index, mkFVar fvarId)
   return (indexed.qsort (fun left right => left.1 < right.1)).map (·.2)
+
+/-- A proposition closed over the locals it depends on, for proving in an empty context. -/
+structure ClosedTarget where
+  /-- The closed proposition. Let-bound locals appear as `let` binders. -/
+  type : Expr
+  /-- The locals that became `∀` binders, in order: apply a proof of `type` to these. -/
+  args : Array Expr
+
+/-- Close `target` over the locals it depends on. A proof `p : type` proves `target`
+in the current context as `mkAppN p args`.
+
+Let-bound locals are not arguments: `mkForallFVars` abstracts them as `let` binders,
+which a proof of the closed proposition already instantiates with their values. -/
+def closeTarget (target : Expr) : MetaM ClosedTarget := do
+  let params ← collectProofParams #[target]
+  let type ← instantiateMVars (← mkForallFVars params target)
+  let args ← params.filterM fun p => return !(← p.fvarId!.isLetVar)
+  return { type, args }
 
 /-- Report admissions in the goal before speculative reconstruction can hide the
 diagnostic. Only dependencies of the goal itself are included. -/

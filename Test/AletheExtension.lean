@@ -130,6 +130,14 @@ register_crush_replay rule <<
 private def invalidReplayRule : ReplayRuleHandler := fun _ =>
   return some (mkConst ``True.intro)
 
+@[crush_replay_rule "test_replay_throw_then_work" high]
+private def throwingReplayRule : ReplayRuleHandler := fun _ =>
+  throwError "replay handler exploded"
+
+register_crush_replay rule low <<
+  (test_replay_throw_then_work ..) => by exact True.intro
+>>
+
 private def parseTerm (source : String) : MetaM Sexp := do
   let some (term, rest) := parseSexp source
     | throwError "failed to parse Alethe term `{source}`"
@@ -260,19 +268,25 @@ example : True := by
 example : True := by
   assert_test_replay_condition_isolated
 
+-- A throwing condition or a rejected proof makes its handler decline; it does not
+-- abort replay.
 /-!
-error: replay condition `failingReplayCondition` failed:
+error: test replay rule `test_replay_condition_error` declined
 -/
 #guard_msgs(error, substring := true) in
 example : True := by
   run_test_replay "test_replay_condition_error" "unused"
 
 /-!
-error: crush: reconstructed proof failed kernel validation:
+error: test replay rule `test_replay_kernel_rejection` declined
 -/
 #guard_msgs(error, substring := true) in
 example : False := by
   run_test_replay "test_replay_kernel_rejection" "unused"
+
+-- A throwing handler is followed by a lower-priority handler that replays the step.
+example : True := by
+  run_test_replay "test_replay_throw_then_work" "unused"
 
 section Replay
 
