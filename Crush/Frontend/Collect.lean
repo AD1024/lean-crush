@@ -8,10 +8,12 @@ import Crush.Solver.KernelCheck
 # Collecting facts from the goal
 
 Collect local propositions, visible local data equations, explicit hints, relevant
-unfolding equations, optional library premises, and the negated goal. Bare `crush`
-uses all local facts; an explicit list restricts them unless it contains `*`.
-Each fact retains its proof and source description for trusted discharge,
-reconstruction, and diagnostics. Polymorphic hints are prepared for specialization.
+unfolding equations, optional library premises, and the negated goal. Every form of
+the tactic uses all local facts: a hint list adds facts and never removes any, as in
+`grind`. `only` drops the automatically collected lemmas, and `-foo` removes one
+global constant from them. Each fact retains its proof and source description for
+trusted discharge, reconstruction, and diagnostics. Polymorphic hints are prepared
+for specialization.
 -/
 
 open Lean Meta
@@ -47,27 +49,57 @@ structure Fact where
   instanceOf : Option Expr := none
   deriving Inhabited
 
+/-- A global constant excluded with `-name` in a hint list. -/
+structure ExcludedHint where
+  /-- The constant written after `-`. -/
+  name : Name
+  /-- Whether `name` is a definition, which stands for its equation lemmas. -/
+  isDefinition : Bool := false
+  /-- `name`, plus the equation lemmas of a definition. Automatic collection
+  (unfolding, reducible rewrites, premise selection, ground instantiation's simp set)
+  skips all of them. -/
+  constants : Array Name := #[]
+  deriving Inhabited
+
+/-- Constants whose use in a finished proof is reported: the excluded theorem or axiom
+itself, or a definition's equation lemmas (the definition itself occurs in its goal). -/
+def ExcludedHint.watched (excluded : ExcludedHint) : Array Name :=
+  if excluded.isDefinition then excluded.constants.filter (· != excluded.name)
+  else #[excluded.name]
+
 /-- The resolved fact sources requested by the tactic's argument grammar. Produced
 by the tactic front-end; `collectFacts` turns it into the actual `Fact` array.
 
 `terms` are proof terms the user named explicitly (lemmas or hypotheses); `eqnLemma`
-names are equation lemmas already resolved from `u[…]`/`d[…]` hints. `allHyps`
-requests every local `Prop` hypothesis — the default when no `[…]` list is given, or
-when the list contains `*`. -/
+names are equation lemmas already resolved from `u[…]`/`d[…]` hints and definition
+names in the list. Every tactic form sets `allHyps`: a hint list adds facts to the
+local context and never removes any (use `clear h` to hide a hypothesis). -/
 structure Hints where
   /-- Explicit proof terms (already elaborated) with a description each. -/
   terms    : Array (Expr × String) := #[]
   /-- Equation-lemma constant names gathered from `u[…]`/`d[…]`. -/
   eqnLemmas : Array Name := #[]
-  /-- Whether to sweep in every local `Prop` hypothesis. -/
+  /-- Whether to sweep in every local `Prop` hypothesis. The tactic always sets it;
+  direct API callers may still collect only `terms`. -/
   allHyps  : Bool := true
   /-- Whether swept local hypotheses enter bounded ground instantiation.
   Bare `crush` leaves this off; an explicit `*` turns it on. -/
   instantiateHyps : Bool := false
-  /-- Whether automatic library premise selection may add facts. An explicit
-  `[...]` list sets this to false so the list remains a strict restriction. -/
+  /-- Whether automatic library premise selection may add facts (still subject to
+  `crush.premises`). -/
   allowPremiseSelection : Bool := true
+  /-- `crush only [...]`: drop automatically collected lemmas — `@[crush_unfold]` and
+  `@[crush_defeq]` equations, `@[reducible]` rewrites, and premise selection. The
+  local context, listed lemmas, `u[...]` and `d[...]` remain. -/
+  only : Bool := false
+  /-- Global constants excluded with `-name`. -/
+  excluded : Array ExcludedHint := #[]
   deriving Inhabited
+
+/-- Every constant removed from automatic collection by `-name` entries. -/
+def Hints.excludedConstants (hints : Hints) : Std.HashSet Name :=
+  hints.excluded.foldl (init := {}) fun set excluded =>
+    excluded.constants.foldl (·.insert ·) set
 
 /-- Facts plus the selected equations that should normalize them before
 monomorphization. `collectFacts` remains as the compatibility wrapper returning
@@ -117,10 +149,17 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
     let mut seenPremises : Std.HashSet Name := {}
     let goalType ← getPropositionalGoalType goal
     seeds := seeds ++ goalType.getUsedConstants
-    -- Local hypotheses, unless an explicit `[…]` list without `*` restricts us.
+    let excluded := hints.excludedConstants
+    -- A listed local is asserted once, as its hint (with eager instantiation).
+    let mut listedLocals : FVarIdSet := {}
+    for (proof, _) in hints.terms do
+      if let .fvar id := (← instantiateMVars proof) then
+        listedLocals := listedLocals.insert id
+    -- Local hypotheses.
     if hints.allHyps then
       for decl in ← getLCtx do
         if decl.isImplementationDetail then continue
+        if listedLocals.contains decl.fvarId then continue
         let ty ← instantiateMVars decl.type
         if (← isProp ty) then
           seeds := seeds ++ ty.getUsedConstants
@@ -163,7 +202,7 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
                     only propositions can be asserted as facts."
     -- Bound library suggestions and send selected polymorphic proofs through specialization.
     let mut selectedPremises := 0
-    if premiseMax > 0 && hints.allowPremiseSelection then
+    if premiseMax > 0 && hints.allowPremiseSelection && !hints.only then
       -- Request a small surplus because selectors may ignore Config.filter;
       -- otherwise irrelevant suggestions can crowd usable rules out of the prefix.
       let candidateMax := min 128 (premiseMax * 4)
@@ -177,6 +216,7 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
       for suggestion in suggestions do
         if selectedPremises >= premiseMax then break
         if seenPremises.contains suggestion.name then continue
+        if excluded.contains suggestion.name then continue
         -- Selectors may ignore their filter. Never automatically select an
         -- admitted theorem; ordinary user axioms remain eligible premises.
         if (← forbiddenReconstructionAxiom? suggestion.name).isSome then continue
@@ -196,9 +236,10 @@ def collectFactsWithRewrite (goal : MVarId) (hints : Hints := {})
     let mut eqnLemmas := hints.eqnLemmas
     let mut rewriteLemmas := hints.eqnLemmas
     -- Collect only reachable marked equations; explicit unfolding hints take precedence.
-    if autoUnfold then
-      eqnLemmas := eqnLemmas ++ (← relevantAutoUnfoldLemmas seeds)
-      rewriteLemmas := eqnLemmas ++ (← relevantReducibleRewriteLemmas seeds)
+    -- `only` drops these automatic lemmas, and `-name` removes individual ones.
+    if autoUnfold && !hints.only then
+      eqnLemmas := eqnLemmas ++ (← relevantAutoUnfoldLemmas seeds excluded)
+      rewriteLemmas := eqnLemmas ++ (← relevantReducibleRewriteLemmas seeds excluded)
     else
       rewriteLemmas := eqnLemmas
     let mut seenEqn : Std.HashSet Name := {}

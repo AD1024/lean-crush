@@ -571,14 +571,17 @@ local `Prop` hypothesis and the negated goal. All other behaviour is governed by
 **Hint grammar** (§9 M5 item 1 — *done*):
 
 ```
-crush [h₁, …, hₙ, *] (u[c₁,…]) (d[c₁,…])
+crush only? [h₁, …, foo, f, -bar, *] (u[c₁,…]) (d[c₁,…])
 ```
 
-- `[…]` an explicit fact list. A `term` element asserts that lemma or hypothesis —
-  this is how you point `crush` at a lemma **not** in the local context, which was
-  the most visible gap when the tactic was argumentless. A `*` element additionally
-  sweeps in all local hypotheses; an explicit list *without* `*` restricts to
-  exactly the listed facts (plus the goal), matching Sledgehammer/`auto`.
+- `[…]` a hint list, with `grind`'s semantics: every form uses all local
+  hypotheses, and a list adds facts and never removes any. A `term` element asserts
+  that lemma or hypothesis with eager ground instantiation — this is how you point
+  `crush` at a lemma **not** in the local context. A definition name adds its
+  equations, as `u[f]` does. `*` gives every local hypothesis eager instantiation.
+  `only` drops automatically collected lemmas (auto-unfold equations, reducible
+  rewrites, premise selection). `-bar` removes a global constant from them and warns
+  when a finished proof still uses it; `-h` on a local is an error (use `clear h`).
 - `u[c₁,…]` unfold: add each constant's equation lemmas (`getEqnsFor?`, falling back
   to its unfold equation).
 - `d[c₁,…]` definitional equalities: add each constant's unfold equation
@@ -595,7 +598,7 @@ crush [h₁, …, hₙ, *] (u[c₁,…]) (d[c₁,…])
 *Not yet in the grammar:* a `* db` named lemma database (there is no `LemDB` yet).
 Premise selection is available through `crush.premises`; it uses Lean core's
 registered `LibrarySuggestions` selector with the `crush.premises.max` bound.
-Explicit `[...]` lists disable it and remain strict restrictions.
+`crush only [...]` disables it, and `-foo` keeps one theorem out of it.
 
 **Two hard lessons from lean-auto's frontend that shape ours:**
 - **Report the pipeline, always.** A bare "failed to find proof" that never says
@@ -830,7 +833,7 @@ SMT operators. `Test/AletheReplay.lean` is the executable coverage record.
     constructor noise; `Test/Extension.lean` and `Test/Theories.lean`.
 6. Premise selection on Lean core `LibrarySuggestions`. **done** — opt-in via
    `crush.premises`, proposition-filtered and bounded by `crush.premises.max`;
-   explicit hint lists remain strict restrictions. Tested in `Test/Premises.lean`.
+   `only` disables it. Tested in `Test/Premises.lean`.
 7. Portfolio backend, per-call config syntax, richer model printing, docs.
 8. **Minimized counterexample models** (`crush.model.minimize`, backlog — wanted by
     downstream users who consume the `sat` model, e.g. PLean). On `sat`, iteratively

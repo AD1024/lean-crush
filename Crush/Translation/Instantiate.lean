@@ -408,8 +408,8 @@ with any usable pattern evidence does not also take the Cartesian fallback, whic
 keeps the pass focused. Trigger occurrences carry their producing templates as
 provenance, so a template cannot feed itself directly or through a cycle and grow
 terms such as `x`, `next x`, `next (next x)`, ... until the budget is consumed. -/
-private def instantiateGroundFactsS (cfg : Config) (facts : Array Fact) :
-    Sym.SymM InstantiationReport := do
+private def instantiateGroundFactsS (cfg : Config) (facts : Array Fact)
+    (excluded : Array Name) : Sym.SymM InstantiationReport := do
   if cfg.instFuel == 0 || cfg.instRounds == 0 then return { facts }
   let mut templates : Array Fact := #[]
   let mut templateSources : Array Nat := #[]
@@ -423,8 +423,11 @@ private def instantiateGroundFactsS (cfg : Config) (facts : Array Fact) :
         templates := templates.push { fact with prop }
         templateSources := templateSources.push sourceIndex
   if templates.isEmpty then return { facts }
+  -- Constants excluded with `-name` leave the default simp set, in both directions.
+  let simpTheorems := excluded.foldl (init := ← getSimpTheorems) fun theorems name =>
+    (theorems.eraseCore (.decl name (inv := false))).eraseCore (.decl name (inv := true))
   let simpContext ← Simp.mkContext
-    (simpTheorems := #[← getSimpTheorems])
+    (simpTheorems := #[simpTheorems])
     (congrTheorems := ← getSimpCongrTheorems)
   let env ← getEnv
   let templateProps : Std.HashSet Expr :=
@@ -557,8 +560,8 @@ private def instantiateGroundFactsS (cfg : Config) (facts : Array Fact) :
 /-- Run the complete pass in one symbolic-computation session. `SymM` caches
 type inference and restricted definitional equality by shared-expression
 identity, which are the dominant repeated operations in ground matching. -/
-def instantiateGroundFacts (cfg : Config) (facts : Array Fact) :
-    MetaM InstantiationReport :=
-  Sym.SymM.run (instantiateGroundFactsS cfg facts)
+def instantiateGroundFacts (cfg : Config) (facts : Array Fact)
+    (excluded : Array Name := #[]) : MetaM InstantiationReport :=
+  Sym.SymM.run (instantiateGroundFactsS cfg facts excluded)
 
 end Crush

@@ -258,8 +258,8 @@ register_option crush.profile.machine : Bool := {
 register_option crush.premises : Bool := {
   defValue := false
   descr := "Use Lean's registered LibrarySuggestions engine to add relevant library \
-            theorems to bare `crush` calls. Explicit `[...]` lists remain strict \
-            restrictions and disable automatic premise selection."
+            theorems to `crush` calls. A hint list keeps premise selection; \
+            `crush only [...]` disables it, and `-foo` excludes one theorem."
 }
 
 register_option crush.premises.max : Nat := {

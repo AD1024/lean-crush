@@ -123,10 +123,11 @@ Equation facts themselves are retained verbatim as quantified fallback axioms.
 Every other proof is transported across the simplifier's equality proof. Failed or
 resource-limited normalization restores its state and retains the original facts;
 this applies to context preparation as well as each individual simplification. -/
-def normalizeFacts (facts : Array Fact) (lemmas : Array Name) :
-    MetaM NormalizeReport := do
+def normalizeFacts (facts : Array Fact) (lemmas : Array Name)
+    (excluded : Std.HashSet Name := {}) : MetaM NormalizeReport := do
   let prepared ← tryNormalization do
-    let constructorLemmas ← constructorEqLemmas facts
+    -- Constructor injectivity lemmas are collected automatically; honor `-name`.
+    let constructorLemmas := (← constructorEqLemmas facts).filter (!excluded.contains ·)
     let lemmas := lemmas ++ constructorLemmas
     if lemmas.isEmpty then return none
     return some (← selectedSimpContext lemmas)

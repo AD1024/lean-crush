@@ -35,6 +35,11 @@ def KernelCheckSnapshot.capture : CoreM KernelCheckSnapshot :=
     axiomFailure := ← IO.mkRef none
   }
 
+/-- Whether `name` already existed when the snapshot was taken, as opposed to being
+generated during this invocation. -/
+def KernelCheckSnapshot.contains (snapshot : KernelCheckSnapshot) (name : Name) : Bool :=
+  snapshot.env.contains name
+
 /-- The first admission rejected during this invocation's proof attempts. -/
 def KernelCheckSnapshot.axiomFailure? (snapshot : KernelCheckSnapshot) :
     BaseIO (Option MessageData) :=

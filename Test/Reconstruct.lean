@@ -241,11 +241,13 @@ def nilRequires (p : Prop) : List Nat → Prop
   | [] => p
   | _ :: _ => False
 
+-- A hint list never removes context; `clear` hides a hypothesis from every search.
 set_option crush.trust "trust" in
 /-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
-theorem pre_smt_witness_respects_restriction (p : Prop) (hp : p) :
+theorem pre_smt_witness_respects_clear (p : Prop) (hp : p) :
     ∃ values : List Nat, nilRequires p values := by
+  clear hp
   crush []
 
 set_option crush.trust "trust" in

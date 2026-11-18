@@ -124,8 +124,8 @@ lowerings representation-compatible.
 ### Soundness and trust
 
 - `crush.trust = "reconstruct"` must never use `Crush.crushSorry`, an unreplayed
-  solver certificate, an unchecked generated term, or an ambient hypothesis that
-  was excluded from the selected facts.
+  solver certificate, or an unchecked generated term. Every visible hypothesis
+  may be used; `clear h` is how a user excludes one.
 - `reconstructOrTrust` may use the axiom only after a visible warning.
 - Every accepted replay or reconstruction term must be free of `sorry` and
   metavariables and pass the Lean kernel checker before assignment.
@@ -153,8 +153,10 @@ lowerings representation-compatible.
   truncated or cannot safely replace its parent. Monomorphization may instead
   lose completeness by dropping an untranslatable polymorphic fact, but must
   report bound exhaustion.
-- Keep bare `crush`, explicit `crush [...]`, and `crush [*, ...]` semantics
-  distinct. An explicit list without `*` is a strict restriction.
+- Hint lists follow `grind`: every form uses all local hypotheses, and a list
+  adds facts and never removes any. `only` drops automatically collected
+  lemmas; `-foo` removes one global constant from them and warns if a finished
+  proof still uses it; `-h` on a local is an error that suggests `clear h`.
 - Reconstruction must operate on a closed implication built from selected/core
   facts, not inherit the original proposition context.
 - Prefer datatype-generic algorithms based on Lean inductive metadata over

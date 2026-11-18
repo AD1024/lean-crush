@@ -48,14 +48,20 @@ report. To require a Lean proof, use the reconstruction policy below.
 
 ## Facts and unfolding
 
-Bare `crush` introduces binders and uses all local hypotheses. Select facts or
-supply extra lemmas with:
+`crush` introduces binders and uses all local hypotheses. As in `grind`, a hint
+list adds facts and never removes any:
 
 ```lean
-crush [h, myLemma]   -- only the listed hypotheses and lemmas
-crush [*, myLemma]   -- all local hypotheses, plus a lemma
-crush u[myFn]        -- unfold a definition using its equations
+crush [myLemma, myFn]  -- all local hypotheses, a lemma, and myFn's equations
+crush [*, myLemma]     -- also instantiate every local hypothesis eagerly
+crush only [myLemma]   -- drop automatically collected lemmas
+crush [-autoLemma]     -- keep one global lemma out of the automatic ones
+crush u[myFn]          -- unfold a definition using its equations
 ```
+
+Use `clear h` to exclude a hypothesis. If a finished proof still uses a lemma
+excluded with `-name` (through instance synthesis or a reconstruction tactic,
+which crush does not assemble), crush warns.
 
 Definition equations may also be added automatically. Mark a definition with
 `@[crush_unfold]`, or enable unfolding for an existing one:

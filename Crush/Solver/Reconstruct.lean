@@ -922,12 +922,11 @@ private def proofBinderNames (proofs : Array Expr) : MetaM (Array Name) := do
         return decl.userName
     mkFreshUserName `h
 
-/-- Try bounded constructor witnesses using only explicitly selected facts.
+/-- Try bounded constructor witnesses using only the collected facts.
 
-The original goal's context may contain propositions omitted by `crush [...]`. Build
-and prove a closed implication exactly as core reconstruction does, then apply the
-checked proof to the selected facts. This keeps witness synthesis cheap enough to run
-before SMT under every trust policy without weakening strict hint selection. -/
+Build and prove a closed implication exactly as core reconstruction does, then apply
+the checked proof to the collected facts. Searching an isolated context keeps witness
+synthesis cheap enough to run before SMT under every trust policy. -/
 private def trySelectedExistentialWitness (snapshot : KernelCheckSnapshot)
     (goal : MVarId) (proofs : Array Expr) :
     TacticM Bool := goal.withContext do
@@ -1007,8 +1006,7 @@ private def trySelectedConstructorSplit (snapshot : KernelCheckSnapshot)
 `proofs` contains every selected fact available as a premise; `candidateIndices`
 identifies the local hypotheses, explicit hints, or premise-selector results that may be
 used as the top-level backward rule. The proof is built in the same isolated context as
-ordinary core reconstruction, so an ambient proposition omitted from `crush [...]`
-cannot discharge a generated premise.
+ordinary core reconstruction, so only collected facts can discharge a generated premise.
 
 The search is intentionally narrow: at most sixteen candidates, one top-level
 application, configurable but bounded rule chaining for premises, and no `grind`,
