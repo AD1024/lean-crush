@@ -647,6 +647,20 @@ where
       withLocalDeclD `arg (← inferType args[position]!) fun arg =>
         go rest (args.set! position arg) (locals.push arg)
 
+/-- The body of `lam` under at most `n` `.lam` binders, skipping `mdata` between
+them, and the number of binders peeled. The body has loose bound variables for the
+peeled binders only. -/
+def peelLambdas (lam : Expr) (n : Nat) : Expr × Nat :=
+  go lam n 0
+where
+  go (e : Expr) (remaining peeled : Nat) : Expr × Nat :=
+    match remaining, e with
+    | 0, _ => (e, peeled)
+    | remaining + 1, .lam _ _ body _ => go body remaining (peeled + 1)
+    | remaining + 1, .mdata _ inner =>
+      if inner.consumeMData.isLambda then go inner (remaining + 1) peeled else (e, peeled)
+    | _ + 1, _ => (e, peeled)
+
 /-- Built-in SMT sorts are fixed across quantifier and lambda instantiations.
 Even a type binder must not occur in a sort key: type equality can distinguish
 empty and inhabited instantiations of the same quantified type variable. -/
@@ -937,12 +951,18 @@ mutual
 
   /-- Enter a λ's binders with fresh fvars mapped to the given SMT names, and
   translate the resulting body. A function-typed parameter is registered as a
-  `funVar` so its applications route through the appropriate `app` symbol. -/
+  `funVar` so its applications route through the appropriate `app` symbol.
+
+  `lam` may have fewer syntactic binders than its arrow arity (an eta-reduced
+  `fun x => g (x + 1)` at `Int → Int → Int`). The peeled binders take the first
+  fresh variables, and the body is applied to the rest. -/
   partial def withLambdaFVars (lam : Expr) (names : Array String)
       (argTys : Array Expr) : TranslateM SMT.Term := do
+    let (body, peeled) := peelLambdas lam names.size
     let rec go (i : Nat) (e : Expr) (acc : Array Expr) : TranslateM SMT.Term := do
       if i ≥ names.size then
-        emitTerm (e.instantiateRev acc)
+        let opened := e.instantiateRev (acc.extract 0 peeled)
+        emitTerm (mkAppN opened (acc.extract peeled acc.size)).headBeta
       else
         let nm := names[i]!
         let ty := argTys[i]!
@@ -958,20 +978,7 @@ mutual
             bind (TranslateM.withFunVar x.fvarId! nm (go (i + 1) e (acc.push x)))
           else
             bind (go (i + 1) e (acc.push x))
-    let body := (← lambdaTelescopeBody lam names.size)
     go 0 body #[]
-
-  /-- The body of `lam` under `n` peeled λ binders, as an open term with loose
-  bvars (to be instantiated by `withLambdaFVars`). -/
-  partial def lambdaTelescopeBody (lam : Expr) (n : Nat) : TranslateM Expr := do
-    let mut e := lam
-    for _ in [0:n] do
-      match e with
-      | .lam _ _ b _ => e := b
-      | _ =>
-        -- Not syntactically a λ (e.g. a partially-applied constant): η-expand.
-        return e
-    return e
 
   /-- All free variables of `e`, in first-occurrence order. -/
   partial def collectFVars (e : Expr) : Array FVarId :=

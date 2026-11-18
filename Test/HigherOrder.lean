@@ -210,3 +210,63 @@ theorem must_reject_partial_info (g : (Int → Int) → Int) (h : g (fun x => x)
 theorem must_reject_capture_conflate (g : (Int → Int) → Int)
     (h : ∀ (f : Int → Int), g f = f 0) (n m : Int) :
     g (fun x => x + n) = g (fun x => x + m) := by crush
+
+/-! ## Lambdas with fewer binders than their arity (review round 3, C2)
+
+`fun x => g (x + 1)` at `Int → Int → Int` has one syntactic binder. Its binder takes
+the first fresh variable, and the body is applied to the rest. -/
+
+section EtaReducedLambda
+
+set_option crush.timeout 10
+
+theorem eta_reduced_lambda (g : Int → Int → Int) (F : (Int → Int → Int) → Int) (a : Int)
+    (h : F (fun x => g (x + 1)) = a) : a = F (fun x => g (x + 1)) := by
+  crush
+
+set_option crush.backend "cvc5" in
+set_option crush.ho.mode "native" in
+theorem eta_reduced_lambda_native (g : Int → Int → Int) (F : (Int → Int → Int) → Int)
+    (a : Int) (h : F (fun x => g (x + 1)) = a) : a = F (fun x => g (x + 1)) := by
+  crush
+
+-- The emitted script is sort-correct even without a solver.
+set_option crush.backend "none" in
+theorem eta_reduced_lambda_script (g : Int → Int → Int) (F : (Int → Int → Int) → Int)
+    (a : Int) (h : F (fun x => g (x + 1)) = a) : a = F (fun x => g (x + 1)) := by
+  crush
+  exact h.symm
+
+theorem eta_reduced_lambda_arity3 (g : Int → Int → Int → Int)
+    (F : (Int → Int → Int → Int) → Int) (a : Int)
+    (h : F (fun x => g (x + 1)) = a) : a = F (fun x => g (x + 1)) := by
+  crush
+
+-- The closure denotes `fun x y => g (x + 1) y`, not a function of its last argument.
+theorem eta_reduced_lambda_meaning (g : Int → Int → Int) (F : (Int → Int → Int) → Int)
+    (h : ∀ k : Int → Int → Int, k 0 5 = g 1 5 → F k = 7) :
+    F (fun x => g (x + 1)) = 7 := by
+  crush
+
+/-- error: crush: could not prove the goal -/
+#guard_msgs(error, substring := true) in
+theorem must_reject_eta_reduced_swap (g : Int → Int → Int) (F : (Int → Int → Int) → Int)
+    (h : ∀ k : Int → Int → Int, k 0 5 = g 6 0 → F k = 7) :
+    F (fun x => g (x + 1)) = 7 := by
+  crush
+
+open Lean Elab Term Meta in
+/-- `fun x => (fun y => g (x + 1) y)` with metadata between the two binders. -/
+elab "mdata_lambda% " g:term : term => do
+  let g ← elabTerm g (some (← mkArrow (mkConst ``Int) (← mkArrow (mkConst ``Int) (mkConst ``Int))))
+  withLocalDeclD `x (mkConst ``Int) fun x => do
+    let inner ← withLocalDeclD `y (mkConst ``Int) fun y => do
+      mkLambdaFVars #[y] (mkApp2 g (← mkAppM ``HAdd.hAdd #[x, mkIntLit 1]) y)
+    mkLambdaFVars #[x] (mkMData {} inner)
+
+theorem eta_mdata_between_binders (g : Int → Int → Int) (F : (Int → Int → Int) → Int)
+    (h : ∀ k : Int → Int → Int, k 0 5 = g 1 5 → F k = 7) :
+    F (mdata_lambda% g) = 7 := by
+  crush
+
+end EtaReducedLambda
