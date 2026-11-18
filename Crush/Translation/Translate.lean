@@ -48,9 +48,28 @@ def getNatLit? (e : Expr) : TranslateM (Option Nat) := do
     | _ => return none
   | _ => return none
 
-/-- `natValue?` that sees through SMT `let` variables. -/
+/-- Tag of the error raised when a sort or erased argument depends on an SMT-bound
+variable. -/
+def boundRefusalTag : Name := `crush.boundRefusal
+
+/-- Refuse a translation that needed the values of the captured `let` variables `ids`,
+which do not hold in a closure's defining axiom. `emitLetBinding?` then substitutes them,
+and the rebuilt closure captures what the values mention. -/
+private def refuseCapturedLets {α : Type} (ids : Array FVarId) : TranslateM α := do
+  let tagged := ids.foldl (fun m id => .tagged (boundRefusalTag ++ id.name) m)
+    m!"crush: a translation inside a closure needs the value of a captured `let` variable"
+  throwError (MessageData.tagged boundRefusalTag tagged)
+
+/-- `natValue?` that sees through SMT `let` variables. A literal that needs the value of a
+captured variable refuses (`refuseCapturedLets`), so that its binding is substituted. -/
 def natOperand? (e : Expr) : TranslateM (Option Nat) := do
-  natValue? (← TranslateM.expandLets e)
+  let e ← TranslateM.expandLets e
+  if let some n ← natValue? e then return some n
+  let captured ← TranslateM.capturedLetsIn #[e]
+  if captured.isEmpty then return none
+  let some #[value] ← TranslateM.substituteLets? #[e] (fun _ v => v.captured) | return none
+  if (← natValue? value).isSome then refuseCapturedLets captured
+  return none
 
 /-- Track which sorts have had their `declare-sort` emitted, reusing the name map
 with a sentinel key so we don't re-declare. -/
@@ -718,19 +737,29 @@ partial def letVarAtTypeLevel (body : Expr) : MetaM Bool := do
     | _ => return true
   visit body 0
 
-/-- The number of occurrences of loose bound variable 0 in `e`, counting up to `limit`. -/
-def countLooseBVar0 (e : Expr) (limit : Nat) : Nat :=
-  go e 0 0
+/-- The number of occurrences of loose bound variable 0 in `e`, counting up to `limit`.
+Counts are memoized per subterm and depth, so a shared subterm is visited once. -/
+partial def countLooseBVar0 (e : Expr) (limit : Nat) : Nat :=
+  (go e 0).run' {}
 where
-  go (e : Expr) (depth count : Nat) : Nat :=
-    if count ≥ limit || !e.hasLooseBVars then count else
-    match e with
-    | .bvar i => if i == depth then count + 1 else count
-    | .app f a => go a depth (go f depth count)
-    | .lam _ t b _ | .forallE _ t b _ => go b (depth + 1) (go t depth count)
-    | .letE _ t v b _ => go b (depth + 1) (go v depth (go t depth count))
-    | .mdata _ b | .proj _ _ b => go b depth count
-    | _ => count
+  go (e : Expr) (depth : Nat) : StateM (Std.HashMap (Expr × Nat) Nat) Nat := do
+    -- At `depth` the variable is `bvar depth`.
+    if e.looseBVarRange ≤ depth then return 0
+    if let some n := (← get)[(e, depth)]? then return n
+    let (own, parts) : Nat × Array (Expr × Nat) := match e with
+      | .bvar i => (if i == depth then 1 else 0, #[])
+      | .app f a => (0, #[(f, depth), (a, depth)])
+      | .lam _ t b _ | .forallE _ t b _ => (0, #[(t, depth), (b, depth + 1)])
+      | .letE _ t v b _ => (0, #[(t, depth), (v, depth), (b, depth + 1)])
+      | .mdata _ b | .proj _ _ b => (0, #[(b, depth)])
+      | _ => (0, #[])
+    let mut n := own
+    for (part, d) in parts do
+      if n ≥ limit then break
+      n := n + (← go part d)
+    n := min n limit
+    modify (·.insert (e, depth) n)
+    return n
 
 /-- Tag of the error `emitSort` raises when it refuses a type it cannot translate
 soundly (a dependent type). A datatype or finite-array declaration that meets it in
@@ -761,15 +790,29 @@ def withRefusalRollback {α : Type} (k : TranslateM α) : TranslateM (Option α)
     set previous
     return none
 
-/-- Tag of the error raised when a sort or erased argument depends on an SMT-bound
-variable. -/
-def boundRefusalTag : Name := `crush.boundRefusal
-
 /-- Whether `e` is a bound-dependency refusal naming `fvar`. -/
 def isBoundRefusalOf (e : Exception) (fvar : FVarId) : Bool :=
   match e with
   | .error _ msg => msg.hasTag (· == boundRefusalTag ++ fvar.name)
   | _ => false
+
+/-- Run handler `h` on `ctx`, refusing a result that needed the value of a captured `let`
+variable it opened. -/
+private def claimWith (h : TranslationHandler) (ctx : TranslationCtx) :
+    TranslateM (Option SMT.Term) := do
+  let (result, opened) ← TranslateM.trackingOpenedLets (h ctx)
+  let some t := result | return none
+  unless opened.isEmpty do refuseCapturedLets opened
+  return some t
+
+/-- How to retry a handler that declined arguments mentioning SMT `let` variables. -/
+private structure LetRetry where
+  /-- The arguments with the uncaptured values substituted, if one occurs. -/
+  uncaptured? : Option (Array Expr)
+  /-- The uncaptured variables, keyed by their values (`collapseLets`). -/
+  vars : Std.HashMap Expr FVarId
+  /-- The captured variables that the arguments still mention. -/
+  captured : Array FVarId
 
 /-- Refuse `term` if it mentions an SMT-bound variable. The error is tagged with the
 variables, so they survive state rollbacks. -/
@@ -1030,7 +1073,7 @@ mutual
       capRefs := capRefs.push (.const nm)
     let cloApp := if capRefs.isEmpty then SMT.Term.const cloName
                   else SMT.Term.app (.symb cloName) capRefs
-    let (paramBinders, bodyTerm) ← emitLambdaBody lam shape
+    let (paramBinders, bodyTerm) ← TranslateM.withCapturedLets (emitLambdaBody lam shape)
     let lhs := SMT.Term.app (.symb appName)
       (#[cloApp] ++ paramBinders.map (fun (n, _) => SMT.Term.const n))
     let axiomBody := (smt| (= $lhs $bodyTerm))
@@ -1513,42 +1556,23 @@ mutual
     if let .fvar fid := e then
       if let some vname ← TranslateM.boundVar? fid then
         return .const vname
+    let (fn, args) := getAppFnArgs' e
     -- General handlers retain first refusal over all built-in mappings.
     if ← hasTranslationHandlers then
-      let (fn, args) := getAppFnArgs' e
-      let ctx : TranslationCtx := {
-        fn, args
-        emitTerm := emitTerm
-        emitSort := emitSort
-        declare  := declareViaThunk }
-      for h in (← getTranslationHandlers) do
-        if let some t ← h ctx then
-          return t
+      if let some t ← runHandlers (← getTranslationHandlers) fn args then
+        return t
     -- Dispatch targeted lowerings after general overrides.
-    let (fn, args) := getAppFnArgs' e
     if let .const head _ := fn then
       if ← hasLoweringsFor head then
-        let ctx : TranslationCtx := {
-          fn, args
-          emitTerm := emitTerm
-          emitSort := emitSort
-          declare  := declareViaThunk }
-        for lowering in (← getLoweringsFor head) do
-          if let some t ← lowering ctx then
-            return t
+        if let some t ← runHandlers (← getLoweringsFor head) fn args then
+          return t
     -- Use immediate result heads or syntactic dependent codomains; aliases remain distinct.
     if ← hasResultLowerings then
       let ty ← inferType e
       if let some resultHead ← resultHead? ty then
         if ← hasResultLoweringsFor resultHead then
-          let ctx : TranslationCtx := {
-            fn, args
-            emitTerm := emitTerm
-            emitSort := emitSort
-            declare  := declareViaThunk }
-          for lowering in (← getResultLoweringsFor resultHead) do
-            if let some t ← lowering ctx then
-              return t
+          if let some t ← runHandlers (← getResultLoweringsFor resultHead) fn args then
+            return t
     let logicalClassProjection ← isLogicalClassProjection fn
     -- Expose the selected instance for partial logical projections before HO
     -- encoding turns the remaining predicate into a function value.
@@ -1595,11 +1619,55 @@ mutual
           return t
       defaultApp fn args
 
+  /-- The first of `handlers` to claim `fn args`. A handler that declines an argument
+  mentioning an SMT `let` variable is retried with the values substituted, which is the
+  term it would see under zeta-reduction; a subterm it translates that is still a `let`
+  value translates as that variable. A result that needs a captured value is refused. -/
+  partial def runHandlers (handlers : Array TranslationHandler) (fn : Expr)
+      (args : Array Expr) : TranslateM (Option SMT.Term) := do
+    -- Computed when a handler first declines.
+    let mut retry? : Option LetRetry := none
+    for h in handlers do
+      if let some t ← claimWith h { fn, args, emitTerm, emitSort, declare := declareViaThunk }
+      then return some t
+      if retry?.isNone then
+        let uncaptured? ← TranslateM.substituteLets? args fun _ v => !v.captured
+        retry? := some {
+          uncaptured?, vars := ← TranslateM.letVarsByValue
+          captured := ← TranslateM.capturedLetsIn (uncaptured?.getD args) }
+      let some retry := retry? | continue
+      if let some expanded := retry.uncaptured? then
+        let emitTerm (e : Expr) := emitTerm (TranslateM.collapseLets retry.vars e)
+        let ctx := { fn, args := expanded, emitTerm, emitSort, declare := declareViaThunk }
+        if let some t ← claimWith h ctx then return some t
+      unless retry.captured.isEmpty do
+        let needed? ← capturedNeeds h fn (retry.uncaptured?.getD args) retry.captured
+        if let some needed := needed? then refuseCapturedLets needed
+    return none
+
+  /-- The captured `let` variables whose values `h` needs to claim `fn args`, if it claims
+  it with all of `captured` substituted: one of them if it suffices alone, else all. A probe
+  result is refused, so its subterms may translate as captured variables. -/
+  partial def capturedNeeds (h : TranslationHandler) (fn : Expr) (args : Array Expr)
+      (captured : Array FVarId) : TranslateM (Option (Array FVarId)) := do
+    let vars ← TranslateM.letVarsByValue (captured := true)
+    let emitTerm (e : Expr) := emitTerm (TranslateM.collapseLets vars e)
+    let probe (pick : FVarId → LetValue → Bool) : TranslateM (Option (Array FVarId)) := do
+      let some expanded ← TranslateM.substituteLets? args pick | return none
+      let ctx := { fn, args := expanded, emitTerm, emitSort, declare := declareViaThunk }
+      let (result, opened) ← TranslateM.trackingOpenedLets (h ctx)
+      return result.map fun _ => opened
+    let some opened ← probe fun _ v => v.captured | return none
+    for id in captured do
+      if let some alone ← probe fun other _ => other == id then return some (alone.push id)
+    return some (captured ++ opened)
+
   /-- Translate `let x := value; body` as `(let ((x value)) body)` when `value` is data
   and `body` uses `x` more than once. The body is translated with `x` as an SMT-bound
   name, which is exactly substitution where `x` is used as a value; bit-vector
   lowerings read literal operands through `expandLets`. Where the value itself matters
-  (`letVarAtTypeLevel`), `none` makes the caller zeta-reduce. -/
+  (`letVarAtTypeLevel`, or a handler in the body of a closure capturing `x` needs it),
+  `none` makes the caller zeta-reduce. -/
   partial def emitLetBinding? (name : Name) (type value body : Expr) :
       TranslateM (Option SMT.Term) := do
     unless countLooseBVar0 body 2 ≥ 2 do return none
@@ -1622,7 +1690,7 @@ mutual
     let outerLets := (← get).letValues
     let attempt : Except (Exception × Bool) SMT.Term ← withLocalDeclD name type fun x => do
       try
-        return .ok (← TranslateM.withLetValue x.fvarId! expanded <|
+        return .ok (← TranslateM.withLetValue x.fvarId! { value, expanded } <|
           TranslateM.withBoundVar x.fvarId! smtName (emitTerm (body.instantiate1 x)))
       catch ex =>
         -- A dependency the check missed: substitute `x`, unless the refusal also names an

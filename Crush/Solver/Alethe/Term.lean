@@ -87,36 +87,21 @@ def TermCtx.bindLocal (ctx : TermCtx) (name : String) (value : Expr) : BaseIO Te
     return { cache with values := ← IO.mkRef {} }
   return { ctx with locals := ctx.locals.insert name value, namedCache }
 
-/-- Expand Alethe `:named` references while preserving the surrounding term shape, with
-the fuel the expansion needs. `fuel` bounds nested `:named` expansions only; term
-nesting costs nothing. -/
-private partial def expandNamed? (ctx : TermCtx) (fuel : Nat) (term : Sexp) :
-    Option (Sexp × Nat) := do
-  match term with
-  | .atom name =>
-    if name.startsWith "@" then
-      match ctx.named.get? name with
-      | some value =>
-        if fuel == 0 || ctx.expanding.contains name then failure
-        let (expanded, need) ← expandNamed? { ctx with expanding := ctx.expanding.insert name }
-          (fuel - 1) (stripAnnots value)
-        return (expanded, need + 1)
-      | none => return (term, 0)
-    else
-      return (term, 0)
-  | .list parts =>
-    let mut expanded := #[]
-    let mut need := 0
-    for part in parts do
-      let (part, partNeed) ← expandNamed? ctx fuel part
-      expanded := expanded.push part
-      need := max need partNeed
-    return (.list expanded, need)
-  | .str _ => return (term, 0)
-
 /-- Record that the term being decoded needs `need` fuel. -/
 private def TermCtx.noteNeed (ctx : TermCtx) (need : Nat) : BaseIO Unit := do
   if let some cache := ctx.namedCache then cache.need.modify (max · need)
+
+/-- Run `k`, which decodes a `:named` definition, and record its need: one more than the
+largest need noted while it ran. -/
+private def TermCtx.decodingNamed {α : Type} (ctx : TermCtx) (k : MetaM α) :
+    MetaM (α × Nat) := do
+  let some cache := ctx.namedCache | return (← k, 0)
+  let outer ← cache.need.get
+  cache.need.set 0
+  let result ← k
+  let need := (← cache.need.get) + 1
+  cache.need.set (max outer need)
+  return (result, need)
 
 /-- Decode an SMT-LIB string literal's escapes in one left-to-right pass: `\u{h…}`
 (one to five hex digits) and `\uhhhh` denote code points; any other backslash is a
@@ -557,24 +542,107 @@ private def bitVecApp? (head : String) (args : Array Expr) : MetaM (Option Expr)
     mkAppChecked? ``BitVec.ofInt #[mkNatLit width, args[1]!]
   | _, _ => return none
 
-/-- Replace the concrete index in a cvc5 bit-blast expression by a marker. -/
-private partial def normalizeBitPattern? (index : Nat) (term : Sexp) : Option Sexp := do
-  let .list parts := term | failure
-  if let some (Sexp.list ident) := parts[0]? then
-    if ident.size == 3 && ident[0]? == some (.atom "_") &&
-        ident[1]? == some (.atom "@bit_of") then
-      let some (Sexp.atom actual) := ident[2]? | failure
-      if actual.toNat? != some index || parts.size != 2 then failure
-      return .list #[
-        .list #[.atom "_", .atom "@bit_of", .atom "#"],
-        parts[1]!]
-  let some (Sexp.atom head) := parts[0]? | failure
-  unless head == "xor" || head == "and" || head == "or" || head == "not" do
-    failure
-  let mut normalized := #[Sexp.atom head]
-  for arg in parts.extract 1 parts.size do
-    normalized := normalized.push (← normalizeBitPattern? index arg)
-  return .list normalized
+/-! ### Whole-vector operations from decoded bits -/
+
+/-- A decoded bit without the `b = true` coercion of a `Bool` operand to `Prop`. -/
+private def stripTrue (bit : Expr) : Expr :=
+  match bit.eq? with
+  | some (type, b, value) =>
+    if type.isConstOf ``Bool && value.isConstOf ``Bool.true then b else bit
+  | none => bit
+
+/-- Bit `index` of `vector`, as `((_ @bit_of index) vector)` decodes. -/
+private def bitOf? (vector : Expr) (index : Nat) : MetaM (Option Expr) := do
+  -- The application `mkAppM` would build, without its unification.
+  let type ← inferType vector
+  if type.isAppOfArity ``BitVec 1 then
+    return some (mkApp3 (mkConst ``BitVec.getLsbD) type.appArg! vector (mkNatLit index))
+  mkAppChecked? ``BitVec.getLsbD #[vector, mkNatLit index]
+
+/-- `t` if `bits` are `((_ @bit_of i) t)` for each position `i`, as cvc5 writes the bits of
+a variable. -/
+private def sameBitOperand? (bits : Array Sexp) : Option Sexp := do
+  let mut operand? := none
+  for h : i in [:bits.size] do
+    let .list #[.list #[.atom "_", .atom "@bit_of", .atom index], t] := bits[i] | none
+    guard (index == toString i)
+    if let some operand := operand? then guard (t == operand) else operand? := some t
+  operand?
+
+/-- `(v, i)` for a decoded `@bit_of`, which is `v.getLsbD i`. -/
+private def lsbOperand? (bit : Expr) : Option (Expr × Nat) := do
+  guard (bit.isAppOfArity ``BitVec.getLsbD 3)
+  let index ← bit.appArg!.nat? <|> bit.appArg!.rawNatLit?
+  return (bit.appFn!.appArg!, index)
+
+/-- A decoded Boolean connective as the bitwise operation it is a bit of, with its operands. -/
+private def bitConnective? (bit : Expr) : Option (String × Array Expr) :=
+  if bit.isAppOfArity ``Not 1 then
+    let inner := bit.appArg!
+    -- SMT `xor` on `Prop` operands decodes as `¬(p ↔ q)`.
+    if inner.isAppOfArity ``Iff 2 then some ("bvxor", #[inner.appFn!.appArg!, inner.appArg!])
+    else some ("bvnot", #[inner])
+  else if bit.isAppOfArity ``And 2 then some ("bvand", #[bit.appFn!.appArg!, bit.appArg!])
+  else if bit.isAppOfArity ``Or 2 then some ("bvor", #[bit.appFn!.appArg!, bit.appArg!])
+  else if bit.isAppOfArity ``Bool.xor 2 then some ("bvxor", #[bit.appFn!.appArg!, bit.appArg!])
+  else none
+
+/-- The operands of `vector` if it is the bitwise operation `head` (`bitVecApp?`). -/
+private def bitwiseOperands? (head : String) (vector : Expr) : Option (Array Expr) :=
+  match head with
+  | "bvnot" => if vector.isAppOfArity ``BitVec.not 2 then some #[vector.appArg!] else none
+  | "bvand" => binary ``BitVec.and
+  | "bvor" => binary ``BitVec.or
+  | "bvxor" => binary ``BitVec.xor
+  | _ => none
+where
+  binary (name : Name) : Option (Array Expr) :=
+    if vector.isAppOfArity name 3 then some #[vector.appFn!.appArg!, vector.appArg!] else none
+
+/-- The bitwise operation on whole vectors whose bit 0 is the decoded `bit`. `memo` holds
+results by bit, so a shared connective is visited once. -/
+private partial def bitZeroVector? (memo : IO.Ref (Std.HashMap Expr (Option Expr)))
+    (bit : Expr) : MetaM (Option Expr) := do
+  let bit := stripTrue bit
+  if let some result := (← memo.get)[bit]? then return result
+  let result ← (do
+    if let some (operand, 0) := lsbOperand? bit then return some operand
+    let some (head, parts) := bitConnective? bit | return none
+    let mut operands := #[]
+    for part in parts do
+      let some operand ← bitZeroVector? memo part | return none
+      operands := operands.push operand
+    bitVecApp? head operands)
+  memo.modify (·.insert bit result)
+  return result
+
+/-- Whether the decoded `bit` is bit `index` of `vector`, a result of `bitZeroVector?`. `memo`
+holds results by vector and bit, so a shared connective is visited once. -/
+private partial def isBitOf (memo : IO.Ref (Std.HashMap (Expr × Expr) Bool)) (index : Nat)
+    (vector bit : Expr) : BaseIO Bool := do
+  let bit := stripTrue bit
+  if let some result := (← memo.get)[(vector, bit)]? then return result
+  let result ← (do
+    if let some (operand, actual) := lsbOperand? bit then
+      return actual == index && operand == vector
+    let some (head, parts) := bitConnective? bit | return false
+    let some operands := bitwiseOperands? head vector | return false
+    unless operands.size == parts.size do return false
+    for (operand, part) in operands.zip parts do
+      unless ← isBitOf memo index operand part do return false
+    return true)
+  memo.modify (·.insert (vector, bit) result)
+  return result
+
+/-- The bitwise operation on whole vectors whose bits, least significant first, are the
+decoded `bits`: each applies the same connectives to bit `i` of the same operands. -/
+private def wholeVector? (bits : Array Expr) : MetaM (Option Expr) := do
+  let some first := bits[0]? | return none
+  let some vector ← bitZeroVector? (← IO.mkRef {}) first | return none
+  unless (← bitVecWidth? vector) == some bits.size do return none
+  for h : i in [1:bits.size] do
+    unless ← isBitOf (← IO.mkRef {}) i vector bits[i] do return none
+  return some vector
 
 /-- Binary SMT-LIB theory operators, mapped to the Lean constant to apply. `=` and `=>` are
 handled separately (`=` is `Iff` on `Prop`-sorted operands; `=>` is a Lean arrow). -/
@@ -630,11 +698,7 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
           if need > fuel then return none
           ctx.noteNeed need
           return some value
-        let outer ← cache.need.get
-        cache.need.set 0
-        let decoded ← toExpr? inner (fuel - 1) (stripAnnots t)
-        let need := (← cache.need.get) + 1
-        cache.need.set (max outer need)
+        let (decoded, need) ← inner.decodingNamed (toExpr? inner (fuel - 1) (stripAnnots t))
         if let some value := decoded then
           cache.values.modify (·.insert a (value, need))
         return decoded
@@ -823,7 +887,7 @@ where
     | "@bit_of", 3, 1 =>
       let some (Sexp.atom index) := ident[2]? | return none
       let some index := index.toNat? | return none
-      mkAppChecked? ``BitVec.getLsbD #[values[0]!, mkNatLit index]
+      bitOf? values[0]! index
     | "rotate_left", 3, 1 | "rotate_right", 3, 1 =>
       let some (Sexp.atom amount) := ident[2]? | return none
       let some amount := amount.toNat? | return none
@@ -862,50 +926,32 @@ where
       | .atom "false" => pure ()
       | _ => allLiteral := false
     if allLiteral then return some (mkBitVecLit args.size literal)
-    let patternResult ← (do
-      let some (first, firstNeed) := expandNamed? ctx fuel args[0]! | return none
-      let some pattern := normalizeBitPattern? 0 first | return none
-      let mut need := firstNeed
-      for i in [1:args.size] do
-        let some (arg, argNeed) := expandNamed? ctx fuel args[i]! | return none
-        unless normalizeBitPattern? i arg == some pattern do return none
-        need := max need argNeed
-      let some result ← bitPatternExpr pattern | return none
-      unless (← bitVecWidth? result) == some args.size do return none
-      return some (result, need))
-    if let some (result, need) := patternResult then
-      ctx.noteNeed need
-      return some result
+    -- Each bit is decoded once, for both the whole-vector reading and bit-by-bit assembly.
     let mut bits := #[]
-    for arg in args do
-      let some bit ← toExpr? ctx fuel arg | return none
-      let some bit ← boolArgument? bit | return none
-      bits := bits.push bit
-    let list ← mkListLit (mkConst ``Bool) bits.toList
+    if let some operand := sameBitOperand? args then
+      -- The bits of one operand decode it once.
+      let some vector ← toExpr? ctx fuel operand | return none
+      if (← bitVecWidth? vector) == some args.size then return some vector
+      for i in [:args.size] do
+        let some bit ← decodedBitOf? vector i | return none
+        bits := bits.push bit
+    else
+      for arg in args do
+        let some bit ← toExpr? ctx fuel arg | return none
+        bits := bits.push bit
+    if let some vector ← wholeVector? bits then return some vector
+    let mut values := #[]
+    for bit in bits do
+      let some value ← boolArgument? bit | return none
+      values := values.push value
+    let list ← mkListLit (mkConst ``Bool) values.toList
     mkAppChecked? ``BitVec.ofBoolListLE #[list]
 
-  /-- Translate a normalized bit pattern as a whole-vector operation. -/
-  bitPatternExpr (pattern : Sexp) : MetaM (Option Expr) := do
-    let .list parts := pattern | return none
-    if let some (Sexp.list ident) := parts[0]? then
-      if ident.size == 3 && ident[0]? == some (.atom "_") &&
-          ident[1]? == some (.atom "@bit_of") && ident[2]? == some (.atom "#") &&
-          parts.size == 2 then
-        return ← toExpr? ctx fuel parts[1]!
-      return none
-    let some (Sexp.atom head) := parts[0]? | return none
-    let mut operands := #[]
-    for arg in parts.extract 1 parts.size do
-      let some operand ← bitPatternExpr arg | return none
-      operands := operands.push operand
-    let vectorHead :=
-      match head with
-      | "xor" => "bvxor"
-      | "and" => "bvand"
-      | "or" => "bvor"
-      | "not" => "bvnot"
-      | _ => head
-    bitVecApp? vectorHead operands
+  /-- Bit `index` of the decoded `vector`, as `indexedApp` decodes `((_ @bit_of index) v)`:
+  the built-in projection, else a registered `@bit_of` decoder. -/
+  decodedBitOf? (vector : Expr) (index : Nat) : MetaM (Option Expr) := do
+    if let some bit ← bitOf? vector index then return some bit
+    runReplayTermHandlers ctx.decoders "@bit_of" #[.atom (toString index)] #[vector]
 
   /-- An uninterpreted symbol applied to translated arguments: rebuild `head args…`.
   A mis-rebuilt (ill-typed) application is rejected rather than returned. -/

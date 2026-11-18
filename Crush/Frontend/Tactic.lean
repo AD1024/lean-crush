@@ -637,7 +637,9 @@ private def runCrushCore (goal : MVarId) (cfg : Config) (hints : Hints)
   -- `crush.timeout` is a per-call limit: both queries are killed at one deadline,
   -- and the fallback gets only the time the first query left.
   let budget ← Solver.QueryBudget.start cfg
-  let firstResult ← prof.time "solve" (Solver.runQuery cfg script (some budget))
+  -- A model of the weakened query is never reported, so it needs only a verdict.
+  let firstResult ← prof.time "solve"
+    (Solver.runQuery cfg script (some budget) (getModel := reducedFacts.isNone))
   let mut result := firstResult
   let remainingMs ← budget.remainingMs
   if reducedFacts.isSome then
@@ -648,6 +650,10 @@ private def runCrushCore (goal : MVarId) (cfg : Config) (hints : Hints)
       if remainingMs < fallbackFloorMs then
         trace[crush.result] "ground-instance query did not close the goal, and only \
           {remainingMs} ms of the call's deadline remain; skipped quantified fallback"
+        if let .sat _ rejected := result then
+          let note := if rejected.isEmpty then "" else s!"; {rejected}"
+          result := .unknown s!"timeout: the ground-instance query was satisfiable, and \
+            only {remainingMs} ms remained for the quantified query{note}"
       else
         trace[crush.result] "ground-instance query did not close the goal; retrying with \
                              retained quantified templates"

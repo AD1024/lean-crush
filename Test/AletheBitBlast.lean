@@ -9,11 +9,12 @@ open Lean Meta Elab Tactic Crush Crush.Alethe
 
 namespace AletheBitBlast
 
-/-- Decode `clause` over `x y : BitVec w` and run the registered handlers for `rule`.
-Returns whether a proof of the decoded step came back. -/
-def replayStep (w : Nat) (rule clause : String) : TacticM Bool := do
+/-- Decode `clause` over `x y : BitVec w` (or `type`) and run the registered handlers for
+`rule`. Returns whether a proof of the decoded step came back. -/
+def replayStep (w : Nat) (rule clause : String) (type? : Option Expr := none) :
+    TacticM Bool := do
   let some (term, _) := SMT.parseSexp clause | throwError "unparsable test step"
-  let type := mkApp (mkConst ``BitVec) (mkNatLit w)
+  let type := type?.getD (mkApp (mkConst ``BitVec) (mkNatLit w))
   withLocalDeclD `x type fun x => withLocalDeclD `y type fun y => do
     let symbols : Std.HashMap String Expr := ((∅ : Std.HashMap String Expr).insert "x_0" x).insert "y_1" y
     let ctx : TermCtx := { symbols, named := {} }
@@ -138,6 +139,23 @@ y_1)) false))) (xor (xor ((_ @bit_of 2) (bvand x_0 y_1)) ((_ @bit_of 2) y_1)) (o
 @bit_of 0) (bvand x_0 y_1)) ((_ @bit_of 0) y_1)) false)))))))
 "#
 
+/-- Bit equations of `x = y` over symbols. -/
+def symbolEqStep : String := r#"
+(= (= x_0 y_1) (and (= ((_ @bit_of 0) x_0) ((_ @bit_of 0) y_1)) (= ((_ @bit_of 1) x_0) ((_
+@bit_of 1) y_1))))
+"#
+
+abbrev Word := BitVec 2
+
+-- An alias of `BitVec 2` replays like `BitVec 2`.
+example : True := by
+  run_tac do
+    unless ← replayStep 2 "bv_bitblast_step_bvequal" symbolEqStep do
+      throwError "the symbol equality step was not replayed"
+    unless ← replayStep 2 "bv_bitblast_step_bvequal" symbolEqStep (some (mkConst ``Word)) do
+      throwError "the equality step over an alias was not replayed"
+  trivial
+
 -- Bit projection is linear in the DAG: a 64-deep shared `v &&& v` and a 4096-bit list.
 example : True := by
   run_tac do
@@ -178,6 +196,39 @@ example : True := by
       throwError "the masked multiplication step was not replayed"
     if ← replayStep 4 "bv_bitblast_step_bvadd" wrongAddStep then
       throwError "a wrong addition step was replayed"
+  trivial
+
+/-- Bit `i` of an 8-bit `(bvnot v)` step's operand: 31 connectives over bit `i` of `x` and
+`y`, 64 nodes. The negated bits on the right have 65 nodes each. -/
+def wideBit (i : Nat) : String := Id.run do
+  let mut term := s!"(not ((_ @bit_of {i}) x_0))"
+  for j in [:31] do
+    term := s!"({#["or", "xor", "and"][j % 3]!} {term} ((_ @bit_of {i}) y_1))"
+  return term
+
+-- Both sides of a `bvnot` step with large bits decode as whole-vector operations, and the
+-- certificate replays.
+example : True := by
+  run_tac do
+    let bits := (List.range 8).map wideBit
+    let vector := s!"(@bbterm {" ".intercalate bits})"
+    let negated := s!"(@bbterm {" ".intercalate (bits.map (s!"(not {·})"))})"
+    let clause := s!"(= (bvnot {vector}) {negated})"
+    let type := mkApp (mkConst ``BitVec) (mkNatLit 8)
+    withLocalDeclD `x type fun x => withLocalDeclD `y type fun y => do
+      let symbols : Std.HashMap String Expr := ((∅ : Std.HashMap String Expr).insert "x_0" x).insert "y_1" y
+      let some (term, _) := SMT.parseSexp clause | throwError "unparsable test step"
+      let some step ← toExpr? { symbols, named := {} } 64 term | throwError "undecodable test step"
+      unless (step.getArg! 2).isAppOf ``BitVec.not do
+        throwError "the negated bits did not decode as `BitVec.not`: {step.getArg! 2}"
+      withLocalDeclD `h (mkNot step) fun h => do
+        let certificate := s!"unsat ((assume a0 (not {clause})) (step t0 (cl {clause}) \
+          :rule bv_bitblast_step_bvnot) (step t1 (cl) :rule resolution :premises (t0 a0)))"
+        let some proof := parseProof certificate | throwError "unparsable certificate"
+        let assumptions := (∅ : Std.HashMap String Expr).insert "a0" h
+        match ← replay proof (SMT.parseSexps certificate) assumptions symbols with
+        | .ok _ => pure ()
+        | .error e => throwError "the bvnot certificate did not replay: {e.kind.label} {e.detail}"
   trivial
 
 end AletheBitBlast

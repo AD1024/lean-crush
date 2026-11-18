@@ -290,7 +290,8 @@ def replayBitBlastEqual (ctx : ReplayRuleContext) : TacticM (Option Expr) := do
   if target.hasMVar then return none
   let some (lhs, conj) := target.iff? | return none
   let some (type, A, B) := lhs.eq? | return none
-  let (``BitVec, #[w]) := type.getAppFnArgs | return none
+  -- The carrier may be an alias of `BitVec w`.
+  let (``BitVec, #[w]) := (← whnf type).getAppFnArgs | return none
   let parts := conjuncts conj
   let width := parts.size
   unless ← isDefEq w (mkNatLit width) do return none

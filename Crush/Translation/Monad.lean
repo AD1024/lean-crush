@@ -89,6 +89,17 @@ structure RegistryCache where
   hasResult       : Option Bool := none
   deriving Inhabited
 
+/-- The value of an SMT `let` variable in scope. -/
+structure LetValue where
+  /-- The value as written; it may mention enclosing `let` variables. -/
+  value : Expr
+  /-- `value` with the enclosing `let` variables substituted, except captured ones. -/
+  expanded : Expr
+  /-- The variable is a parameter of the closure being defined, whose defining axiom does
+      not bind it to `value`. -/
+  captured : Bool := false
+  deriving Inhabited
+
 /-- Mutable translation state. -/
 structure TranslateState where
   cfg        : Config
@@ -157,8 +168,10 @@ structure TranslateState where
   /-- Normalized forms of structural-key type components, which every symbol lookup
       would otherwise recompute with `reduceAll`. -/
   normalizedTypes : Std.HashMap Expr Expr := {}
-  /-- SMT `let` variables in scope, with their values (already expanded). -/
-  letValues : Std.HashMap FVarId Expr := {}
+  /-- SMT `let` variables in scope, with their values. -/
+  letValues : Std.HashMap FVarId LetValue := {}
+  /-- Captured `let` variables opened (`openLet`) by the handler running now. -/
+  openedCaptured : Array FVarId := #[]
   deriving Inhabited
 
 /-- The translation monad. `MetaM` at the bottom gives us `whnf`, unification,
@@ -357,19 +370,87 @@ def withBoundVar {α : Type} (fvar : FVarId) (name : String) (k : TranslateM α)
   try k finally modify fun s => { s with boundVars := prev }
 
 /-- Record `fvar`, an SMT `let` variable, as standing for `value` during `k`. -/
-def withLetValue {α : Type} (fvar : FVarId) (value : Expr) (k : TranslateM α) :
+def withLetValue {α : Type} (fvar : FVarId) (value : LetValue) (k : TranslateM α) :
     TranslateM α := do
   let prev := (← get).letValues
   modify fun s => { s with letValues := s.letValues.insert fvar value }
   try k finally modify fun s => { s with letValues := prev }
 
-/-- `e` with SMT `let` variables replaced by their values. -/
+/-- Run `k`, which translates the body of a closure's defining axiom: every `let`
+variable in scope is then a parameter of the closure, not its value. -/
+def withCapturedLets {α : Type} (k : TranslateM α) : TranslateM α := do
+  let prev := (← get).letValues
+  if prev.isEmpty then return ← k
+  let captured := prev.fold (fun m id v => m.insert id { v with captured := true }) {}
+  modify fun s => { s with letValues := captured }
+  try k finally modify fun s => { s with letValues := prev }
+
+/-- `e` with the SMT `let` variables in scope replaced by their values. A captured variable
+stays: its value does not hold in a closure's defining axiom. -/
 def expandLets (e : Expr) : TranslateM Expr := do
   let lets := (← get).letValues
   if lets.isEmpty || !e.hasFVar then return e
   return e.replace fun
-    | .fvar id => lets.get? id
+    | .fvar id => (lets.get? id).bind fun v => if v.captured then none else some v.expanded
     | _ => none
+
+/-- `e` without metadata, and, while it is a `let` variable, its value. Subterms keep
+their `let` variables. Opening a captured variable is recorded, so the translator can
+refuse a handler result that needed its value. -/
+partial def openLet (e : Expr) : TranslateM Expr := do
+  let e := e.consumeMData
+  let .fvar id := e | return e
+  let some v := (← get).letValues.get? id | return e
+  if v.captured then
+    modify fun s => { s with openedCaptured := s.openedCaptured.push id }
+  openLet v.value
+
+/-- Run `k` and return the captured `let` variables it opened directly. -/
+def trackingOpenedLets {α : Type} (k : TranslateM α) : TranslateM (α × Array FVarId) := do
+  let outer := (← get).openedCaptured
+  modify fun s => { s with openedCaptured := #[] }
+  try
+    let result ← k
+    return (result, (← get).openedCaptured)
+  finally modify fun s => { s with openedCaptured := outer }
+
+/-- `args` with the values of the `let` variables that satisfy `pick` substituted, or `none`
+if none occurs. The substitution repeats, since a captured value may mention variables
+captured by an enclosing closure. -/
+def substituteLets? (args : Array Expr) (pick : FVarId → LetValue → Bool) :
+    TranslateM (Option (Array Expr)) := do
+  let lets := (← get).letValues
+  if lets.isEmpty then return none
+  let picked : Expr → Option Expr
+    | .fvar id => (lets.get? id).bind fun v => if pick id v then some v.expanded else none
+    | _ => none
+  -- `find?` visits a shared subterm once; `hasAnyFVar` does not.
+  let mentions (arg : Expr) : Bool := (arg.find? (picked · |>.isSome)).isSome
+  unless args.any mentions do return none
+  let mut args := args
+  while args.any mentions do
+    args := args.map (·.replace picked)
+  return some args
+
+/-- The captured `let` variables `args` mention. -/
+def capturedLetsIn (args : Array Expr) : TranslateM (Array FVarId) := do
+  let lets := (← get).letValues
+  if lets.isEmpty then return #[]
+  let fvars := args.foldl (fun acc arg => Lean.collectFVars acc arg) {}
+  return fvars.fvarIds.filter fun id => (lets.get? id).any (·.captured)
+
+/-- The `let` variables in scope keyed by their expanded values: the uncaptured ones, and
+the captured ones too if `captured`. -/
+def letVarsByValue (captured := false) : TranslateM (Std.HashMap Expr FVarId) := do
+  let mut vars := {}
+  for (id, v) in (← get).letValues do
+    if captured || !v.captured then vars := vars.insert v.expanded id
+  return vars
+
+/-- `e` with each subterm that is a value in `vars` replaced by its `let` variable, which
+translates as the variable's SMT name. -/
+def collapseLets (vars : Std.HashMap Expr FVarId) (e : Expr) : Expr :=
+  if vars.isEmpty then e else e.replace fun sub => (vars.get? sub).map mkFVar
 
 /-- The SMT variable name for `fvar` if it is a bound quantifier variable. -/
 def boundVar? (fvar : FVarId) : TranslateM (Option String) := do

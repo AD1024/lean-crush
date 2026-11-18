@@ -279,11 +279,11 @@ result-extraction commands ourselves. The solver's own limit is `limitMs`
 (`crush.timeout` by default), and the child is killed at the deadline of `budget` (a
 fresh call budget by default), which also covers the follow-up output. On timeout
 before a verdict we return `.unknown "timeout"`. A timeout while reading the follow-up
-output keeps the verdict: `unsat` then carries no core or proof. The child is always
-killed before returning. -/
+output keeps the verdict: `unsat` then carries no core or proof. Without `getModel`, `sat`
+returns at once with no model. The child is always killed before returning. -/
 def runQuery (cfg : Config) (script : Array SMT.Command)
-    (budget? : Option QueryBudget := none) (limitMs? : Option Nat := none) :
-    MetaM Result := do
+    (budget? : Option QueryBudget := none) (limitMs? : Option Nat := none)
+    (getModel := true) : MetaM Result := do
   let some _ := backendSpec cfg.backend
     | throwError "crush: backend `{cfg.backend}` does not spawn a solver process"
   let request ← SolverRequest.current cfg
@@ -321,6 +321,7 @@ def runQuery (cfg : Config) (script : Array SMT.Command)
         return .unsat core proof
       | "sat" =>
         if wrote.isNone then return .unknown "writing the solver script failed or timed out"
+        unless getModel do return .sat "" (rejectionDiagnostics noise)
         let some model ← drainResponse p #[.getModel] timerTask
           | trace[crush.result] "timed out reading the model after `sat`"
             return .sat "" (rejectionDiagnostics noise)

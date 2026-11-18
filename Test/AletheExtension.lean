@@ -183,6 +183,26 @@ run_meta do
     assertDecoded symbols "((_ divisible 3) x)" expected
     assertDecoded symbols "(divisible 3 x)" expected
 
+/-- A record whose bits a registered `@bit_of` decoder projects. -/
+structure TwoBits where
+  bits : BitVec 2
+
+@[crush_replay "@bit_of"]
+def twoBitsBit : ReplayTermHandler := fun ctx => do
+  let #[word] := ctx.args | return none
+  unless (← inferType word).isConstOf ``TwoBits do return none
+  let #[.atom index] := ctx.indices | return none
+  let some index := index.toNat? | return none
+  return some (← mkAppM ``BitVec.getLsbD #[← mkAppM ``TwoBits.bits #[word], mkNatLit index])
+
+-- A registered `@bit_of` decoder also decodes the bits of a bit-blasted term.
+run_meta do
+  withLocalDeclD `w (mkConst ``TwoBits) fun w => do
+    let symbols := ({} : Std.HashMap String Expr).insert "w" w
+    let bits ← mkAppM ``TwoBits.bits #[w]
+    assertDecoded symbols "((_ @bit_of 1) w)" (← mkAppM ``BitVec.getLsbD #[bits, mkNatLit 1])
+    assertDecoded symbols "(@bbterm ((_ @bit_of 0) w) ((_ @bit_of 1) w))" bits
+
 private def replayTestRule (goal : MVarId) (rule arg : String) :
     TacticM (Option Expr) := goal.withContext do
   let target ← instantiateMVars (← goal.getType)

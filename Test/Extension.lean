@@ -141,6 +141,24 @@ theorem sort_sugar_fires (x : MappedInt) :
     (MappedInt.next x).value = x.value + 1 := by
   crush
 
+/-! ## A lowering matching a nested shape sees through a shared `let`
+
+`v` is used twice, so it becomes an SMT `let`; the lowering declines the bare variable
+and is retried with its value. -/
+
+opaque addHalf : Nat → Nat → Nat
+
+-- `addHalf x (2 * y)` is `x + y`.
+@[crush_lower addHalf]
+def addHalfLowering : LoweringHandler := fun ctx => do
+  let #[x, arg] := ctx.args | return none
+  unless arg.isAppOfArity ``HMul.hMul 6 && (arg.getArg! 4).nat? == some 2 do return none
+  return some (smt| (+ $(← ctx.emitTerm x) $(← ctx.emitTerm arg.appArg!)))
+
+theorem lowering_through_let (x n : Nat) :
+    (let v := 2 * n; addHalf x v + v) = x + 3 * n := by
+  crush
+
 /-! ## A result-indexed lowering fires
 
 This is the executable counterpart of the Verso example. The term handler is

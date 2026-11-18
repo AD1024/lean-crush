@@ -101,6 +101,13 @@ private def requireSame (where_ : String) (a b : Option SSort) : Except String U
     else throw s!"{where_} combines incompatible sorts `{a}` and `{b}`"
   | _, _ => pure ()
 
+/-- Every known sort in `args` is the first known one. -/
+private def requireAllSame (where_ : String) (args : Array (Option SSort)) :
+    Except String Unit := do
+  let some first := args.findSome? id | return
+  for arg in args do
+    requireSame where_ (some first) arg
+
 private def requireBoolArgs (name : String) (args : Array (Option SSort)) :
     Except String Unit := do
   for i in [0:args.size] do
@@ -243,14 +250,12 @@ where
         return some boolSort
       | "=" =>
         requireAtLeast name args.size 2
-        for i in [1:args.size] do
-          requireSame s!"arguments of `{name}`" args[0]! args[i]!
+        requireAllSame s!"arguments of `{name}`" args
         return some boolSort
       | "distinct" =>
         if args.size < 2 then
           throw s!"`distinct` expects at least two arguments, got {args.size}"
-        for i in [1:args.size] do
-          requireSame "arguments of `distinct`" args[0]! args[i]!
+        requireAllSame "arguments of `distinct`" args
         return some boolSort
       | "ite" =>
         requireArity name args.size 3

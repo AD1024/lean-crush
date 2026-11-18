@@ -502,4 +502,23 @@ theorem let_chain_to_width (p : Prop) (q : Nat → Prop)
     (hq : ∀ k, q k) : p := by
   crush
 
+-- Counting a let's uses visits a shared subterm once: a 40-deep DAG over an inner binder.
+open Lean Meta in
+run_meta do
+  let nat := mkConst ``Nat
+  withLocalDeclD `f (← mkArrow nat (← mkArrow nat nat)) fun f => do
+    let mut shared : Expr := .bvar 0
+    for _ in [:40] do
+      shared := mkApp2 f shared shared
+    let body := Expr.lam `z nat (mkApp2 f (.bvar 1) shared) .default
+    unless Crush.countLooseBVar0 body 2 == 1 do throwError "miscounted a single use"
+    let twice := Expr.lam `z nat (mkApp2 f (.bvar 1) (mkApp2 f shared (.bvar 1))) .default
+    unless Crush.countLooseBVar0 twice 2 == 2 do throwError "miscounted two uses"
+
+-- A literal rotation amount read through a `let` captured by a closure substitutes the let.
+theorem let_rotation_in_closure :
+    (let k := Nat.succ 0
+     (fun x : BitVec 8 => x.rotateLeft k) = (fun x => x.rotateLeft 1) ∧ k = 1) ∧ True := by
+  crush
+
 end NestedLets

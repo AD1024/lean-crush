@@ -6,8 +6,9 @@ import Crush.SMT.Quote
 
 `register_lowering term`, `result-type`, and `sort` compile to private definitions
 registered through the existing lowering attributes. Patterns inspect complete
-elaborated application spines without unfolding. Matching finishes before any
-capture is translated, so a declined pattern emits no declarations.
+elaborated application spines without unfolding, looking through a shared `let`
+variable only where they inspect its value. Matching finishes before any capture is
+translated, so a declined pattern emits no declarations.
 An optional `with ctx` explicitly binds the original `TranslationCtx` for the RHS.
 -/
 
@@ -67,7 +68,7 @@ private def patternHead (pattern : TSyntax `crushLoweringPattern) :
   | `(crushLoweringPattern| ($head:ident $_:crushLoweringPattern*)) => return head
   | _ => throwErrorAt pattern "a lowering pattern must have a constant application head"
 
-private partial def compilePattern (pattern : TSyntax `crushLoweringPattern)
+private partial def compilePattern (ctx : Ident) (pattern : TSyntax `crushLoweringPattern)
     (value : Ident) (code : PatternCode := {}) (headOnly := false) : CommandElabM PatternCode := do
   match pattern with
   | `(crushLoweringPattern| _) => return code
@@ -76,7 +77,7 @@ private partial def compilePattern (pattern : TSyntax `crushLoweringPattern)
     if let some type := type then
       let typeValue ← freshIdent
       let check ← `(doElem| let $typeValue ← Lean.Meta.inferType $value)
-      compilePattern type typeValue { code with checks := code.checks.push check } true
+      compilePattern ctx type typeValue { code with checks := code.checks.push check } true
     else return code
   | `(crushLoweringPattern| (sort $name:ident)) =>
     let check ← `(doElem|
@@ -99,7 +100,7 @@ where
     let expression ← freshIdent
     let spine ← freshIdent
     let mut code := { code with checks := code.checks ++ #[
-      (← `(doElem| let $expression := Lean.Expr.consumeMData $value)),
+      (← `(doElem| let $expression ← ($ctx).openLet $value)),
       (← `(doElem| unless ($expression).getAppFn.isConstOf $(quote headName) do return none)),
       (← `(doElem| let $spine := ($expression).getAppArgs)),
       (← `(doElem| unless ($spine).size == $(quote args.size) do return none))] }
@@ -107,7 +108,7 @@ where
       let arg ← freshIdent
       let check ← `(doElem| let $arg := $spine[$(quote i)]!)
       code := { code with checks := code.checks.push check }
-      code ← compilePattern args[i]! arg code
+      code ← compilePattern ctx args[i]! arg code
     return code
 
 /-- Internal elaboration adapter: prefer a monadic RHS, otherwise lift a pure value. -/
@@ -136,7 +137,7 @@ elab_rules : command
       | none => freshIdent
     let value ← freshIdent
     let name ← freshIdent
-    let code ← compilePattern pattern value (headOnly := true)
+    let code ← compilePattern ctx pattern value (headOnly := true)
     if let some contextName := contextName then
       if code.captures.any (·.name.getId == contextName.getId) then
         throwErrorAt contextName

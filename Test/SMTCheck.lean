@@ -143,6 +143,9 @@ private def naryPrelude : Array Command := #[
 #eval show IO Unit from do
   for (term, expected) in #[((smt| (= (+ x) x)), "at least 2"),
       ((smt| (= x y b)), "incompatible sorts"), ((smt| (< x)), "at least 2"),
+      -- An operand of unknown sort first does not hide the others.
+      ((smt| (= (str.at s 0) x b)), "incompatible sorts"),
+      ((smt| (distinct (str.at s 0) x b)), "incompatible sorts"),
       ((smt| (=> b)), "at least 2")] do
     match checkScript (naryPrelude.push (.assert term)) with
     | .error error =>
