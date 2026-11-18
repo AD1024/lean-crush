@@ -2,8 +2,7 @@
 
 This document is the first-stop guide for an LLM coding agent working on
 lean-crush. Read it before changing the translator, solver interface, or proof
-reconstruction. The implementation and tests are authoritative; roadmap text may
-describe planned work that has since changed.
+reconstruction. The implementation and tests are authoritative.
 
 Do not modify this file unless explicitly instructed to do so.
 
@@ -39,11 +38,9 @@ Read these files in order:
 2. `Crush.lean` for the public modules exported by `import Crush`.
 3. `Crush/Frontend/Tactic.lean` for the actual end-to-end control flow.
 4. `Crush/Frontend/Config.lean` for every supported option and its semantics.
-5. `Doc/OPTIMIZATIONS.md` before changing search bounds, instantiation,
+5. `scripts/README.md` before changing search bounds, instantiation,
    reconstruction, or query shaping.
-6. `Doc/PLAN.md` for architecture history, soundness obligations, and roadmap.
-   Use the source and tests when its status text disagrees with current code.
-7. The closest file under `Test/` before modifying a subsystem.
+6. The closest file under `Test/` before modifying a subsystem.
 
 The published user documentation is implemented under `Doc/Verso/`. User-visible
 changes must keep the README and Verso manual synchronized.
@@ -164,8 +161,8 @@ lowerings representation-compatible.
 - Use `SymM` where a hot loop performs repeated normalization, type inference, or
   definitional equality and can benefit from shared symbolic caches. Do not move
   ordinary one-shot metaprogramming into `SymM` without evidence.
-- Search-bound changes require focused tests and downstream benchmark comparison.
-  Read `Doc/OPTIMIZATIONS.md` first.
+- Search-bound changes require focused tests and downstream benchmark comparison
+  (`scripts/README.md`).
 
 ### Process and packaging
 
@@ -193,8 +190,7 @@ lowerings representation-compatible.
   markers, temporary plans, agent notes, user-request summaries, or references
   such as "the issue discussed above."
 - Describe permanent behavior rather than the sequence by which a change was
-  developed. Put historical rationale in `Doc/PLAN.md` or
-  `Doc/OPTIMIZATIONS.md` only when it remains relevant to future maintenance.
+  developed. Put historical rationale in the commit message.
 - Keep comments synchronized with behavior. A stale detailed comment is worse
   than no comment.
 - Prefer the repository's existing terminology (`translation`, `lowering`,
@@ -278,8 +274,8 @@ Use `backend = "none"` to inspect translation independently of solver behavior.
 Run the saved script directly with the configured solver when distinguishing a
 translation bug from solver incompleteness.
 
-For search or performance changes, use the scripts and protocol in
-`Doc/OPTIMIZATIONS.md`. Record solver versions, repository commits, trust mode,
+For search or performance changes, use the benchmark harnesses described in
+`scripts/README.md`. Record solver versions, repository commits, trust mode,
 timeouts, dirty state, coverage, matched-goal latency, and tail latency. A faster
 warm build is not evidence of a faster tactic.
 
@@ -306,8 +302,7 @@ Before finishing:
 
 1. Confirm no unrelated files were reverted or generated artifacts added.
 2. Run focused tests, then the appropriate full suites.
-3. Check whether README, Verso, option docs, `Doc/PLAN.md`, or
-   `Doc/OPTIMIZATIONS.md` must change.
+3. Check whether README, Verso, or option docs must change.
 4. Review the trust boundary and prove that every new trusting behavior is
    explicit.
 5. Review failure paths for retained fallbacks, restored metavariable state,
