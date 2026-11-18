@@ -106,3 +106,37 @@ run_meta do
         let expected ← mkAppM ``And #[xy, ← mkAppM ``And #[xz, yz]]
         unless ← isDefEq value expected do
           throwError "SMT `distinct` did not decode to canonical pairwise inequalities"
+
+/-- A context with a `:named` cache, over `named` and `symbols`. -/
+private def cachedCtx (named : List (String × String)) (symbols : Std.HashMap String Expr := {}) :
+    MetaM TermCtx := do
+  let mut defs : Std.HashMap String Sexp := {}
+  for (name, source) in named do
+    defs := defs.insert name (← parseTerm source)
+  return { symbols, named := defs, namedCache := some (← IO.mkRef {}),
+           namedNeed := some (← IO.mkRef 0) }
+
+-- A cached `:named` term is reused only within its fuel need, whatever ran first.
+run_meta do
+  let chain := [("@a", "@b"), ("@b", "@c"), ("@c", "true")]
+  if (← toExpr? (← cachedCtx chain) 2 (.atom "@a")).isSome then
+    throwError "decoded `@a` beyond its fuel"
+  let ctx ← cachedCtx chain
+  unless (← toExpr? ctx 2 (.atom "@b")).isSome do
+    throwError "failed to decode `@b`"
+  if (← toExpr? ctx 2 (.atom "@a")).isSome then
+    throwError "a cached `@b` let `@a` exceed its fuel"
+  unless (← toExpr? ctx 3 (.atom "@a")).isSome do
+    throwError "failed to decode `@a` with enough fuel"
+  -- The need of a bit pattern counts its expanded names.
+  withLocalDeclD `x (bitVecType 2) fun x => do
+    let pattern := [("@v", "(@bbterm @b0 @b1)"), ("@b0", "@d0"), ("@d0", "((_ @bit_of 0) x)"),
+      ("@b1", "((_ @bit_of 1) x)"), ("@u", "@v")]
+    let symbols := (({} : Std.HashMap String Expr).insert "x" x)
+    if (← toExpr? (← cachedCtx pattern symbols) 3 (.atom "@u")).isSome then
+      throwError "decoded `@u` beyond its fuel"
+    let ctx ← cachedCtx pattern symbols
+    unless (← toExpr? ctx 3 (.atom "@v")).isSome do
+      throwError "failed to decode `@v`"
+    if (← toExpr? ctx 3 (.atom "@u")).isSome then
+      throwError "a cached bit pattern let `@u` exceed its fuel"

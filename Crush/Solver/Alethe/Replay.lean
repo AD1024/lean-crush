@@ -1154,7 +1154,9 @@ partial def replay (proof : AletheProof) (rawSexps : Array Sexp)
   -- Inhabitation evidence for `choice` terms over types without a `Nonempty` instance.
   let nonempty ← nonemptyEvidence (encodingEvidence ++ facts.toArray.map (·.2))
   let namedCache ← IO.mkRef {}
-  let ctx : TermCtx := { symbols, named, decoders, nonempty, namedCache := some namedCache }
+  let namedNeed ← IO.mkRef 0
+  let ctx : TermCtx := { symbols, named, decoders, nonempty, namedCache := some namedCache,
+                         namedNeed := some namedNeed }
   let failureRef ← IO.mkRef none
   let telemetry ← ReplayTelemetrySession.start
   let referenceCounts := premiseReferenceCounts proof.commands

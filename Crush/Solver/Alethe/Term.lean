@@ -65,10 +65,13 @@ structure TermCtx where
   /-- Proofs of `Nonempty T`, for decoding `choice` over a type without a
   `Nonempty` instance (see `nonemptyEvidence`). -/
   nonempty : Array Expr := #[]
-  /-- Decoded `:named` references for the current binder scope. Every `@p_k` reference
-  would otherwise re-decode its definition, which is exponential in a shared DAG. A
-  scope that binds a new local gets a fresh cache (`TermCtx.bindLocal`). -/
-  namedCache : Option (IO.Ref (Std.HashMap String Expr)) := none
+  /-- Decoded `:named` references for the current binder scope, with the fuel each
+  decoding needs. Every `@p_k` reference would otherwise re-decode its definition, which
+  is exponential in a shared DAG. A scope that binds a new local gets a fresh cache
+  (`TermCtx.bindLocal`). -/
+  namedCache : Option (IO.Ref (Std.HashMap String (Expr × Nat))) := none
+  /-- The largest fuel need among `:named` references decoded under the current one. -/
+  namedNeed : Option (IO.Ref Nat) := none
 
 /-- Bind an Alethe variable for a nested scope, with a fresh `:named` cache: a named
 term may decode differently once the variable is in scope. -/
@@ -77,24 +80,36 @@ def TermCtx.bindLocal (ctx : TermCtx) (name : String) (value : Expr) : BaseIO Te
     if ctx.namedCache.isSome then pure (some (← IO.mkRef {})) else pure none
   return { ctx with locals := ctx.locals.insert name value, namedCache }
 
-/-- Expand Alethe `:named` references while preserving the surrounding term shape.
-`fuel` bounds nested `:named` expansions only; term nesting costs nothing. -/
+/-- Expand Alethe `:named` references while preserving the surrounding term shape, with
+the fuel the expansion needs. `fuel` bounds nested `:named` expansions only; term
+nesting costs nothing. -/
 private partial def expandNamed? (ctx : TermCtx) (fuel : Nat) (term : Sexp) :
-    Option Sexp := do
+    Option (Sexp × Nat) := do
   match term with
   | .atom name =>
     if name.startsWith "@" then
       match ctx.named.get? name with
       | some value =>
         if fuel == 0 || ctx.expanding.contains name then failure
-        expandNamed? { ctx with expanding := ctx.expanding.insert name } (fuel - 1)
-          (stripAnnots value)
-      | none => return term
+        let (expanded, need) ← expandNamed? { ctx with expanding := ctx.expanding.insert name }
+          (fuel - 1) (stripAnnots value)
+        return (expanded, need + 1)
+      | none => return (term, 0)
     else
-      return term
+      return (term, 0)
   | .list parts =>
-    return .list (← parts.mapM fun part => expandNamed? ctx fuel part)
-  | .str _ => return term
+    let mut expanded := #[]
+    let mut need := 0
+    for part in parts do
+      let (part, partNeed) ← expandNamed? ctx fuel part
+      expanded := expanded.push part
+      need := max need partNeed
+    return (.list expanded, need)
+  | .str _ => return (term, 0)
+
+/-- Record that the term being decoded needs `need` fuel. -/
+private def TermCtx.noteNeed (ctx : TermCtx) (need : Nat) : BaseIO Unit := do
+  if let some ref := ctx.namedNeed then ref.modify (max · need)
 
 /-- Decode an SMT-LIB string literal's escapes in one left-to-right pass: `\u{h…}`
 (one to five hex digits) and `\uhhhh` denote code points; any other backslash is a
@@ -600,12 +615,21 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
       match ctx.named.get? a with
       | some t =>
         if fuel == 0 || ctx.expanding.contains a then return none
-        if let some cache := ctx.namedCache then
-          if let some cached := (← cache.get).get? a then return some cached
-        let decoded ←
-          toExpr? { ctx with expanding := ctx.expanding.insert a } (fuel - 1) (stripAnnots t)
-        if let (some cache, some value) := (ctx.namedCache, decoded) then
-          cache.modify (·.insert a value)
+        let inner := { ctx with expanding := ctx.expanding.insert a }
+        let (some cache, some needRef) := (ctx.namedCache, ctx.namedNeed)
+          | toExpr? inner (fuel - 1) (stripAnnots t)
+        -- A cached value is used only within its fuel need, as a fresh decoding would.
+        if let some (value, need) := (← cache.get).get? a then
+          if need > fuel then return none
+          ctx.noteNeed need
+          return some value
+        let outer ← needRef.get
+        needRef.set 0
+        let decoded ← toExpr? inner (fuel - 1) (stripAnnots t)
+        let need := (← needRef.get) + 1
+        needRef.set (max outer need)
+        if let some value := decoded then
+          cache.modify (·.insert a (value, need))
         return decoded
       | none => return none
     else if a == "true" then return some (mkConst ``True)
@@ -832,15 +856,19 @@ where
       | _ => allLiteral := false
     if allLiteral then return some (mkBitVecLit args.size literal)
     let patternResult ← (do
-      let some first := expandNamed? ctx fuel args[0]! | return none
+      let some (first, firstNeed) := expandNamed? ctx fuel args[0]! | return none
       let some pattern := normalizeBitPattern? 0 first | return none
+      let mut need := firstNeed
       for i in [1:args.size] do
-        let some arg := expandNamed? ctx fuel args[i]! | return none
+        let some (arg, argNeed) := expandNamed? ctx fuel args[i]! | return none
         unless normalizeBitPattern? i arg == some pattern do return none
+        need := max need argNeed
       let some result ← bitPatternExpr pattern | return none
       unless (← bitVecWidth? result) == some args.size do return none
-      return some result)
-    if let some result := patternResult then return some result
+      return some (result, need))
+    if let some (result, need) := patternResult then
+      ctx.noteNeed need
+      return some result
     let mut bits := #[]
     for arg in args do
       let some bit ← toExpr? ctx fuel arg | return none
