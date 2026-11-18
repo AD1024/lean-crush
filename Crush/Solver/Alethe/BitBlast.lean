@@ -170,6 +170,50 @@ theorem mul_eq_of_bits {w : Nat} (L R V : BitVec w) (a b : Nat → Bool)
   rw [hlast, ← mulRow_eq_mulRec L R n j hj, Nat.add_sub_cancel]
   exact mulRow_congr ha hb n j (by omega) hj
 
+/-! ## Bit-vector equality -/
+
+/-- Replay lemma for `bv_bitblast_step_bvequal`. -/
+theorem eq_iff_of_bits {w : Nat} (A B : BitVec w) (a b : Nat → Bool)
+    (ha : ∀ k, k < w → A.getLsbD k = a k) (hb : ∀ k, k < w → B.getLsbD k = b k)
+    {C : Prop} (hC : C ↔ ∀ k, k < w → a k = b k) : (A = B) ↔ C := by
+  rw [hC]
+  constructor
+  · intro h k hk
+    rw [← ha k hk, ← hb k hk, h]
+  · intro h
+    apply BitVec.eq_of_getLsbD_eq
+    intro k hk
+    rw [ha k hk, hb k hk, h k hk]
+
+/-! Conjunctions `c₀ ∧ (c₁ ∧ … cₙ₋₁)` as bounded `∀`. -/
+
+theorem conj_last {c : Prop} {P : Nat → Prop} {i : Nat} (h : c ↔ P i) :
+    c ↔ ∀ k, i ≤ k → k < i + 1 → P k := by
+  rw [h]
+  constructor
+  · intro hp k hi hk
+    have : k = i := by omega
+    exact this ▸ hp
+  · intro hall
+    exact hall i (Nat.le_refl i) (Nat.lt_succ_self i)
+
+theorem conj_cons {c R : Prop} {P : Nat → Prop} {i n : Nat} (h : c ↔ P i)
+    (hR : R ↔ ∀ k, i + 1 ≤ k → k < n → P k) (hin : i < n) :
+    (c ∧ R) ↔ ∀ k, i ≤ k → k < n → P k := by
+  rw [h, hR]
+  constructor
+  · intro ⟨hp, hrest⟩ k hi hk
+    by_cases e : k = i
+    · exact e ▸ hp
+    · exact hrest k (by omega) hk
+  · intro hall
+    exact ⟨hall i (Nat.le_refl i) hin, fun k hi hk => hall k (by omega) hk⟩
+
+theorem conj_all {C : Prop} {P : Nat → Prop} {n : Nat}
+    (h : C ↔ ∀ k, 0 ≤ k → k < n → P k) : C ↔ ∀ k, k < n → P k := by
+  rw [h]
+  exact ⟨fun hall k hk => hall k (Nat.zero_le k) hk, fun hall k _ hk => hall k hk⟩
+
 /-! ## Bounded `∀`, for proofs at a concrete width -/
 
 theorem forall_lt_zero (P : Nat → Prop) : ∀ k, k < 0 → P k :=
@@ -205,6 +249,13 @@ theorem reify_xor {P Q : Prop} {p q : Bool} (hp : P ↔ p = true) (hq : Q ↔ q 
 theorem reify_iff {P Q : Prop} {p q : Bool} (hp : P ↔ p = true) (hq : Q ↔ q = true) :
     (P ↔ Q) ↔ (!(p ^^ q)) = true := by
   rw [hp, hq]; cases p <;> cases q <;> simp
+
+theorem reify_iff_eq {P Q : Prop} {p q : Bool} (hp : P ↔ p = true) (hq : Q ↔ q = true) :
+    (P ↔ Q) ↔ p = q := by
+  rw [hp, hq]; cases p <;> cases q <;> simp
+
+theorem reify_beq {s t s' t' : Bool} (hs : s = s') (ht : t = t') :
+    (s = t) ↔ (s' = t') := by rw [hs, ht]
 
 theorem reify_prop_atom (P : Prop) : P ↔ @decide P (Classical.propDecidable P) = true :=
   (@decide_eq_true_iff P (Classical.propDecidable P)).symm

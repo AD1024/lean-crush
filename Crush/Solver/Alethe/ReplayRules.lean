@@ -187,12 +187,6 @@ private theorem stringAppendIsEmptyEqIff (left right : String) :
   rw [Bool.eq_iff_iff]
   simp only [String.isEmpty_iff, Bool.and_eq_true]
 
-private theorem bitVecGetLsbDXor {width : Nat} (left right : BitVec width)
-    (index : Nat) :
-    (BitVec.xor left right).getLsbD index =
-      Bool.xor (left.getLsbD index) (right.getLsbD index) :=
-  BitVec.getLsbD_xor
-
 private theorem bitVecUltEqTrueIffLt {width : Nat} (left right : BitVec width) :
     left.ult right = true ↔ left < right :=
   BitVec.ult_iff_lt
@@ -200,18 +194,6 @@ private theorem bitVecUltEqTrueIffLt {width : Nat} (left right : BitVec width) :
 private theorem bitVecUleEqTrueIffLe {width : Nat} (left right : BitVec width) :
     left.ule right = true ↔ left ≤ right :=
   BitVec.ule_iff_le
-
-private theorem decideIffBoolEqTrue {predicate : Prop} {decision : Decidable predicate}
-    {value : Bool} (equal : @decide predicate decision = value) :
-    predicate ↔ value = true := by
-  rw [← @decide_eq_true_iff predicate decision]
-  exact Bool.eq_iff_iff.mp equal
-
-private theorem decideEqBoolOfIff {predicate : Prop} {decision : Decidable predicate}
-    {value : Bool} (equal : predicate ↔ value = true) :
-    @decide predicate decision = value := by
-  rw [Bool.eq_iff_iff, @decide_eq_true_iff predicate decision]
-  exact equal
 
 private theorem existsLtSucc {predicate : Nat → Prop} (bound : Nat) :
     (∃ index < bound + 1, predicate index) ↔
@@ -568,84 +550,6 @@ private partial def concreteNatValue? (value : Expr) : MetaM (Option Nat) := do
     return (← concreteNatValue? value.getAppArgs[0]!).map (· + 1)
   return none
 
-/-- Project a bit-vector equality into cvc5's conjunction of bit equalities. -/
-private partial def bitEqualityForward (index width : Nat) :
-    TacticM (TSyntax `Lean.Parser.Tactic.tacticSeq) := do
-  if index >= width then
-    return ← `(tacticSeq| trivial)
-  let value : TSyntax `term := ⟨Syntax.mkNumLit (toString index)⟩
-  let proveBit ← `(tacticSeq|
-    have projected := congrArg (fun vector => vector.getLsbD $value) heq
-    repeat' rw [bitVecGetLsbDXor] at projected
-    first
-    | exact projected
-    | simp only [BitVec.getLsbD_ofBoolListLE, List.getD] at projected
-      exact decideIffBoolEqTrue projected
-    | simp only [BitVec.getLsbD_ofBoolListLE, List.getD] at projected
-      exact (decideIffBoolEqTrue projected).symm
-    | simp only [BitVec.getLsbD_ofBoolListLE, List.getD] at projected
-      exact decideIffBoolEqTrue projected.symm
-    | simp only [BitVec.getLsbD_ofBoolListLE, List.getD] at projected
-      exact (decideIffBoolEqTrue projected.symm).symm)
-  if index + 1 >= width then
-    return proveBit
-  let rest ← bitEqualityForward (index + 1) width
-  `(tacticSeq|
-    constructor
-    · $proveBit:tacticSeq
-    · $rest:tacticSeq)
-
-/-- Enumerate a statically bounded bit index and select its matching bit hypothesis. -/
-private partial def bitIndexCases (index width : Nat) :
-    TacticM (TSyntax `Lean.Parser.Tactic.tacticSeq) := do
-  if index >= width then
-    return ← `(tacticSeq| omega <;> done)
-  let rest ← bitIndexCases (index + 1) width
-  let value : TSyntax `term := ⟨Syntax.mkNumLit (toString index)⟩
-  let mut projection ← `(term| hbits)
-  for _ in [:index] do
-    projection ← `(term| ($projection).2)
-  if index + 1 < width then
-    projection ← `(term| ($projection).1)
-  `(tacticSeq|
-    by_cases hindex : i = $value
-    · subst i
-      first
-      | exact $projection
-      | simp only [BitVec.getLsbD_ofBoolListLE, List.getD]
-        exact decideEqBoolOfIff $projection
-      | simp only [BitVec.getLsbD_ofBoolListLE, List.getD]
-        exact (decideEqBoolOfIff $projection).symm
-      | simp only [BitVec.getLsbD_ofBoolListLE, List.getD]
-        exact decideEqBoolOfIff ($projection).symm
-      | simp only [BitVec.getLsbD_ofBoolListLE, List.getD]
-        exact (decideEqBoolOfIff ($projection).symm).symm
-      | repeat' rw [bitVecGetLsbDXor]
-        grind
-    · $rest:tacticSeq)
-
-/-- Concrete checker for cvc5's vector-equality-to-bits bridge. -/
-private def bitVecEqualityHint? (target : Expr) : TacticM (Option (TSyntax `tactic)) := do
-  let target ← whnf target
-  unless target.isAppOfArity ``Iff 2 do return none
-  let equality := target.getAppArgs[0]!
-  unless equality.isAppOfArity ``Eq 3 do return none
-  let type ← whnf (← inferType equality.getAppArgs[1]!)
-  let .app (.const ``BitVec _) widthExpr := type | return none
-  let some width ← concreteNatValue? widthExpr | return none
-  let forward ← bitEqualityForward 0 width
-  let cases ← bitIndexCases 0 width
-  let widthSyntax : TSyntax `term := ⟨Syntax.mkNumLit (toString width)⟩
-  return some (← `(tactic|
-    (constructor
-     · intro heq
-       ($forward:tacticSeq)
-     · intro hbits
-       apply BitVec.eq_of_getLsbD_eq
-       intro i hi
-       have hbound : i < $widthSyntax := by exact hi
-       ($cases:tacticSeq))))
-
 /-- Enumerate a concrete bit-vector width and prove each selected negation bit. -/
 private partial def bitVecNegCases (index width : Nat) :
     TacticM (TSyntax `Lean.Parser.Tactic.tacticSeq) := do
@@ -740,7 +644,6 @@ private def bitVecSignedLtHint? (target : Expr) :
      simp [bitVecUnsignedLtBits, BitVec.msb_eq_getLsbD_last])))
 
 private inductive BitVecReplayKind where
-  | equality
   | negation
   | extract
   | unsignedLt
@@ -750,7 +653,7 @@ private def BitVecReplayKind.applicable
     (kind : BitVecReplayKind) (target : Expr) : MetaM Bool := do
   let target ← whnf target
   return match kind with
-    | .equality | .unsignedLt | .signedLt =>
+    | .unsignedLt | .signedLt =>
       target.isAppOfArity ``Iff 2
     | .negation | .extract =>
       target.isAppOfArity ``Eq 3
@@ -759,7 +662,6 @@ private def BitVecReplayKind.hint?
     (kind : BitVecReplayKind) (target : Expr) :
     TacticM (Option (TSyntax `tactic)) :=
   match kind with
-  | .equality => bitVecEqualityHint? target
   | .negation => bitVecNegationHint? target
   | .extract => bitVecExtractHint? target
   | .unsignedLt => bitVecUnsignedLtHint? target
@@ -774,12 +676,6 @@ private def runBitVecReplay (kind : BitVecReplayKind) : TacticM Unit := do
   let some tactic ← kind.hint? target
     | throwError "bit-vector replay target has an unsupported shape"
   evalTactic tactic
-
-register_crush_replay rule low <<
-  (bv_bitblast_step_bvequal ..)
-    if BitVecReplayKind.equality =>
-    by run_tac runBitVecReplay BitVecReplayKind.equality
->>
 
 register_crush_replay rule low <<
   (bv_bitblast_step_bvneg ..)

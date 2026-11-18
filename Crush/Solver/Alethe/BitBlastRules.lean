@@ -4,8 +4,9 @@ import Crush.Solver.Alethe.BitBlast
 /-!
 # Checked replay of bit-blasted addition and multiplication
 
-Handlers for `bv_bitblast_step_bvadd` and `bv_bitblast_step_bvmult`. Each step is proved
-with `add_eq_of_bits` or `mul_eq_of_bits` and kernel-checked before it is returned.
+Handlers for `bv_bitblast_step_bvadd`, `bv_bitblast_step_bvmult` and
+`bv_bitblast_step_bvequal`, proved with `add_eq_of_bits`, `mul_eq_of_bits` and
+`eq_iff_of_bits`. Each step is kernel-checked before it is returned.
 -/
 
 open Lean Meta Elab Tactic
@@ -236,6 +237,84 @@ def replayBitBlast (ctx : ReplayRuleContext) (multiply : Bool) : TacticM (Option
     trace[crush.replay] "bit-blast step {ctx.stepId}: the circuit does not match cvc5's"
     return none
   return some proof
+
+/-- The conjuncts of `c₀ ∧ (c₁ ∧ …)`, with the remaining conjunction after each. -/
+private partial def conjuncts (e : Expr) : Array (Expr × Expr) :=
+  go e #[]
+where
+  go (e : Expr) (acc : Array (Expr × Expr)) : Array (Expr × Expr) :=
+    if e.isAppOfArity ``And 2 then go (e.getArg! 1) (acc.push (e.getArg! 0, e))
+    else acc.push (e, e)
+
+/-- `c ↔ v₁ = v₂` for a decoded bit equation `c`. -/
+private def reifyBitEq (c : Expr) : ReifyM (Option Expr) := do
+  if c.isAppOfArity ``Iff 2 then
+    let p := c.getArg! 0
+    let q := c.getArg! 1
+    let rp ← reifyProp p
+    let rq ← reifyProp q
+    return some (mkApp6 (mkConst ``reify_iff_eq) p q rp.value rq.value rp.proof rq.proof)
+  if c.isAppOfArity ``Eq 3 && (c.getArg! 0).isConstOf ``Bool then
+    let s := c.getArg! 1
+    let t := c.getArg! 2
+    let rs ← reifyBool s
+    let rt ← reifyBool t
+    return some (mkApp6 (mkConst ``reify_beq) s t rs.value rt.value rs.proof rt.proof)
+  return none
+
+/-- Replay `(A = B) ↔ ⋀ᵢ (aᵢ ↔ bᵢ)`, cvc5's bit-blasted equality. -/
+def replayBitBlastEqual (ctx : ReplayRuleContext) : TacticM (Option Expr) := do
+  let target ← instantiateMVars ctx.target
+  if target.hasMVar then return none
+  let some (lhs, conj) := target.iff? | return none
+  let some (type, A, B) := lhs.eq? | return none
+  let (``BitVec, #[w]) := type.getAppFnArgs | return none
+  let parts := conjuncts conj
+  let width := parts.size
+  unless ← isDefEq w (mkNatLit width) do return none
+  let build : ReifyM (Option Expr) := do
+    let mut aValues := #[]
+    let mut aProofs := #[]
+    let mut bValues := #[]
+    let mut bProofs := #[]
+    let mut cProofs := #[]
+    for k in [:width] do
+      let ra ← bitOf w A k
+      let rb ← bitOf w B k
+      aValues := aValues.push ra.value
+      aProofs := aProofs.push ra.proof
+      bValues := bValues.push rb.value
+      bProofs := bProofs.push rb.proof
+      let some hc ← reifyBitEq parts[k]!.1 | return none
+      cProofs := cProofs.push hc
+    let a ← bitFunction aValues
+    let b ← bitFunction bValues
+    let nat := mkConst ``Nat
+    let bitEq (v f : Expr) : Expr :=
+      .lam `k nat (mkApp3 (mkConst ``Eq [1]) boolType (getLsbD w v (.bvar 0)) (mkApp f (.bvar 0)))
+        .default
+    let p := Expr.lam `k nat
+      (mkApp3 (mkConst ``Eq [1]) boolType (mkApp a (.bvar 0)) (mkApp b (.bvar 0))) .default
+    let n := mkNatLit width
+    -- Fold the conjunction from its last conjunct.
+    let last := width - 1
+    let mut chain := mkApp4 (mkConst ``conj_last) parts[last]!.1 p (mkNatLit last) cProofs[last]!
+    for j in [:last] do
+      let i := last - 1 - j
+      let hin ← mkDecideProof (← mkAppM ``LT.lt #[mkNatLit i, n])
+      chain := mkAppN (mkConst ``conj_cons)
+        #[parts[i]!.1, parts[i + 1]!.2, p, mkNatLit i, n, cProofs[i]!, chain, hin]
+    let hC := mkApp4 (mkConst ``conj_all) conj p n chain
+    return some <| mkAppN (mkConst ``eq_iff_of_bits)
+      #[w, A, B, a, b, forallLt (bitEq A a) aProofs, forallLt (bitEq B b) bProofs, conj, hC]
+  let some proof ← (try build.run' {} catch _ => pure none) | return none
+  unless ← kernelAccepts target proof do
+    trace[crush.replay] "bit-blast step {ctx.stepId}: the bit equations do not match"
+    return none
+  return some proof
+
+@[crush_replay_rule "bv_bitblast_step_bvequal"]
+def replayBitBlastEq : ReplayRuleHandler := replayBitBlastEqual
 
 @[crush_replay_rule "bv_bitblast_step_bvadd"]
 def replayBitBlastAdd : ReplayRuleHandler := fun ctx => replayBitBlast ctx false

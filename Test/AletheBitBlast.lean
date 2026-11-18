@@ -1,8 +1,8 @@
 import Crush
 
 /-!
-Checked replay of cvc5's bit-blasted addition and multiplication. The steps below are
-cvc5 1.3.4 certificate steps with their `:named` subterms expanded.
+Checked replay of cvc5's bit-blasted addition, multiplication and equality. The steps
+below are cvc5 1.3.4 certificate steps with their `:named` subterms expanded.
 -/
 
 open Lean Meta Elab Tactic Crush Crush.Alethe
@@ -84,8 +84,50 @@ false))))) (xor (xor ((_ @bit_of 3) x_0) ((_ @bit_of 3) y_1)) (or (and ((_ @bit_
 x_0) ((_ @bit_of 0) y_1)) (and (xor ((_ @bit_of 0) x_0) ((_ @bit_of 0) y_1)) false)))))))))
 "#
 
+/-- An adder's output compared with a constant. -/
+def sumEqStep : String := r#"
+(= (= (@bbterm (xor (xor ((_ @bit_of 0) x_0) ((_ @bit_of 0) y_1)) false) (xor (xor ((_ @bit_of
+1) x_0) ((_ @bit_of 1) y_1)) (or (and ((_ @bit_of 0) x_0) ((_ @bit_of 0) y_1)) (and (xor ((_
+@bit_of 0) x_0) ((_ @bit_of 0) y_1)) false))) (xor (xor ((_ @bit_of 2) x_0) ((_ @bit_of 2) y_1))
+(or (and ((_ @bit_of 1) x_0) ((_ @bit_of 1) y_1)) (and (xor ((_ @bit_of 1) x_0) ((_ @bit_of 1)
+y_1)) (or (and ((_ @bit_of 0) x_0) ((_ @bit_of 0) y_1)) (and (xor ((_ @bit_of 0) x_0) ((_
+@bit_of 0) y_1)) false))))) (xor (xor ((_ @bit_of 3) x_0) ((_ @bit_of 3) y_1)) (or (and ((_
+@bit_of 2) x_0) ((_ @bit_of 2) y_1)) (and (xor ((_ @bit_of 2) x_0) ((_ @bit_of 2) y_1)) (or (and
+((_ @bit_of 1) x_0) ((_ @bit_of 1) y_1)) (and (xor ((_ @bit_of 1) x_0) ((_ @bit_of 1) y_1)) (or
+(and ((_ @bit_of 0) x_0) ((_ @bit_of 0) y_1)) (and (xor ((_ @bit_of 0) x_0) ((_ @bit_of 0) y_1))
+false)))))))) (@bbterm false false false false)) (and (= (xor (xor ((_ @bit_of 0) x_0) ((_
+@bit_of 0) y_1)) false) false) (= (xor (xor ((_ @bit_of 1) x_0) ((_ @bit_of 1) y_1)) (or (and
+((_ @bit_of 0) x_0) ((_ @bit_of 0) y_1)) (and (xor ((_ @bit_of 0) x_0) ((_ @bit_of 0) y_1))
+false))) false) (= (xor (xor ((_ @bit_of 2) x_0) ((_ @bit_of 2) y_1)) (or (and ((_ @bit_of 1)
+x_0) ((_ @bit_of 1) y_1)) (and (xor ((_ @bit_of 1) x_0) ((_ @bit_of 1) y_1)) (or (and ((_
+@bit_of 0) x_0) ((_ @bit_of 0) y_1)) (and (xor ((_ @bit_of 0) x_0) ((_ @bit_of 0) y_1))
+false))))) false) (= (xor (xor ((_ @bit_of 3) x_0) ((_ @bit_of 3) y_1)) (or (and ((_ @bit_of 2)
+x_0) ((_ @bit_of 2) y_1)) (and (xor ((_ @bit_of 2) x_0) ((_ @bit_of 2) y_1)) (or (and ((_
+@bit_of 1) x_0) ((_ @bit_of 1) y_1)) (and (xor ((_ @bit_of 1) x_0) ((_ @bit_of 1) y_1)) (or (and
+((_ @bit_of 0) x_0) ((_ @bit_of 0) y_1)) (and (xor ((_ @bit_of 0) x_0) ((_ @bit_of 0) y_1))
+false))))))) false)))
+"#
+
+/-- A constant compared with a bit list. -/
+def constEqStep : String := r#"
+(= (= (@bbterm true false false false) (@bbterm ((_ @bit_of 0) x_0) false false false)) (and (=
+true ((_ @bit_of 0) x_0)) (= false false) (= false false) (= false false)))
+"#
+
+/-- `constEqStep` with its first bit equation negated: false, so it must decline. -/
+def wrongEqStep : String := r#"
+(= (= (@bbterm true false false false) (@bbterm ((_ @bit_of 0) x_0) false false false)) (and (=
+false ((_ @bit_of 0) x_0)) (= false false) (= false false) (= false false)))
+"#
+
 example : True := by
   run_tac do
+    unless ← replayStep 4 "bv_bitblast_step_bvequal" sumEqStep do
+      throwError "the sum equality step was not replayed"
+    unless ← replayStep 4 "bv_bitblast_step_bvequal" constEqStep do
+      throwError "the constant equality step was not replayed"
+    if ← replayStep 4 "bv_bitblast_step_bvequal" wrongEqStep then
+      throwError "a wrong equality step was replayed"
     unless ← replayStep 4 "bv_bitblast_step_bvadd" addStep do
       throwError "the addition step was not replayed"
     unless ← replayStep 3 "bv_bitblast_step_bvmult" mulStep do
