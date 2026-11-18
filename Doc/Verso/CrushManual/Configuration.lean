@@ -66,9 +66,12 @@ example (p : Prop) (h : p) : p := by
 
 {optionDocs crush.timeout}
 
-The timeout applies independently to each solver query.
-A ground-first query followed by a quantified fallback can therefore use the
-budget twice.
+The timeout is a per-call limit.
+The first solver query gets it as the solver's own limit, and every query of the
+call is killed two seconds after it.
+A quantified fallback after a ground-first query gets only the time left before
+that deadline, and is skipped when less than a second remains.
+One `crush` call therefore spends at most the timeout plus two seconds in solvers.
 
 {optionDocs crush.save}
 
@@ -123,7 +126,17 @@ unsuccessful searches still cost time.
 {optionDocs crush.reconstruct}
 
 Use `"auto"` for ordinary checked proofs. `"core"` uses Z3 or cvc5's unsat
-core and Lean finishers; Bitwuzla supplies neither a core nor a certificate.
+core and Lean finishers; Bitwuzla supplies neither a core nor a certificate, so
+reconstruction then starts from every asserted fact.
+The option is ignored under `crush.trust "trust"`.
+
+The configuration also decides what the solver is asked for.
+Under `"trust"`, a query asks for the verdict alone, plus an unsat core when
+`trace.crush.result` is on.
+A reconstructing policy asks for an unsat core, and for cvc5 an Alethe proof
+unless `crush.reconstruct` is `"core"`.
+Asking for cores and proofs changes solver heuristics, so a goal's verdict or
+time can differ between policies.
 
 With a reconstructing trust policy, `"alethe"` bypasses early proofs and
 requires a replayed cvc5 certificate. It fails on missing certificates or

@@ -121,8 +121,10 @@ register_option crush.backend : Backend := {
 
 register_option crush.timeout : Nat := {
   defValue := 10
-  descr := "Per-query solver wall-clock timeout in seconds. Enforced by lean-crush \
-            in addition to the solver's own limit, so a hung solver is always killed."
+  descr := "Per-call solver wall-clock limit in seconds. The first query gets it as \
+            the solver's own limit; every query of the call, including a quantified \
+            fallback, is killed 2 s after it, and the fallback gets only the time \
+            left (it is skipped below one second)."
 }
 
 register_option crush.trust : TrustMode := {

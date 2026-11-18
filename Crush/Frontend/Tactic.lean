@@ -510,6 +510,9 @@ private def callerLevelParams (goal : MVarId) : TacticM (List Name) := goal.with
       names := names ++ [param]
   return names
 
+/-- The quantified fallback query is skipped when less of `crush.timeout` remains. -/
+def fallbackFloorMs : Nat := 1000
+
 /-- How `runCrush` closed its goal, for the excluded-lemma warning. -/
 private def closedByKernel (method : String) : String := s!"{method} (kernel-checked)"
 private def closedByTrust : String := "trusted (`Crush.crushSorry`)"
@@ -629,31 +632,47 @@ private def runCrushCore (goal : MVarId) (cfg : Config) (hints : Hints)
     return none
   -- Saved before the run, so a query that throws still leaves its script on disk.
   Solver.maybeSave cfg script
-  let firstResult ← prof.time "solve" (Solver.runQuery cfg script)
+  -- `crush.timeout` is a per-call limit: both queries are killed at one deadline,
+  -- and the fallback gets only the time the first query left.
+  let budget ← Solver.QueryBudget.start cfg
+  let firstResult ← prof.time "solve" (Solver.runQuery cfg script (some budget))
   let mut result := firstResult
+  let remainingMs ← budget.remainingMs
   if reducedFacts.isSome then
     match result with
     | .unsat .. =>
       trace[crush.result] "ground-instance query was unsatisfiable; skipped quantified fallback"
     | .sat .. | .unknown .. =>
-      trace[crush.result] "ground-instance query did not close the goal; retrying with \
-                           retained quantified templates"
-      let (fallbackScript, fallbackSt) ←
-        prof.time "translate-fallback"
-          (buildScript cfg fullFacts (levelParams := some levelParams))
-      script := fallbackScript
-      st := fallbackSt
-      if cfg.traceScript then
-        logInfo m!"crush SMT fallback script:{indentD (scriptToString script)}"
-      trace[crush.script] "{scriptToString script}"
-      Solver.maybeSave cfg script
-      let fallbackResult ←
-        prof.time "solve-fallback" (Solver.runQuery cfg script)
-      result := fallbackResult
+      if remainingMs < fallbackFloorMs then
+        trace[crush.result] "ground-instance query did not close the goal, and only \
+          {remainingMs} ms of the call's deadline remain; skipped quantified fallback"
+      else
+        trace[crush.result] "ground-instance query did not close the goal; retrying with \
+                             retained quantified templates"
+        let (fallbackScript, fallbackSt) ←
+          prof.time "translate-fallback"
+            (buildScript cfg fullFacts (levelParams := some levelParams))
+        script := fallbackScript
+        st := fallbackSt
+        if cfg.traceScript then
+          logInfo m!"crush SMT fallback script:{indentD (scriptToString script)}"
+        trace[crush.script] "{scriptToString script}"
+        Solver.maybeSave cfg script
+        let fallbackResult ←
+          prof.time "solve-fallback"
+            (Solver.runQuery cfg script (some budget) (limitMs? := some remainingMs))
+        result := fallbackResult
   match result with
   | .unsat coreSexp proofSexps =>
-    let coreIds := unsatCoreFactIds coreSexp
-    trace[crush.result] "unsat; core facts: {coreIds}"
+    -- Without a core (not requested, unsupported, or cut off by the deadline),
+    -- reconstruction uses every asserted fact.
+    let coreIds :=
+      if coreSexp.isSome then unsatCoreFactIds coreSexp
+      else st.facts.map (·.id)
+    if coreSexp.isSome then
+      trace[crush.result] "unsat; core facts: {coreIds}"
+    else
+      trace[crush.result] "unsat; no unsat core, so every asserted fact is used"
     match cfg.trust with
     | .trust =>
       let goalType ← goal.getType
