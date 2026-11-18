@@ -21,8 +21,14 @@ structure Reified where
   proof : Expr
   deriving Inhabited
 
-/-- Reification shares results across the certificate's DAG. -/
-abbrev ReifyM := StateRefT (Std.HashMap Expr Reified) MetaM
+/-- Reification state, shared across the certificate's DAG. -/
+structure ReifyState where
+  /-- Reified propositions, booleans and bits. -/
+  terms : Std.HashMap Expr Reified := {}
+  /-- Elements of list literals. -/
+  lists : Std.HashMap Expr (Option (Array Expr)) := {}
+
+abbrev ReifyM := StateRefT ReifyState MetaM
 
 private def boolType : Expr := mkConst ``Bool
 
@@ -31,13 +37,35 @@ private def eqRefl (e : Expr) : Expr := mkApp2 (mkConst ``Eq.refl [1]) boolType 
 private def eqTrans (a b c p q : Expr) : Expr :=
   mkApp6 (mkConst ``Eq.trans [1]) boolType a b c p q
 
+private def getLsbD (w v k : Expr) : Expr := mkApp3 (mkConst ``BitVec.getLsbD) w v k
+
+/-- The elements of a list literal. -/
+private partial def listElems? (e : Expr) : Option (Array Expr) :=
+  go e #[]
+where
+  go (e : Expr) (acc : Array Expr) : Option (Array Expr) :=
+    match e.getAppFnArgs with
+    | (``List.nil, #[_]) => some acc
+    | (``List.cons, #[_, head, tail]) => go tail (acc.push head)
+    | _ => none
+
+/-- `listElems?`, computed once per list. -/
+private def cachedListElems? (e : Expr) : ReifyM (Option (Array Expr)) := do
+  if let some elems := (← get).lists[e]? then return elems
+  let elems := listElems? e
+  modify fun s => { s with lists := s.lists.insert e elems }
+  return elems
+
+private def cached (e : Expr) (k : ReifyM Reified) : ReifyM Reified := do
+  if let some r := (← get).terms[e]? then return r
+  let r ← k
+  modify fun s => { s with terms := s.terms.insert e r }
+  return r
+
 mutual
   /-- `e ↔ value = true` for a decoded `Prop`. -/
-  partial def reifyProp (e : Expr) : ReifyM Reified := do
-    if let some r := (← get)[e]? then return r
-    let r ← reifyPropCore e
-    modify (·.insert e r)
-    return r
+  partial def reifyProp (e : Expr) : ReifyM Reified :=
+    cached e (reifyPropCore e)
 
   partial def reifyPropCore (e : Expr) : ReifyM Reified := do
     if e.isConstOf ``True then
@@ -80,11 +108,8 @@ mutual
              proof := mkApp6 (mkConst lemma) p q rp.value rq.value rp.proof rq.proof }
 
   /-- `e = value` for a decoded `Bool`. -/
-  partial def reifyBool (e : Expr) : ReifyM Reified := do
-    if let some r := (← get)[e]? then return r
-    let r ← reifyBoolCore e
-    modify (·.insert e r)
-    return r
+  partial def reifyBool (e : Expr) : ReifyM Reified :=
+    cached e (reifyBoolCore e)
 
   partial def reifyBoolCore (e : Expr) : ReifyM Reified := do
     match e.getAppFnArgs with
@@ -98,6 +123,11 @@ mutual
     | (``Decidable.decide, #[p, inst]) =>
       let r ← reifyProp p
       return { value := r.value, proof := mkApp4 (mkConst ``reify_decide) p inst r.value r.proof }
+    -- Expand a bit like an operand's, so both sides of a step agree.
+    | (``BitVec.getLsbD, #[w, v, i]) =>
+      match i.rawNatLit? <|> i.nat? with
+      | some k => bitOf w v k
+      | none => return { value := e, proof := eqRefl e }
     | _ => return { value := e, proof := eqRefl e }
 
   partial def boolBinary (lemma op : Name) (s t : Expr) : ReifyM Reified := do
@@ -105,68 +135,60 @@ mutual
     let rt ← reifyBool t
     return { value := mkApp2 (mkConst op) rs.value rt.value
              proof := mkApp6 (mkConst lemma) s t rs.value rt.value rs.proof rt.proof }
-end
 
-/-- The elements of a list literal. -/
-private partial def listElems? (e : Expr) : Option (Array Expr) :=
-  go e #[]
-where
-  go (e : Expr) (acc : Array Expr) : Option (Array Expr) :=
-    match e.getAppFnArgs with
-    | (``List.nil, #[_]) => some acc
-    | (``List.cons, #[_, head, tail]) => go tail (acc.push head)
-    | _ => none
+  /-- `v.getLsbD k = value` for a decoded operand `v : BitVec w`. -/
+  partial def bitOf (w v : Expr) (k : Nat) : ReifyM Reified :=
+    let bit := getLsbD w v (mkNatLit k)
+    cached bit (bitOfCore w v k bit)
 
-private def getLsbD (w v k : Expr) : Expr := mkApp3 (mkConst ``BitVec.getLsbD) w v k
+  partial def bitOfCore (w v : Expr) (k : Nat) (bit : Expr) : ReifyM Reified := do
+    let kE := mkNatLit k
+    match v.getAppFnArgs with
+    | (``BitVec.ofBoolListLE, #[bs]) =>
+      if let some elems ← cachedListElems? bs then
+        if let some e := elems[k]? then
+          let r ← reifyBool e
+          return { value := r.value
+                   proof := eqTrans bit e r.value (mkApp2 (mkConst ``getLsbD_ofBoolListLE') bs kE)
+                     r.proof }
+    | (``BitVec.xor, #[n, x, y]) =>
+      return ← bitBinary ``getLsbD_xor' ``reify_bxor ``Bool.xor ``BitVec.xor n x y k
+    | (``BitVec.and, #[n, x, y]) =>
+      return ← bitBinary ``getLsbD_and' ``reify_band ``Bool.and ``BitVec.and n x y k
+    | (``BitVec.or, #[n, x, y]) =>
+      return ← bitBinary ``getLsbD_or' ``reify_bor ``Bool.or ``BitVec.or n x y k
+    | (``BitVec.not, #[n, x]) =>
+      let some width := (← whnf n).rawNatLit? <|> (← getNatValue? n) | pure ()
+      if k < width then
+        let rx ← bitOf n x k
+        let hk ← mkDecideProof (← mkAppM ``LT.lt #[kE, n])
+        let notBit := mkApp (mkConst ``Bool.not) (getLsbD n x kE)
+        return { value := mkApp (mkConst ``Bool.not) rx.value
+                 proof := eqTrans bit notBit (mkApp (mkConst ``Bool.not) rx.value)
+                   (mkApp4 (mkConst ``getLsbD_not') n x kE hk)
+                   (mkApp3 (mkConst ``reify_bnot) (getLsbD n x kE) rx.value rx.proof) }
+    | (``BitVec.ofNat, #[n, m]) =>
+      -- A constant: the kernel evaluates its bit.
+      if let (some width, some value) := (← getNatValue? n, ← getNatValue? m) then
+        let b := if k < width && value.testBit k then ``Bool.true else ``Bool.false
+        return { value := mkConst b, proof := eqRefl (mkConst b) }
+    | _ => pure ()
+    return { value := bit, proof := eqRefl bit }
 
-/-- `v.getLsbD k = value` for a decoded operand `v : BitVec w`. -/
-partial def bitOf (w v : Expr) (k : Nat) : ReifyM Reified := do
-  let kE := mkNatLit k
-  let bit := getLsbD w v kE
-  match v.getAppFnArgs with
-  | (``BitVec.ofBoolListLE, #[bs]) =>
-    if let some elems := listElems? bs then
-      if let some e := elems[k]? then
-        let r ← reifyBool e
-        return { value := r.value
-                 proof := eqTrans bit e r.value (mkApp2 (mkConst ``getLsbD_ofBoolListLE') bs kE)
-                   r.proof }
-  | (``BitVec.xor, #[n, x, y]) => return ← vectorBinary ``getLsbD_xor' ``reify_bxor ``Bool.xor n x y
-  | (``BitVec.and, #[n, x, y]) => return ← vectorBinary ``getLsbD_and' ``reify_band ``Bool.and n x y
-  | (``BitVec.or, #[n, x, y]) => return ← vectorBinary ``getLsbD_or' ``reify_bor ``Bool.or n x y
-  | (``BitVec.not, #[n, x]) =>
-    let some width := (← whnf n).rawNatLit? <|> (← getNatValue? n) | pure ()
-    if k < width then
-      let rx ← bitOf n x k
-      let hk ← mkDecideProof (← mkAppM ``LT.lt #[kE, n])
-      let notBit := mkApp (mkConst ``Bool.not) (getLsbD n x kE)
-      return { value := mkApp (mkConst ``Bool.not) rx.value
-               proof := eqTrans bit notBit (mkApp (mkConst ``Bool.not) rx.value)
-                 (mkApp4 (mkConst ``getLsbD_not') n x kE hk)
-                 (mkApp3 (mkConst ``reify_bnot) (getLsbD n x kE) rx.value rx.proof) }
-  | (``BitVec.ofNat, #[n, m]) =>
-    -- A constant: the kernel evaluates its bit.
-    if let (some width, some value) := (← getNatValue? n, ← getNatValue? m) then
-      let b := if k < width && value.testBit k then ``Bool.true else ``Bool.false
-      return { value := mkConst b, proof := eqRefl (mkConst b) }
-  | _ => pure ()
-  return { value := bit, proof := eqRefl bit }
-where
-  vectorBinary (lemma reify op : Name) (n x y : Expr) : ReifyM Reified := do
+  /-- Bit `k` of the bitwise operation `vecOp n x y`. -/
+  partial def bitBinary (lemma reify op vecOp : Name) (n x y : Expr) (k : Nat) :
+      ReifyM Reified := do
     let kE := mkNatLit k
     let rx ← bitOf n x k
     let ry ← bitOf n y k
     let raw := mkApp2 (mkConst op) (getLsbD n x kE) (getLsbD n y kE)
     let value := mkApp2 (mkConst op) rx.value ry.value
     return { value
-             proof := eqTrans (getLsbD n (mkApp3 (mkConst (opName lemma)) n x y) kE) raw value
+             proof := eqTrans (getLsbD n (mkApp3 (mkConst vecOp) n x y) kE) raw value
                (mkApp4 (mkConst lemma) n x y kE)
                (mkApp6 (mkConst reify) (getLsbD n x kE) (getLsbD n y kE) rx.value ry.value
                  rx.proof ry.proof) }
-  opName : Name → Name
-    | ``getLsbD_xor' => ``BitVec.xor
-    | ``getLsbD_and' => ``BitVec.and
-    | _ => ``BitVec.or
+end
 
 /-- A proof of `∀ k, k < proofs.size → P k` from proofs of `P 0, …`. -/
 private def forallLt (p : Expr) (proofs : Array Expr) : Expr := Id.run do

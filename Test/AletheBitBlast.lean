@@ -120,8 +120,50 @@ def wrongEqStep : String := r#"
 false ((_ @bit_of 0) x_0)) (= false false) (= false false) (= false false)))
 "#
 
+/-- Bit equations over bits of the compound operand `x &&& y`. -/
+def andEqStep : String := r#"
+(= (= (bvand x_0 y_1) y_1) (and (= ((_ @bit_of 0) (bvand x_0 y_1)) ((_ @bit_of 0) y_1)) (= ((_
+@bit_of 1) (bvand x_0 y_1)) ((_ @bit_of 1) y_1)) (= ((_ @bit_of 2) (bvand x_0 y_1)) ((_ @bit_of
+2) y_1)) (= ((_ @bit_of 3) (bvand x_0 y_1)) ((_ @bit_of 3) y_1))))
+"#
+
+/-- An adder over bits of the compound operand `x &&& y`. -/
+def andAddStep : String := r#"
+(= (bvadd (bvand x_0 y_1) y_1) (@bbterm (xor (xor ((_ @bit_of 0) (bvand x_0 y_1)) ((_ @bit_of 0)
+y_1)) false) (xor (xor ((_ @bit_of 1) (bvand x_0 y_1)) ((_ @bit_of 1) y_1)) (or (and ((_ @bit_of
+0) (bvand x_0 y_1)) ((_ @bit_of 0) y_1)) (and (xor ((_ @bit_of 0) (bvand x_0 y_1)) ((_ @bit_of 0)
+y_1)) false))) (xor (xor ((_ @bit_of 2) (bvand x_0 y_1)) ((_ @bit_of 2) y_1)) (or (and ((_
+@bit_of 1) (bvand x_0 y_1)) ((_ @bit_of 1) y_1)) (and (xor ((_ @bit_of 1) (bvand x_0 y_1)) ((_
+@bit_of 1) y_1)) (or (and ((_ @bit_of 0) (bvand x_0 y_1)) ((_ @bit_of 0) y_1)) (and (xor ((_
+@bit_of 0) (bvand x_0 y_1)) ((_ @bit_of 0) y_1)) false)))))))
+"#
+
+-- Bit projection is linear in the DAG: a 64-deep shared `v &&& v` and a 4096-bit list.
 example : True := by
   run_tac do
+    let w := mkNatLit 8
+    withLocalDeclD `x (mkApp (mkConst ``BitVec) w) fun x => do
+      let mut v := x
+      for _ in [:64] do
+        v := mkApp3 (mkConst ``BitVec.and) w v v
+      discard <| (BitBlastRules.bitOf w v 0).run' {}
+    let n := 4096
+    let bits := (List.range n).map fun i => mkConst (if i % 3 == 0 then ``true else ``false)
+    let list ← mkListLit (mkConst ``Bool) bits
+    let vec := mkApp (mkConst ``BitVec.ofBoolListLE) list
+    let wide := mkNatLit n
+    let run : BitBlastRules.ReifyM Unit := do
+      for k in [:n] do
+        discard <| BitBlastRules.bitOf wide vec k
+    run.run' {}
+  trivial
+
+example : True := by
+  run_tac do
+    unless ← replayStep 4 "bv_bitblast_step_bvequal" andEqStep do
+      throwError "the compound-operand equality step was not replayed"
+    unless ← replayStep 3 "bv_bitblast_step_bvadd" andAddStep do
+      throwError "the compound-operand addition step was not replayed"
     unless ← replayStep 4 "bv_bitblast_step_bvequal" sumEqStep do
       throwError "the sum equality step was not replayed"
     unless ← replayStep 4 "bv_bitblast_step_bvequal" constEqStep do
