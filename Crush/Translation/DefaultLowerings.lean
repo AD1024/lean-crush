@@ -214,7 +214,9 @@ has replaced Crush's finite Array representation.
 
 private def optionTerms (elem : Expr) (value : SMT.Term) :
     TranslateM (SMT.Term × SMT.Term) := do
-  let optionSort ← declareDatatype ``Option #[elem]
+  let .const _ levels := (← mkAppM ``Option #[elem]).getAppFn
+    | throwError "crush: internal — `Option` application has no constant head"
+  let optionSort ← declareDatatype ``Option levels #[elem]
   let noneCtor ← reserveCtorSymbol optionSort ``Option.none
   let someCtor ← reserveCtorSymbol optionSort ``Option.some
   let noneTerm := SMT.Term.const noneCtor

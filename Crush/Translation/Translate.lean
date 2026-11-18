@@ -93,9 +93,26 @@ def hasLawfulBEq (carrier inst : Expr) : TranslateM Bool := do
   catch _ =>
     return false
 
+/-- Constructor type at the datatype's universe levels and parameters.
+
+A constructor's declared type mentions the inductive's own universe *parameters*.
+Instantiating only the type parameters would leave a field such as `Sort v` at
+the parameter `v`, conflating `T.{0}` and `T.{1}` (or capturing a same-named
+universe of the caller). Every field inspection therefore goes through here. -/
+def instantiateCtorType (ctor : Name) (levels : List Level) (typeArgs : Array Expr) :
+    MetaM Expr := do
+  let info ← getConstInfo ctor
+  unless info.levelParams.length == levels.length do
+    throwError "crush: internal — `{ctor}` expects {info.levelParams.length} universe level(s)"
+  instantiateForall (info.instantiateTypeLevelParams levels) typeArgs
+
 /-- SMT datatypes require a finite constructor tree for every mutually declared sort.
 A Lean inductive may have only recursive constructors and therefore be empty. Keep
-such a block opaque and guarded instead of emitting an invalid SMT datatype. -/
+such a block opaque and guarded instead of emitting an invalid SMT datatype.
+
+This check inspects constructor types at the inductive's own universe parameters.
+That is deliberate and sound: it compares field *head names* with the block's
+member names only, and neither depends on the universe levels the block is used at. -/
 private def hasProductiveDatatypeBlock (iv : InductiveVal) : MetaM Bool := do
   let block := iv.all.toArray
   let mut productive : Std.HashSet Name := {}
@@ -121,22 +138,25 @@ private def hasProductiveDatatypeBlock (iv : InductiveVal) : MetaM Bool := do
 structures, self-recursive `List`- or tree-shaped types, and — via monomorphization —
 *fully-applied parametric* types such as `Option Int`, `Int × Int`, `List Bool`.
 
-`typeArgs` are the concrete parameter values the head is applied to (empty for a
-non-parametric type). The type must be **ground** — no remaining type variables — so
-the constructor field sorts are determined; a bare `List` with an un-instantiated
-element type stays an opaque sort.
+`levels` are the universe levels of the head constant and `typeArgs` the concrete
+parameter values the head is applied to (empty for a non-parametric type). The
+type must be **ground** — no remaining type variables — so the constructor field
+sorts are determined; a bare `List` with an un-instantiated element type stays an
+opaque sort.
 
 We require at least one constructor: SMT-LIB datatypes must be inhabited
 (z3 rejects `(declare-datatypes ((E 0)) (()))`), and more fundamentally every SMT
 sort is non-empty while `Empty` is not, so an empty Lean inductive cannot be
 modelled faithfully and must stay an opaque sort (see `isEmptyType`). -/
-def isSupportedDatatypeApp (n : Name) (typeArgs : Array Expr) : MetaM Bool := do
+def isSupportedDatatypeApp (n : Name) (levels : List Level) (typeArgs : Array Expr) :
+    MetaM Bool := do
   let env ← getEnv
   let some (.inductInfo iv) := env.find? n | return false
   -- Indices (true dependent families) are unsupported; parameters are fine once
   -- instantiated. The applied prefix must supply exactly the parameters.
   if iv.numIndices != 0 then return false
   if typeArgs.size != iv.numParams then return false
+  if levels.length != iv.levelParams.length then return false
   if n == ``Nat || n == ``Int || n == ``Bool || n == ``String then return false
   if iv.ctors.isEmpty then return false
   unless ← hasProductiveDatatypeBlock iv do return false
@@ -157,8 +177,7 @@ def isSupportedDatatypeApp (n : Name) (typeArgs : Array Expr) : MetaM Bool := do
   -- Instantiated fields must be data with non-function SMT sorts. Direct
   -- positive recursion is supported; proof and function fields remain opaque.
   let fieldsOk ← iv.ctors.allM fun ctorName => do
-    let ci ← getConstInfoCtor ctorName
-    let ctorTy ← instantiateForall ci.type typeArgs
+    let ctorTy ← instantiateCtorType ctorName levels typeArgs
     forallTelescopeReducing ctorTy fun args _ =>
       args.allM fun a => do
         let ty ← whnf (← inferType a)
@@ -169,16 +188,16 @@ def isSupportedDatatypeApp (n : Name) (typeArgs : Array Expr) : MetaM Bool := do
   -- Emit only Lean's own mutual block. Recursion through an external datatype
   -- would require a larger SMT declaration block and otherwise forward-reference
   -- an undeclared sort; keep such types opaque.
-  return !(← escapesBlock n iv.all.toArray typeArgs)
+  return !(← escapesBlock n iv.all.toArray levels typeArgs)
 where
   /-- Whether some constructor field reaches back into `block` through a datatype *outside*
   `block`. `block` is `n`'s Lean mutual block, which is emitted as a unit. -/
-  escapesBlock (n : Name) (block : Array Name) (typeArgs : Array Expr) : MetaM Bool := do
+  escapesBlock (n : Name) (block : Array Name) (levels : List Level) (typeArgs : Array Expr) :
+      MetaM Bool := do
     let inBlock : Std.HashSet Name := block.foldl (·.insert ·) {}
     let some (.inductInfo iv) := (← getEnv).find? n | return false
     iv.ctors.anyM fun ctorName => do
-      let ci ← getConstInfoCtor ctorName
-      let ctorTy ← instantiateForall ci.type typeArgs
+      let ctorTy ← instantiateCtorType ctorName levels typeArgs
       forallTelescopeReducing ctorTy fun args _ =>
         args.anyM fun a => do
           let fty ← whnf (← inferType a)
@@ -195,7 +214,7 @@ where
     | 0 => return false
     | fuel + 1 =>
       let ty ← whnf ty
-      let .const m _ := ty.getAppFn | return false
+      let .const m mlevels := ty.getAppFn | return false
       if targets.contains m then return true
       if visiting.contains m then return false
       let some (.inductInfo miv) := (← getEnv).find? m | return false
@@ -204,18 +223,19 @@ where
       if margs.size != miv.numParams then return false
       let visiting := visiting.insert m
       miv.ctors.anyM fun c => do
-        let ci ← getConstInfoCtor c
-        let some cty ← (try pure (some (← instantiateForall ci.type margs))
+        let some cty ← (try pure (some (← instantiateCtorType c mlevels margs))
                         catch _ => pure none) | pure false
         forallTelescopeReducing cty fun args _ =>
           args.anyM fun a => do reaches targets (← inferType a) fuel visiting
 
-/-- `isSupportedDatatypeApp` for a fully-applied type expression. -/
-def supportedDatatypeType? (e : Expr) : MetaM (Option (Name × Array Expr)) := do
+/-- `isSupportedDatatypeApp` for a fully-applied type expression. Returns the head,
+its universe levels, and its parameters. -/
+def supportedDatatypeType? (e : Expr) : MetaM (Option (Name × List Level × Array Expr)) := do
   let e ← whnf e
-  let .const n _ := e.getAppFn | return none
+  let .const n levels := e.getAppFn | return none
   let args := e.getAppArgs
-  if ← isSupportedDatatypeApp n args then return some (n, args) else return none
+  if ← isSupportedDatatypeApp n levels args then return some (n, levels, args)
+  else return none
 
 
 /-- Whether `ty` is an *uninhabited* Lean type, which SMT cannot model: every SMT
@@ -685,8 +705,8 @@ mutual
       return sort
     -- Supported inductives receive distinct SMT datatypes for each type instantiation.
     match ← supportedDatatypeType? e with
-    | some (n, typeArgs) =>
-      let name ← declareDatatype n typeArgs (some e)
+    | some (n, levels, typeArgs) =>
+      let name ← declareDatatype n levels typeArgs
       return .app (.symb name) #[]
     | none =>
       -- An opaque sort cannot vary with a value binder, and dependent function
@@ -1099,32 +1119,32 @@ mutual
     direction: the true hypothesis `∀ p : PN, p.x ≥ 0` becomes unsatisfiable, from
     which the solver derives `False`. We therefore emit a well-formedness predicate
     `wf_T` characterizing the image of the Lean type, and *guard every quantifier
-    over `T`* with it (see `quantifier`/`guardSort`). -/
-  partial def declareDatatype (n : Name) (typeArgs : Array Expr := #[])
-      (sourceType? : Option Expr := none) :
+    over `T`* with it (see `quantifier`/`guardSort`).
+
+  * Datatype identity includes the head's **universe levels**. `T.{0}` and `T.{1}`
+    are distinct Lean types, possibly of different cardinalities, so they get
+    distinct SMT sorts, and constructor fields are read at those levels
+    (`instantiateCtorType`). -/
+  partial def declareDatatype (n : Name) (levels : List Level) (typeArgs : Array Expr := #[]) :
       TranslateM String := do
     let typeArgs ← typeArgs.mapM instantiateMVars
     typeArgs.forM checkSortClosed
-    -- Type instantiations must distinguish sorts, constructors, and selectors.
-    let key : StructuralKey := { tag := "datatype", name := n, typeExprs := typeArgs }
-    if let some name ← TranslateM.structuralSymbol? key then
+    let levels ← levels.mapM instantiateLevelMVars
+    -- Universe levels and type instantiations must distinguish sorts, constructors,
+    -- and selectors. `exprs` normalizes the levels of the head constant.
+    let memberKey (m : Name) : StructuralKey :=
+      { tag := "datatype", name := m, exprs := #[mkConst m levels], typeExprs := typeArgs }
+    if let some name ← TranslateM.structuralSymbol? (memberKey n) then
       return name
     -- Emit the complete Lean mutual block together: selectors and validity
-    -- predicates can reference sibling sorts. Shared type parameters key each member.
+    -- predicates can reference sibling sorts. Shared levels and parameters key each member.
     let iv ← getConstInfoInduct n
     -- Reserve sibling sorts before visiting fields so recursion reuses their names.
     let mut memberSorts : Array (Name × String) := #[]
     for m in iv.all do
-      let memberKey : StructuralKey := {
-        tag := "datatype", name := m, typeExprs := typeArgs
-      }
-      let mSort ← TranslateM.symbolForStructural memberKey (nameHint m)
-      -- Record concrete universe levels before recursive field-sort emission can
-      -- encounter the declaration's uninstantiated universe parameters.
-      if let some sourceType := sourceType? then
-        let .const _ levels := sourceType.getAppFn
-          | throwError "crush: internal — expected a datatype application"
-        TranslateM.recordSymbolExpr mSort (mkAppN (mkConst m levels) typeArgs)
+      let mSort ← TranslateM.symbolForStructural (memberKey m) (nameHint m)
+      -- Record the concrete type for replay and validity predicates.
+      TranslateM.recordSymbolExpr mSort (mkAppN (mkConst m levels) typeArgs)
       markSortDeclared mSort
       memberSorts := memberSorts.push (m, mSort)
     let mut dtInfos : Array (String × Nat × DatatypeDecl) := #[]
@@ -1136,9 +1156,9 @@ mutual
       let mut wfParts : Array (String × Array (String × Expr)) := #[]
       for ctorName in miv.ctors do
         let ctorSym ← reserveCtorSymbol mSort ctorName
-        let ctorInfo ← getConstInfoCtor ctorName
-        -- Specialize fields at the datatype parameters before translating their sorts.
-        let ctorTy ← instantiateForall ctorInfo.type typeArgs
+        -- Specialize fields at the datatype's levels and parameters before
+        -- translating their sorts.
+        let ctorTy ← instantiateCtorType ctorName levels typeArgs
         let (selDecls, guards) ← forallTelescopeReducing ctorTy fun args _ => do
           let mut sels : Array (String × SSort) := #[]
           let mut gs : Array (String × Expr) := #[]
@@ -1190,7 +1210,7 @@ mutual
       else if ← knownNonemptyDefunctionalizedArrow ty shape then
         return false
       return ← needsWFGuard shape.res visiting
-    let some (n, typeArgs) ← supportedDatatypeType? ty | do
+    let some (n, levels, typeArgs) ← supportedDatatypeType? ty | do
       discard <| emitSort ty
       let key : StructuralKey := { tag := "opaque-sort", typeExprs := #[ty] }
       if (← TranslateM.structuralSymbol? key).isSome then
@@ -1201,8 +1221,7 @@ mutual
     -- Inspect instantiated fields so Option Nat receives guards while Option Int does not.
     let iv ← getConstInfoInduct n
     iv.ctors.anyM fun ctorName => do
-      let ci ← getConstInfoCtor ctorName
-      let ctorTy ← instantiateForall ci.type typeArgs
+      let ctorTy ← instantiateCtorType ctorName levels typeArgs
       forallTelescopeReducing ctorTy fun args _ =>
         args.anyM fun a => do
           needsWFGuard (← inferType a) visiting
@@ -1281,7 +1300,7 @@ mutual
       let .app (.symb sortName) _ := sort | return none
       let wf ← reserveWfSymbol sortName
       return some (.app (.symb wf) #[t])
-    let some (n, typeArgs) ← supportedDatatypeType? ty | do
+    let some (n, levels, typeArgs) ← supportedDatatypeType? ty | do
       discard <| emitSort ty
       let key : StructuralKey := { tag := "opaque-sort", typeExprs := #[ty] }
       let some sortName ← TranslateM.structuralSymbol? key | return none
@@ -1289,7 +1308,7 @@ mutual
       let wf ← reserveWfSymbol sortName
       return some (.app (.symb wf) #[t])
     if !(← needsWFGuard ty) then return none
-    let sortName ← declareDatatype n typeArgs (some ty)
+    let sortName ← declareDatatype n levels typeArgs
     let wf ← reserveWfSymbol sortName
     return some (.app (.symb wf) #[t])
 
@@ -1566,8 +1585,9 @@ mutual
     let some structArg := args[info.numParams]? | return none
     let structTy ← whnf (← inferType structArg)
     if (← finiteArrayElem? structTy).isSome then return none
-    let some (_, typeArgs) ← supportedDatatypeType? structTy | return none
-    let sortName ← declareDatatype info.ctorName.getPrefix typeArgs (some structTy)
+    let some (n, levels, typeArgs) ← supportedDatatypeType? structTy | return none
+    unless n == (← getConstInfoCtor info.ctorName).induct do return none
+    let sortName ← declareDatatype n levels typeArgs
     let sel ← reserveSelSymbol sortName info.ctorName info.i
     let extraArgs := args.extract (info.numParams + 1) args.size
     let sarg ← emitTerm structArg
@@ -1584,8 +1604,9 @@ mutual
     let some (.ctorInfo ci) := env.find? cn | return none
     let resTy ← whnf (← inferType (mkAppN fn args))
     if (← finiteArrayElem? resTy).isSome then return none
-    let some (_, typeArgs) ← supportedDatatypeType? resTy | return none
-    let sortName ← declareDatatype ci.induct typeArgs (some resTy)
+    let some (n, levels, typeArgs) ← supportedDatatypeType? resTy | return none
+    unless n == ci.induct do return none
+    let sortName ← declareDatatype n levels typeArgs
     let valueArgs := args.extract ci.numParams args.size
     let sargs ← valueArgs.mapM emitTerm
     let ctor ← reserveCtorSymbol sortName cn

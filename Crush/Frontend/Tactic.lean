@@ -103,10 +103,11 @@ private def resolveFactUniverses (facts : Array Fact) : MetaM (Array Fact) := do
 /-- Translate all facts into assertion commands, each `:named` for unsat-core
 provenance, prepended by the declarations they induce. Returns the full script
 (minus `check-sat`) and the final `TranslateState` (for provenance lookup). -/
-def buildScript (cfg : Config) (facts : Array Fact) :
+def buildScript (cfg : Config) (facts : Array Fact)
+    (levelParams : Option (List Name) := none) :
     MetaM (Array SMT.Command × TranslateState) := do
   let facts ← resolveFactUniverses facts
-  let (_, st) ← TranslateM.run cfg do
+  let (_, st) ← TranslateM.run cfg (levelParams := levelParams) do
     for fact in facts do
       let saved ← Meta.saveState
       let previous ← get
@@ -471,6 +472,7 @@ private def trustedProof (goalType : Expr) (st : TranslateState) : MetaM Expr :=
     let proof ← instantiateMVars proof
     if proof.hasExprMVar then
       throwError "crush: trusted dependency contains unresolved metavariables"
+    checkDependencyLevelParams st.levelParams "a trusted dependency" proof
     if proof.hasLevelMVar then
       checkDependencyUniverses proof
     if seen.contains proof then continue
@@ -491,6 +493,22 @@ private def trustedProof (goalType : Expr) (st : TranslateState) : MetaM Expr :=
     dependencies := combined
   let (dependencyType, dependencyProof) := dependencies[0]!
   return mkApp3 (mkConst ``crushSorryWith) goalType dependencyType dependencyProof
+
+/-- Universe parameters a trusted dependency may mention: the enclosing declaration's
+(`Term.getLevelNames`), plus any that occur in the goal or its local context, so a
+caller outside the declaration's elaboration scope is not rejected. -/
+private def callerLevelParams (goal : MVarId) : TacticM (List Name) := goal.withContext do
+  let mut used : CollectLevelParams.State := {}
+  used := collectLevelParams used (← instantiateMVars (← goal.getType))
+  for decl in ← getLCtx do
+    used := collectLevelParams used (← instantiateMVars decl.type)
+    if let some value := decl.value? then
+      used := collectLevelParams used (← instantiateMVars value)
+  let mut names ← Term.getLevelNames
+  for param in used.params do
+    unless names.contains param do
+      names := names ++ [param]
+  return names
 
 /-- The core driver, given a resolved goal, config, and collected hints. -/
 def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
@@ -588,7 +606,9 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
   let reducedFacts :=
     if cfg.backend == .none then none else instantiated.groundFacts
   let firstFacts := reducedFacts.getD fullFacts
-  let (firstScript, firstSt) ← prof.time "translate" (buildScript cfg firstFacts)
+  let levelParams ← callerLevelParams goal
+  let (firstScript, firstSt) ←
+    prof.time "translate" (buildScript cfg firstFacts (levelParams := some levelParams))
   let mut script := firstScript
   let mut st := firstSt
   if cfg.traceScript then
@@ -612,7 +632,8 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
       trace[crush.result] "ground-instance query did not close the goal; retrying with \
                            retained quantified templates"
       let (fallbackScript, fallbackSt) ←
-        prof.time "translate-fallback" (buildScript cfg fullFacts)
+        prof.time "translate-fallback"
+          (buildScript cfg fullFacts (levelParams := some levelParams))
       script := fallbackScript
       st := fallbackSt
       if cfg.traceScript then

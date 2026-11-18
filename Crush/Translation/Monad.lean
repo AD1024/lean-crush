@@ -145,6 +145,11 @@ structure TranslateState where
   funVars    : Std.HashMap FVarId String := {}
   /-- Registry lookups already resolved during this run. -/
   registries : RegistryCache := {}
+  /-- Universe parameters of the declaration being proved, when the caller knows them
+      (`runCrush`). A trusted dependency mentioning any other `Level.param` has picked
+      up a library declaration's own universe parameter through an uninstantiated type,
+      so it is rejected with an internal error. `none` (direct API use) skips the check. -/
+  levelParams : Option (List Name) := none
   deriving Inhabited
 
 /-- The translation monad. `MetaM` at the bottom gives us `whnf`, unification,
@@ -166,13 +171,31 @@ def isDefEqRigid (left right : Expr) : MetaM Bool :=
 
 namespace TranslateM
 
-def run {α : Type} (cfg : Config) (x : TranslateM α) : MetaM (α × TranslateState) := do
+def run {α : Type} (cfg : Config) (x : TranslateM α)
+    (levelParams : Option (List Name) := none) : MetaM (α × TranslateState) := do
   StateRefT'.run x {
     cfg
     inputLCtx := ← getLCtx
-    inputLocalInstances := ← Meta.getLocalInstances }
+    inputLocalInstances := ← Meta.getLocalInstances
+    levelParams }
 
 @[inline] def getConfig : TranslateM Config := return (← get).cfg
+
+end TranslateM
+
+/-- Reject a universe parameter outside `allowed` in a trusted dependency. Such a
+parameter can only come from a library declaration's own universe parameters (for
+example a constructor type read without instantiating its levels), and the
+dependency would either fail to be added or silently denote the wrong universe. -/
+def checkDependencyLevelParams (allowed : Option (List Name)) (what : String)
+    (e : Expr) : MetaM Unit := do
+  let some allowed := allowed | return
+  for param in (collectLevelParams {} e).params do
+    unless allowed.contains param do
+      throwError "crush: internal — {what} mentions the universe parameter `{param}`, \
+                  which is not a universe of the current declaration"
+
+namespace TranslateM
 
 /-- Retain evidence only when it is valid in the original query context.
 Hypotheses introduced while translating a binder cannot justify unconditional
@@ -181,6 +204,7 @@ def recordEncodingEvidence (expected proof : Expr) : TranslateM Bool := do
   let proof ← instantiateMVars (Meta.mkExpectedPropHint proof expected)
   if proof.hasMVar then return false
   let st ← get
+  checkDependencyLevelParams st.levelParams "encoding evidence" proof
   for id in (Lean.collectFVars {} proof).fvarIds do
     let some decl := st.inputLCtx.find? id | return false
     if decl.isImplementationDetail then return false
