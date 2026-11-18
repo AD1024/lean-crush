@@ -240,3 +240,18 @@ theorem checkedLowering (x : Int) : bumpDo x = x + 6 := by crush
 #print axioms checkedLowering
 
 end LoweringSyntaxTest
+
+/-! ## Extensions may emit n-ary SMT-LIB operators (review round 3, C7) -/
+
+namespace NaryLowering
+
+def add3 (x y z : Int) : Int := x + y + z
+
+open Crush in
+register_lowering term <<
+  (add3 (term x) (term y) (term z)) => (smt| (+ $x $y $z))
+>>
+
+theorem nary_lowering (x y z : Int) : add3 x y z = x + y + z := by crush
+
+end NaryLowering
