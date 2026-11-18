@@ -157,8 +157,8 @@ structure TranslateState where
   /-- Normalized forms of structural-key type components, which every symbol lookup
       would otherwise recompute with `reduceAll`. -/
   normalizedTypes : Std.HashMap Expr Expr := {}
-  /-- SMT-bound variables named by the latest bound-dependency refusal. -/
-  refusedBoundVars : Array FVarId := #[]
+  /-- SMT `let` variables in scope, with their values (already expanded). -/
+  letValues : Std.HashMap FVarId Expr := {}
   deriving Inhabited
 
 /-- The translation monad. `MetaM` at the bottom gives us `whnf`, unification,
@@ -355,6 +355,21 @@ def withBoundVar {α : Type} (fvar : FVarId) (name : String) (k : TranslateM α)
   let prev := (← get).boundVars
   modify fun s => { s with boundVars := s.boundVars.insert fvar name }
   try k finally modify fun s => { s with boundVars := prev }
+
+/-- Record `fvar`, an SMT `let` variable, as standing for `value` during `k`. -/
+def withLetValue {α : Type} (fvar : FVarId) (value : Expr) (k : TranslateM α) :
+    TranslateM α := do
+  let prev := (← get).letValues
+  modify fun s => { s with letValues := s.letValues.insert fvar value }
+  try k finally modify fun s => { s with letValues := prev }
+
+/-- `e` with SMT `let` variables replaced by their values. -/
+def expandLets (e : Expr) : TranslateM Expr := do
+  let lets := (← get).letValues
+  if lets.isEmpty || !e.hasFVar then return e
+  return e.replace fun
+    | .fvar id => lets.get? id
+    | _ => none
 
 /-- The SMT variable name for `fvar` if it is a bound quantifier variable. -/
 def boundVar? (fvar : FVarId) : TranslateM (Option String) := do

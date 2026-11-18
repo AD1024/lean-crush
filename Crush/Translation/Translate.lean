@@ -48,6 +48,10 @@ def getNatLit? (e : Expr) : TranslateM (Option Nat) := do
     | _ => return none
   | _ => return none
 
+/-- `natValue?` that sees through SMT `let` variables. -/
+def natOperand? (e : Expr) : TranslateM (Option Nat) := do
+  natValue? (← TranslateM.expandLets e)
+
 /-- Track which sorts have had their `declare-sort` emitted, reusing the name map
 with a sentinel key so we don't re-declare. -/
 def declaredSort (name : String) : TranslateM Bool := do
@@ -680,6 +684,40 @@ where
     e.isRawNatLit
       || (e.isAppOfArity ``OfNat.ofNat 3 && e.appFn!.appArg!.consumeMData.isRawNatLit)
 
+/-- Whether loose bound variable `0` of `body`, a `let` variable, occurs where its value
+may matter: a binder type, a non-explicit argument, an argument that the result type or
+a later parameter depends on, or an argument of a head with no known signature.
+Decidability instances are exempt (`ite` and `decide` ignore them). -/
+partial def letVarAtTypeLevel (body : Expr) : MetaM Bool := do
+  let visited ← IO.mkRef ({} : Std.HashSet (Expr × Nat))
+  -- At depth `d` the variable is `bvar d`, the only loose bound variable ≥ `d`.
+  let rec visit (e : Expr) (d : Nat) : MetaM Bool := do
+    if e.looseBVarRange ≤ d || (← visited.get).contains (e, d) then return false
+    visited.modify (·.insert (e, d))
+    match e with
+    | .bvar _ => return false
+    | .lam _ t b _ | .forallE _ t b _ => return t.looseBVarRange > d || (← visit b (d + 1))
+    | .letE _ t v b _ =>
+      return t.looseBVarRange > d || (← visit v d) || (← visit b (d + 1))
+    | .mdata _ b => visit b d
+    | .app .. =>
+      let fn := e.getAppFn
+      let args := e.getAppArgs
+      unless fn.isConst || fn.isFVar do return true
+      let info ← try getFunInfoNArgs fn args.size catch _ => return true
+      for h : i in [:args.size] do
+        let arg := args[i]
+        if arg.looseBVarRange ≤ d then continue
+        let some param := info.paramInfo[i]? | return true
+        if param.isDecInst then continue
+        unless param.binderInfo.isExplicit && !info.resultDeps.contains i do return true
+        for later in info.paramInfo[i+1:] do
+          if later.backDeps.contains i && !later.isDecInst then return true
+        if ← visit arg d then return true
+      return false
+    | _ => return true
+  visit body 0
+
 /-- The number of occurrences of loose bound variable 0 in `e`, counting up to `limit`. -/
 def countLooseBVar0 (e : Expr) (limit : Nat) : Nat :=
   go e 0 0
@@ -727,19 +765,22 @@ def withRefusalRollback {α : Type} (k : TranslateM α) : TranslateM (Option α)
 variable. -/
 def boundRefusalTag : Name := `crush.boundRefusal
 
-/-- Whether `e` is a bound-dependency refusal (see `boundRefusalTag`). -/
-def isBoundRefusal : Exception → Bool
-  | .error _ msg => msg.hasTag (· == boundRefusalTag)
+/-- Whether `e` is a bound-dependency refusal naming `fvar`. -/
+def isBoundRefusalOf (e : Exception) (fvar : FVarId) : Bool :=
+  match e with
+  | .error _ msg => msg.hasTag (· == boundRefusalTag ++ fvar.name)
   | _ => false
 
-/-- Refuse `term` if it mentions an SMT-bound variable, recording which ones. -/
+/-- Refuse `term` if it mentions an SMT-bound variable. The error is tagged with the
+variables, so they survive state rollbacks. -/
 private def refuseBoundDependency (term : Expr) (msg : MessageData) : TranslateM Unit := do
   let st ← get
   let bound := (Lean.collectFVars {} term).fvarIds.filter
     (fun id => st.boundVars.contains id || st.funVars.contains id)
   unless bound.isEmpty do
-    set { st with refusedBoundVars := bound }
-    throwError (MessageData.tagged boundRefusalTag m!"{msg}{indentExpr term}")
+    let tagged := bound.foldl (fun m id => .tagged (boundRefusalTag ++ id.name) m)
+      m!"{msg}{indentExpr term}"
+    throwError (MessageData.tagged boundRefusalTag tagged)
 
 /-- Built-in SMT sorts are fixed across quantifier and lambda instantiations.
 Even a type binder must not occur in a sort key: type equality can distinguish
@@ -1556,44 +1597,44 @@ mutual
 
   /-- Translate `let x := value; body` as `(let ((x value)) body)` when `value` is data
   and `body` uses `x` more than once. The body is translated with `x` as an SMT-bound
-  name, which is exactly substitution, so this agrees with zeta-reduction wherever the
-  body treats `x` as an opaque value. Where it cannot — `x` in a sort or an erased
-  argument — translation refuses the dependency on `x`; the state is rolled back and
-  `none` makes the caller zeta-reduce. Other body failures propagate, since
-  substitution would hit them again (and retrying each nested let is exponential). -/
+  name, which is exactly substitution where `x` is used as a value; bit-vector
+  lowerings read literal operands through `expandLets`. Where the value itself matters
+  (`letVarAtTypeLevel`), `none` makes the caller zeta-reduce. -/
   partial def emitLetBinding? (name : Name) (type value body : Expr) :
       TranslateM (Option SMT.Term) := do
     unless countLooseBVar0 body 2 ≥ 2 do return none
     if value.hasLooseBVars || type.hasLooseBVars then return none
-    -- Substituting a literal is free, and lowerings read literal operands.
+    -- Substituting a literal is free.
     if isLiteralValue value then return none
     if ← isProp type then return none
     if ← isTypeArgument type then return none
     let typeWhnf ← whnf type
     if typeWhnf.isForall then return none
     if (← isClass? typeWhnf).isSome then return none
+    if ← letVarAtTypeLevel body then return none
     let saved ← Meta.saveState
     let previous ← get
     let rollback : TranslateM Unit := do saved.restore; set previous
     let smtValue? ← try some <$> emitTerm value catch _ => pure none
     let some smtValue := smtValue? | rollback; return none
     let smtName ← TranslateM.freshSymbol "let"
+    let expanded ← TranslateM.expandLets value
+    let outerLets := (← get).letValues
     let attempt : Except (Exception × Bool) SMT.Term ← withLocalDeclD name type fun x => do
       try
-        return .ok (← TranslateM.withBoundVar x.fvarId! smtName
-          (emitTerm (body.instantiate1 x)))
+        return .ok (← TranslateM.withLetValue x.fvarId! expanded <|
+          TranslateM.withBoundVar x.fvarId! smtName (emitTerm (body.instantiate1 x)))
       catch ex =>
-        let onX := isBoundRefusal ex && (← get).refusedBoundVars.contains x.fvarId!
-        return .error (ex, onX)
+        -- A dependency the check missed: substitute `x`, unless the refusal also names an
+        -- outer let, which then substitutes first.
+        let retry := isBoundRefusalOf ex x.fvarId! &&
+          !outerLets.keys.any (isBoundRefusalOf ex ·)
+        return .error (ex, retry)
     match attempt with
     | .ok smtBody => return some (.letE #[(smtName, smtValue)] smtBody)
-    | .error (ex, onX) =>
+    | .error (ex, retry) =>
       rollback
-      -- Substitution removes the dependency only if `value` has no SMT binder.
-      let st ← get
-      let valueBound := (Lean.collectFVars {} value).fvarIds.any
-        (fun id => st.boundVars.contains id || st.funVars.contains id)
-      if onX && !valueBound then return none
+      if retry then return none
       throw ex
 
   /-- Higher-order forms: λ-abstractions, partial applications, applications whose
@@ -1953,8 +1994,8 @@ mutual
     -- Conversions and numerals carry their own width; other operators use operand types.
     match_expr e with
     | BitVec.ofNat w n =>
-      let some wv ← natValue? w | return none
-      match ← natValue? n with
+      let some wv ← natOperand? w | return none
+      match ← natOperand? n with
       | some nv => return some (bvLit wv nv)
       | none =>
         -- int2bv preserves symbolic dependence and wraps modulo 2^w like BitVec.ofNat.
@@ -1963,7 +2004,7 @@ mutual
       unless ← hasExpectedOfNatInstance e do return none
       -- OfNat is shared with integer types, so inspect its carrier before emitting a literal.
       let some wv ← bvWidthOfType? ty | return none
-      let some nv ← natValue? n | return none
+      let some nv ← natOperand? n | return none
       return some (bvLit wv nv)
     | _ =>
     -- Width of the result type, or (for predicates) of the first explicit operand.
@@ -2024,23 +2065,23 @@ mutual
     | BitVec.rotateLeft _ a b => rotateOp "rotate_left" a b
     | BitVec.rotateRight _ a b => rotateOp "rotate_right" a b
     | BitVec.setWidth _ target x =>
-      let some tv ← natValue? target | return none
+      let some tv ← natOperand? target | return none
       let some xw ← bvWidthOf? x | return none
       return some (bvResize false xw tv (← emitTerm x))
     | BitVec.zeroExtend _ target x =>
       -- zeroExtend is a distinct declaration with the same unsigned resize as setWidth.
-      let some tv ← natValue? target | return none
+      let some tv ← natOperand? target | return none
       let some xw ← bvWidthOf? x | return none
       return some (bvResize false xw tv (← emitTerm x))
     | BitVec.signExtend _ target x =>
-      let some tv ← natValue? target | return none
+      let some tv ← natOperand? target | return none
       let some xw ← bvWidthOf? x | return none
       return some (bvResize true xw tv (← emitTerm x))
     | BitVec.extractLsb _ hi lo x =>
       -- Convert inclusive bounds to a slice length. Empty slices have no SMT
       -- extract representation and remain uninterpreted.
-      let some hv ← natValue? hi | return none
-      let some lv ← natValue? lo | return none
+      let some hv ← natOperand? hi | return none
+      let some lv ← natOperand? lo | return none
       let some xw ← bvWidthOf? x | return none
       if hv < lv then return none
       let len := hv + 1 - lv
@@ -2050,8 +2091,8 @@ mutual
       let sliced := bvExtract (min (lv + len) xw - 1) lv sx
       return some (if len ≤ avail then sliced else bvExtend false (len - avail) sliced)
     | BitVec.extractLsb' _ start len x =>
-      let some sv ← natValue? start | return none
-      let some lv ← natValue? len | return none
+      let some sv ← natOperand? start | return none
+      let some lv ← natOperand? len | return none
       let some xw ← bvWidthOf? x | return none
       if lv == 0 then return none
       let sx ← emitTerm x
@@ -2067,7 +2108,7 @@ mutual
     | BitVec.toNat _ a => return some (smt| (bv2nat $(← emitTerm a)))
     | BitVec.toInt _ a => return some (smt| (sbv_to_int $(← emitTerm a)))
     | BitVec.ofInt width i =>
-      let some wv ← natValue? width | return none
+      let some wv ← natOperand? width | return none
       return some (.app (.indexed "int2bv" #[.inr wv]) #[← emitTerm i])
     | _ => return none
 
@@ -2075,7 +2116,7 @@ mutual
   (`((_ rotate_left k) x)`), so a symbolic amount cannot be expressed and is
   refused rather than mistranslated. -/
   partial def rotateOp (op : String) (a b : Expr) : TranslateM (Option SMT.Term) := do
-    let some amt ← natValue? b | return none
+    let some amt ← natOperand? b | return none
     return some (.app (.indexed op #[.inr amt]) #[← emitTerm a])
 
   /-- A shift, coercing a `Nat` shift amount to a same-width bit-vector literal as
@@ -2092,7 +2133,7 @@ mutual
         return some (smt| (ite (bvuge $sb $(bvLit bw w)) $saturated $shifted))
       return some shifted
     if (← whnf (← inferType b)).isConstOf ``Nat then
-      let some bv ← natValue? b | return none
+      let some bv ← natOperand? b | return none
       -- Saturate at the width: both Lean and SMT yield 0 (or sign-fill) there, and
       -- the literal must fit in `w` bits to be representable.
       return some (.symbApp op #[sa, bvLit w (min bv w)])
