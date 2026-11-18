@@ -1499,6 +1499,11 @@ mutual
             let reduced ← withTransparency .instances <| whnf e
             if reduced != e then
               return ← emitTerm reduced
+      -- A primitive projection is the projection function applied to its structure,
+      -- so both forms must reach the same selector or symbol.
+      if let .proj structName idx structArg := fn then
+        if let some t ← primitiveProjection? structName idx structArg args then
+          return t
       defaultApp fn args
 
   /-- Higher-order forms: λ-abstractions, partial applications, applications whose
@@ -1680,6 +1685,22 @@ mutual
     let sextra ← extraArgs.mapM emitTerm
     return some (.app (.symb sel) (#[sarg] ++ sextra))
 
+  /-- Translate `.proj S i s` (applied to `args`) as the projection function of field
+  `i`, through `projApp?` or, for an opaque structure, `defaultApp`. It does not
+  re-enter `emitTerm`, which could fold the application back into a primitive
+  projection. -/
+  partial def primitiveProjection? (structName : Name) (idx : Nat) (structArg : Expr)
+      (args : Array Expr) : TranslateM (Option SMT.Term) := do
+    let env ← getEnv
+    unless isStructure env structName do return none
+    let some field := (getStructureFields env structName)[idx]? | return none
+    let some _ := getProjFnForField? env structName field | return none
+    let projected := mkAppN (← mkProjection structArg field) args
+    let fn := projected.getAppFn
+    let args := projected.getAppArgs
+    if let some t ← projApp? fn args then return some t
+    return some (← defaultApp fn args)
+
   /-- If `fn` is a constructor of a supported (possibly parametric) datatype,
   translate the application to the corresponding SMT constructor symbol applied to
   the *value* args (type parameters are dropped — they select the instantiation, not
@@ -1815,7 +1836,12 @@ mutual
           return some (smt| (=> $a $b))
         else
           quantifier true ty body
-      | .app (.app (.const ``Exists _) _) (.lam _ ty body _) =>
+      | .app (.app (.const ``Exists us) ty) pred =>
+        let pred := pred.consumeMData
+        let .lam _ ty body _ := pred
+          | -- An eta-reduced predicate `Exists p` quantifies like `∃ x, p x`.
+            return some (← emitTerm (mkApp2 (mkConst ``Exists us) ty
+              (.lam `x ty (mkApp pred (.bvar 0)) .default)))
         if ← isProp ty then
           -- A proof exists exactly when its proposition holds. Proof irrelevance
           -- permits a fresh proof local when the predicate mentions its witness.

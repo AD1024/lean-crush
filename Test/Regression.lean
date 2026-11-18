@@ -371,3 +371,43 @@ theorem enum_pigeonhole (x y z t : Color3) :
 -- η for pairs: `Prod Int Int` is now a real datatype with selectors, so the
 -- projection form equals the original.
 theorem prod_eta (x : Int × Int) : x = (Prod.fst x, Prod.snd x) := by crush
+
+/-! ## Primitive projections and eta-reduced `Exists` (review round 3, C8) -/
+
+namespace PrimitiveProjections
+
+open Lean Meta Elab Term
+
+structure Pt where
+  x : Int
+  y : Int
+
+/-- The primitive projection `Expr.proj Pt 0 p`, which source `p.1` does not produce. -/
+elab "proj0% " t:ident : term => do
+  let e ← elabTerm t none
+  return Expr.proj ``Pt 0 e
+
+theorem primitive_projection (p : Pt) (h : (proj0% p) = 3) : p.x + 0 = 3 := by crush
+
+theorem primitive_projection_under_binder (f : Pt → Int)
+    (h : ∀ p : Pt, (proj0% p) = f p) (q : Pt) : f q = q.x := by crush
+
+-- An opaque structure (its field sort is refused) reaches the same symbol.
+structure FinPt where
+  x : Int
+  tag : Fin 3
+
+elab "finproj0% " t:ident : term => do
+  let e ← elabTerm t none
+  return Expr.proj ``FinPt 0 e
+
+theorem primitive_projection_opaque (p : FinPt) (h : (finproj0% p) = 3) :
+    p.x = 3 := by crush
+
+theorem exists_eta (p : Int → Prop) (h : p 3) : Exists p := by crush
+
+/-- error: crush: could not prove the goal -/
+#guard_msgs(error, substring := true) in
+theorem exists_eta_needs_witness (p : Int → Prop) : Exists p := by crush
+
+end PrimitiveProjections
