@@ -291,6 +291,17 @@ translating these types could produce false proofs. Types that depend only on
 other types, such as `List α`, are supported. So is `DecidableEq α`, which looks
 dependent but has its own sound translation.
 
+A structure or inductive whose field has such a type is not refused: it becomes
+an opaque SMT sort, guarded unless it is known to be inhabited, so equality
+reasoning about it still works but its fields are uninterpreted.
+`structure Wrap where val : Fin 5`, `Option (Fin 5)` and `Array (Fin 5)` are
+examples. The decision is made per query by translating the field sorts, so a
+`@[crush_translate_sort]` handler for the field type makes the structure a
+datatype again. A structure whose field type mentions an earlier field, such as
+`structure Sig where α : Type; x : α`, is always opaque, because an SMT selector
+has a single sort. The fallback is local: a structure with an opaque structure
+as a field remains a datatype.
+
 String and concrete-width bitvector operations use their SMT theories:
 
 ```lean

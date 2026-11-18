@@ -180,6 +180,9 @@ example (x : Int) : loweringAddThree x = x + 3 := by crush
 numerals, Booleans, and strings. `$x` splices an existing `SMT.Term`.
 When an `SMT.SSort` is expected, the same quotation constructs a sort and its
 splices must be sorts. The final SMT script is sort-checked before solving.
+The checker accepts SMT-LIB's n-ary forms, so a lowering may emit
+`(+ $x $y $z)`: `+`, `*`, `-`, and `str.++` associate to the left, `=>` to the
+right, and `=` and the integer comparisons are chainable.
 
 There are three registration kinds:
 

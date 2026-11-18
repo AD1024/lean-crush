@@ -1302,3 +1302,18 @@ finisher; it is more general, but trusts Lean's native compiler, runtime, and ev
 executable definition reached by the decision procedure. Generated dependencies are
 accepted only under their reserved native-decision names with Boolean equality
 certificate types, and remain visible through `#print axioms`.
+
+## Round-3 invariants (2026-11-18)
+
+- Datatype identity includes the head constant's universe levels, and constructor
+  fields are read at those levels (`instantiateCtorType`). `T.{0}` and `T.{1}` are
+  distinct SMT sorts.
+- A closed reconstruction target is applied only to its `∀` parameters
+  (`closeTarget`); let-bound locals become `let` binders of the closed proposition.
+- Whether a type is a datatype is decided per query by translating its field sorts
+  under rollback (`datatypeSort?`); a refused field makes the block opaque everywhere
+  in that query.
+- `crush.timeout` is a per-call limit shared by the ground-first query and its
+  fallback; the solver is asked for a core or proof only when the configuration
+  reads it (`SolverRequest`).
+
