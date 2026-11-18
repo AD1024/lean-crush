@@ -175,21 +175,18 @@ lake build Test         # full dependency-free test suite
 
 Runnable examples live in [`Test/`](Test/), with verification conditions in
 [`Test/CaseStudies/`](Test/CaseStudies/) and optional Mathlib integration in
-[`MathlibTest/`](MathlibTest/). Read the
-[optimization guide](Doc/OPTIMIZATIONS.md) before changing search bounds or
-reconstruction heuristics.
+[`MathlibTest/`](MathlibTest/).
 
-For recorded results, see [`BENCHMARKS.md`](BENCHMARKS.md) and the manual's
+Recorded results are in [`BENCHMARKS.md`](BENCHMARKS.md) and the manual's
 [coverage and reconstruction figures](https://ad1024.github.io/lean-crush/Benchmarks/).
-To run the experiments:
+To rerun the experiments (the first run builds the benchmark projects and can take
+hours; `--suites curated` is the smallest suite):
 
 ```sh
 bash run-experiments.sh
 ```
 
-The first run provisions and builds the benchmark projects and can take hours.
-Use `--suites curated` for the smallest suite; see the
-[benchmark script guide](scripts/README.md) for prerequisites, resuming runs,
+The [benchmark script guide](scripts/README.md) covers prerequisites, resuming runs,
 plotting, and individual harnesses.
 
 ## Citation

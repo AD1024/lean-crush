@@ -13,8 +13,8 @@ consensus goal from `SmtTranslation/Names.lean`.
 Each goal is filed as **handled** (a closed `theorem`/`example`), **sound refusal**
 (true in Lean but declined rather than closed unsoundly — pinned with `#guard_msgs`),
 or **known gap** (diagnosis in a comment). Several started as gaps this study surfaced
-and were closed here; see `Doc/PLAN.md` §11b for the full account. Only one gap
-remains: the Church tower over an *abstract universe*.
+and were closed here. Only one gap remains: the Church tower over an *abstract
+universe*.
 
 Ports run under `crush.trust "trust"` by default (measuring translation + solving, as
 `LeanAutoPort.lean` does), except where a section shows reconstruction. `auto`'s `d[f]`
@@ -271,7 +271,7 @@ lean-auto's original binds `{α : Sort u}` *inside* each hypothesis (`add : ∀ 
 Monomorphization would have to instantiate that inner `{α}` at the goal's function
 types — arrows the encoding handles at use, not as monomorphization candidates (the
 nested-binder boundary in `Monomorphize.lean`). The ground-`A` version above is the
-payload case; this is tracked in `Doc/PLAN.md` §10.
+payload case.
 
 ```lean
 example {A : Sort u}
