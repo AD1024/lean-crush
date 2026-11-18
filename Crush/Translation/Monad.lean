@@ -154,6 +154,9 @@ structure TranslateState where
       this query because a field sort cannot be translated. They are opaque sorts
       everywhere in the query. Keys are normalized like `structuralToName`. -/
   opaqueDatatypes : Std.HashSet StructuralKey := {}
+  /-- Normalized forms of structural-key type components, which every symbol lookup
+      would otherwise recompute with `reduceAll`. -/
+  normalizedTypes : Std.HashMap Expr Expr := {}
   deriving Inhabited
 
 /-- The translation monad. `MetaM` at the bottom gives us `whnf`, unification,
@@ -293,7 +296,10 @@ private def normalizeStructuralKey (key : StructuralKey) : TranslateM Structural
     Meta.Sym.normalizeLevels (← instantiateMVars e)
   let typeExprs ← key.typeExprs.mapM fun e => do
     let e ← instantiateMVars e
-    Meta.Sym.normalizeLevels (← Meta.withReducible <| Meta.reduceAll e)
+    if let some normalized := (← get).normalizedTypes[e]? then return normalized
+    let normalized ← Meta.Sym.normalizeLevels (← Meta.withReducible <| Meta.reduceAll e)
+    modify fun s => { s with normalizedTypes := s.normalizedTypes.insert e normalized }
+    return normalized
   return { key with exprs, typeExprs }
 
 /-- Look up or allocate an expression-derived symbol using structural identity. -/
