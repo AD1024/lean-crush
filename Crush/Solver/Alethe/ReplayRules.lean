@@ -1,4 +1,5 @@
 import Crush.Solver.Alethe.ArithmeticRules
+import Crush.Solver.Alethe.BitBlastRules
 
 /-!
 # Built-in Alethe replay rules

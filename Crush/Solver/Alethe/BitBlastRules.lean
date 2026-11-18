@@ -1,0 +1,246 @@
+import Crush.Solver.Alethe.ReplayAttr
+import Crush.Solver.Alethe.BitBlast
+
+/-!
+# Checked replay of bit-blasted addition and multiplication
+
+Handlers for `bv_bitblast_step_bvadd` and `bv_bitblast_step_bvmult`. Each step is proved
+with `add_eq_of_bits` or `mul_eq_of_bits` and kernel-checked before it is returned.
+-/
+
+open Lean Meta Elab Tactic
+
+namespace Crush.Alethe.BitBlastRules
+
+open Crush.Alethe.BitBlast
+
+/-- A bit's `Bool` value, with `e = value` (or `e ↔ value = true` for a `Prop`). -/
+structure Reified where
+  value : Expr
+  proof : Expr
+  deriving Inhabited
+
+/-- Reification shares results across the certificate's DAG. -/
+abbrev ReifyM := StateRefT (Std.HashMap Expr Reified) MetaM
+
+private def boolType : Expr := mkConst ``Bool
+
+private def eqRefl (e : Expr) : Expr := mkApp2 (mkConst ``Eq.refl [1]) boolType e
+
+private def eqTrans (a b c p q : Expr) : Expr :=
+  mkApp6 (mkConst ``Eq.trans [1]) boolType a b c p q
+
+mutual
+  /-- `e ↔ value = true` for a decoded `Prop`. -/
+  partial def reifyProp (e : Expr) : ReifyM Reified := do
+    if let some r := (← get)[e]? then return r
+    let r ← reifyPropCore e
+    modify (·.insert e r)
+    return r
+
+  partial def reifyPropCore (e : Expr) : ReifyM Reified := do
+    if e.isConstOf ``True then
+      return { value := mkConst ``Bool.true, proof := mkConst ``reify_true }
+    if e.isConstOf ``False then
+      return { value := mkConst ``Bool.false, proof := mkConst ``reify_false }
+    if e.isAppOfArity ``Eq 3 && (e.getArg! 0).isConstOf ``Bool &&
+        (e.getArg! 2).isConstOf ``Bool.true then
+      let t := e.getArg! 1
+      let r ← reifyBool t
+      return { value := r.value, proof := mkApp3 (mkConst ``reify_eq_true) t r.value r.proof }
+    if e.isAppOfArity ``And 2 then
+      return ← propBinary ``reify_and ``Bool.and (e.getArg! 0) (e.getArg! 1)
+    if e.isAppOfArity ``Or 2 then
+      return ← propBinary ``reify_or ``Bool.or (e.getArg! 0) (e.getArg! 1)
+    if e.isAppOfArity ``Not 1 then
+      let p := e.getArg! 0
+      -- Decoded xor.
+      if p.isAppOfArity ``Iff 2 then
+        return ← propBinary ``reify_xor ``Bool.xor (p.getArg! 0) (p.getArg! 1)
+      let r ← reifyProp p
+      return { value := mkApp (mkConst ``Bool.not) r.value
+               proof := mkApp3 (mkConst ``reify_not) p r.value r.proof }
+    if e.isAppOfArity ``Iff 2 then
+      let p := e.getArg! 0
+      let q := e.getArg! 1
+      let rp ← reifyProp p
+      let rq ← reifyProp q
+      return { value := mkApp (mkConst ``Bool.not) (mkApp2 (mkConst ``Bool.xor) rp.value rq.value)
+               proof := mkApp6 (mkConst ``reify_iff) p q rp.value rq.value rp.proof rq.proof }
+    -- Opaque proposition.
+    let inst := mkApp (mkConst ``Classical.propDecidable) e
+    return { value := mkApp2 (mkConst ``Decidable.decide) e inst
+             proof := mkApp (mkConst ``reify_prop_atom) e }
+
+  partial def propBinary (lemma op : Name) (p q : Expr) : ReifyM Reified := do
+    let rp ← reifyProp p
+    let rq ← reifyProp q
+    return { value := mkApp2 (mkConst op) rp.value rq.value
+             proof := mkApp6 (mkConst lemma) p q rp.value rq.value rp.proof rq.proof }
+
+  /-- `e = value` for a decoded `Bool`. -/
+  partial def reifyBool (e : Expr) : ReifyM Reified := do
+    if let some r := (← get)[e]? then return r
+    let r ← reifyBoolCore e
+    modify (·.insert e r)
+    return r
+
+  partial def reifyBoolCore (e : Expr) : ReifyM Reified := do
+    match e.getAppFnArgs with
+    | (``Bool.xor, #[s, t]) => boolBinary ``reify_bxor ``Bool.xor s t
+    | (``Bool.and, #[s, t]) => boolBinary ``reify_band ``Bool.and s t
+    | (``Bool.or, #[s, t]) => boolBinary ``reify_bor ``Bool.or s t
+    | (``Bool.not, #[s]) =>
+      let r ← reifyBool s
+      return { value := mkApp (mkConst ``Bool.not) r.value
+               proof := mkApp3 (mkConst ``reify_bnot) s r.value r.proof }
+    | (``Decidable.decide, #[p, inst]) =>
+      let r ← reifyProp p
+      return { value := r.value, proof := mkApp4 (mkConst ``reify_decide) p inst r.value r.proof }
+    | _ => return { value := e, proof := eqRefl e }
+
+  partial def boolBinary (lemma op : Name) (s t : Expr) : ReifyM Reified := do
+    let rs ← reifyBool s
+    let rt ← reifyBool t
+    return { value := mkApp2 (mkConst op) rs.value rt.value
+             proof := mkApp6 (mkConst lemma) s t rs.value rt.value rs.proof rt.proof }
+end
+
+/-- The elements of a list literal. -/
+private partial def listElems? (e : Expr) : Option (Array Expr) :=
+  go e #[]
+where
+  go (e : Expr) (acc : Array Expr) : Option (Array Expr) :=
+    match e.getAppFnArgs with
+    | (``List.nil, #[_]) => some acc
+    | (``List.cons, #[_, head, tail]) => go tail (acc.push head)
+    | _ => none
+
+private def getLsbD (w v k : Expr) : Expr := mkApp3 (mkConst ``BitVec.getLsbD) w v k
+
+/-- `v.getLsbD k = value` for a decoded operand `v : BitVec w`. -/
+partial def bitOf (w v : Expr) (k : Nat) : ReifyM Reified := do
+  let kE := mkNatLit k
+  let bit := getLsbD w v kE
+  match v.getAppFnArgs with
+  | (``BitVec.ofBoolListLE, #[bs]) =>
+    if let some elems := listElems? bs then
+      if let some e := elems[k]? then
+        let r ← reifyBool e
+        return { value := r.value
+                 proof := eqTrans bit e r.value (mkApp2 (mkConst ``getLsbD_ofBoolListLE') bs kE)
+                   r.proof }
+  | (``BitVec.xor, #[n, x, y]) => return ← vectorBinary ``getLsbD_xor' ``reify_bxor ``Bool.xor n x y
+  | (``BitVec.and, #[n, x, y]) => return ← vectorBinary ``getLsbD_and' ``reify_band ``Bool.and n x y
+  | (``BitVec.or, #[n, x, y]) => return ← vectorBinary ``getLsbD_or' ``reify_bor ``Bool.or n x y
+  | (``BitVec.not, #[n, x]) =>
+    let some width := (← whnf n).rawNatLit? <|> (← getNatValue? n) | pure ()
+    if k < width then
+      let rx ← bitOf n x k
+      let hk ← mkDecideProof (← mkAppM ``LT.lt #[kE, n])
+      let notBit := mkApp (mkConst ``Bool.not) (getLsbD n x kE)
+      return { value := mkApp (mkConst ``Bool.not) rx.value
+               proof := eqTrans bit notBit (mkApp (mkConst ``Bool.not) rx.value)
+                 (mkApp4 (mkConst ``getLsbD_not') n x kE hk)
+                 (mkApp3 (mkConst ``reify_bnot) (getLsbD n x kE) rx.value rx.proof) }
+  | (``BitVec.ofNat, #[n, m]) =>
+    -- A constant: the kernel evaluates its bit.
+    if let (some width, some value) := (← getNatValue? n, ← getNatValue? m) then
+      let b := if k < width && value.testBit k then ``Bool.true else ``Bool.false
+      return { value := mkConst b, proof := eqRefl (mkConst b) }
+  | _ => pure ()
+  return { value := bit, proof := eqRefl bit }
+where
+  vectorBinary (lemma reify op : Name) (n x y : Expr) : ReifyM Reified := do
+    let kE := mkNatLit k
+    let rx ← bitOf n x k
+    let ry ← bitOf n y k
+    let raw := mkApp2 (mkConst op) (getLsbD n x kE) (getLsbD n y kE)
+    let value := mkApp2 (mkConst op) rx.value ry.value
+    return { value
+             proof := eqTrans (getLsbD n (mkApp3 (mkConst (opName lemma)) n x y) kE) raw value
+               (mkApp4 (mkConst lemma) n x y kE)
+               (mkApp6 (mkConst reify) (getLsbD n x kE) (getLsbD n y kE) rx.value ry.value
+                 rx.proof ry.proof) }
+  opName : Name → Name
+    | ``getLsbD_xor' => ``BitVec.xor
+    | ``getLsbD_and' => ``BitVec.and
+    | _ => ``BitVec.or
+
+/-- A proof of `∀ k, k < proofs.size → P k` from proofs of `P 0, …`. -/
+private def forallLt (p : Expr) (proofs : Array Expr) : Expr := Id.run do
+  let mut acc := mkApp (mkConst ``forall_lt_zero) p
+  for h : n in [:proofs.size] do
+    acc := mkApp4 (mkConst ``forall_lt_succ) p (mkNatLit n) acc proofs[n]
+  return acc
+
+/-- `fun k => [values].getD k false`. -/
+private def bitFunction (values : Array Expr) : MetaM Expr := do
+  let list ← mkListLit boolType values.toList
+  return .lam `k (mkConst ``Nat)
+    (mkApp4 (mkConst ``List.getD [0]) boolType list (.bvar 0) (mkConst ``Bool.false)) .default
+
+/-- Whether the kernel accepts `proof : expected`. -/
+private def kernelAccepts (expected proof : Expr) : MetaM Bool := do
+  match Kernel.check (← getEnv) (← getLCtx) (mkApp2 (mkConst ``id [0]) expected proof) with
+  | .ok _ => return true
+  | .error _ => return false
+
+/-- Replay `L ∘ R = ofBoolListLE bits` for cvc5's adder (`multiply := false`) or
+multiplier. -/
+def replayBitBlast (ctx : ReplayRuleContext) (multiply : Bool) : TacticM (Option Expr) := do
+  let target ← instantiateMVars ctx.target
+  if target.hasMVar then return none
+  let some (_, lhs, rhs) := target.eq? | return none
+  let op := if multiply then ``BitVec.mul else ``BitVec.add
+  let (opName, #[w, l, r]) := lhs.getAppFnArgs | return none
+  unless opName == op do return none
+  let (``BitVec.ofBoolListLE, #[bs]) := rhs.getAppFnArgs | return none
+  let some outs := listElems? bs | return none
+  let width := outs.size
+  if width == 0 then return none
+  unless ← isDefEq w (mkNatLit width) do return none
+  let build : ReifyM Expr := do
+    let mut aValues := #[]
+    let mut aProofs := #[]
+    let mut bValues := #[]
+    let mut bProofs := #[]
+    for k in [:width] do
+      let ra ← bitOf w l k
+      let rb ← bitOf w r k
+      aValues := aValues.push ra.value
+      aProofs := aProofs.push ra.proof
+      bValues := bValues.push rb.value
+      bProofs := bProofs.push rb.proof
+    let a ← bitFunction aValues
+    let b ← bitFunction bValues
+    let mut vProofs := #[]
+    for i in [:width] do
+      let ri ← reifyBool outs[i]!
+      let iE := mkNatLit i
+      vProofs := vProofs.push <| eqTrans (getLsbD w rhs iE) outs[i]! ri.value
+        (mkApp2 (mkConst ``getLsbD_ofBoolListLE') bs iE) ri.proof
+    let nat := mkConst ``Nat
+    let bitEq (v f : Expr) : Expr :=
+      .lam `k nat (mkApp3 (mkConst ``Eq [1]) boolType (getLsbD w v (.bvar 0)) (mkApp f (.bvar 0)))
+        .default
+    let circuit :=
+      if multiply then mkApp3 (mkConst ``mulRow) a b (mkNatLit (width - 1))
+      else mkApp2 (mkConst ``addSum) a b
+    let lemma := if multiply then ``mul_eq_of_bits else ``add_eq_of_bits
+    return mkAppN (mkConst lemma)
+      #[w, l, r, rhs, a, b, forallLt (bitEq l a) aProofs, forallLt (bitEq r b) bProofs,
+        forallLt (bitEq rhs circuit) vProofs]
+  let proof ← try build.run' {} catch _ => return none
+  unless ← kernelAccepts target proof do
+    trace[crush.replay] "bit-blast step {ctx.stepId}: the circuit does not match cvc5's"
+    return none
+  return some proof
+
+@[crush_replay_rule "bv_bitblast_step_bvadd"]
+def replayBitBlastAdd : ReplayRuleHandler := fun ctx => replayBitBlast ctx false
+
+@[crush_replay_rule "bv_bitblast_step_bvmult"]
+def replayBitBlastMul : ReplayRuleHandler := fun ctx => replayBitBlast ctx true
+
+end Crush.Alethe.BitBlastRules
