@@ -34,6 +34,14 @@ run_meta do
   expectKernelRejection do
     discard <| kernelCheckProof snapshot expected malformed
 
+-- A universe metavariable outside the validated premise is rejected.
+run_meta do
+  let premise := mkConst ``True.intro
+  let u ← mkFreshLevelMVar
+  let proof := Expr.letE `x (mkSort (.succ u)) (mkConst ``PUnit [.succ u]) premise false
+  expectKernelRejection do
+    discard <| validateProofCandidate (mkConst ``True) proof #[premise]
+
 run_meta do
   withLocalDeclD `α (mkSort (.succ .zero)) fun α =>
     withLocalDeclD `x α fun x =>

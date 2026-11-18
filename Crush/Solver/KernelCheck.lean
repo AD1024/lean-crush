@@ -104,6 +104,8 @@ ones. A replay step embeds every ancestor's proof, so checking each step in full
 quadratic in the length of the certificate. -/
 private def ensureCompleteExcept (label : String) (e : Expr)
     (validated : Std.HashSet Expr) : MetaM Unit := do
+  -- Cached, and covers universe metavariables too.
+  if e.hasMVar then throwError "crush: {label} contains unresolved metavariables"
   let visited ← IO.mkRef ({} : Std.HashSet Expr)
   let rec visit (e : Expr) : MetaM Unit := do
     if validated.contains e || (← visited.get).contains e then return
@@ -113,7 +115,6 @@ private def ensureCompleteExcept (label : String) (e : Expr)
       if name == ``sorryAx then throwError "crush: {label} contains `sorry`"
       if name == `Crush.crushSorry then
         throwError "crush: {label} depends on `Crush.crushSorry`"
-    | .mvar _ => throwError "crush: {label} contains unresolved metavariables"
     | .app f a => visit f; visit a
     | .lam _ t b _ | .forallE _ t b _ => visit t; visit b
     | .letE _ t v b _ => visit t; visit v; visit b
