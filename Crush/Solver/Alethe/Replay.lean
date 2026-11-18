@@ -318,7 +318,7 @@ private def proveStepCore (target : Expr) (premises : Array Expr) (rule : String
       if gs.isEmpty then
         let assigned ← instantiateMVars mv
         let proof := mkAppN (mkAppN assigned closedImpl.args) premises
-        let proof ← validateProofCandidate target proof
+        let proof ← validateProofCandidate target proof (validated := premises)
         return some { proof, method := candidate.label }
       restoreState saved
       return none
@@ -457,6 +457,9 @@ private def contradictionProof? (left leftProof right rightProof : Expr) :
   return none
 
 private def containsLiteral (literals : Array Expr) (literal : Expr) : MetaM Bool := do
+  -- A syntactic match is the common case; `sameLiteral` may reduce with `whnf`.
+  let literal' := literal.consumeMData
+  if literals.any (·.consumeMData == literal') then return true
   for existing in literals do
     if ← sameLiteral existing literal then return true
   return false
@@ -523,6 +526,18 @@ private partial def injectProposition? (target proposition proof : Expr) :
     return some (mkApp3 (mkConst ``Or.inl) left right leftProof)
   let some rightProof ← injectProposition? right proposition proof | return none
   return some (mkApp3 (mkConst ``Or.inr) left right rightProof)
+
+/-- `not_or`: `¬ lᵢ` from `¬ (l₁ ∨ … ∨ lₙ)`. -/
+private def proveNotOrStep? (target : Expr) (premise : ClauseProof) : MetaM (Option Expr) := do
+  let target ← whnfR target
+  let premiseType ← whnfR premise.clause
+  unless target.isAppOfArity ``Not 1 && premiseType.isAppOfArity ``Not 1 do return none
+  let disjunction := premiseType.appArg!
+  try
+    withLocalDeclD `h target.appArg! fun h => do
+      let some injected ← injectProposition? disjunction target.appArg! h | return none
+      return some (← mkLambdaFVars #[h] (mkApp premise.proof injected))
+  catch _ => return none
 
 private def excludedMiddleClause? (antecedent target : Expr)
     (positive : Expr → MetaM (Option (Expr × Expr))) : MetaM (Option Expr) := do
@@ -863,10 +878,11 @@ private def proveResolutionStep (target : Expr) (targetLiterals : Array Expr)
     (premises : Array ClauseProof) :
     TacticM (Option Expr) := do
   let mut pool := premises
+  -- Certificate order first, for every width: it is linear in the premises, while
+  -- greedy pairing searches all pairs and often declines narrow chains to `grind`.
+  if let some proof ← proveOrderedResolutionStep? target targetLiterals pool then
+    return some proof
   if pool.size >= wideResolutionThreshold then
-    if let some proof ←
-        proveOrderedResolutionStep? target targetLiterals pool then
-      return some proof
     return none
   while !pool.isEmpty do
     for entry in pool do
@@ -1137,7 +1153,8 @@ partial def replay (proof : AletheProof) (rawSexps : Array Sexp)
   let replayRules ← getReplayRuleHandlers
   -- Inhabitation evidence for `choice` terms over types without a `Nonempty` instance.
   let nonempty ← nonemptyEvidence (encodingEvidence ++ facts.toArray.map (·.2))
-  let ctx : TermCtx := { symbols, named, decoders, nonempty }
+  let namedCache ← IO.mkRef {}
+  let ctx : TermCtx := { symbols, named, decoders, nonempty, namedCache := some namedCache }
   let failureRef ← IO.mkRef none
   let telemetry ← ReplayTelemetrySession.start
   let referenceCounts := premiseReferenceCounts proof.commands
@@ -1311,7 +1328,11 @@ where
     }
     let dispatchStarted ← telemetry.mark
     let initialStructural : Option (Expr × String) ←
-      if premiseProofs.isEmpty then
+      -- A premise that already is the conclusion (e.g. `or` on a one-literal clause).
+      if let some premise := premiseProofs.find? fun premise =>
+          premise.clause.consumeMData == target.consumeMData then
+        pure (some (premise.proof, "structural:premise"))
+      else if premiseProofs.isEmpty then
         if let some proof ← proveReflexiveClause? target then
           pure (some (proof, "structural:reflexivity"))
         else if let some theoremName := boolXorTheorem? rule then
@@ -1336,6 +1357,13 @@ where
         if rule == "symm" then
           let proof? ← proveSymmStep? target premiseProofs[0]!
           pure (proof?.map fun proof : Expr => (proof, "structural:symm"))
+        else if rule == "and" then
+          let premise := premiseProofs[0]!
+          let proof? ← projectConjunct? premise.clause premise.proof target
+          pure (proof?.map fun proof : Expr => (proof, "structural:and"))
+        else if rule == "not_or" then
+          let proof? ← proveNotOrStep? target premiseProofs[0]!
+          pure (proof?.map fun proof : Expr => (proof, "structural:not-or"))
         else if rule == "implies" then
           let proof? ← proveImplicationPremiseClause? target premiseProofs[0]!
           pure (proof?.map fun proof : Expr => (proof, "structural:implies-elim"))
@@ -1371,7 +1399,9 @@ where
         pure none
     let structuralProof : Option StepProof ← match structural with
     | some (proof, method) => do
-      pure (some { proof := ← validateProofCandidate target proof, method })
+      let proof ← validateProofCandidate target proof
+        (validated := premiseProofs.map (·.proof) ++ scopedProofs)
+      pure (some { proof, method })
     | none =>
       pure none
     let proof? : Option StepProof ← match structuralProof with
@@ -1565,9 +1595,9 @@ where
                   term := some sort
                   detail := "binder sort could not be decoded as a Lean type" }
                 return none
-            withLocalDeclD name.toName type fun bound =>
+            withLocalDeclD name.toName type fun bound => do
               bindVariables (j + 1)
-                { innerCtx with locals := innerCtx.locals.insert name bound }
+                (← innerCtx.bindLocal name bound)
                 (locals.push bound)
           else
             applyAnchorAssignments failureRef innerCtx stepId closeRule anchorArgs
@@ -1775,7 +1805,7 @@ where
             term := some valueTerm
             detail := s!"value of assignment `{name}` has the wrong Lean type" }
           return none
-        go (index + 1) { ctx with locals := ctx.locals.insert name value }
+        go (index + 1) (← ctx.bindLocal name value)
       else
         onDone ctx
     go 0 ctx

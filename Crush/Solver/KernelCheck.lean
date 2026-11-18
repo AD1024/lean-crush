@@ -99,12 +99,41 @@ private def ensureAxiomClosure (label : String) (e : Expr)
           snapshot.axiomFailure.set (some diagnostic)
       throwError "crush: {diagnostic}"
 
-/-- Check a replay fragment with the elaborator before the complete proof reaches the kernel. -/
-def validateProofCandidate (expected proof : Expr) : MetaM Expr := do
+/-- `ensureComplete` without descending into `validated` subterms or revisiting shared
+ones. A replay step embeds every ancestor's proof, so checking each step in full is
+quadratic in the length of the certificate. -/
+private def ensureCompleteExcept (label : String) (e : Expr)
+    (validated : Std.HashSet Expr) : MetaM Unit := do
+  let visited ← IO.mkRef ({} : Std.HashSet Expr)
+  let rec visit (e : Expr) : MetaM Unit := do
+    if validated.contains e || (← visited.get).contains e then return
+    visited.modify (·.insert e)
+    match e with
+    | .const name _ =>
+      if name == ``sorryAx then throwError "crush: {label} contains `sorry`"
+      if name == `Crush.crushSorry then
+        throwError "crush: {label} depends on `Crush.crushSorry`"
+    | .mvar _ => throwError "crush: {label} contains unresolved metavariables"
+    | .app f a => visit f; visit a
+    | .lam _ t b _ | .forallE _ t b _ => visit t; visit b
+    | .letE _ t v b _ => visit t; visit v; visit b
+    | .mdata _ b | .proj _ _ b => visit b
+    | _ => pure ()
+  visit e
+
+/-- Check a replay fragment with the elaborator before the complete proof reaches the
+kernel. Subterms in `validated` (premise proofs checked when they were produced) are
+not traversed again; the final proof is kernel-checked in full anyway. -/
+def validateProofCandidate (expected proof : Expr) (validated : Array Expr := #[]) :
+    MetaM Expr := do
   let expected ← instantiateMVars expected
   let proof ← instantiateMVars proof
   ensureComplete "reconstructed goal type" expected
-  ensureComplete "reconstructed proof" proof
+  if validated.isEmpty then
+    ensureComplete "reconstructed proof" proof
+  else
+    ensureCompleteExcept "reconstructed proof" proof
+      (validated.foldl (·.insert ·) {})
   let actual ← inferType proof
   unless ← isDefEqGuarded actual expected do
     throwError "crush: reconstructed proof has type{indentExpr actual}\nbut expected{indentExpr expected}"

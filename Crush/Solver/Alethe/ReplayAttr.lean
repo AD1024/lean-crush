@@ -787,6 +787,7 @@ def runReplayRuleHandlersDetailed (registry : ReplayRuleRegistry)
       match result with
       | some proof =>
         let proof ← validateProofCandidate ctx.target proof
+          (validated := ctx.premises.map (·.proof) ++ ctx.scopedProofs)
         let source :=
           match entry.implementation with
           | .declaration declName _ => s!"handler:{declName}"

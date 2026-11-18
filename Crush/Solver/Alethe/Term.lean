@@ -65,6 +65,17 @@ structure TermCtx where
   /-- Proofs of `Nonempty T`, for decoding `choice` over a type without a
   `Nonempty` instance (see `nonemptyEvidence`). -/
   nonempty : Array Expr := #[]
+  /-- Decoded `:named` references for the current binder scope. Every `@p_k` reference
+  would otherwise re-decode its definition, which is exponential in a shared DAG. A
+  scope that binds a new local gets a fresh cache (`TermCtx.bindLocal`). -/
+  namedCache : Option (IO.Ref (Std.HashMap String Expr)) := none
+
+/-- Bind an Alethe variable for a nested scope, with a fresh `:named` cache: a named
+term may decode differently once the variable is in scope. -/
+def TermCtx.bindLocal (ctx : TermCtx) (name : String) (value : Expr) : BaseIO TermCtx := do
+  let namedCache ←
+    if ctx.namedCache.isSome then pure (some (← IO.mkRef {})) else pure none
+  return { ctx with locals := ctx.locals.insert name value, namedCache }
 
 /-- Expand Alethe `:named` references while preserving the surrounding term shape.
 `fuel` bounds nested `:named` expansions only; term nesting costs nothing. -/
@@ -589,7 +600,13 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
       match ctx.named.get? a with
       | some t =>
         if fuel == 0 || ctx.expanding.contains a then return none
-        toExpr? { ctx with expanding := ctx.expanding.insert a } (fuel - 1) (stripAnnots t)
+        if let some cache := ctx.namedCache then
+          if let some cached := (← cache.get).get? a then return some cached
+        let decoded ←
+          toExpr? { ctx with expanding := ctx.expanding.insert a } (fuel - 1) (stripAnnots t)
+        if let (some cache, some value) := (ctx.namedCache, decoded) then
+          cache.modify (·.insert a value)
+        return decoded
       | none => return none
     else if a == "true" then return some (mkConst ``True)
     else if a == "false" then return some (mkConst ``False)
@@ -630,9 +647,8 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
           let some (Sexp.atom vname) := bind[0]? | return none
           let some sortSexp := bind[1]? | return none
           let some ty ← sortToType? ctx sortSexp | return none
-          withLocalDeclD (Name.mkSimple vname) ty fun v =>
-            goBinders (i + 1) { ctx with locals := ctx.locals.insert vname v }
-              (fvars.push v)
+          withLocalDeclD (Name.mkSimple vname) ty fun v => do
+            goBinders (i + 1) (← ctx.bindLocal vname v) (fvars.push v)
       return ← goBinders 0 ctx #[]
     if head == "choice" then
       let some (Sexp.list binders) := args[0]? | return none
@@ -643,7 +659,7 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
       let some sortSexp := bind[1]? | return none
       let some ty ← sortToType? ctx sortSexp | return none
       let predicate? ← withLocalDeclD (Name.mkSimple vname) ty fun v => do
-        let localCtx := { ctx with locals := ctx.locals.insert vname v }
+        let localCtx ← ctx.bindLocal vname v
         let some predicate ← toExpr? localCtx fuel body | return none
         return some (← mkLambdaFVars #[v] (← toProp predicate))
       let some predicate := predicate? | return none
@@ -663,7 +679,7 @@ partial def toExpr? (ctx : TermCtx) (fuel : Nat) (s : Sexp) : MetaM (Option Expr
         let some value ← toExpr? ctx fuel value | return none
         values := values.push (name, value)
       for (name, value) in values do
-        localCtx := { localCtx with locals := localCtx.locals.insert name value }
+        localCtx ← localCtx.bindLocal name value
       return ← toExpr? localCtx fuel body
     if head == "@bbterm" then
       return ← bitBlastTerm args

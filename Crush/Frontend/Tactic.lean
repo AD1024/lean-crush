@@ -372,9 +372,10 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
       { commands := proof.commands.size, assumes, steps, anchors }
     else
       { commands := 0, assumes := 0, steps := 0, anchors := 0 }
-  let features := proof.features
-  trace[crush.result] "alethe certificate features: operators={features.operators}, \
-    indexed={features.indexedOperators}, sorts={features.sorts}, rules={features.rules}"
+  if ← isTracingEnabledFor `crush.result then
+    let features := proof.features
+    trace[crush.result] "alethe certificate features: operators={features.operators}, \
+      indexed={features.indexedOperators}, sorts={features.sorts}, rules={features.rules}"
   goal.withContext do
     let saved ← saveState
     let snapshot ← snapshot?.getDM KernelCheckSnapshot.capture
