@@ -7,12 +7,14 @@ import Crush.Frontend.Config
 /-!
 # Solver process management
 
-Run each solver query under one wall-clock deadline covering the verdict and all
-follow-up output. Drain stdout and stderr concurrently with stdin writes to avoid
-pipe deadlocks, then kill and reap the child on every exit path.
+Run the solver queries of one `crush` call under one wall-clock budget covering
+each verdict and its follow-up output. Drain stdout and stderr concurrently with stdin
+writes to avoid pipe deadlocks, then kill and reap the child on every exit path.
 Resolve the executable before launch, distinguish missing backends and process errors
-from solver unknown results, and request only supported backend features. Parse the
-captured output once for downstream verdict, model, core, and certificate handling.
+from solver unknown results, and request only what the configuration uses: an unsat
+core when a reconstructing policy or the result trace reads it, and a proof only for
+cvc5 Alethe replay. Parse the captured output once for downstream verdict, model,
+core, and certificate handling.
 -/
 
 open Lean
@@ -34,11 +36,19 @@ inductive Result where
   | unknown (reason : String)
   deriving Inhabited
 
+/-- What a query asks the solver for beyond its verdict. -/
+structure SolverRequest where
+  /-- `:produce-unsat-cores` and `(get-unsat-core)`. -/
+  cores : Bool := false
+  /-- `:produce-proofs` and `(get-proof)`; for cvc5 also the Alethe proof flags. -/
+  proofs : Bool := false
+  deriving BEq, Repr, Inhabited
+
 /-- Static description of how to launch a backend. -/
 structure BackendSpec where
   exe   : String
-  /-- Build argv given the timeout in seconds. -/
-  args  : Nat → Array String
+  /-- Build argv given the solver's time limit in milliseconds and the request. -/
+  args  : Nat → SolverRequest → Array String
   /-- Backend-specific massaging of the resolved `set-logic` string. -/
   logic : String → String
   /-- Whether `:produce-unsat-cores` and `(get-unsat-core)` are supported. Core-directed
@@ -51,19 +61,26 @@ def backendSpec (b : Backend) : Option BackendSpec :=
   match b with
   | .z3 => some {
       exe := "z3"
-      args := fun t => #["-in", "-smt2", s!"-T:{t}"]
-      logic := id }
+      -- `-T` takes whole seconds; the wall-clock guard enforces the exact deadline.
+      args := fun ms _ => #["-in", "-smt2", s!"-T:{max 1 ((ms + 999) / 1000)}"]
+      logic := id
+      -- z3's proofs are never replayed (replay reads cvc5's Alethe format only).
+      proofs := false }
   | .cvc5 => some {
       exe := "cvc5"
-      -- Request Alethe certificates and expand coarse rewrite steps to improve
-      -- checked replay coverage. Replay must independently prove any remaining holes.
-      args := fun t => #[s!"--tlimit={t * 1000}", "--produce-models",
-                          "--produce-unsat-cores", "--enum-inst", "--incremental",
-                          "--proof-format-mode=alethe", "--proof-granularity=dsl-rewrite"]
+      -- Each process issues one `check-sat`, so `--incremental` is not needed. Alethe
+      -- certificates with expanded rewrite steps improve checked replay coverage; replay
+      -- must independently prove any remaining holes.
+      args := fun ms request =>
+        #[s!"--tlimit={ms}", "--produce-models", "--enum-inst"]
+          ++ (if request.cores then #["--produce-unsat-cores"] else #[])
+          ++ (if request.proofs then
+                #["--proof-format-mode=alethe", "--proof-granularity=dsl-rewrite"]
+              else #[])
       logic := id }
   | .bitwuzla => some {
       exe := "bitwuzla"
-      args := fun t => #["--produce-models", "--time-limit", toString (t * 1000)]
+      args := fun ms _ => #["--produce-models", "--time-limit", toString ms]
       -- bitwuzla implements the bit-vector/array/UF fragment and rejects `ALL`.
       logic := fun _ => "QF_AUFBV"
       unsatCores := false
@@ -134,12 +151,62 @@ private def missingSolverMessage (backend : Backend) (exe : String) : BaseIO Mes
   return m!"crush: backend `{backend}` needs the `{exe}` executable, which was not found \
             on `PATH`. Install {exe}, or switch backends. {advice}"
 
-/-- The options `runQuery` sends before the script, given the backend's capabilities.
-`maybeSave` writes these too, so a saved script reproduces the same query. -/
-def prologue (spec : BackendSpec) : Array SMT.Command :=
-  let cores := if spec.unsatCores then #[SMT.Command.setOption "produce-unsat-cores" "true"] else #[]
-  let proofs := if spec.proofs then #[SMT.Command.setOption "produce-proofs" "true"] else #[]
+/-- What a configuration asks the solver for (decision 5).
+
+* Cores: a reconstructing policy reads them. Under `trust` only the
+  `trace.crush.result` line reads the core, and the trusted proof uses every asserted
+  fact, so a core is requested only when that trace is on.
+* Proofs: only cvc5's Alethe certificate is replayed, under a reconstructing policy
+  whose `crush.reconstruct` is not `core`.
+
+Both also require the backend to support the feature. -/
+def SolverRequest.ofConfig (cfg : Config) (traceResult : Bool) : SolverRequest :=
+  let spec? := backendSpec cfg.backend
+  { cores := spec?.any (·.unsatCores) && (cfg.trust != .trust || traceResult)
+    proofs := spec?.any (·.proofs) && cfg.trust != .trust && cfg.backend == .cvc5
+      && cfg.reconstruct != .core }
+
+/-- The request for `cfg` under the current options. -/
+def SolverRequest.current (cfg : Config) : CoreM SolverRequest := do
+  return .ofConfig cfg (← isTracingEnabledFor `crush.result)
+
+/-- The options `runQuery` sends before the script for a request. `maybeSave` writes
+these too, so a saved script reproduces the query that was run. -/
+def prologue (request : SolverRequest) : Array SMT.Command :=
+  let cores := if request.cores then #[SMT.Command.setOption "produce-unsat-cores" "true"] else #[]
+  let proofs := if request.proofs then #[SMT.Command.setOption "produce-proofs" "true"] else #[]
   cores ++ proofs
+
+/-- The follow-up commands sent after an `unsat` verdict for a request. -/
+def unsatFollowUp (request : SolverRequest) : Array SMT.Command :=
+  (if request.cores then #[SMT.Command.getUnsatCore] else #[])
+    ++ (if request.proofs then #[SMT.Command.getProof] else #[])
+
+/-- The argv for a backend, a solver time limit in milliseconds, and a request. -/
+def backendArgs (cfg : Config) (limitMs : Nat) (request : SolverRequest) :
+    Option (Array String) :=
+  (backendSpec cfg.backend).map fun spec => spec.args limitMs request ++ cfg.additionalArgs
+
+/-- Kill margin past the solver's own limit, so a solver that honours its limit can
+still print its verdict. -/
+def killGraceMs : Nat := 2000
+
+/-- A wall-clock budget shared by the solver queries of one `crush` call:
+`crush.timeout` is a per-call limit. The first query gets `crush.timeout` as its own
+limit; every query is killed at one deadline, `killGraceMs` after that limit, and a
+later query gets only the time left before it. -/
+structure QueryBudget where
+  /-- When every query of the call is killed (`IO.monoMsNow` milliseconds). -/
+  deadline : Nat
+  deriving Inhabited
+
+/-- Start the budget for a call now. -/
+def QueryBudget.start (cfg : Config) : BaseIO QueryBudget := do
+  return { deadline := (← IO.monoMsNow) + cfg.timeout * 1000 + killGraceMs }
+
+/-- Milliseconds left before the deadline. -/
+def QueryBudget.remainingMs (budget : QueryBudget) : BaseIO Nat := do
+  return budget.deadline - (← IO.monoMsNow)
 
 /-- Split a parsed solver response according to the backend's enabled follow-ups.
 Leading atoms (a status token some solvers repeat) are skipped, matching the
@@ -157,12 +224,12 @@ def splitCoreAndProof (hasCore hasProof : Bool) (response : Array SMT.Sexp) :
 abbrev SolverProc := IO.Process.Child ⟨.piped, .piped, .piped⟩
 
 /-- Spawn the solver process for the configured backend. -/
-def spawn (cfg : Config) : MetaM SolverProc := do
+def spawn (cfg : Config) (limitMs : Nat) (request : SolverRequest) : MetaM SolverProc := do
   let some spec := backendSpec cfg.backend
     | throwError "crush: backend `{cfg.backend}` does not spawn a solver process"
   unless ← backendAvailable cfg.backend do
     throwError (← missingSolverMessage cfg.backend spec.exe)
-  let args := spec.args cfg.timeout ++ cfg.additionalArgs
+  let args := spec.args limitMs request ++ cfg.additionalArgs
   -- Keep OS lookup at launch; prior resolution only checks availability.
   try
     IO.Process.spawn { stdin := .piped, stdout := .piped, stderr := .piped,
@@ -208,24 +275,34 @@ private def awaitBy {α : Type} (task : Task (Except IO.Error α))
 /-- Run a full query with our own wall-clock guard.
 
 `script` is the declaration/assertion prefix; we append the check-sat and
-result-extraction commands ourselves. On timeout we kill the child and return
-`.unknown "timeout"`. The child is always killed before returning. -/
-def runQuery (cfg : Config) (script : Array SMT.Command) : MetaM Result := do
-  let some spec := backendSpec cfg.backend
+result-extraction commands ourselves. The solver's own limit is `limitMs`
+(`crush.timeout` by default), and the child is killed at the deadline of `budget` (a
+fresh call budget by default), which also covers the follow-up output. On timeout
+before a verdict we return `.unknown "timeout"`. A timeout while reading the follow-up
+output keeps the verdict: `unsat` then carries no core or proof. Without `getModel`, `sat`
+returns at once with no model. The child is always killed before returning. -/
+def runQuery (cfg : Config) (script : Array SMT.Command)
+    (budget? : Option QueryBudget := none) (limitMs? : Option Nat := none)
+    (getModel := true) : MetaM Result := do
+  let some _ := backendSpec cfg.backend
     | throwError "crush: backend `{cfg.backend}` does not spawn a solver process"
-  let p ← spawn cfg
-  -- Allow the solver's own timeout a grace margin, within one deadline
-  -- covering both the verdict and follow-up output.
-  let start ← IO.monoMsNow
-  let deadline := start + (cfg.timeout + 2) * 1000
+  let request ← SolverRequest.current cfg
+  let budget ← budget?.getDM (QueryBudget.start cfg)
+  let limitMs := max 1 (limitMs?.getD (cfg.timeout * 1000))
+  let p ← spawn cfg limitMs request
+  let deadline := budget.deadline
+  -- Sleeps in slices and stops once cancelled (`finally`): a task thread has a 1 GB stack,
+  -- and each solver launch forks this process with every live thread.
   let timerTask ← IO.asTask (prio := .dedicated) do
-    let now ← IO.monoMsNow
-    if now < deadline then IO.sleep (deadline - now).toUInt32
+    repeat
+      let now ← IO.monoMsNow
+      if now ≥ deadline || (← IO.checkCanceled) then break
+      IO.sleep (min 50 (deadline - now)).toUInt32
   -- Drained for the child's whole lifetime; see the module comment.
   let errTask ← IO.asTask (prio := .dedicated) p.stderr.readToEnd
   try
     -- Fed from a task, so stdout is drained while the script is still going in.
-    let text := commandText (prologue spec ++ script ++ #[.checkSat])
+    let text := commandText (prologue request ++ script ++ #[.checkSat])
     let writeTask ← IO.asTask (prio := .dedicated) (do
       p.stdin.putStr text
       p.stdin.flush)
@@ -239,26 +316,31 @@ def runQuery (cfg : Config) (script : Array SMT.Command) : MetaM Result := do
       match token with
       | "unsat" =>
         if wrote.isNone then return .unknown "writing the solver script failed or timed out"
-        let follow :=
-          (if spec.unsatCores then #[SMT.Command.getUnsatCore] else #[])
-            ++ (if spec.proofs then #[SMT.Command.getProof] else #[])
-        let rest ← drainResponse p follow timerTask
+        let some rest ← drainResponse p (unsatFollowUp request) timerTask
+          | trace[crush.result] "timed out reading the core and proof after `unsat`; \
+              keeping the verdict without them"
+            return .unsat none #[]
         let (core, proof) :=
-          splitCoreAndProof spec.unsatCores spec.proofs (SMT.parseSexpPrefix rest)
+          splitCoreAndProof request.cores request.proofs (SMT.parseSexpPrefix rest)
         return .unsat core proof
       | "sat" =>
         if wrote.isNone then return .unknown "writing the solver script failed or timed out"
-        return .sat (← drainResponse p #[.getModel] timerTask) (rejectionDiagnostics noise)
+        unless getModel do return .sat "" (rejectionDiagnostics noise)
+        let some model ← drainResponse p #[.getModel] timerTask
+          | trace[crush.result] "timed out reading the model after `sat`"
+            return .sat "" (rejectionDiagnostics noise)
+        return .sat model (rejectionDiagnostics noise)
       | "unknown" =>
         if wrote.isNone then return .unknown "writing the solver script failed or timed out"
-        let reason ← drainResponse p #[] timerTask
+        let reason := (← drainResponse p #[] timerTask).getD "timeout"
         let rejected := rejectionDiagnostics noise
         return .unknown (if rejected.isEmpty then reason else s!"{reason}; {rejected}")
       | _ =>
         -- Report startup or process failure from stderr when no verdict was produced.
         let errDetail ← stderrExcerpt errTask timerTask
         if errDetail.contains launchFailureMarker then
-          throwError "crush: backend `{cfg.backend}` could not run the `{spec.exe}` \
+          let exe := (backendExe cfg.backend).getD "solver"
+          throwError "crush: backend `{cfg.backend}` could not run the `{exe}` \
                       executable: {errDetail}. Check that it is installed, executable, \
                       and built for this platform."
         let details :=
@@ -293,21 +375,22 @@ where
   `(exit)` is the fast path; closing stdin is the EOF for a solver that ignores it.
 
   A solver that has already exited makes the write fail; the verdict still stands, so
-  the response is simply empty. -/
+  the response is simply empty. `none` means the deadline passed while reading: the
+  child is killed, and the caller keeps the verdict. -/
   drainResponse (p : SolverProc) (follow : Array SMT.Command)
       (timerTask : Task (Except IO.Error Unit)) :
-      MetaM String := do
+      MetaM (Option String) := do
     try
       p.stdin.putStr (commandText (follow ++ #[.exit]))
       p.stdin.flush
-    catch _ => return ""
+    catch _ => return some ""
     let (_, p) ← p.takeStdin
     let readTask ← IO.asTask (prio := .dedicated) p.stdout.readToEnd
     match ← awaitBy readTask timerTask with
-    | some response => return response
+    | some response => return some response
     | none =>
       try p.kill catch _ => pure ()
-      throwError "crush: timed out reading solver output after its verdict"
+      return none
 
 /-- Optionally write the script to disk for debugging / reproducing.
 
@@ -315,7 +398,7 @@ Includes the same option prologue `runQuery` sends, so replaying the file reprod
 core and certificate too. -/
 def maybeSave (cfg : Config) (script : Array SMT.Command) : MetaM Unit := do
   if cfg.savePath.isEmpty then return
-  let prefixCmds := (backendSpec cfg.backend).map prologue |>.getD #[]
+  let prefixCmds := prologue (← SolverRequest.current cfg)
   IO.FS.writeFile cfg.savePath
     (scriptToString (prefixCmds ++ script) ++ "\n(check-sat)\n")
 

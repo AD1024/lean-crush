@@ -119,3 +119,36 @@ private def fnB : SSort := .app (.symb "FnB") #[]
   | .ok () => pure ()
   | .error error =>
     throw <| IO.userError s!"valid signed comparison aliases failed: {error}"
+
+/-! SMT-LIB n-ary forms (review round 3, C7): `+`, `*`, `-` and `str.++` associate to
+the left, `=>` to the right, and `=` and the comparisons are chainable. -/
+
+private def intSort : SSort := .app (.symb "Int") #[]
+private def boolSort : SSort := .app (.symb "Bool") #[]
+private def stringSort : SSort := .app (.symb "String") #[]
+
+private def naryPrelude : Array Command := #[
+  .declFun "x" #[] intSort, .declFun "y" #[] intSort, .declFun "z" #[] intSort,
+  .declFun "b" #[] boolSort, .declFun "c" #[] boolSort,
+  .declFun "s" #[] stringSort]
+
+#eval show IO Unit from do
+  for term in #[(smt| (= (+ x y z) (* x y z))), (smt| (= (- x y z) (- x))),
+      (smt| (< x y z)), (smt| (<= x y z)), (smt| (> x y z)), (smt| (>= x y z)),
+      (smt| (= x y z)), (smt| (=> b c b)), (smt| (= (str.++ s s s) s))] do
+    match checkScript (naryPrelude.push (.assert term)) with
+    | .ok () => pure ()
+    | .error error => throw <| IO.userError s!"n-ary form rejected: {error}"
+
+#eval show IO Unit from do
+  for (term, expected) in #[((smt| (= (+ x) x)), "at least 2"),
+      ((smt| (= x y b)), "incompatible sorts"), ((smt| (< x)), "at least 2"),
+      -- An operand of unknown sort first does not hide the others.
+      ((smt| (= (str.at s 0) x b)), "incompatible sorts"),
+      ((smt| (distinct (str.at s 0) x b)), "incompatible sorts"),
+      ((smt| (=> b)), "at least 2")] do
+    match checkScript (naryPrelude.push (.assert term)) with
+    | .error error =>
+      unless error.message.contains expected do
+        throw <| IO.userError s!"unexpected checker error: {error}"
+    | .ok () => throw <| IO.userError "an ill-formed n-ary application was accepted"

@@ -116,7 +116,9 @@ def parseCommand (s : Sexp) : Option Command :=
       let kw := keywordArgs (xs.extract 1 xs.size)
       let id := match (kw.find? (·.1 == "step")).map (·.2) with
         | some (Sexp.atom i) => i | _ => ""
-      some (.anchor id (xs.extract 1 xs.size))
+      -- Strip annotations such as `(! (choice …) :named @sk)` from `:args`, as for step
+      -- arguments; `collectNamed` reads the raw certificate, so the names are kept.
+      some (.anchor id ((xs.extract 1 xs.size).map stripAnnot))
     | _ => none
   | _ => none
 

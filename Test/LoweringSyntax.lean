@@ -123,6 +123,86 @@ run_meta do
   unless result.isNone && state.commands.isEmpty do
     throwError "a mismatched type was accepted or emitted commands"
 
+/-- `let v₁ := n + n; …; let v_d := v_{d-1} + v_{d-1}; let w := n.succ; body v_d w`. -/
+private def doublings (n : Expr) (depth : Nat) (body : Expr → Expr → MetaM Expr) : MetaM Expr :=
+  go depth n #[]
+where
+  go : Nat → Expr → Array Expr → MetaM Expr
+    | 0, v, lets =>
+      withLetDecl `w (mkConst ``Nat) (mkApp (mkConst ``Nat.succ) n) fun w => do
+        mkLetFVars (lets.push w) (← body v w)
+    | remaining + 1, v, lets => do
+      withLetDecl (.mkSimple s!"v{lets.size + 1}") (mkConst ``Nat) (← mkAppM ``HAdd.hAdd #[v, v])
+        fun v' => go remaining v' (lets.push v')
+
+/-- `lower v w + v + w`. -/
+private def sumWith (lower : Expr → Expr → Expr) (v w : Expr) : MetaM Expr := do
+  mkAppM ``HAdd.hAdd #[← mkAppM ``HAdd.hAdd #[lower v w, v], w]
+
+/-- The number of SMT additions in `e`'s translation, with its declarations and axioms. -/
+private def additions (e : Expr) : MetaM (Nat × String) := do
+  let (term, state) ← TranslateM.run {} (emitTerm e)
+  let output := toString term ++ String.intercalate "\n" (state.commands.toList.map toString)
+  return ((output.splitOn "(+ ").length - 1, output)
+
+-- A lowering that opens one shared `let` keeps the others as SMT `let` references, so the
+-- query grows linearly with the number of doublings.
+run_meta do
+  withLocalDeclD `n (mkConst ``Nat) fun n => do
+    let mut sizes := #[]
+    for depth in [6, 12] do
+      let (size, output) ← additions (← doublings n depth (sumWith (mkApp2 (mkConst ``nested))))
+      unless (output.splitOn s!"(+ let_{depth} (+ n_0 1))").length == 2 do
+        throwError "the lowering did not receive `v{depth}` as its `let` variable: {output}"
+      sizes := sizes.push size
+    unless sizes == #[sizes[0]!, sizes[0]! + 6] do
+      throwError "additions grew nonlinearly with the doublings: {sizes}"
+
+def nestedHand (x y : Nat) : Nat := x + y
+
+@[crush_lower nestedHand]
+def lowerNestedHand : LoweringHandler := fun ctx => do
+  let #[x, y] := ctx.args | return none
+  unless y.isAppOfArity ``Nat.succ 1 do return none
+  return some (smt| (+ $(← ctx.emitTerm x) (+ $(← ctx.emitTerm y.appArg!) 1)))
+
+-- In a closure body, a handwritten or generated lowering that needs the captured `w`
+-- substitutes `w` alone: the doublings stay shared.
+run_meta do
+  withLocalDeclD `n (mkConst ``Nat) fun n => do
+    for lowering in [``nestedHand, ``nested] do
+      let mut sizes := #[]
+      for depth in [6, 12] do
+        let closure (v w : Expr) : MetaM Expr := withLocalDeclD `x (mkConst ``Nat) fun x => do
+          let lower (v w : Expr) := mkApp2 (mkConst lowering) (mkApp2 (mkConst ``Nat.add) v x) w
+          mkLambdaFVars #[x] (← sumWith lower v w)
+        let (size, output) ← additions (← doublings n depth closure)
+        -- An application the lowering declined would be an uninterpreted symbol.
+        if (output.splitOn lowering.getString!).length > 1 then
+          throwError "`{lowering}` did not fire in the closure: {output}"
+        sizes := sizes.push size
+      unless sizes == #[sizes[0]!, sizes[0]! + 6] do
+        throwError "`{lowering}` in a closure grew nonlinearly with the doublings: {sizes}"
+
+-- A lowering in a closure body that needs a captured `let` value substitutes the binding;
+-- the rebuilt closure captures `n` and binds it in its defining axiom.
+theorem loweringInClosure :
+    (∀ n : Nat, let v := Nat.succ n; (fun x : Nat => nested x v) = (fun x => nested x v + 0))
+      ∧ True := by
+  crush
+
+-- A captured `let` whose value the lowering declines stays shared.
+run_meta do
+  let goal ← withLocalDeclD `n (mkConst ``Nat) fun n => do
+    withLetDecl `v (mkConst ``Nat) (← mkAppM ``HAdd.hAdd #[n, mkNatLit 1]) fun v => do
+      let lam (extra : Bool) := withLocalDeclD `x (mkConst ``Nat) fun x => do
+        let app := mkApp2 (mkConst ``nested) x v
+        mkLambdaFVars #[x] (← if extra then mkAppM ``HAdd.hAdd #[app, mkNatLit 0] else pure app)
+      mkForallFVars #[n] (← mkLetFVars #[v] (← mkEq (← lam false) (← lam true)))
+  let (term, _) ← TranslateM.run {} (emitTerm goal)
+  unless ((toString term).splitOn "(let ((let_").length > 1 do
+    throwError "the declined `let` was substituted: {term}"
+
 -- Same-priority registration names must not collide, and open namespaces resolve
 -- constants at registration rather than at the eventual tactic call.
 open LoweringSyntaxImported in
@@ -240,3 +320,18 @@ theorem checkedLowering (x : Int) : bumpDo x = x + 6 := by crush
 #print axioms checkedLowering
 
 end LoweringSyntaxTest
+
+/-! ## Extensions may emit n-ary SMT-LIB operators (review round 3, C7) -/
+
+namespace NaryLowering
+
+def add3 (x y z : Int) : Int := x + y + z
+
+open Crush in
+register_lowering term <<
+  (add3 (term x) (term y) (term z)) => (smt| (+ $x $y $z))
+>>
+
+theorem nary_lowering (x y z : Int) : add3 x y z = x + y + z := by crush
+
+end NaryLowering

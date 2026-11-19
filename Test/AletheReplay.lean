@@ -632,3 +632,74 @@ theorem trusted_native_decide (a b : BitVec 8) :
     throwError "trusted native reconstruction used an unintended trust path"
 
 end TrustedNativeDecide
+
+
+/-! ## Review round 3: replay declines on valid steps (W2–W7)
+
+Each theorem below declined before; `alethe_round3_checked` confirms that none uses the
+trust axiom. -/
+
+section Round3
+set_option crush.backend "cvc5"
+set_option crush.trust "reconstruct"
+set_option crush.reconstruct "alethe"
+set_option crush.timeout 20
+
+-- W2: `subproof`, `bind` and `sko_*` are discharged structurally.
+theorem alethe_w2_subproof (r : Int → Int → Prop) (h : ∀ x, ∃ y, r x y)
+    (h2 : ∀ x y, r x y → r y x) : ∃ a, r a 0 := by crush
+
+-- W3: decoding fuel is charged only for `:named` expansion, not term nesting.
+theorem alethe_w3_deep70 (f : Int → Int) (a : Int) (h : f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (a)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))) = 0) :
+    f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (a)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))) + 1 = 1 := by crush
+theorem alethe_w3_deep200 (f : Int → Int) (a : Int) (h : f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (a)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))) = 0) :
+    f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (f (a)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))) + 1 = 1 := by crush
+
+-- W4: string literals are unescaped in one pass.
+theorem alethe_w4_accent (x y : String) (h : x = "é") (h2 : y = x ++ "b") :
+    y = "éb" := by crush
+theorem alethe_w4_backslash (x y : String) (h : x = "\\") (h2 : y = x ++ "b") :
+    y = "\\b" := by crush
+theorem alethe_w4_escape_text (x y : String) (h : x = "\\u{41}") (h2 : y = x ++ "b") :
+    y = "\\u{41}b" := by crush
+
+-- W5: `choice` over a type without a `Nonempty` instance uses inhabitation evidence
+-- from the facts (here `¬ ∀ x, q x`).
+theorem alethe_w5_choice (α : Type) (p q : α → Prop) (h : ∀ x, p x → q x)
+    (h2 : ¬ ∀ x, q x) : ¬ ∀ x, p x := by crush
+theorem alethe_w5_choice_instance (α : Type) [Inhabited α] (p q : α → Prop)
+    (h : ∀ x, p x → q x) (h2 : ¬ ∀ x, q x) : ¬ ∀ x, p x := by crush
+
+end Round3
+
+open Lean Meta Crush Crush.Alethe in
+run_meta do
+  for name in [``alethe_w2_subproof, ``alethe_w3_deep70, ``alethe_w3_deep200,
+      ``alethe_w4_accent, ``alethe_w4_backslash, ``alethe_w4_escape_text,
+      ``alethe_w5_choice, ``alethe_w5_choice_instance] do
+    if (← collectAxioms name).contains ``Crush.crushSorry then
+      throwError "`{name}` was closed with the trust axiom"
+
+-- W4: the decoder handles both escape forms and leaves other backslashes alone.
+open Crush.Alethe in
+#eval show IO Unit from do
+  for (raw, expected) in [("\\u{e9}", "é"), ("\\u{5c}u{41}", "\\u{41}"), ("\\u0041", "A"),
+      ("\\u{1F600}", "😀"), ("a\\b", "a\\b"), ("\\u{}", "\\u{}"), ("\\u{123456}", "\\u{123456}"),
+      ("\\u12", "\\u12")] do
+    unless decodeSmtString raw == expected do
+      throw <| IO.userError s!"decodeSmtString {raw} = {decodeSmtString raw}, expected {expected}"
+
+-- W6: anchor arguments lose their annotations; `collectNamed` still sees the names.
+open Crush Crush.Alethe in
+#eval show IO Unit from do
+  let certificate := "unsat\n(\n(anchor :step t1 :args ((:= (x Int) (! (+ y 1) :named @sk))))\n\
+    (step t1.t0 (cl (= x x)) :rule refl)\n(step t1 (cl (= x x)) :rule bind)\n)"
+  let some parsed := parseProof certificate
+    | throw <| IO.userError "could not parse the anchor certificate"
+  let some (Command.anchor _ args) := parsed.commands[0]?
+    | throw <| IO.userError "the first command is not an anchor"
+  if toString (SMT.Sexp.list args) |>.contains "!" then
+    throw <| IO.userError s!"anchor arguments kept an annotation: {SMT.Sexp.list args}"
+  let named := (SMT.parseSexps certificate).foldl (fun acc s => collectNamed s acc) {}
+  unless named.contains "@sk" do
+    throw <| IO.userError "the anchor's `:named` binding was lost"

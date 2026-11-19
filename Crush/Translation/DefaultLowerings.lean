@@ -212,14 +212,23 @@ These use the same public `withFiniteArray` view available to downstream
 has replaced Crush's finite Array representation.
 -/
 
-private def optionTerms (elem : Expr) (value : SMT.Term) :
-    TranslateM (SMT.Term × SMT.Term) := do
-  let optionSort ← declareDatatype ``Option #[elem]
-  let noneCtor ← reserveCtorSymbol optionSort ``Option.none
-  let someCtor ← reserveCtorSymbol optionSort ``Option.some
-  let noneTerm := SMT.Term.const noneCtor
-  let someTerm := SMT.Term.app (.symb someCtor) #[value]
-  return (noneTerm, someTerm)
+/-- The SMT constructors of `Option elem`. -/
+private structure OptionCtors where
+  noneCtor : String
+  someCtor : String
+
+/-- The constructors of the SMT datatype that `Option elem` translates to, or `none`
+when `Option elem` is opaque in this query (an untranslatable `elem`) or a sort
+handler selected another representation. The lowering then declines. -/
+private def optionCtors? (ctx : TranslationCtx) (elem : Expr) :
+    TranslateM (Option OptionCtors) := do
+  let optionTy ← mkAppM ``Option #[elem]
+  let actual ← ctx.emitSort optionTy
+  let some (_, _, _, optionSort) ← datatypeSort? optionTy | return none
+  unless actual == .app (.symb optionSort) #[] do return none
+  return some {
+    noneCtor := ← reserveCtorSymbol optionSort ``Option.none
+    someCtor := ← reserveCtorSymbol optionSort ``Option.some }
 
 private def guardedArrayStore (ctx : TranslationCtx)
     (elem arr idx value : Expr) : TranslateM (Option SMT.Term) := do
@@ -299,10 +308,12 @@ def arrayGetElemOpt : LoweringHandler := fun ctx => do
   unless (← whnf idxTy).isConstOf ``Nat do return none
   unless ← isDefEqRigid elem arrayElem do return none
   unless ctx.hasInstanceHead 4 ``Array.instGetElem?NatLtSize do return none
+  let some option ← optionCtors? ctx arrayElem | return none
   let sidx ← ctx.emitTerm idx
   withFiniteArray ctx arrayElem arr fun view => do
     let value := (smt| (select $(view.data) $sidx))
-    let (noneTerm, someTerm) ← optionTerms arrayElem value
+    let someTerm := SMT.Term.app (.symb option.someCtor) #[value]
+    let noneTerm := SMT.Term.const option.noneCtor
     return (smt| (ite (< $sidx $(view.length)) $someTerm $noneTerm))
 
 @[crush_lower Array.set]
@@ -378,9 +389,11 @@ def arrayBackBang : LoweringHandler := fun ctx => do
 @[crush_lower Array.back?]
 def arrayBackOpt : LoweringHandler := fun ctx => do
   let #[elem, arr] := ctx.args | return none
+  let some option ← optionCtors? ctx elem | return none
   withFiniteArray ctx elem arr fun view => do
     let value := (smt| (select $(view.data) (- $(view.length) 1)))
-    let (noneTerm, someTerm) ← optionTerms elem value
+    let someTerm := SMT.Term.app (.symb option.someCtor) #[value]
+    let noneTerm := SMT.Term.const option.noneCtor
     return (smt| (ite (> $(view.length) 0) $someTerm $noneTerm))
 
 end Crush.DefaultLowerings

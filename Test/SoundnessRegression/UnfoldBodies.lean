@@ -1,8 +1,8 @@
 import Crush.Translation.Unfold
 
 /-!
-Automatic unfolding must warn and skip relevant declarations whose metadata exposes
-no definition body. Unrelated queries must not inspect unavailable marked definitions.
+Automatic unfolding must warn and skip relevant marked declarations that have no
+equation lemmas. Unrelated queries must not inspect unavailable marked definitions.
 -/
 
 open Lean Meta Crush
@@ -10,7 +10,7 @@ open Lean Meta Crush
 axiom unavailableBody : Nat → Nat
 run_cmd crushUnfoldExt.add (``unavailableBody, .unfold) .local
 
-/-- warning: crush: skipping automatic unfolding of `unavailableBody` because its definition body is unavailable -/
+/-- warning: crush: skipping automatic unfolding of `unavailableBody` because it has no equations -/
 #guard_msgs in
 #eval show MetaM Unit from do
   unless (← relevantAutoUnfoldLemmas #[``unavailableBody]).isEmpty do

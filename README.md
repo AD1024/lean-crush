@@ -48,14 +48,20 @@ report. To require a Lean proof, use the reconstruction policy below.
 
 ## Facts and unfolding
 
-Bare `crush` introduces binders and uses all local hypotheses. Select facts or
-supply extra lemmas with:
+`crush` introduces binders and uses all local hypotheses. As in `grind`, a hint
+list adds facts and never removes any:
 
 ```lean
-crush [h, myLemma]   -- only the listed hypotheses and lemmas
-crush [*, myLemma]   -- all local hypotheses, plus a lemma
-crush u[myFn]        -- unfold a definition using its equations
+crush [myLemma, myFn]  -- all local hypotheses, a lemma, and myFn's equations
+crush [*, myLemma]     -- also instantiate every local hypothesis eagerly
+crush only [myLemma]   -- drop automatically collected lemmas
+crush [-autoLemma]     -- keep one global lemma out of the automatic ones
+crush u[myFn]          -- unfold a definition using its equations
 ```
+
+Use `clear h` to exclude a hypothesis. If a finished proof still uses a lemma
+excluded with `-name` (through instance synthesis or a reconstruction tactic,
+which crush does not assemble), crush warns.
 
 Definition equations may also be added automatically. Mark a definition with
 `@[crush_unfold]`, or enable unfolding for an existing one:
@@ -169,21 +175,18 @@ lake build Test         # full dependency-free test suite
 
 Runnable examples live in [`Test/`](Test/), with verification conditions in
 [`Test/CaseStudies/`](Test/CaseStudies/) and optional Mathlib integration in
-[`MathlibTest/`](MathlibTest/). Read the
-[optimization guide](Doc/OPTIMIZATIONS.md) before changing search bounds or
-reconstruction heuristics.
+[`MathlibTest/`](MathlibTest/).
 
-For recorded results, see [`BENCHMARKS.md`](BENCHMARKS.md) and the manual's
+Recorded results are in [`BENCHMARKS.md`](BENCHMARKS.md) and the manual's
 [coverage and reconstruction figures](https://ad1024.github.io/lean-crush/Benchmarks/).
-To run the experiments:
+To rerun the experiments (the first run builds the benchmark projects and can take
+hours; `--suites curated` is the smallest suite):
 
 ```sh
 bash run-experiments.sh
 ```
 
-The first run provisions and builds the benchmark projects and can take hours.
-Use `--suites curated` for the smallest suite; see the
-[benchmark script guide](scripts/README.md) for prerequisites, resuming runs,
+The [benchmark script guide](scripts/README.md) covers prerequisites, resuming runs,
 plotting, and individual harnesses.
 
 ## Citation

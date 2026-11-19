@@ -180,6 +180,9 @@ example (x : Int) : loweringAddThree x = x + 3 := by crush
 numerals, Booleans, and strings. `$x` splices an existing `SMT.Term`.
 When an `SMT.SSort` is expected, the same quotation constructs a sort and its
 splices must be sorts. The final SMT script is sort-checked before solving.
+The checker accepts SMT-LIB's n-ary forms, so a lowering may emit
+`(+ $x $y $z)`: `+`, `*`, `-`, and `str.++` associate to the left, `=>` to the
+right, and `=` and the integer comparisons are chainable.
 
 There are three registration kinds:
 
@@ -210,7 +213,9 @@ Patterns match exact elaborated application spines, including implicit type
 and instance arguments. They do not unfold definitions or compare by
 definitional equality. The optional type pattern follows the same structural
 rules, with a bare constant interpreted as a nullary type. Captures must have
-distinct names.
+distinct names. A pattern looks through a variable standing for a shared `let`
+value only where it matches a nested application, so other captures keep the
+variable and its sharing.
 All pattern checks finish before any capture is recursively translated.
 
 The right-hand side can return a pure `SMT.Term`, a `TranslateM SMT.Term`, or a
@@ -262,6 +267,10 @@ The handler receives the original Lean arguments and recursive `emitTerm` and
 `emitSort` callbacks.
 The head and arguments are syntactic and are not weak-head-normalized before
 dispatch; use the available `MetaM` operations when a handler needs reduction.
+An argument may be a variable standing for a shared `let` value; `ctx.openLet`
+replaces it by its value and keeps the variables inside. A handler that declines
+is retried with the values substituted, and a subterm it translates that is still
+a `let` value translates as that variable.
 It returns `some term` when it recognizes an application and `none` to defer:
 
 ```lean

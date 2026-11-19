@@ -35,6 +35,11 @@ def KernelCheckSnapshot.capture : CoreM KernelCheckSnapshot :=
     axiomFailure := ← IO.mkRef none
   }
 
+/-- Whether `name` already existed when the snapshot was taken, as opposed to being
+generated during this invocation. -/
+def KernelCheckSnapshot.contains (snapshot : KernelCheckSnapshot) (name : Name) : Bool :=
+  snapshot.env.contains name
+
 /-- The first admission rejected during this invocation's proof attempts. -/
 def KernelCheckSnapshot.axiomFailure? (snapshot : KernelCheckSnapshot) :
     BaseIO (Option MessageData) :=
@@ -94,12 +99,42 @@ private def ensureAxiomClosure (label : String) (e : Expr)
           snapshot.axiomFailure.set (some diagnostic)
       throwError "crush: {diagnostic}"
 
-/-- Check a replay fragment with the elaborator before the complete proof reaches the kernel. -/
-def validateProofCandidate (expected proof : Expr) : MetaM Expr := do
+/-- `ensureComplete` without descending into `validated` subterms or revisiting shared
+ones. A replay step embeds every ancestor's proof, so checking each step in full is
+quadratic in the length of the certificate. -/
+private def ensureCompleteExcept (label : String) (e : Expr)
+    (validated : Std.HashSet Expr) : MetaM Unit := do
+  -- Cached, and covers universe metavariables too.
+  if e.hasMVar then throwError "crush: {label} contains unresolved metavariables"
+  let visited ← IO.mkRef ({} : Std.HashSet Expr)
+  let rec visit (e : Expr) : MetaM Unit := do
+    if validated.contains e || (← visited.get).contains e then return
+    visited.modify (·.insert e)
+    match e with
+    | .const name _ =>
+      if name == ``sorryAx then throwError "crush: {label} contains `sorry`"
+      if name == `Crush.crushSorry then
+        throwError "crush: {label} depends on `Crush.crushSorry`"
+    | .app f a => visit f; visit a
+    | .lam _ t b _ | .forallE _ t b _ => visit t; visit b
+    | .letE _ t v b _ => visit t; visit v; visit b
+    | .mdata _ b | .proj _ _ b => visit b
+    | _ => pure ()
+  visit e
+
+/-- Check a replay fragment with the elaborator before the complete proof reaches the
+kernel. Subterms in `validated` (premise proofs checked when they were produced) are
+not traversed again; the final proof is kernel-checked in full anyway. -/
+def validateProofCandidate (expected proof : Expr) (validated : Array Expr := #[]) :
+    MetaM Expr := do
   let expected ← instantiateMVars expected
   let proof ← instantiateMVars proof
   ensureComplete "reconstructed goal type" expected
-  ensureComplete "reconstructed proof" proof
+  if validated.isEmpty then
+    ensureComplete "reconstructed proof" proof
+  else
+    ensureCompleteExcept "reconstructed proof" proof
+      (validated.foldl (·.insert ·) {})
   let actual ← inferType proof
   unless ← isDefEqGuarded actual expected do
     throwError "crush: reconstructed proof has type{indentExpr actual}\nbut expected{indentExpr expected}"
@@ -261,7 +296,11 @@ private def ensureNativeAxiomClosure (snapshot : KernelCheckSnapshot)
 
 /-- Collect the local declarations needed to close `exprs`, without scanning unrelated
 entries in the ambient context. Visible let values contribute dependencies; nondependent
-lets are generalized and therefore contribute only their types. -/
+lets are generalized and therefore contribute only their types.
+
+The result includes let-bound locals. `mkForallFVars` turns a (dependent) let-bound
+local into a `let` binder, not a `∀` binder, so a proof of the closed proposition must
+not be applied to it: use `closeTarget`, whose `args` are exactly the `∀` parameters. -/
 def collectProofParams (exprs : Array Expr) : MetaM (Array Expr) := do
   let lctx ← getLCtx
   let mut used : CollectFVars.State := {}
@@ -283,6 +322,24 @@ def collectProofParams (exprs : Array Expr) : MetaM (Array Expr) := do
       retained := retained.insert fvarId
       indexed := indexed.push (decl.index, mkFVar fvarId)
   return (indexed.qsort (fun left right => left.1 < right.1)).map (·.2)
+
+/-- A proposition closed over the locals it depends on, for proving in an empty context. -/
+structure ClosedTarget where
+  /-- The closed proposition. Let-bound locals appear as `let` binders. -/
+  type : Expr
+  /-- The locals that became `∀` binders, in order: apply a proof of `type` to these. -/
+  args : Array Expr
+
+/-- Close `target` over the locals it depends on. A proof `p : type` proves `target`
+in the current context as `mkAppN p args`.
+
+Let-bound locals are not arguments: `mkForallFVars` abstracts them as `let` binders,
+which a proof of the closed proposition already instantiates with their values. -/
+def closeTarget (target : Expr) : MetaM ClosedTarget := do
+  let params ← collectProofParams #[target]
+  let type ← instantiateMVars (← mkForallFVars params target)
+  let args ← params.filterM fun p => return !(← p.fvarId!.isLetVar)
+  return { type, args }
 
 /-- Report admissions in the goal before speculative reconstruction can hide the
 diagnostic. Only dependencies of the goal itself are included. -/

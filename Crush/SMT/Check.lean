@@ -82,6 +82,10 @@ private def requireArity (name : String) (actual expected : Nat) : Except String
   if actual == expected then pure ()
   else throw s!"`{name}` expects {expected} argument(s), got {actual}"
 
+private def requireAtLeast (name : String) (actual minimum : Nat) : Except String Unit :=
+  if actual >= minimum then pure ()
+  else throw s!"`{name}` expects at least {minimum} argument(s), got {actual}"
+
 private def requireSort (where_ : String) (actual : Option SSort) (expected : SSort) :
     Except String Unit :=
   match actual with
@@ -96,6 +100,13 @@ private def requireSame (where_ : String) (a b : Option SSort) : Except String U
     if a == b then pure ()
     else throw s!"{where_} combines incompatible sorts `{a}` and `{b}`"
   | _, _ => pure ()
+
+/-- Every known sort in `args` is the first known one. -/
+private def requireAllSame (where_ : String) (args : Array (Option SSort)) :
+    Except String Unit := do
+  let some first := args.findSome? id | return
+  for arg in args do
+    requireSame where_ (some first) arg
 
 private def requireBoolArgs (name : String) (args : Array (Option SSort)) :
     Except String Unit := do
@@ -231,19 +242,20 @@ where
         if args.isEmpty then throw s!"`{name}` expects at least one argument, got none"
         requireBoolArgs name args
         return some boolSort
+      -- SMT-LIB: `=>` associates to the right; `=` and the comparisons are chainable;
+      -- `+`, `*`, `-` and `str.++` associate to the left.
       | "=>" =>
-        requireArity name args.size 2
+        requireAtLeast name args.size 2
         requireBoolArgs name args
         return some boolSort
       | "=" =>
-        requireArity name args.size 2
-        requireSame s!"arguments of `{name}`" args[0]! args[1]!
+        requireAtLeast name args.size 2
+        requireAllSame s!"arguments of `{name}`" args
         return some boolSort
       | "distinct" =>
         if args.size < 2 then
           throw s!"`distinct` expects at least two arguments, got {args.size}"
-        for i in [1:args.size] do
-          requireSame "arguments of `distinct`" args[0]! args[i]!
+        requireAllSame "arguments of `distinct`" args
         return some boolSort
       | "ite" =>
         requireArity name args.size 3
@@ -253,12 +265,11 @@ where
           | some sort => some sort
           | none => args[2]!
       | "+" | "*" =>
-        requireArity name args.size 2
+        requireAtLeast name args.size 2
         requireIntArgs name args
         return some intSort
       | "-" =>
-        unless args.size == 1 || args.size == 2 do
-          throw s!"`-` expects one or two arguments, got {args.size}"
+        requireAtLeast name args.size 1
         requireIntArgs name args
         return some intSort
       | "div" | "mod" =>
@@ -266,7 +277,7 @@ where
         requireIntArgs name args
         return some intSort
       | "<" | "<=" | ">" | ">=" =>
-        requireArity name args.size 2
+        requireAtLeast name args.size 2
         requireIntArgs name args
         return some boolSort
       | "abs" =>
@@ -307,7 +318,7 @@ where
         requireSort "argument of `str.len`" args[0]! stringSort
         return some intSort
       | "str.++" =>
-        requireArity name args.size 2
+        requireAtLeast name args.size 2
         for arg in args do requireSort "argument of `str.++`" arg stringSort
         return some stringSort
       | "str.prefixof" | "str.suffixof" | "str.contains" =>

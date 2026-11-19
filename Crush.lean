@@ -42,5 +42,5 @@ This root module re-exports the public API. `import Crush` gives you:
   (`Crush.Solver.Alethe`),
 * all `crush.*` `set_option`s (`Crush.Frontend.Config`).
 
-See `README.md` and `Doc/PLAN.md` for the architecture and roadmap.
+See `README.md` for usage and `Doc/AGENTS.md` for the architecture.
 -/

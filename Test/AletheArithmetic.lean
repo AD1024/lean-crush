@@ -46,10 +46,11 @@ theorem square_root_upper_bound (i x : Nat) (h : x < i * i) :
 #guard_msgs in
 #print axioms square_root_upper_bound
 
--- An ambient comparison omitted from the selected facts cannot justify the goal.
+-- A cleared comparison cannot justify the goal.
 /-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
 example (x y : Nat) (h : x < y) : x * x < y * y := by
+  clear h
   crush []
 
 end AletheArithmetic

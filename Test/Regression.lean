@@ -371,3 +371,154 @@ theorem enum_pigeonhole (x y z t : Color3) :
 -- η for pairs: `Prod Int Int` is now a real datatype with selectors, so the
 -- projection form equals the original.
 theorem prod_eta (x : Int × Int) : x = (Prod.fst x, Prod.snd x) := by crush
+
+/-! ## Primitive projections and eta-reduced `Exists` (review round 3, C8) -/
+
+namespace PrimitiveProjections
+
+open Lean Meta Elab Term
+
+structure Pt where
+  x : Int
+  y : Int
+
+/-- The primitive projection `Expr.proj Pt 0 p`, which source `p.1` does not produce. -/
+elab "proj0% " t:ident : term => do
+  let e ← elabTerm t none
+  return Expr.proj ``Pt 0 e
+
+theorem primitive_projection (p : Pt) (h : (proj0% p) = 3) : p.x + 0 = 3 := by crush
+
+theorem primitive_projection_under_binder (f : Pt → Int)
+    (h : ∀ p : Pt, (proj0% p) = f p) (q : Pt) : f q = q.x := by crush
+
+-- An opaque structure (its field sort is refused) reaches the same symbol.
+structure FinPt where
+  x : Int
+  tag : Fin 3
+
+elab "finproj0% " t:ident : term => do
+  let e ← elabTerm t none
+  return Expr.proj ``FinPt 0 e
+
+theorem primitive_projection_opaque (p : FinPt) (h : (finproj0% p) = 3) :
+    p.x = 3 := by crush
+
+theorem exists_eta (p : Int → Prop) (h : p 3) : Exists p := by crush
+
+/-- error: crush: could not prove the goal -/
+#guard_msgs(error, substring := true) in
+theorem exists_eta_needs_witness (p : Int → Prop) : Exists p := by crush
+
+end PrimitiveProjections
+
+
+/-! ## Nested lets stay linear (review round 3, P2)
+
+A data-valued `let` used more than once is emitted as an SMT `let`, and normalization
+no longer zeta-reduces, so a chain of 32 doubling lets translates in linear size
+instead of 2^32. A `let` whose value occurs in a type falls back to zeta-reduction. -/
+
+namespace NestedLets
+
+theorem nested_lets_linear (h : ∀ a0 : Int, let a1 := a0 + a0; let a2 := a1 + a1; let a3 := a2 + a2; let a4 := a3 + a3; let a5 := a4 + a4; let a6 := a5 + a5; let a7 := a6 + a6; let a8 := a7 + a7; let a9 := a8 + a8; let a10 := a9 + a9; let a11 := a10 + a10; let a12 := a11 + a11; let a13 := a12 + a12; let a14 := a13 + a13; let a15 := a14 + a14; let a16 := a15 + a15; let a17 := a16 + a16; let a18 := a17 + a17; let a19 := a18 + a18; let a20 := a19 + a19; let a21 := a20 + a20; let a22 := a21 + a21; let a23 := a22 + a22; let a24 := a23 + a23; let a25 := a24 + a24; let a26 := a25 + a25; let a27 := a26 + a26; let a28 := a27 + a27; let a29 := a28 + a28; let a30 := a29 + a29; let a31 := a30 + a30; let a32 := a31 + a31; a32 = a32) (y : Int) (hy : y > 2) : y > 1 := by
+  crush
+
+theorem let_used_twice (f : Int → Int) (h : ∀ x : Int, let y := f x; y + y = 2 * f x)
+    (z : Int) : f z + f z = 2 * f z := by crush
+
+set_option crush.trust "reconstruct" in
+theorem let_used_twice_checked (h : ∀ x : Int, let y := x + 1; y * y ≥ 0 ∧ y - 1 = x)
+    (z : Int) : z + 1 - 1 = z := by crush
+
+theorem let_in_type_falls_back (h : ∀ n : Nat, let m := n + 1; (Fin.last m).val = m ∧ m + m > 0)
+    (k : Nat) : k + 1 > 0 := by crush
+
+-- A literal is substituted, so the rotations stay indexed.
+theorem let_literal_operand (x : BitVec 8) :
+    (let n := 1; (x.rotateLeft n).rotateRight n) = x := by crush
+
+-- A let used in a width is substituted.
+set_option crush.trust "reconstruct" in
+theorem let_width_falls_back (p : Nat → Prop)
+    (h : ∀ y : Nat, let n := 2 + 3; (∀ v : BitVec n, v &&& v = v) → p y) (z : Nat) : p z := by
+  crush
+
+-- An unrelated failure (`Fin 5`) is not retried once per enclosing let.
+set_option linter.unusedVariables false in
+theorem let_failure_not_retried (f g : Nat → Nat)
+    (h : ∀ y : Nat, let a1 := g 1; let a2 := g 2; let a3 := g 3; let a4 := g 4; let a5 := g 5;
+      let a6 := g 6; let a7 := g 7; let a8 := g 8; let a9 := g 9; let a10 := g 10;
+      let a11 := g 11; let a12 := g 12; let a13 := g 13; let a14 := g 14; let a15 := g 15;
+      let a16 := g 16; let a17 := g 17; let a18 := g 18; let a19 := g 19; let a20 := g 20;
+      (∀ i : Fin 5, f i.val = y) ∨ (f a1 = f a1 ∧ f a2 = f a2 ∧ f a3 = f a3 ∧ f a4 = f a4 ∧
+      f a5 = f a5 ∧ f a6 = f a6 ∧ f a7 = f a7 ∧ f a8 = f a8 ∧ f a9 = f a9 ∧ f a10 = f a10 ∧
+      f a11 = f a11 ∧ f a12 = f a12 ∧ f a13 = f a13 ∧ f a14 = f a14 ∧ f a15 = f a15 ∧
+      f a16 = f a16 ∧ f a17 = f a17 ∧ f a18 = f a18 ∧ f a19 = f a19 ∧ f a20 = f a20))
+    (z : Nat) : z + 1 > 0 := by crush
+
+-- An inner let's rollback does not hide the outer let's width dependency.
+set_option crush.trust "reconstruct" in
+theorem let_width_under_inner_let (p : Nat → Prop) (f : Nat → Nat)
+    (h : ∀ y : Nat, let n := 2 + 3; let b := f y; (∀ v : BitVec n, v &&& v = v) → p (b + b))
+    (z : Nat) : p (f z + f z) := by
+  crush
+
+def LetFamily : Nat → Type
+  | 0 => Bool
+  | _ + 1 => Int
+
+-- A value with a quantified variable can still make the sort closed.
+theorem let_sort_reduces (p : Nat → Prop)
+    (h : ∀ y : Nat, let n := Nat.succ y; (∀ v : LetFamily n, v = v) → p (n + n))
+    (z : Nat) : p (z.succ + z.succ) := by
+  crush
+
+-- A let inside an instance argument is substituted.
+theorem let_in_instance (g : Nat → Nat) (p : Nat → Prop)
+    (h : ∀ y : Nat, let a := g 2; p (@OfNat.ofNat Nat 1 ⟨a⟩ + a + y))
+    (z : Nat) : p (@OfNat.ofNat Nat 1 ⟨g 2⟩ + g 2 + z) := by
+  crush
+
+-- A computed rotation amount stays indexed.
+theorem let_computed_operand (x : BitVec 8) :
+    (let n := 2 + 3; (x.rotateLeft n).rotateRight n) = x := by crush
+
+-- Twenty lets summed into a width, and twenty refused values, stay linear.
+set_option linter.unusedVariables false in
+theorem let_width_sum (h : ∀ y : Nat, let a1 := 0 + 1; let a2 := 0 + 1; let a3 := 0 + 1; let a4 := 0 + 1; let a5 := 0 + 1; let a6 := 0 + 1; let a7 := 0 + 1; let a8 := 0 + 1; let a9 := 0 + 1; let a10 := 0 + 1; let a11 := 0 + 1; let a12 := 0 + 1; let a13 := 0 + 1; let a14 := 0 + 1; let a15 := 0 + 1; let a16 := 0 + 1; let a17 := 0 + 1; let a18 := 0 + 1; let a19 := 0 + 1; let a20 := 0 + 1; ∀ v : BitVec (a1 + a1 + a2 + a2 + a3 + a3 + a4 + a4 + a5 + a5 + a6 + a6 + a7 + a7 + a8 + a8 + a9 + a9 + a10 + a10 + a11 + a11 + a12 + a12 + a13 + a13 + a14 + a14 + a15 + a15 + a16 + a16 + a17 + a17 + a18 + a18 + a19 + a19 + a20 + a20), v = v ∧ y = y)
+    (z : Nat) : z + 1 > 0 := by crush
+
+set_option linter.unusedVariables false in
+theorem let_values_refused (g : Nat → Nat)
+    (h : ∀ y : Nat, let b1 := g y; let b2 := g (Fin.last b1).val + b1; let b3 := g (Fin.last b2).val + b2; let b4 := g (Fin.last b3).val + b3; let b5 := g (Fin.last b4).val + b4; let b6 := g (Fin.last b5).val + b5; let b7 := g (Fin.last b6).val + b6; let b8 := g (Fin.last b7).val + b7; let b9 := g (Fin.last b8).val + b8; let b10 := g (Fin.last b9).val + b9; let b11 := g (Fin.last b10).val + b10; let b12 := g (Fin.last b11).val + b11; let b13 := g (Fin.last b12).val + b12; let b14 := g (Fin.last b13).val + b13; let b15 := g (Fin.last b14).val + b14; let b16 := g (Fin.last b15).val + b15; let b17 := g (Fin.last b16).val + b16; let b18 := g (Fin.last b17).val + b17; let b19 := g (Fin.last b18).val + b18; let b20 := g (Fin.last b19).val + b19; b20 + b20 = y) (z : Nat) : z + 1 > 0 := by crush
+
+def letBump (k : Nat) : Nat := k + 1
+
+-- A chain of lets reaching a width only through inner values.
+set_option crush.trust "reconstruct" in
+theorem let_chain_to_width (p : Prop) (q : Nat → Prop)
+    (h : let a1 := letBump 3; let a2 := letBump a1; let a3 := letBump a2; let a4 := letBump a3; let a5 := letBump a4; let a6 := letBump a5; let a7 := letBump a6; let a8 := letBump a7; let a9 := letBump a8; let a10 := letBump a9; let a11 := letBump a10; let a12 := letBump a11; let a13 := letBump a12; let a14 := letBump a13; let a15 := letBump a14; let a16 := letBump a15; let a17 := letBump a16; let a18 := letBump a17; let a19 := letBump a18; let a20 := letBump a19; (∀ v : BitVec (a20 - 19), v &&& v = v) → q (a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10 + a11 + a12 + a13 + a14 + a15 + a16 + a17 + a18 + a19) → p)
+    (hq : ∀ k, q k) : p := by
+  crush
+
+-- Counting a let's uses visits a shared subterm once: a 40-deep DAG over an inner binder.
+open Lean Meta in
+run_meta do
+  let nat := mkConst ``Nat
+  withLocalDeclD `f (← mkArrow nat (← mkArrow nat nat)) fun f => do
+    let mut shared : Expr := .bvar 0
+    for _ in [:40] do
+      shared := mkApp2 f shared shared
+    let body := Expr.lam `z nat (mkApp2 f (.bvar 1) shared) .default
+    unless Crush.countLooseBVar0 body 2 == 1 do throwError "miscounted a single use"
+    let twice := Expr.lam `z nat (mkApp2 f (.bvar 1) (mkApp2 f shared (.bvar 1))) .default
+    unless Crush.countLooseBVar0 twice 2 == 2 do throwError "miscounted two uses"
+
+-- A literal rotation amount read through a `let` captured by a closure substitutes the let.
+theorem let_rotation_in_closure :
+    (let k := Nat.succ 0
+     (fun x : BitVec 8 => x.rotateLeft k) = (fun x => x.rotateLeft 1) ∧ k = 1) ∧ True := by
+  crush
+
+end NestedLets

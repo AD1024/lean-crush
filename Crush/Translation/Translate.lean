@@ -48,6 +48,29 @@ def getNatLit? (e : Expr) : TranslateM (Option Nat) := do
     | _ => return none
   | _ => return none
 
+/-- Tag of the error raised when a sort or erased argument depends on an SMT-bound
+variable. -/
+def boundRefusalTag : Name := `crush.boundRefusal
+
+/-- Refuse a translation that needed the values of the captured `let` variables `ids`,
+which do not hold in a closure's defining axiom. `emitLetBinding?` then substitutes them,
+and the rebuilt closure captures what the values mention. -/
+private def refuseCapturedLets {α : Type} (ids : Array FVarId) : TranslateM α := do
+  let tagged := ids.foldl (fun m id => .tagged (boundRefusalTag ++ id.name) m)
+    m!"crush: a translation inside a closure needs the value of a captured `let` variable"
+  throwError (MessageData.tagged boundRefusalTag tagged)
+
+/-- `natValue?` that sees through SMT `let` variables. A literal that needs the value of a
+captured variable refuses (`refuseCapturedLets`), so that its binding is substituted. -/
+def natOperand? (e : Expr) : TranslateM (Option Nat) := do
+  let e ← TranslateM.expandLets e
+  if let some n ← natValue? e then return some n
+  let captured ← TranslateM.capturedLetsIn #[e]
+  if captured.isEmpty then return none
+  let some #[value] ← TranslateM.substituteLets? #[e] (fun _ v => v.captured) | return none
+  if (← natValue? value).isSome then refuseCapturedLets captured
+  return none
+
 /-- Track which sorts have had their `declare-sort` emitted, reusing the name map
 with a sentinel key so we don't re-declare. -/
 def declaredSort (name : String) : TranslateM Bool := do
@@ -93,9 +116,26 @@ def hasLawfulBEq (carrier inst : Expr) : TranslateM Bool := do
   catch _ =>
     return false
 
+/-- Constructor type at the datatype's universe levels and parameters.
+
+A constructor's declared type mentions the inductive's own universe *parameters*.
+Instantiating only the type parameters would leave a field such as `Sort v` at
+the parameter `v`, conflating `T.{0}` and `T.{1}` (or capturing a same-named
+universe of the caller). Every field inspection therefore goes through here. -/
+def instantiateCtorType (ctor : Name) (levels : List Level) (typeArgs : Array Expr) :
+    MetaM Expr := do
+  let info ← getConstInfo ctor
+  unless info.levelParams.length == levels.length do
+    throwError "crush: internal — `{ctor}` expects {info.levelParams.length} universe level(s)"
+  instantiateForall (info.instantiateTypeLevelParams levels) typeArgs
+
 /-- SMT datatypes require a finite constructor tree for every mutually declared sort.
 A Lean inductive may have only recursive constructors and therefore be empty. Keep
-such a block opaque and guarded instead of emitting an invalid SMT datatype. -/
+such a block opaque and guarded instead of emitting an invalid SMT datatype.
+
+This check inspects constructor types at the inductive's own universe parameters.
+That is deliberate and sound: it compares field *head names* with the block's
+member names only, and neither depends on the universe levels the block is used at. -/
 private def hasProductiveDatatypeBlock (iv : InductiveVal) : MetaM Bool := do
   let block := iv.all.toArray
   let mut productive : Std.HashSet Name := {}
@@ -121,22 +161,25 @@ private def hasProductiveDatatypeBlock (iv : InductiveVal) : MetaM Bool := do
 structures, self-recursive `List`- or tree-shaped types, and — via monomorphization —
 *fully-applied parametric* types such as `Option Int`, `Int × Int`, `List Bool`.
 
-`typeArgs` are the concrete parameter values the head is applied to (empty for a
-non-parametric type). The type must be **ground** — no remaining type variables — so
-the constructor field sorts are determined; a bare `List` with an un-instantiated
-element type stays an opaque sort.
+`levels` are the universe levels of the head constant and `typeArgs` the concrete
+parameter values the head is applied to (empty for a non-parametric type). The
+type must be **ground** — no remaining type variables — so the constructor field
+sorts are determined; a bare `List` with an un-instantiated element type stays an
+opaque sort.
 
 We require at least one constructor: SMT-LIB datatypes must be inhabited
 (z3 rejects `(declare-datatypes ((E 0)) (()))`), and more fundamentally every SMT
 sort is non-empty while `Empty` is not, so an empty Lean inductive cannot be
 modelled faithfully and must stay an opaque sort (see `isEmptyType`). -/
-def isSupportedDatatypeApp (n : Name) (typeArgs : Array Expr) : MetaM Bool := do
+def isSupportedDatatypeApp (n : Name) (levels : List Level) (typeArgs : Array Expr) :
+    MetaM Bool := do
   let env ← getEnv
   let some (.inductInfo iv) := env.find? n | return false
   -- Indices (true dependent families) are unsupported; parameters are fine once
   -- instantiated. The applied prefix must supply exactly the parameters.
   if iv.numIndices != 0 then return false
   if typeArgs.size != iv.numParams then return false
+  if levels.length != iv.levelParams.length then return false
   if n == ``Nat || n == ``Int || n == ``Bool || n == ``String then return false
   if iv.ctors.isEmpty then return false
   unless ← hasProductiveDatatypeBlock iv do return false
@@ -156,29 +199,33 @@ def isSupportedDatatypeApp (n : Name) (typeArgs : Array Expr) : MetaM Bool := do
     return false
   -- Instantiated fields must be data with non-function SMT sorts. Direct
   -- positive recursion is supported; proof and function fields remain opaque.
+  -- A field whose type mentions an earlier field (`x : α` after `α : Type`) has no
+  -- single SMT selector sort, so its type stays opaque as well.
   let fieldsOk ← iv.ctors.allM fun ctorName => do
-    let ci ← getConstInfoCtor ctorName
-    let ctorTy ← instantiateForall ci.type typeArgs
-    forallTelescopeReducing ctorTy fun args _ =>
-      args.allM fun a => do
-        let ty ← whnf (← inferType a)
+    let ctorTy ← instantiateCtorType ctorName levels typeArgs
+    forallTelescopeReducing ctorTy fun args _ => do
+      for i in [:args.size] do
+        let ty ← whnf (← inferType args[i]!)
         if ty.isForall then return false
         if ← isProp ty then return false
-        return true
+        let ty ← Core.betaReduce (← instantiateMVars ty)
+        if (args.extract 0 i).any (fun earlier => ty.containsFVar earlier.fvarId!) then
+          return false
+      return true
   unless fieldsOk do return false
   -- Emit only Lean's own mutual block. Recursion through an external datatype
   -- would require a larger SMT declaration block and otherwise forward-reference
   -- an undeclared sort; keep such types opaque.
-  return !(← escapesBlock n iv.all.toArray typeArgs)
+  return !(← escapesBlock n iv.all.toArray levels typeArgs)
 where
   /-- Whether some constructor field reaches back into `block` through a datatype *outside*
   `block`. `block` is `n`'s Lean mutual block, which is emitted as a unit. -/
-  escapesBlock (n : Name) (block : Array Name) (typeArgs : Array Expr) : MetaM Bool := do
+  escapesBlock (n : Name) (block : Array Name) (levels : List Level) (typeArgs : Array Expr) :
+      MetaM Bool := do
     let inBlock : Std.HashSet Name := block.foldl (·.insert ·) {}
     let some (.inductInfo iv) := (← getEnv).find? n | return false
     iv.ctors.anyM fun ctorName => do
-      let ci ← getConstInfoCtor ctorName
-      let ctorTy ← instantiateForall ci.type typeArgs
+      let ctorTy ← instantiateCtorType ctorName levels typeArgs
       forallTelescopeReducing ctorTy fun args _ =>
         args.anyM fun a => do
           let fty ← whnf (← inferType a)
@@ -195,7 +242,7 @@ where
     | 0 => return false
     | fuel + 1 =>
       let ty ← whnf ty
-      let .const m _ := ty.getAppFn | return false
+      let .const m mlevels := ty.getAppFn | return false
       if targets.contains m then return true
       if visiting.contains m then return false
       let some (.inductInfo miv) := (← getEnv).find? m | return false
@@ -204,18 +251,19 @@ where
       if margs.size != miv.numParams then return false
       let visiting := visiting.insert m
       miv.ctors.anyM fun c => do
-        let ci ← getConstInfoCtor c
-        let some cty ← (try pure (some (← instantiateForall ci.type margs))
+        let some cty ← (try pure (some (← instantiateCtorType c mlevels margs))
                         catch _ => pure none) | pure false
         forallTelescopeReducing cty fun args _ =>
           args.anyM fun a => do reaches targets (← inferType a) fuel visiting
 
-/-- `isSupportedDatatypeApp` for a fully-applied type expression. -/
-def supportedDatatypeType? (e : Expr) : MetaM (Option (Name × Array Expr)) := do
+/-- `isSupportedDatatypeApp` for a fully-applied type expression. Returns the head,
+its universe levels, and its parameters. -/
+def supportedDatatypeType? (e : Expr) : MetaM (Option (Name × List Level × Array Expr)) := do
   let e ← whnf e
-  let .const n _ := e.getAppFn | return none
+  let .const n levels := e.getAppFn | return none
   let args := e.getAppArgs
-  if ← isSupportedDatatypeApp n args then return some (n, args) else return none
+  if ← isSupportedDatatypeApp n levels args then return some (n, levels, args)
+  else return none
 
 
 /-- Whether `ty` is an *uninhabited* Lean type, which SMT cannot model: every SMT
@@ -627,14 +675,161 @@ where
       withLocalDeclD `arg (← inferType args[position]!) fun arg =>
         go rest (args.set! position arg) (locals.push arg)
 
+/-- The body of `lam` under at most `n` `.lam` binders, skipping `mdata` between
+them, and the number of binders peeled. The body has loose bound variables for the
+peeled binders only. -/
+def peelLambdas (lam : Expr) (n : Nat) : Expr × Nat :=
+  go lam n 0
+where
+  go (e : Expr) (remaining peeled : Nat) : Expr × Nat :=
+    match remaining, e with
+    | 0, _ => (e, peeled)
+    | remaining + 1, .lam _ _ body _ => go body remaining (peeled + 1)
+    | remaining + 1, .mdata _ inner =>
+      if inner.consumeMData.isLambda then go inner (remaining + 1) peeled else (e, peeled)
+    | _ + 1, _ => (e, peeled)
+
+/-- Numerals and atoms, which a `let` gains nothing by naming. -/
+def isLiteralValue (e : Expr) : Bool :=
+  match e.consumeMData with
+  | .lit _ | .const .. | .fvar _ => true
+  | e =>
+    isNumeral e
+      || (e.isAppOfArity ``Neg.neg 3 && isNumeral e.appArg!.consumeMData)
+      || (e.isAppOfArity ``BitVec.ofNat 2
+          && isNumeral e.appFn!.appArg!.consumeMData && isNumeral e.appArg!.consumeMData)
+where
+  isNumeral (e : Expr) : Bool :=
+    e.isRawNatLit
+      || (e.isAppOfArity ``OfNat.ofNat 3 && e.appFn!.appArg!.consumeMData.isRawNatLit)
+
+/-- Whether loose bound variable `0` of `body`, a `let` variable, occurs where its value
+may matter: a binder type, a non-explicit argument, an argument that the result type or
+a later parameter depends on, or an argument of a head with no known signature.
+Decidability instances are exempt (`ite` and `decide` ignore them). -/
+partial def letVarAtTypeLevel (body : Expr) : MetaM Bool := do
+  let visited ← IO.mkRef ({} : Std.HashSet (Expr × Nat))
+  -- At depth `d` the variable is `bvar d`, the only loose bound variable ≥ `d`.
+  let rec visit (e : Expr) (d : Nat) : MetaM Bool := do
+    if e.looseBVarRange ≤ d || (← visited.get).contains (e, d) then return false
+    visited.modify (·.insert (e, d))
+    match e with
+    | .bvar _ => return false
+    | .lam _ t b _ | .forallE _ t b _ => return t.looseBVarRange > d || (← visit b (d + 1))
+    | .letE _ t v b _ =>
+      return t.looseBVarRange > d || (← visit v d) || (← visit b (d + 1))
+    | .mdata _ b => visit b d
+    | .app .. =>
+      let fn := e.getAppFn
+      let args := e.getAppArgs
+      unless fn.isConst || fn.isFVar do return true
+      let info ← try getFunInfoNArgs fn args.size catch _ => return true
+      for h : i in [:args.size] do
+        let arg := args[i]
+        if arg.looseBVarRange ≤ d then continue
+        let some param := info.paramInfo[i]? | return true
+        if param.isDecInst then continue
+        unless param.binderInfo.isExplicit && !info.resultDeps.contains i do return true
+        for later in info.paramInfo[i+1:] do
+          if later.backDeps.contains i && !later.isDecInst then return true
+        if ← visit arg d then return true
+      return false
+    | _ => return true
+  visit body 0
+
+/-- The number of occurrences of loose bound variable 0 in `e`, counting up to `limit`.
+Counts are memoized per subterm and depth, so a shared subterm is visited once. -/
+partial def countLooseBVar0 (e : Expr) (limit : Nat) : Nat :=
+  (go e 0).run' {}
+where
+  go (e : Expr) (depth : Nat) : StateM (Std.HashMap (Expr × Nat) Nat) Nat := do
+    -- At `depth` the variable is `bvar depth`.
+    if e.looseBVarRange ≤ depth then return 0
+    if let some n := (← get)[(e, depth)]? then return n
+    let (own, parts) : Nat × Array (Expr × Nat) := match e with
+      | .bvar i => (if i == depth then 1 else 0, #[])
+      | .app f a => (0, #[(f, depth), (a, depth)])
+      | .lam _ t b _ | .forallE _ t b _ => (0, #[(t, depth), (b, depth + 1)])
+      | .letE _ t v b _ => (0, #[(t, depth), (v, depth), (b, depth + 1)])
+      | .mdata _ b | .proj _ _ b => (0, #[(b, depth)])
+      | _ => (0, #[])
+    let mut n := own
+    for (part, d) in parts do
+      if n ≥ limit then break
+      n := n + (← go part d)
+    n := min n limit
+    modify (·.insert (e, depth) n)
+    return n
+
+/-- Tag of the error `emitSort` raises when it refuses a type it cannot translate
+soundly (a dependent type). A datatype or finite-array declaration that meets it in
+a field rolls back and leaves its type opaque; other errors propagate. -/
+def sortRefusalTag : Name := `crush.sortRefusal
+
+/-- Whether `e` is a sort refusal (see `sortRefusalTag`). -/
+def isSortRefusal : Exception → Bool
+  | .error _ msg => msg.hasTag (· == sortRefusalTag)
+  | _ => false
+
+/-- Structural identity of a datatype instantiation: its head, universe levels, and
+parameters. -/
+def datatypeKey (n : Name) (levels : List Level) (typeArgs : Array Expr) : StructuralKey :=
+  { tag := "datatype", name := n, exprs := #[mkConst n levels], typeExprs := typeArgs }
+
+/-- Run a declaration that may be refused because a component sort cannot be
+translated. A refusal restores the translation and metavariable state and returns
+`none`; any other error propagates. -/
+def withRefusalRollback {α : Type} (k : TranslateM α) : TranslateM (Option α) := do
+  let saved ← Meta.saveState
+  let previous ← get
+  try
+    return some (← k)
+  catch e =>
+    unless isSortRefusal e do throw e
+    saved.restore
+    set previous
+    return none
+
+/-- Whether `e` is a bound-dependency refusal naming `fvar`. -/
+def isBoundRefusalOf (e : Exception) (fvar : FVarId) : Bool :=
+  match e with
+  | .error _ msg => msg.hasTag (· == boundRefusalTag ++ fvar.name)
+  | _ => false
+
+/-- Run handler `h` on `ctx`, refusing a result that needed the value of a captured `let`
+variable it opened. -/
+private def claimWith (h : TranslationHandler) (ctx : TranslationCtx) :
+    TranslateM (Option SMT.Term) := do
+  let (result, opened) ← TranslateM.trackingOpenedLets (h ctx)
+  let some t := result | return none
+  unless opened.isEmpty do refuseCapturedLets opened
+  return some t
+
+/-- How to retry a handler that declined arguments mentioning SMT `let` variables. -/
+private structure LetRetry where
+  /-- The arguments with the uncaptured values substituted, if one occurs. -/
+  uncaptured? : Option (Array Expr)
+  /-- The uncaptured variables, keyed by their values (`collapseLets`). -/
+  vars : Std.HashMap Expr FVarId
+  /-- The captured variables that the arguments still mention. -/
+  captured : Array FVarId
+
+/-- Refuse `term` if it mentions an SMT-bound variable. The error is tagged with the
+variables, so they survive state rollbacks. -/
+private def refuseBoundDependency (term : Expr) (msg : MessageData) : TranslateM Unit := do
+  let st ← get
+  let bound := (Lean.collectFVars {} term).fvarIds.filter
+    (fun id => st.boundVars.contains id || st.funVars.contains id)
+  unless bound.isEmpty do
+    let tagged := bound.foldl (fun m id => .tagged (boundRefusalTag ++ id.name) m)
+      m!"{msg}{indentExpr term}"
+    throwError (MessageData.tagged boundRefusalTag tagged)
+
 /-- Built-in SMT sorts are fixed across quantifier and lambda instantiations.
 Even a type binder must not occur in a sort key: type equality can distinguish
 empty and inhabited instantiations of the same quantified type variable. -/
-private def checkSortClosed (ty : Expr) : TranslateM Unit := do
-  let st ← get
-  if (Lean.collectFVars {} ty).fvarIds.any
-      (fun id => st.boundVars.contains id || st.funVars.contains id) then
-    throwError "crush: cannot translate a sort depending on a bound variable:{indentExpr ty}"
+private def checkSortClosed (ty : Expr) : TranslateM Unit :=
+  refuseBoundDependency ty "crush: cannot translate a sort depending on a bound variable:"
 
 mutual
   /-- Sort translation. Interpreted Lean types map to SMT theory sorts; supported
@@ -668,9 +863,12 @@ mutual
                  else declareUninterpretedSort e
     | _ =>
     -- Encode finite arrays by a length and a theory array for native read/write semantics.
+    -- An element sort that cannot be translated leaves the array opaque (arrays are
+    -- inhabited, so no validity guard is lost).
     if let some elem ← finiteArrayElem? e then
-      let enc ← declareFiniteArray elem
-      return .app (.symb enc.sortName) #[]
+      match ← declareFiniteArray? elem with
+      | some enc => return .app (.symb enc.sortName) #[]
+      | none => return ← declareUninterpretedSort e
     -- Literal widths use indexed SMT bit-vector sorts; symbolic widths are refused below.
     match ← bvWidthOfType? e with
     | some w => return bvSort w
@@ -683,22 +881,22 @@ mutual
         return nativeArrowSort (← shape.args.mapM emitSort) (← emitSort shape.res)
       let (sort, _) ← declareArrowSort e
       return sort
-    -- Supported inductives receive distinct SMT datatypes for each type instantiation.
-    match ← supportedDatatypeType? e with
-    | some (n, typeArgs) =>
-      let name ← declareDatatype n typeArgs (some e)
-      return .app (.symb name) #[]
+    -- Supported inductives receive distinct SMT datatypes for each type instantiation,
+    -- unless a field sort is refused, in which case the type is opaque in this query.
+    match ← datatypeSort? e with
+    | some (_, _, _, name) => return .app (.symb name) #[]
     | none =>
       -- An opaque sort cannot vary with a value binder, and dependent function
       -- applications cannot use a fixed arrow signature. Refuse unsupported dependent
       -- types, including fixed instances such as Fin 5; earlier handlers may encode them.
       if ← isDependentType e then
-        throwError "crush: cannot translate the dependent type{indentExpr e}\n\
-                    A dependent type is a type that depends on a value, such as \
-                    `Fin n`, or a function type whose result type depends on its \
-                    argument, such as `(n : Nat) → β n`. crush cannot translate \
-                    these types to SMT without risking false proofs. Restate the \
-                    goal without this type, or prove it another way."
+        throwError (MessageData.tagged sortRefusalTag
+          m!"crush: cannot translate the dependent type{indentExpr e}\n\
+            A dependent type is a type that depends on a value, such as \
+            `Fin n`, or a function type whose result type depends on its \
+            argument, such as `(n : Nat) → β n`. crush cannot translate \
+            these types to SMT without risking false proofs. Restate the \
+            goal without this type, or prove it another way.")
       declareUninterpretedSort e
 
   /-- Declare the `Fn` sort and `app` symbol for an arrow type `σ₁ → … → τ`, once.
@@ -875,7 +1073,7 @@ mutual
       capRefs := capRefs.push (.const nm)
     let cloApp := if capRefs.isEmpty then SMT.Term.const cloName
                   else SMT.Term.app (.symb cloName) capRefs
-    let (paramBinders, bodyTerm) ← emitLambdaBody lam shape
+    let (paramBinders, bodyTerm) ← TranslateM.withCapturedLets (emitLambdaBody lam shape)
     let lhs := SMT.Term.app (.symb appName)
       (#[cloApp] ++ paramBinders.map (fun (n, _) => SMT.Term.const n))
     let axiomBody := (smt| (= $lhs $bodyTerm))
@@ -917,12 +1115,18 @@ mutual
 
   /-- Enter a λ's binders with fresh fvars mapped to the given SMT names, and
   translate the resulting body. A function-typed parameter is registered as a
-  `funVar` so its applications route through the appropriate `app` symbol. -/
+  `funVar` so its applications route through the appropriate `app` symbol.
+
+  `lam` may have fewer syntactic binders than its arrow arity (an eta-reduced
+  `fun x => g (x + 1)` at `Int → Int → Int`). The peeled binders take the first
+  fresh variables, and the body is applied to the rest. -/
   partial def withLambdaFVars (lam : Expr) (names : Array String)
       (argTys : Array Expr) : TranslateM SMT.Term := do
+    let (body, peeled) := peelLambdas lam names.size
     let rec go (i : Nat) (e : Expr) (acc : Array Expr) : TranslateM SMT.Term := do
       if i ≥ names.size then
-        emitTerm (e.instantiateRev acc)
+        let opened := e.instantiateRev (acc.extract 0 peeled)
+        emitTerm (mkAppN opened (acc.extract peeled acc.size)).headBeta
       else
         let nm := names[i]!
         let ty := argTys[i]!
@@ -938,20 +1142,7 @@ mutual
             bind (TranslateM.withFunVar x.fvarId! nm (go (i + 1) e (acc.push x)))
           else
             bind (go (i + 1) e (acc.push x))
-    let body := (← lambdaTelescopeBody lam names.size)
     go 0 body #[]
-
-  /-- The body of `lam` under `n` peeled λ binders, as an open term with loose
-  bvars (to be instantiated by `withLambdaFVars`). -/
-  partial def lambdaTelescopeBody (lam : Expr) (n : Nat) : TranslateM Expr := do
-    let mut e := lam
-    for _ in [0:n] do
-      match e with
-      | .lam _ _ b _ => e := b
-      | _ =>
-        -- Not syntactically a λ (e.g. a partially-applied constant): η-expand.
-        return e
-    return e
 
   /-- All free variables of `e`, in first-occurrence order. -/
   partial def collectFVars (e : Expr) : Array FVarId :=
@@ -1020,6 +1211,21 @@ mutual
     }
     let some sortName ← TranslateM.structuralSymbol? key | return false
     return actual == SSort.app (.symb sortName) #[]
+
+  /-- `declareFiniteArray`, or `none` when the element sort is refused. The refusal
+  is remembered, so the array type is opaque everywhere in the query. -/
+  partial def declareFiniteArray? (elem : Expr) : TranslateM (Option FiniteArrayEncoding) := do
+    let elem ← instantiateMVars elem
+    let key : StructuralKey := {
+      tag := "finite-array", name := ``Array, typeExprs := #[elem]
+    }
+    if (← TranslateM.structuralSymbol? key).isSome then
+      return some (← declareFiniteArray elem)
+    if ← TranslateM.isOpaqueStructural key then return none
+    if let some enc ← withRefusalRollback (declareFiniteArray elem) then
+      return some enc
+    TranslateM.markOpaqueStructural key
+    return none
 
   /-- Declare the finite representation of `Array elem`.
 
@@ -1099,32 +1305,31 @@ mutual
     direction: the true hypothesis `∀ p : PN, p.x ≥ 0` becomes unsatisfiable, from
     which the solver derives `False`. We therefore emit a well-formedness predicate
     `wf_T` characterizing the image of the Lean type, and *guard every quantifier
-    over `T`* with it (see `quantifier`/`guardSort`). -/
-  partial def declareDatatype (n : Name) (typeArgs : Array Expr := #[])
-      (sourceType? : Option Expr := none) :
+    over `T`* with it (see `quantifier`/`guardSort`).
+
+  * Datatype identity includes the head's **universe levels**. `T.{0}` and `T.{1}`
+    are distinct Lean types, possibly of different cardinalities, so they get
+    distinct SMT sorts, and constructor fields are read at those levels
+    (`instantiateCtorType`). -/
+  partial def declareDatatype (n : Name) (levels : List Level) (typeArgs : Array Expr := #[]) :
       TranslateM String := do
     let typeArgs ← typeArgs.mapM instantiateMVars
     typeArgs.forM checkSortClosed
-    -- Type instantiations must distinguish sorts, constructors, and selectors.
-    let key : StructuralKey := { tag := "datatype", name := n, typeExprs := typeArgs }
-    if let some name ← TranslateM.structuralSymbol? key then
+    let levels ← levels.mapM instantiateLevelMVars
+    -- Universe levels and type instantiations must distinguish sorts, constructors,
+    -- and selectors. `exprs` normalizes the levels of the head constant.
+    let memberKey (m : Name) : StructuralKey := datatypeKey m levels typeArgs
+    if let some name ← TranslateM.structuralSymbol? (memberKey n) then
       return name
     -- Emit the complete Lean mutual block together: selectors and validity
-    -- predicates can reference sibling sorts. Shared type parameters key each member.
+    -- predicates can reference sibling sorts. Shared levels and parameters key each member.
     let iv ← getConstInfoInduct n
     -- Reserve sibling sorts before visiting fields so recursion reuses their names.
     let mut memberSorts : Array (Name × String) := #[]
     for m in iv.all do
-      let memberKey : StructuralKey := {
-        tag := "datatype", name := m, typeExprs := typeArgs
-      }
-      let mSort ← TranslateM.symbolForStructural memberKey (nameHint m)
-      -- Record concrete universe levels before recursive field-sort emission can
-      -- encounter the declaration's uninstantiated universe parameters.
-      if let some sourceType := sourceType? then
-        let .const _ levels := sourceType.getAppFn
-          | throwError "crush: internal — expected a datatype application"
-        TranslateM.recordSymbolExpr mSort (mkAppN (mkConst m levels) typeArgs)
+      let mSort ← TranslateM.symbolForStructural (memberKey m) (nameHint m)
+      -- Record the concrete type for replay and validity predicates.
+      TranslateM.recordSymbolExpr mSort (mkAppN (mkConst m levels) typeArgs)
       markSortDeclared mSort
       memberSorts := memberSorts.push (m, mSort)
     let mut dtInfos : Array (String × Nat × DatatypeDecl) := #[]
@@ -1136,9 +1341,9 @@ mutual
       let mut wfParts : Array (String × Array (String × Expr)) := #[]
       for ctorName in miv.ctors do
         let ctorSym ← reserveCtorSymbol mSort ctorName
-        let ctorInfo ← getConstInfoCtor ctorName
-        -- Specialize fields at the datatype parameters before translating their sorts.
-        let ctorTy ← instantiateForall ctorInfo.type typeArgs
+        -- Specialize fields at the datatype's levels and parameters before
+        -- translating their sorts.
+        let ctorTy ← instantiateCtorType ctorName levels typeArgs
         let (selDecls, guards) ← forallTelescopeReducing ctorTy fun args _ => do
           let mut sels : Array (String × SSort) := #[]
           let mut gs : Array (String × Expr) := #[]
@@ -1170,6 +1375,36 @@ mutual
       | throwError "crush: internal — `{n}` missing from its own mutual block"
     return nSort
 
+  /-- `declareDatatype` under rollback. When a field sort is refused (a dependent
+  field such as `Fin 5`), the state is restored, every member of the block is
+  recorded as opaque for the rest of the query, and the result is `none`; the caller
+  then uses an opaque sort, which carries a validity guard unless the type is known
+  to be inhabited. A type already declared skips the check. The fallback is local: a
+  structure with such a datatype as a field remains a datatype over the opaque sort. -/
+  partial def declareDatatype? (n : Name) (levels : List Level) (typeArgs : Array Expr) :
+      TranslateM (Option String) := do
+    let typeArgs ← typeArgs.mapM instantiateMVars
+    let levels ← levels.mapM instantiateLevelMVars
+    let key := datatypeKey n levels typeArgs
+    if let some name ← TranslateM.structuralSymbol? key then return some name
+    if ← TranslateM.isOpaqueStructural key then return none
+    if let some name ← withRefusalRollback (declareDatatype n levels typeArgs) then
+      return some name
+    for m in (← getConstInfoInduct n).all do
+      TranslateM.markOpaqueStructural (datatypeKey m levels typeArgs)
+    return none
+
+  /-- The SMT datatype for the type `ty`: its head, levels, parameters, and sort
+  symbol, declared on first use. `none` when `ty` is not a supported datatype or its
+  declaration was refused in this query. Every site that treats a type as a datatype
+  goes through here, so within one query a type is either a datatype everywhere or
+  opaque everywhere. -/
+  partial def datatypeSort? (ty : Expr) :
+      TranslateM (Option (Name × List Level × Array Expr × String)) := do
+    let some (n, levels, typeArgs) ← supportedDatatypeType? ty | return none
+    let some sortName ← declareDatatype? n levels typeArgs | return none
+    return some (n, levels, typeArgs, sortName)
+
   /-- Whether values of `ty` occupy a *proper subset* of their SMT sort, so a
   quantifier over them needs a guard. True for `Nat` (encoded as `Int`) and for any
   datatype that transitively contains such a field.
@@ -1190,7 +1425,7 @@ mutual
       else if ← knownNonemptyDefunctionalizedArrow ty shape then
         return false
       return ← needsWFGuard shape.res visiting
-    let some (n, typeArgs) ← supportedDatatypeType? ty | do
+    let some (n, levels, typeArgs, _) ← datatypeSort? ty | do
       discard <| emitSort ty
       let key : StructuralKey := { tag := "opaque-sort", typeExprs := #[ty] }
       if (← TranslateM.structuralSymbol? key).isSome then
@@ -1201,8 +1436,7 @@ mutual
     -- Inspect instantiated fields so Option Nat receives guards while Option Int does not.
     let iv ← getConstInfoInduct n
     iv.ctors.anyM fun ctorName => do
-      let ci ← getConstInfoCtor ctorName
-      let ctorTy ← instantiateForall ci.type typeArgs
+      let ctorTy ← instantiateCtorType ctorName levels typeArgs
       forallTelescopeReducing ctorTy fun args _ =>
         args.anyM fun a => do
           needsWFGuard (← inferType a) visiting
@@ -1281,7 +1515,7 @@ mutual
       let .app (.symb sortName) _ := sort | return none
       let wf ← reserveWfSymbol sortName
       return some (.app (.symb wf) #[t])
-    let some (n, typeArgs) ← supportedDatatypeType? ty | do
+    let some (_, _, _, sortName) ← datatypeSort? ty | do
       discard <| emitSort ty
       let key : StructuralKey := { tag := "opaque-sort", typeExprs := #[ty] }
       let some sortName ← TranslateM.structuralSymbol? key | return none
@@ -1289,7 +1523,6 @@ mutual
       let wf ← reserveWfSymbol sortName
       return some (.app (.symb wf) #[t])
     if !(← needsWFGuard ty) then return none
-    let sortName ← declareDatatype n typeArgs (some ty)
     let wf ← reserveWfSymbol sortName
     return some (.app (.symb wf) #[t])
 
@@ -1310,50 +1543,36 @@ mutual
     -- hypothetical proof of False must not generate an unconditional witness.
     if ← isProof e then
       throwError "crush: cannot translate a proof-valued term as an SMT value"
-    -- Zeta-reduce a let (including one in application-head position) before it
-    -- can become an opaque symbol and lose dependencies on enclosing binders.
-    if let .letE _ _ value body _ := e.getAppFn.consumeMData then
+    -- A data-valued let used more than once becomes an SMT `let`, so nested lets stay
+    -- linear instead of being zeta-expanded exponentially. Otherwise zeta-reduce (also
+    -- in application-head position) before the let can become an opaque symbol and
+    -- lose dependencies on enclosing binders.
+    if let .letE name type value body _ := e.getAppFn.consumeMData then
+      if e.getAppArgs.isEmpty then
+        if let some t ← emitLetBinding? name type value body then
+          return t
       return ← emitTerm (mkAppN (body.instantiate1 value) e.getAppArgs)
     -- A quantifier-bound variable renders as its SMT name, never a declaration.
     if let .fvar fid := e then
       if let some vname ← TranslateM.boundVar? fid then
         return .const vname
+    let (fn, args) := getAppFnArgs' e
     -- General handlers retain first refusal over all built-in mappings.
     if ← hasTranslationHandlers then
-      let (fn, args) := getAppFnArgs' e
-      let ctx : TranslationCtx := {
-        fn, args
-        emitTerm := emitTerm
-        emitSort := emitSort
-        declare  := declareViaThunk }
-      for h in (← getTranslationHandlers) do
-        if let some t ← h ctx then
-          return t
+      if let some t ← runHandlers (← getTranslationHandlers) fn args then
+        return t
     -- Dispatch targeted lowerings after general overrides.
-    let (fn, args) := getAppFnArgs' e
     if let .const head _ := fn then
       if ← hasLoweringsFor head then
-        let ctx : TranslationCtx := {
-          fn, args
-          emitTerm := emitTerm
-          emitSort := emitSort
-          declare  := declareViaThunk }
-        for lowering in (← getLoweringsFor head) do
-          if let some t ← lowering ctx then
-            return t
+        if let some t ← runHandlers (← getLoweringsFor head) fn args then
+          return t
     -- Use immediate result heads or syntactic dependent codomains; aliases remain distinct.
     if ← hasResultLowerings then
       let ty ← inferType e
       if let some resultHead ← resultHead? ty then
         if ← hasResultLoweringsFor resultHead then
-          let ctx : TranslationCtx := {
-            fn, args
-            emitTerm := emitTerm
-            emitSort := emitSort
-            declare  := declareViaThunk }
-          for lowering in (← getResultLoweringsFor resultHead) do
-            if let some t ← lowering ctx then
-              return t
+          if let some t ← runHandlers (← getResultLoweringsFor resultHead) fn args then
+            return t
     let logicalClassProjection ← isLogicalClassProjection fn
     -- Expose the selected instance for partial logical projections before HO
     -- encoding turns the remaining predicate into a function value.
@@ -1393,7 +1612,98 @@ mutual
             let reduced ← withTransparency .instances <| whnf e
             if reduced != e then
               return ← emitTerm reduced
+      -- A primitive projection is the projection function applied to its structure,
+      -- so both forms must reach the same selector or symbol.
+      if let .proj structName idx structArg := fn then
+        if let some t ← primitiveProjection? structName idx structArg args then
+          return t
       defaultApp fn args
+
+  /-- The first of `handlers` to claim `fn args`. A handler that declines an argument
+  mentioning an SMT `let` variable is retried with the values substituted, which is the
+  term it would see under zeta-reduction; a subterm it translates that is still a `let`
+  value translates as that variable. A result that needs a captured value is refused. -/
+  partial def runHandlers (handlers : Array TranslationHandler) (fn : Expr)
+      (args : Array Expr) : TranslateM (Option SMT.Term) := do
+    -- Computed when a handler first declines.
+    let mut retry? : Option LetRetry := none
+    for h in handlers do
+      if let some t ← claimWith h { fn, args, emitTerm, emitSort, declare := declareViaThunk }
+      then return some t
+      if retry?.isNone then
+        let uncaptured? ← TranslateM.substituteLets? args fun _ v => !v.captured
+        retry? := some {
+          uncaptured?, vars := ← TranslateM.letVarsByValue
+          captured := ← TranslateM.capturedLetsIn (uncaptured?.getD args) }
+      let some retry := retry? | continue
+      if let some expanded := retry.uncaptured? then
+        let emitTerm (e : Expr) := emitTerm (TranslateM.collapseLets retry.vars e)
+        let ctx := { fn, args := expanded, emitTerm, emitSort, declare := declareViaThunk }
+        if let some t ← claimWith h ctx then return some t
+      unless retry.captured.isEmpty do
+        let needed? ← capturedNeeds h fn (retry.uncaptured?.getD args) retry.captured
+        if let some needed := needed? then refuseCapturedLets needed
+    return none
+
+  /-- The captured `let` variables whose values `h` needs to claim `fn args`, if it claims
+  it with all of `captured` substituted: one of them if it suffices alone, else all. A probe
+  result is refused, so its subterms may translate as captured variables. -/
+  partial def capturedNeeds (h : TranslationHandler) (fn : Expr) (args : Array Expr)
+      (captured : Array FVarId) : TranslateM (Option (Array FVarId)) := do
+    let vars ← TranslateM.letVarsByValue (captured := true)
+    let emitTerm (e : Expr) := emitTerm (TranslateM.collapseLets vars e)
+    let probe (pick : FVarId → LetValue → Bool) : TranslateM (Option (Array FVarId)) := do
+      let some expanded ← TranslateM.substituteLets? args pick | return none
+      let ctx := { fn, args := expanded, emitTerm, emitSort, declare := declareViaThunk }
+      let (result, opened) ← TranslateM.trackingOpenedLets (h ctx)
+      return result.map fun _ => opened
+    let some opened ← probe fun _ v => v.captured | return none
+    for id in captured do
+      if let some alone ← probe fun other _ => other == id then return some (alone.push id)
+    return some (captured ++ opened)
+
+  /-- Translate `let x := value; body` as `(let ((x value)) body)` when `value` is data
+  and `body` uses `x` more than once. The body is translated with `x` as an SMT-bound
+  name, which is exactly substitution where `x` is used as a value; bit-vector
+  lowerings read literal operands through `expandLets`. Where the value itself matters
+  (`letVarAtTypeLevel`, or a handler in the body of a closure capturing `x` needs it),
+  `none` makes the caller zeta-reduce. -/
+  partial def emitLetBinding? (name : Name) (type value body : Expr) :
+      TranslateM (Option SMT.Term) := do
+    unless countLooseBVar0 body 2 ≥ 2 do return none
+    if value.hasLooseBVars || type.hasLooseBVars then return none
+    -- Substituting a literal is free.
+    if isLiteralValue value then return none
+    if ← isProp type then return none
+    if ← isTypeArgument type then return none
+    let typeWhnf ← whnf type
+    if typeWhnf.isForall then return none
+    if (← isClass? typeWhnf).isSome then return none
+    if ← letVarAtTypeLevel body then return none
+    let saved ← Meta.saveState
+    let previous ← get
+    let rollback : TranslateM Unit := do saved.restore; set previous
+    let smtValue? ← try some <$> emitTerm value catch _ => pure none
+    let some smtValue := smtValue? | rollback; return none
+    let smtName ← TranslateM.freshSymbol "let"
+    let expanded ← TranslateM.expandLets value
+    let outerLets := (← get).letValues
+    let attempt : Except (Exception × Bool) SMT.Term ← withLocalDeclD name type fun x => do
+      try
+        return .ok (← TranslateM.withLetValue x.fvarId! { value, expanded } <|
+          TranslateM.withBoundVar x.fvarId! smtName (emitTerm (body.instantiate1 x)))
+      catch ex =>
+        -- A dependency the check missed: substitute `x`, unless the refusal also names an
+        -- outer let, which then substitutes first.
+        let retry := isBoundRefusalOf ex x.fvarId! &&
+          !outerLets.keys.any (isBoundRefusalOf ex ·)
+        return .error (ex, retry)
+    match attempt with
+    | .ok smtBody => return some (.letE #[(smtName, smtValue)] smtBody)
+    | .error (ex, retry) =>
+      rollback
+      if retry then return none
+      throw ex
 
   /-- Higher-order forms: λ-abstractions, partial applications, applications whose
   head is a function *value*, and equations between function-typed terms. Returns
@@ -1566,13 +1876,29 @@ mutual
     let some structArg := args[info.numParams]? | return none
     let structTy ← whnf (← inferType structArg)
     if (← finiteArrayElem? structTy).isSome then return none
-    let some (_, typeArgs) ← supportedDatatypeType? structTy | return none
-    let sortName ← declareDatatype info.ctorName.getPrefix typeArgs (some structTy)
+    let some (n, _, _, sortName) ← datatypeSort? structTy | return none
+    unless n == (← getConstInfoCtor info.ctorName).induct do return none
     let sel ← reserveSelSymbol sortName info.ctorName info.i
     let extraArgs := args.extract (info.numParams + 1) args.size
     let sarg ← emitTerm structArg
     let sextra ← extraArgs.mapM emitTerm
     return some (.app (.symb sel) (#[sarg] ++ sextra))
+
+  /-- Translate `.proj S i s` (applied to `args`) as the projection function of field
+  `i`, through `projApp?` or, for an opaque structure, `defaultApp`. It does not
+  re-enter `emitTerm`, which could fold the application back into a primitive
+  projection. -/
+  partial def primitiveProjection? (structName : Name) (idx : Nat) (structArg : Expr)
+      (args : Array Expr) : TranslateM (Option SMT.Term) := do
+    let env ← getEnv
+    unless isStructure env structName do return none
+    let some field := (getStructureFields env structName)[idx]? | return none
+    let some _ := getProjFnForField? env structName field | return none
+    let projected := mkAppN (← mkProjection structArg field) args
+    let fn := projected.getAppFn
+    let args := projected.getAppArgs
+    if let some t ← projApp? fn args then return some t
+    return some (← defaultApp fn args)
 
   /-- If `fn` is a constructor of a supported (possibly parametric) datatype,
   translate the application to the corresponding SMT constructor symbol applied to
@@ -1584,8 +1910,8 @@ mutual
     let some (.ctorInfo ci) := env.find? cn | return none
     let resTy ← whnf (← inferType (mkAppN fn args))
     if (← finiteArrayElem? resTy).isSome then return none
-    let some (_, typeArgs) ← supportedDatatypeType? resTy | return none
-    let sortName ← declareDatatype ci.induct typeArgs (some resTy)
+    let some (n, _, _, sortName) ← datatypeSort? resTy | return none
+    unless n == ci.induct do return none
     let valueArgs := args.extract ci.numParams args.size
     let sargs ← valueArgs.mapM emitTerm
     let ctor ← reserveCtorSymbol sortName cn
@@ -1709,7 +2035,12 @@ mutual
           return some (smt| (=> $a $b))
         else
           quantifier true ty body
-      | .app (.app (.const ``Exists _) _) (.lam _ ty body _) =>
+      | .app (.app (.const ``Exists us) ty) pred =>
+        let pred := pred.consumeMData
+        let .lam _ ty body _ := pred
+          | -- An eta-reduced predicate `Exists p` quantifies like `∃ x, p x`.
+            return some (← emitTerm (mkApp2 (mkConst ``Exists us) ty
+              (.lam `x ty (mkApp pred (.bvar 0)) .default)))
         if ← isProp ty then
           -- A proof exists exactly when its proposition holds. Proof irrelevance
           -- permits a fresh proof local when the predicate mentions its witness.
@@ -1731,8 +2062,8 @@ mutual
     -- Conversions and numerals carry their own width; other operators use operand types.
     match_expr e with
     | BitVec.ofNat w n =>
-      let some wv ← natValue? w | return none
-      match ← natValue? n with
+      let some wv ← natOperand? w | return none
+      match ← natOperand? n with
       | some nv => return some (bvLit wv nv)
       | none =>
         -- int2bv preserves symbolic dependence and wraps modulo 2^w like BitVec.ofNat.
@@ -1741,7 +2072,7 @@ mutual
       unless ← hasExpectedOfNatInstance e do return none
       -- OfNat is shared with integer types, so inspect its carrier before emitting a literal.
       let some wv ← bvWidthOfType? ty | return none
-      let some nv ← natValue? n | return none
+      let some nv ← natOperand? n | return none
       return some (bvLit wv nv)
     | _ =>
     -- Width of the result type, or (for predicates) of the first explicit operand.
@@ -1802,23 +2133,23 @@ mutual
     | BitVec.rotateLeft _ a b => rotateOp "rotate_left" a b
     | BitVec.rotateRight _ a b => rotateOp "rotate_right" a b
     | BitVec.setWidth _ target x =>
-      let some tv ← natValue? target | return none
+      let some tv ← natOperand? target | return none
       let some xw ← bvWidthOf? x | return none
       return some (bvResize false xw tv (← emitTerm x))
     | BitVec.zeroExtend _ target x =>
       -- zeroExtend is a distinct declaration with the same unsigned resize as setWidth.
-      let some tv ← natValue? target | return none
+      let some tv ← natOperand? target | return none
       let some xw ← bvWidthOf? x | return none
       return some (bvResize false xw tv (← emitTerm x))
     | BitVec.signExtend _ target x =>
-      let some tv ← natValue? target | return none
+      let some tv ← natOperand? target | return none
       let some xw ← bvWidthOf? x | return none
       return some (bvResize true xw tv (← emitTerm x))
     | BitVec.extractLsb _ hi lo x =>
       -- Convert inclusive bounds to a slice length. Empty slices have no SMT
       -- extract representation and remain uninterpreted.
-      let some hv ← natValue? hi | return none
-      let some lv ← natValue? lo | return none
+      let some hv ← natOperand? hi | return none
+      let some lv ← natOperand? lo | return none
       let some xw ← bvWidthOf? x | return none
       if hv < lv then return none
       let len := hv + 1 - lv
@@ -1828,8 +2159,8 @@ mutual
       let sliced := bvExtract (min (lv + len) xw - 1) lv sx
       return some (if len ≤ avail then sliced else bvExtend false (len - avail) sliced)
     | BitVec.extractLsb' _ start len x =>
-      let some sv ← natValue? start | return none
-      let some lv ← natValue? len | return none
+      let some sv ← natOperand? start | return none
+      let some lv ← natOperand? len | return none
       let some xw ← bvWidthOf? x | return none
       if lv == 0 then return none
       let sx ← emitTerm x
@@ -1845,7 +2176,7 @@ mutual
     | BitVec.toNat _ a => return some (smt| (bv2nat $(← emitTerm a)))
     | BitVec.toInt _ a => return some (smt| (sbv_to_int $(← emitTerm a)))
     | BitVec.ofInt width i =>
-      let some wv ← natValue? width | return none
+      let some wv ← natOperand? width | return none
       return some (.app (.indexed "int2bv" #[.inr wv]) #[← emitTerm i])
     | _ => return none
 
@@ -1853,7 +2184,7 @@ mutual
   (`((_ rotate_left k) x)`), so a symbolic amount cannot be expressed and is
   refused rather than mistranslated. -/
   partial def rotateOp (op : String) (a b : Expr) : TranslateM (Option SMT.Term) := do
-    let some amt ← natValue? b | return none
+    let some amt ← natOperand? b | return none
     return some (.app (.indexed op #[.inr amt]) #[← emitTerm a])
 
   /-- A shift, coercing a `Nat` shift amount to a same-width bit-vector literal as
@@ -1870,7 +2201,7 @@ mutual
         return some (smt| (ite (bvuge $sb $(bvLit bw w)) $saturated $shifted))
       return some shifted
     if (← whnf (← inferType b)).isConstOf ``Nat then
-      let some bv ← natValue? b | return none
+      let some bv ← natOperand? b | return none
       -- Saturate at the width: both Lean and SMT yield 0 (or sign-fill) there, and
       -- the literal must fit in `w` bits to be representable.
       return some (.symbApp op #[sa, bvLit w (min bv w)])
@@ -1944,11 +2275,9 @@ mutual
     -- Every SMT binder dependency must be an explicit argument of this symbol.
     -- A dependency hidden in the head or an erased type/instance would
     -- collapse distinct binder instantiations into a single SMT constant.
-    let st ← get
-    let checkClosed (term : Expr) : TranslateM Unit := do
-      if (Lean.collectFVars {} term).fvarIds.any
-          (fun id => st.boundVars.contains id || st.funVars.contains id) then
-        throwError "crush: cannot erase a bound-variable dependency in an uninterpreted application:{indentExpr term}"
+    let checkClosed (term : Expr) : TranslateM Unit :=
+      refuseBoundDependency term
+        "crush: cannot erase a bound-variable dependency in an uninterpreted application:"
     checkClosed fn
     for i in [:args.size] do
       unless partition.valuePositions.contains i || (← isProof args[i]!) do

@@ -114,7 +114,7 @@ run_meta do
         discard <| declareOpaqueCarrier α
     expectCaptureRefused do
       TranslateM.withBoundVar α.fvarId! "α" do
-        discard <| declareDatatype ``Phantom #[α]
+        discard <| declareDatatype ``Phantom [] #[α]
     expectCaptureRefused do
       TranslateM.withBoundVar α.fvarId! "α" do
         discard <| declareFiniteArray α

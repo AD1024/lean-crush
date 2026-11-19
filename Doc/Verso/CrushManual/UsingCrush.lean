@@ -19,7 +19,7 @@ tag := "using-crush-syntax"
 The tactic accepts these clauses, in the order shown:
 
 ```
-crush [h₁, lemma, *] u[f, g] d[h] with [r₁, r₂] using (tactic₁; tactic₂)
+crush only [h₁, lemma, f, -other, *] u[f, g] d[h] with [r₁, r₂] using (tactic₁; tactic₂)
 ```
 
 Every component after `crush` is optional.
@@ -29,7 +29,9 @@ both are present, must appear in that order.
 
 These clauses act at different stages:
 
-* `[...]` chooses propositions for the SMT query.
+* `[...]` adds propositions and definition equations to the SMT query, and
+  `-name` removes a global lemma from those crush collects automatically.
+* `only` drops the automatically collected lemmas.
 * `u[...]` and `d[...]` provide equations for rewriting and for SMT.
 * `with [...]` supplies proof terms only to checked core reconstruction.
 * `using` supplies a final Lean tactic only to checked core reconstruction.
@@ -43,9 +45,10 @@ replay, which reconstructs individual solver steps instead of the original goal.
 tag := "using-crush-facts"
 %%%
 
-## Bare, Restricted, and Extended Calls
+## Hint Lists Add Facts
 
-A bare call includes every local hypothesis whose type is a proposition:
+Hint lists follow `grind`: every form of the call includes every local
+hypothesis whose type is a proposition, and a list only adds to them.
 
 ```lean
 theorem orderedTrans (a b c : Int)
@@ -53,19 +56,31 @@ theorem orderedTrans (a b c : Int)
   crush
 ```
 
-An explicit list without `*` is a strict restriction.
-Unlisted local hypotheses are excluded; relevant defining equations may still
-be added automatically:
+* Bare `crush` and `crush []` use all local hypotheses.
+* `crush [h]`, for a local `h`, also gives `h` eager ground instantiation.
+* `crush [foo]`, for a lemma, adds `foo` with eager ground instantiation.
+* `crush [f]`, for a definition, adds the equations of `f`, as `u[f]` does.
+* `crush [*]` gives every local hypothesis eager ground instantiation.
+* `crush only [...]` drops the automatically collected lemmas:
+  `@[crush_unfold]` and `@[crush_defeq]` equations, `@[reducible]` rewrites,
+  and premise selection.
+* `crush [-foo]` removes the global lemma `foo` from the automatic lemmas; for a
+  definition, it removes the definition's equations.
+* `crush [-h]`, for a local `h`, is an error that suggests `clear h`.
+
+A list therefore never shrinks the query.
+To exclude a hypothesis, `clear` it before the call:
 
 ```lean
-theorem orderedTransRestricted (a b c : Int)
+theorem orderedTransWithoutNoise (a b c : Int)
     (hab : a ≤ b) (hbc : b ≤ c)
-    (_irrelevant : c < a + 100) : a ≤ c := by
-  crush [hab, hbc]
+    (noise : ∀ x : Int, x < x + 100) : a ≤ c := by
+  clear noise
+  crush
 ```
 
-Use `*` to combine every local proposition with named lemmas that are not
-already in the context:
+Use `*` to give every local proposition eager ground instantiation, together
+with named lemmas that are not already in the context:
 
 ```lean
 theorem orderedTransWithContext (a b c : Int)
@@ -73,18 +88,16 @@ theorem orderedTransWithContext (a b c : Int)
   crush [*, Int.le_trans]
 ```
 
-`crush []` deliberately sends no local hypotheses.
-`crush [*]` and bare `crush` both include the local propositions, but they are
-not identical:
-
-* bare `crush` permits optional library premise selection and leaves quantified
-  local hypotheses out of eager proof-producing ground instantiation;
-* `crush [*]` disables premise selection and opts quantified local hypotheses
-  into eager ground instantiation.
-
-Prefer a bare call as the default.
-Use an explicit list to make the dependency set reproducible, remove irrelevant
-quantifiers, or request eager instances of a selected quantified fact.
+Naming the same constant as `-foo` and as a hint, or in `u[...]` or `d[...]`,
+is an error.
+crush removes `-foo` from everything it collects itself, but it cannot hide it
+from Lean code it runs without assembling, such as instance synthesis, simprocs,
+and the tactics used in checked reconstruction.
+When the finished proof still uses `foo` (or, for a definition `-f`, one of its
+equation lemmas), crush warns, says how the goal was closed, and lists the
+axioms `foo` depends on.
+The kernel unfolding a definition by definitional reduction leaves no constant,
+so the warning cannot see that use.
 
 ## Supplying Lemmas
 
@@ -118,7 +131,8 @@ set_option crush.premises.max 32
 
 Premise selection is useful when the needed theorem is not obvious, but it can
 make performance and dependencies less predictable.
-Writing any explicit list, including `crush [*]`, disables premise selection.
+A hint list keeps premise selection; `crush only [...]` disables it, and
+`-foo` keeps one theorem out of it.
 Once the relevant theorems are known, prefer naming them explicitly.
 
 # Exposing Definitions
@@ -276,6 +290,17 @@ and a function type whose result type depends on its argument, such as
 translating these types could produce false proofs. Types that depend only on
 other types, such as `List α`, are supported. So is `DecidableEq α`, which looks
 dependent but has its own sound translation.
+
+A structure or inductive whose field has such a type is not refused: it becomes
+an opaque SMT sort, guarded unless it is known to be inhabited, so equality
+reasoning about it still works but its fields are uninterpreted.
+`structure Wrap where val : Fin 5`, `Option (Fin 5)` and `Array (Fin 5)` are
+examples. The decision is made per query by translating the field sorts, so a
+`@[crush_translate_sort]` handler for the field type makes the structure a
+datatype again. A structure whose field type mentions an earlier field, such as
+`structure Sig where α : Type; x : α`, is always opaque, because an SMT selector
+has a single sort. The fallback is local: a structure with an opaque structure
+as a field remains a datatype.
 
 String and concrete-width bitvector operations use their SMT theories:
 

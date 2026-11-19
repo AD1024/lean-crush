@@ -103,10 +103,11 @@ private def resolveFactUniverses (facts : Array Fact) : MetaM (Array Fact) := do
 /-- Translate all facts into assertion commands, each `:named` for unsat-core
 provenance, prepended by the declarations they induce. Returns the full script
 (minus `check-sat`) and the final `TranslateState` (for provenance lookup). -/
-def buildScript (cfg : Config) (facts : Array Fact) :
+def buildScript (cfg : Config) (facts : Array Fact)
+    (levelParams : Option (List Name) := none) :
     MetaM (Array SMT.Command × TranslateState) := do
   let facts ← resolveFactUniverses facts
-  let (_, st) ← TranslateM.run cfg do
+  let (_, st) ← TranslateM.run cfg (levelParams := levelParams) do
     for fact in facts do
       let saved ← Meta.saveState
       let previous ← get
@@ -371,9 +372,10 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
       { commands := proof.commands.size, assumes, steps, anchors }
     else
       { commands := 0, assumes := 0, steps := 0, anchors := 0 }
-  let features := proof.features
-  trace[crush.result] "alethe certificate features: operators={features.operators}, \
-    indexed={features.indexedOperators}, sorts={features.sorts}, rules={features.rules}"
+  if ← isTracingEnabledFor `crush.result then
+    let features := proof.features
+    trace[crush.result] "alethe certificate features: operators={features.operators}, \
+      indexed={features.indexedOperators}, sorts={features.sorts}, rules={features.rules}"
   goal.withContext do
     let saved ← saveState
     let snapshot ← snapshot?.getDM KernelCheckSnapshot.capture
@@ -394,7 +396,7 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
             let proof := src.negationTransform.map (fun transform => mkApp transform hneg)
               |>.getD hneg
             facts := facts.insert name proof
-        match ← Alethe.replay proof proofSexps facts st.nameToExpr with
+        match ← Alethe.replay proof proofSexps facts st.nameToExpr st.encodingEvidence with
         | .ok falseProof => return .ok (← mkLambdaFVars #[hneg] falseProof)
         | .error failure => return .error failure
     ) fun e => do
@@ -424,8 +426,8 @@ def tryProofReplay (goal : MVarId) (cfg : Config) (st : TranslateState)
 
 /-- Close a goal that is already one of the selected facts.
 
-Checking only `facts` preserves the strict meaning of `crush [h₁, ...]`: an ambient
-hypothesis omitted by the user cannot be used by this fast path. This runs before
+Only the collected facts are checked. Every visible hypothesis is among them (a
+hypothesis the user cleared is no longer visible). This runs before
 translation because quantified nonlinear assumptions can otherwise make an identity query
 expensive for SMT despite the Lean proof being a single local constant. -/
 private def closeFromSelectedFacts (snapshot : KernelCheckSnapshot)
@@ -471,6 +473,7 @@ private def trustedProof (goalType : Expr) (st : TranslateState) : MetaM Expr :=
     let proof ← instantiateMVars proof
     if proof.hasExprMVar then
       throwError "crush: trusted dependency contains unresolved metavariables"
+    checkDependencyLevelParams st.levelParams "a trusted dependency" proof
     if proof.hasLevelMVar then
       checkDependencyUniverses proof
     if seen.contains proof then continue
@@ -492,21 +495,46 @@ private def trustedProof (goalType : Expr) (st : TranslateState) : MetaM Expr :=
   let (dependencyType, dependencyProof) := dependencies[0]!
   return mkApp3 (mkConst ``crushSorryWith) goalType dependencyType dependencyProof
 
-/-- The core driver, given a resolved goal, config, and collected hints. -/
-def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
-    (reconstructionHints : Array (Expr × String) := #[])
-    (reconstructionFinisher? : Option (TSyntax `tactic) := none)
-    (snapshot? : Option KernelCheckSnapshot := none) : TacticM Unit :=
+/-- Universe parameters a trusted dependency may mention: the enclosing declaration's
+(`Term.getLevelNames`), plus any that occur in the goal or its local context, so a
+caller outside the declaration's elaboration scope is not rejected. -/
+private def callerLevelParams (goal : MVarId) : TacticM (List Name) := goal.withContext do
+  let mut used : CollectLevelParams.State := {}
+  used := collectLevelParams used (← instantiateMVars (← goal.getType))
+  for decl in ← getLCtx do
+    used := collectLevelParams used (← instantiateMVars decl.type)
+    if let some value := decl.value? then
+      used := collectLevelParams used (← instantiateMVars value)
+  let mut names ← Term.getLevelNames
+  for param in used.params do
+    unless names.contains param do
+      names := names ++ [param]
+  return names
+
+/-- The quantified fallback query is skipped when less of `crush.timeout` remains. -/
+def fallbackFloorMs : Nat := 1000
+
+/-- How `runCrush` closed its goal, for the excluded-lemma warning. -/
+private def closedByKernel (method : String) : String := s!"{method} (kernel-checked)"
+private def closedByTrust : String := "trusted (`Crush.crushSorry`)"
+
+/-- The core driver. Returns how the goal was closed, or `none` when it was left open
+(`crush.backend "none"`). -/
+private def runCrushCore (goal : MVarId) (cfg : Config) (hints : Hints)
+    (reconstructionHints : Array (Expr × String))
+    (reconstructionFinisher? : Option (TSyntax `tactic))
+    (snapshot : KernelCheckSnapshot) : TacticM (Option String) :=
   withOptions (fun options => options
     |>.setBool `crush.reconstruct.trustBvDecide cfg.trustBvDecide
     |>.setBool `crush.reconstruct.trustNativeDecide cfg.trustNativeDecide) <|
   goal.withContext do
   cfg.validate
-  let snapshot := (← snapshot?.getDM KernelCheckSnapshot.capture).withConfig cfg
+  let snapshot := snapshot.withConfig cfg
   if cfg.trust == .reconstruct && cfg.backend != .none then
     checkReconstructionGoalAxioms (← goal.getType)
   let forceAlethe := cfg.trust != .trust && cfg.reconstruct == .alethe
-  if cfg.reconstruct == .alethe && cfg.backend != .cvc5 then
+  -- `crush.reconstruct` is not consulted under trust, and backend `none` runs no solver.
+  if forceAlethe && cfg.backend != .cvc5 && cfg.backend != .none then
     throwError "crush: `crush.reconstruct alethe` requires the cvc5 backend, but \
                 `crush.backend` is `{cfg.backend}`"
   -- Native mode requires cvc5 for execution; other solvers use defunctionalization.
@@ -523,7 +551,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
   let profileContext? ←
     if cfg.profile then some <$> captureRunProfileContext goal else pure none
   let premiseMax :=
-    if cfg.premises && hints.allowPremiseSelection then cfg.premiseMax else 0
+    if cfg.premises && hints.allowPremiseSelection && !hints.only then cfg.premiseMax else 0
   let collected ←
     prof.time "collect" (collectFactsWithRewrite goal hints cfg.autoUnfold premiseMax)
   trace[crush] "selected {collected.selectedPremises} library premise(s)"
@@ -534,7 +562,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
       trace[crush.result] "goal is one of the selected facts; skipped SMT"
       reportRunProfile cfg prof profileContext? "selected-fact" "not-attempted"
         "closed from a selected Lean fact"
-      return
+      return some (closedByKernel "a selected fact")
     -- Keep pre-solver search settings independent of the discharge trust policy.
     let saved ← saveState
     let closed ← prof.time "pre-reconstruct" <| tryCatchRuntimeEx
@@ -548,9 +576,10 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
       trace[crush.result] "pre-translation checked proof succeeded; skipped SMT"
       reportRunProfile cfg prof profileContext? "pre-reconstructed" "not-attempted"
         "closed before SMT translation"
-      return
+      return some (closedByKernel "pre-SMT reconstruction")
   let normalized ←
-    prof.time "normalize" (normalizeFacts collected.facts collected.rewriteLemmas)
+    prof.time "normalize"
+      (normalizeFacts collected.facts collected.rewriteLemmas hints.excludedConstants)
   trace[crush] "normalized {normalized.rewritten} fact(s) with \
                 {collected.rewriteLemmas.size} selected equation lemma(s)"
   let facts := normalized.facts
@@ -574,7 +603,8 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
                   ({mono.rejected}); this indicates an internal bug in the \
                   monomorphizer. The affected facts were not asserted."
   let instantiated ←
-    prof.time "instantiate" (instantiateGroundFacts cfg facts)
+    prof.time "instantiate"
+      (instantiateGroundFacts cfg facts (hints.excludedConstants.toArray))
   let fullFacts := instantiated.facts
   trace[crush.inst] "generated {instantiated.generated} ground instance(s); \
                      exhausted: {instantiated.exhausted}"
@@ -588,7 +618,9 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
   let reducedFacts :=
     if cfg.backend == .none then none else instantiated.groundFacts
   let firstFacts := reducedFacts.getD fullFacts
-  let (firstScript, firstSt) ← prof.time "translate" (buildScript cfg firstFacts)
+  let levelParams ← callerLevelParams goal
+  let (firstScript, firstSt) ←
+    prof.time "translate" (buildScript cfg firstFacts (levelParams := some levelParams))
   let mut script := firstScript
   let mut st := firstSt
   if cfg.traceScript then
@@ -599,39 +631,63 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
     logInfo m!"crush: backend is `none`; emitted {script.size} commands, no solver run."
     reportRunProfile cfg prof profileContext? "script-emitted" "not-attempted"
       "backend disabled"
-    return
+    return none
   -- Saved before the run, so a query that throws still leaves its script on disk.
   Solver.maybeSave cfg script
-  let firstResult ← prof.time "solve" (Solver.runQuery cfg script)
+  -- `crush.timeout` is a per-call limit: both queries are killed at one deadline,
+  -- and the fallback gets only the time the first query left.
+  let budget ← Solver.QueryBudget.start cfg
+  -- A model of the weakened query is never reported, so it needs only a verdict.
+  let firstResult ← prof.time "solve"
+    (Solver.runQuery cfg script (some budget) (getModel := reducedFacts.isNone))
   let mut result := firstResult
+  let remainingMs ← budget.remainingMs
   if reducedFacts.isSome then
     match result with
     | .unsat .. =>
       trace[crush.result] "ground-instance query was unsatisfiable; skipped quantified fallback"
     | .sat .. | .unknown .. =>
-      trace[crush.result] "ground-instance query did not close the goal; retrying with \
-                           retained quantified templates"
-      let (fallbackScript, fallbackSt) ←
-        prof.time "translate-fallback" (buildScript cfg fullFacts)
-      script := fallbackScript
-      st := fallbackSt
-      if cfg.traceScript then
-        logInfo m!"crush SMT fallback script:{indentD (scriptToString script)}"
-      trace[crush.script] "{scriptToString script}"
-      Solver.maybeSave cfg script
-      let fallbackResult ←
-        prof.time "solve-fallback" (Solver.runQuery cfg script)
-      result := fallbackResult
+      if remainingMs < fallbackFloorMs then
+        trace[crush.result] "ground-instance query did not close the goal, and only \
+          {remainingMs} ms of the call's deadline remain; skipped quantified fallback"
+        if let .sat _ rejected := result then
+          let note := if rejected.isEmpty then "" else s!"; {rejected}"
+          result := .unknown s!"timeout: the ground-instance query was satisfiable, and \
+            only {remainingMs} ms remained for the quantified query{note}"
+      else
+        trace[crush.result] "ground-instance query did not close the goal; retrying with \
+                             retained quantified templates"
+        let (fallbackScript, fallbackSt) ←
+          prof.time "translate-fallback"
+            (buildScript cfg fullFacts (levelParams := some levelParams))
+        script := fallbackScript
+        st := fallbackSt
+        if cfg.traceScript then
+          logInfo m!"crush SMT fallback script:{indentD (scriptToString script)}"
+        trace[crush.script] "{scriptToString script}"
+        Solver.maybeSave cfg script
+        let fallbackResult ←
+          prof.time "solve-fallback"
+            (Solver.runQuery cfg script (some budget) (limitMs? := some remainingMs))
+        result := fallbackResult
   match result with
   | .unsat coreSexp proofSexps =>
-    let coreIds := unsatCoreFactIds coreSexp
-    trace[crush.result] "unsat; core facts: {coreIds}"
+    -- Without a core (not requested, unsupported, or cut off by the deadline),
+    -- reconstruction uses every asserted fact.
+    let coreIds :=
+      if coreSexp.isSome then unsatCoreFactIds coreSexp
+      else st.facts.map (·.id)
+    if coreSexp.isSome then
+      trace[crush.result] "unsat; core facts: {coreIds}"
+    else
+      trace[crush.result] "unsat; no unsat core, so every asserted fact is used"
     match cfg.trust with
     | .trust =>
       let goalType ← goal.getType
       goal.assign (← trustedProof goalType st)
       reportRunProfile cfg prof profileContext? "verified" "not-requested"
         "solver returned unsat; closed under the trust policy"
+      return some closedByTrust
     | .reconstruct | .reconstructOrTrust =>
       let coreProofs := coreHypotheses st coreIds
       let mut reconstructionProofs := coreProofs
@@ -646,7 +702,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
         reportRunProfile cfg prof profileContext? "alethe-reconstructed" "success"
           "Alethe certificate replay succeeded"
           (replayProfileMetrics cfg certificate proofSexps)
-        return
+        return some (closedByKernel "Alethe replay")
       let replayFailure? :=
         match replayAttempt with
         | .success _ => none
@@ -687,6 +743,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
         trace[crush.result] "reconstruction succeeded; no axiom used"
         reportRunProfile cfg prof profileContext? "core-reconstructed" replayLabel
           "core-directed reconstruction succeeded"
+        return some (closedByKernel "core reconstruction")
       else if cfg.trust == .reconstructOrTrust then
         if let some diagnostic ← snapshot.axiomFailure? then
           logWarning m!"crush: solver reported `unsat`, but checked reconstruction \
@@ -705,6 +762,7 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
         goal.assign (← trustedProof goalType st)
         reportRunProfile cfg prof profileContext? "trusted-fallback" replayLabel
           "core-directed reconstruction failed; closed under the trust policy"
+        return some closedByTrust
       else
         if let some diagnostic ← snapshot.axiomFailure? then
           reportRunProfile cfg prof profileContext? "reconstruction-failed" replayLabel
@@ -745,19 +803,91 @@ def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
     throwError m!"crush: solver returned `unknown` ({reason}). \
                   Try increasing `crush.timeout` or adding hypotheses."
 
+/-- The constants of `proof`, following declarations generated after `snapshot`
+(auxiliary lemmas created while building the proof). -/
+private def proofConstants (proof : Expr) (snapshot? : Option KernelCheckSnapshot) :
+    MetaM (Std.HashSet Name) := do
+  let env ← getEnv
+  let mut seen : Std.HashSet Name := {}
+  let mut work := proof.getUsedConstants
+  while !work.isEmpty do
+    let name := work.back!
+    work := work.pop
+    if seen.contains name then continue
+    seen := seen.insert name
+    let some snapshot := snapshot? | continue
+    if snapshot.contains name then continue
+    let some info := env.find? name | continue
+    work := work ++ info.type.getUsedConstants
+    if let some value := info.value? (allowOpaque := true) then
+      work := work ++ value.getUsedConstants
+  return seen
+
+/-- One line describing an excluded constant: its kind and the axioms it depends on. -/
+private def describeExcludedConstant (name : Name) : MetaM MessageData := do
+  let info ← getConstInfo name
+  let kind := match info with
+    | .axiomInfo _ => "an axiom"
+    | .thmInfo _ => "a theorem"
+    | .defnInfo _ => "a definition"
+    | .opaqueInfo _ => "an opaque definition"
+    | _ => "a declaration"
+  if info matches .axiomInfo _ then return m!"`{name}`: {kind}"
+  let axioms := (← collectAxioms name).qsort Name.lt
+  if axioms.isEmpty then return m!"`{name}`: {kind}; depends on no axioms"
+  let axioms := axioms.toList.map fun axiomName => m!"`{axiomName}`"
+  return m!"`{name}`: {kind}; depends on {MessageData.joinSep axioms ", "}"
+
+/-- Warn when a finished proof uses a constant that the hint list excluded with `-name`.
+
+crush removes such constants from everything it collects itself, but it cannot hide
+them from Lean code it runs without assembling it: instance synthesis, simprocs, and
+reconstruction tactics. `closedBy` says how the goal was closed. The kernel unfolding a
+definition by definitional reduction leaves no constant, so this check cannot see it. -/
+def warnExcludedUses (proof : Expr) (excluded : Array ExcludedHint) (closedBy : String)
+    (snapshot? : Option KernelCheckSnapshot := none) : MetaM Unit := do
+  if excluded.isEmpty then return
+  let used ← proofConstants (← instantiateMVars proof) snapshot?
+  for entry in excluded do
+    for name in entry.watched do
+      unless used.contains name do continue
+      let source :=
+        if entry.isDefinition then m!" (`-{entry.name}`)" else m!""
+      logWarning m!"crush: the proof uses `{name}`, which the hint list excludes{source}.\
+        \n  closed by: {closedBy}\n  {← describeExcludedConstant name}"
+
+/-- The core driver, given a resolved goal, config, and collected hints. -/
+def runCrush (goal : MVarId) (cfg : Config) (hints : Hints := {})
+    (reconstructionHints : Array (Expr × String) := #[])
+    (reconstructionFinisher? : Option (TSyntax `tactic) := none)
+    (snapshot? : Option KernelCheckSnapshot := none) : TacticM Unit := do
+  let snapshot ← snapshot?.getDM KernelCheckSnapshot.capture
+  let some closedBy ← runCrushCore goal cfg hints reconstructionHints
+      reconstructionFinisher? snapshot | return
+  unless hints.excluded.isEmpty do
+    warnExcludedUses (mkMVar goal) hints.excluded closedBy (some snapshot)
+
 /-! ## Tactic syntax and the hint grammar
 
 ```
-crush [h₁, …, hₙ, *] u[f₁, …] d[g₁, …] with [r₁, …] using <tactic>
+crush only? [h₁, …, foo, f, -bar, *] u[f₁, …] d[g₁, …] with [r₁, …] using <tactic>
 ```
 
-Bare `crush` selects all local facts. A list without `*` restricts selection to its
-terms; `*` adds the local context. `u[...]` adds equation lemmas and `d[...]` adds
-unfold equations. `with [...]` supplies reconstruction-only proofs, and `using`
-tries a finisher in the isolated reconstruction context before kernel validation.
+Hint lists follow `grind`: every form uses all local facts, and a list only adds.
+A listed lemma `foo` is asserted with eager instantiation, as is a listed local
+hypothesis; a definition name `f` adds its equations, as `u[f]` does. `*` gives every
+local hypothesis eager instantiation. `only` drops automatically collected lemmas
+(`@[crush_unfold]`/`@[crush_defeq]` equations, `@[reducible]` rewrites, premise
+selection), and `-bar` removes one global constant from them; a warning reports a
+finished proof that still uses it. Use `clear h` to hide a hypothesis. `u[...]` adds
+equation lemmas and `d[...]` adds unfold equations. `with [...]` supplies
+reconstruction-only proofs, and `using` tries a finisher in the isolated
+reconstruction context before kernel validation.
 -/
 
-syntax crushHintElem := term <|> "*"
+/-- `-foo` removes the global constant `foo` from automatically collected lemmas. -/
+syntax crushHintErase := "-" ident
+syntax crushHintElem := crushHintErase <|> term <|> "*"
 syntax crushHints := ("[" crushHintElem,* "]")?
 syntax crushUnfolds := "u[" ident,* "]"
 syntax crushDefeqs := "d[" ident,* "]"
@@ -766,7 +896,7 @@ syntax crushReconstructionHints := "with" "[" term,* "]"
 syntax crushReconstructionFinisher := "using" tacticSeq
 
 /-- `crush` tactic. See the module comment for the hint grammar. -/
-syntax (name := crushTac) "crush" crushHints (ppSpace crushUOrD)*
+syntax (name := crushTac) "crush" (&" only")? crushHints (ppSpace crushUOrD)*
   (ppSpace crushReconstructionHints)? (ppSpace crushReconstructionFinisher)? : tactic
 
 /-- Resolve an `ident` hint to the constant name it names, erroring helpfully. -/
@@ -780,29 +910,30 @@ private def resolveHintConst (i : TSyntax `ident) : TacticM Name := do
   | none => throwError "crush: unknown identifier `{i}`."
 
 /-- Gather the equation-lemma names requested by all `u[…]`/`d[…]` groups. `u[f]`
-adds `f`'s full equation set; `d[f]` adds its single unfold equation. -/
-private def parseUOrDs (stxs : Array (TSyntax ``crushUOrD)) : TacticM (Array Name) := do
+adds `f`'s full equation set; `d[f]` adds its single unfold equation. Also returns the
+constants named. -/
+private def parseUOrDs (stxs : Array (TSyntax ``crushUOrD)) :
+    TacticM (Array Name × Array Name) := do
   let mut names : Array Name := #[]
+  let mut named : Array Name := #[]
   for stx in stxs do
     match stx with
     | `(crushUOrD| u[ $[$is],* ]) =>
       for i in is do
         let n ← resolveHintConst i
-        match ← getEqnsFor? n with
-        | some eqns => names := names ++ eqns
-        | none =>
-          -- Fall back to an unfold equation when no clause equations are available.
-          match ← getUnfoldEqnFor? n (nonRec := true) with
-          | some eqn => names := names.push eqn
-          | none => throwError "crush: `{n}` has no equational lemmas to unfold."
+        named := named.push n
+        let eqns ← eqnLemmasFor n .unfold
+        if eqns.isEmpty then throwError "crush: `{n}` has no equational lemmas to unfold."
+        names := names ++ eqns
     | `(crushUOrD| d[ $[$is],* ]) =>
       for i in is do
         let n ← resolveHintConst i
-        match ← getUnfoldEqnFor? n (nonRec := true) with
-        | some eqn => names := names.push eqn
-        | none => throwError "crush: `{n}` has no unfold equation."
+        named := named.push n
+        let eqns ← eqnLemmasFor n .defeq
+        if eqns.isEmpty then throwError "crush: `{n}` has no unfold equation."
+        names := names ++ eqns
     | _ => throwUnsupportedSyntax
-  return names
+  return (names, named)
 
 private def elaborateHint (term : TSyntax `term) : TacticM Expr := do
   let errorsBefore := (← Core.getMessageLog).toList.filter (·.severity == .error) |>.length
@@ -813,28 +944,78 @@ private def elaborateHint (term : TSyntax `term) : TacticM Expr := do
     throwError "crush: hint elaboration failed or left unsolved goals"
   return proof
 
-/-- Parse the `[…]` hint list into elaborated proof terms and local-hypothesis flags. -/
+/-- The parsed `[…]` hint list. -/
+private structure ParsedHintList where
+  terms : Array (Expr × String) := #[]
+  /-- Equation lemmas of definition names in the list. -/
+  eqnLemmas : Array Name := #[]
+  /-- Global constants the list names, as a lemma or a definition. -/
+  named : Array Name := #[]
+  excluded : Array ExcludedHint := #[]
+  /-- `*`: swept local hypotheses get eager instantiation. -/
+  instantiateHyps : Bool := false
+
+/-- A definition named in the list stands for its equations, as in `u[f]`. -/
+private def definitionHint? (term : TSyntax `term) : TacticM (Option Name) := do
+  unless term.raw.isIdent do return none
+  let some (.const name _) ← (try Term.resolveId? term catch _ => pure none) | return none
+  let info ← getConstInfo name
+  unless info matches .defnInfo _ do return none
+  if ← isProp info.type then return none
+  return some name
+
+/-- Resolve `-name`. A local hypothesis cannot be excluded: the hint list never
+removes context, so the user is pointed at `clear`. -/
+private def resolveExcludedHint (id : TSyntax `ident) : TacticM ExcludedHint := do
+  if ((← getLCtx).findFromUserName? id.getId).isSome then
+    throwErrorAt id "crush: `-{id.getId}` names a local hypothesis, and a hint list \
+      cannot remove hypotheses. Use `clear {id.getId}` before `crush` to exclude it."
+  let name ← realizeGlobalConstNoOverloadWithInfo id
+  let info ← getConstInfo name
+  if (info matches .defnInfo _) && !(← isProp info.type) then
+    let mut constants := #[name]
+    for eqn in (← eqnLemmasFor name .unfold) ++ (← eqnLemmasFor name .defeq) do
+      unless constants.contains eqn do constants := constants.push eqn
+    return { name, isDefinition := true, constants }
+  return { name, constants := #[name] }
+
+/-- Parse the `[…]` hint list into elaborated proof terms, equation lemmas, and
+exclusions. Every form keeps the local context; see the grammar above. -/
 private def parseHintList (goal : MVarId) (stx : TSyntax ``crushHints) :
-    TacticM (Array (Expr × String) × Bool × Bool × Bool) := goal.withContext do
+    TacticM ParsedHintList := goal.withContext do
   match stx with
-  | `(crushHints| ) =>
-    -- No list at all: send every local hypothesis to SMT, but reserve eager
-    -- proof-producing instantiation for hypotheses explicitly selected by `*`.
-    return (#[], true, false, true)
+  | `(crushHints| ) => return {}
   | `(crushHints| [ $[$elems],* ]) =>
-    let mut terms : Array (Expr × String) := #[]
-    let mut allHyps := false
+    let mut parsed : ParsedHintList := {}
     for elem in elems do
       match elem with
-      | `(crushHintElem| *) => allHyps := true
+      | `(crushHintElem| *) => parsed := { parsed with instantiateHyps := true }
+      | `(crushHintElem| - $id:ident) =>
+        parsed := { parsed with excluded := parsed.excluded.push (← resolveExcludedHint id) }
       | `(crushHintElem| $t:term) =>
-        let e ← elaborateHint t
-        let descr := (t.raw.reprint.getD "hint").trimAscii.toString
-        terms := terms.push (e, s!"hint {descr}")
+        if let some name ← definitionHint? t then
+          let eqns ← eqnLemmasFor name .unfold
+          if eqns.isEmpty then throwError "crush: `{name}` has no equational lemmas to unfold."
+          parsed := { parsed with
+            eqnLemmas := parsed.eqnLemmas ++ eqns, named := parsed.named.push name }
+        else
+          let e ← elaborateHint t
+          let descr := (t.raw.reprint.getD "hint").trimAscii.toString
+          parsed := { parsed with terms := parsed.terms.push (e, s!"hint {descr}") }
+          if let .const name _ := e.getAppFn then
+            parsed := { parsed with named := parsed.named.push name }
       | _ => throwUnsupportedSyntax
-    -- An explicit list without `*` is a *restriction*: only the listed facts.
-    return (terms, allHyps, allHyps, false)
+    return parsed
   | _ => throwUnsupportedSyntax
+
+/-- `-name` and a request for the same constant contradict each other. -/
+private def checkExclusionConflicts (excluded : Array ExcludedHint)
+    (requested : Array Name) : TacticM Unit := do
+  for entry in excluded do
+    for name in requested do
+      if entry.constants.contains name then
+        throwError "crush: `{name}` is excluded by `-{entry.name}` but also requested \
+          by the hint list, `u[...]` or `d[...]`."
 
 private def parseReconstructionHints (goal : MVarId)
     (stx? : Option (TSyntax ``crushReconstructionHints)) :
@@ -875,7 +1056,7 @@ def evalCrush : Tactic := fun stx => do
   -- proof attempt. Keep one boundary for the entire invocation, including hints.
   let snapshot ← KernelCheckSnapshot.capture
   let `(tactic|
-      crush $hintsStx:crushHints $[$uordStxs:crushUOrD]*
+      crush $[only%$onlyTk]? $hintsStx:crushHints $[$uordStxs:crushUOrD]*
         $[$reconstructionHintsStx:crushReconstructionHints]?
         $[$reconstructionFinisherStx:crushReconstructionFinisher]?) := stx
     | throwUnsupportedSyntax
@@ -885,10 +1066,11 @@ def evalCrush : Tactic := fun stx => do
   -- Intro any leading binders so ∀-goals become closed props under hypotheses.
   let (_, goal) ← goal.intros
   replaceMainGoal [goal]
-  -- Parse the hint grammar: `crush <hints> <uord>*`.
-  let (terms, allHyps, instantiateHyps, allowPremiseSelection) ←
-    parseHintList goal hintsStx
-  let eqnLemmas ← parseUOrDs uordStxs
+  -- Parse the hint grammar: `crush only? <hints> <uord>*`.
+  let parsed ← parseHintList goal hintsStx
+  let (uordLemmas, uordNames) ← parseUOrDs uordStxs
+  checkExclusionConflicts parsed.excluded
+    (parsed.named ++ parsed.eqnLemmas ++ uordNames ++ uordLemmas)
   let reconstructionHints ←
     parseReconstructionHints goal reconstructionHintsStx
   let reconstructionFinisher? ←
@@ -899,7 +1081,13 @@ def evalCrush : Tactic := fun stx => do
                 `crush.trust` is set to \"trust\". Set it to \"reconstruct\" or \
                 \"reconstructOrTrust\" for this invocation."
   let hints : Hints := {
-    terms, eqnLemmas, allHyps, instantiateHyps, allowPremiseSelection }
+    terms := parsed.terms
+    eqnLemmas := parsed.eqnLemmas ++ uordLemmas
+    allHyps := true
+    instantiateHyps := parsed.instantiateHyps
+    allowPremiseSelection := true
+    only := onlyTk.isSome
+    excluded := parsed.excluded }
   runCrush goal cfg hints reconstructionHints reconstructionFinisher?
     (snapshot? := some snapshot)
 

@@ -196,6 +196,18 @@ example (p q : Type) : modelLabelProbe p = modelLabelProbe q := by
       IO.println "z3 refusal round-trip: reported with `unknown` ✓"
     | .unsat .. => throwError "a refused command produced an `unsat` verdict"
 
+-- A verdict-only query (the weakened ground query) returns `sat` without a model.
+#eval show Lean.MetaM Unit from do
+  let cfg : Config := { backend := .z3, timeout := 5 }
+  if !(← Solver.backendAvailable cfg.backend) then
+    IO.println "z3: not installed; skipping verdict-only round-trip"
+  else
+    match ← Solver.runQuery cfg #[.declFun "a" #[] (.app (.symb "Int") #[]),
+        .assert (smt| (> a 0))] (getModel := false) with
+    | .sat model _ =>
+      unless model.isEmpty do throwError "a verdict-only query read the model"
+    | _ => throwError "a verdict-only satisfiable query did not return `sat`"
+
 -- Live solver round-trip (skips gracefully if z3 is absent).
 #eval show Lean.MetaM Unit from do
   let cfg : Config := { backend := .z3, timeout := 5 }

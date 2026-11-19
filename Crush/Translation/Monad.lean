@@ -89,6 +89,17 @@ structure RegistryCache where
   hasResult       : Option Bool := none
   deriving Inhabited
 
+/-- The value of an SMT `let` variable in scope. -/
+structure LetValue where
+  /-- The value as written; it may mention enclosing `let` variables. -/
+  value : Expr
+  /-- `value` with the enclosing `let` variables substituted, except captured ones. -/
+  expanded : Expr
+  /-- The variable is a parameter of the closure being defined, whose defining axiom does
+      not bind it to `value`. -/
+  captured : Bool := false
+  deriving Inhabited
+
 /-- Mutable translation state. -/
 structure TranslateState where
   cfg        : Config
@@ -145,6 +156,22 @@ structure TranslateState where
   funVars    : Std.HashMap FVarId String := {}
   /-- Registry lookups already resolved during this run. -/
   registries : RegistryCache := {}
+  /-- Universe parameters of the declaration being proved, when the caller knows them
+      (`runCrush`). A trusted dependency mentioning any other `Level.param` has picked
+      up a library declaration's own universe parameter through an uninstantiated type,
+      so it is rejected with an internal error. `none` (direct API use) skips the check. -/
+  levelParams : Option (List Name) := none
+  /-- Datatype (and finite-array) instantiations whose declaration was refused in
+      this query because a field sort cannot be translated. They are opaque sorts
+      everywhere in the query. Keys are normalized like `structuralToName`. -/
+  opaqueDatatypes : Std.HashSet StructuralKey := {}
+  /-- Normalized forms of structural-key type components, which every symbol lookup
+      would otherwise recompute with `reduceAll`. -/
+  normalizedTypes : Std.HashMap Expr Expr := {}
+  /-- SMT `let` variables in scope, with their values. -/
+  letValues : Std.HashMap FVarId LetValue := {}
+  /-- Captured `let` variables opened (`openLet`) by the handler running now. -/
+  openedCaptured : Array FVarId := #[]
   deriving Inhabited
 
 /-- The translation monad. `MetaM` at the bottom gives us `whnf`, unification,
@@ -166,13 +193,31 @@ def isDefEqRigid (left right : Expr) : MetaM Bool :=
 
 namespace TranslateM
 
-def run {α : Type} (cfg : Config) (x : TranslateM α) : MetaM (α × TranslateState) := do
+def run {α : Type} (cfg : Config) (x : TranslateM α)
+    (levelParams : Option (List Name) := none) : MetaM (α × TranslateState) := do
   StateRefT'.run x {
     cfg
     inputLCtx := ← getLCtx
-    inputLocalInstances := ← Meta.getLocalInstances }
+    inputLocalInstances := ← Meta.getLocalInstances
+    levelParams }
 
 @[inline] def getConfig : TranslateM Config := return (← get).cfg
+
+end TranslateM
+
+/-- Reject a universe parameter outside `allowed` in a trusted dependency. Such a
+parameter can only come from a library declaration's own universe parameters (for
+example a constructor type read without instantiating its levels), and the
+dependency would either fail to be added or silently denote the wrong universe. -/
+def checkDependencyLevelParams (allowed : Option (List Name)) (what : String)
+    (e : Expr) : MetaM Unit := do
+  let some allowed := allowed | return
+  for param in (collectLevelParams {} e).params do
+    unless allowed.contains param do
+      throwError "crush: internal — {what} mentions the universe parameter `{param}`, \
+                  which is not a universe of the current declaration"
+
+namespace TranslateM
 
 /-- Retain evidence only when it is valid in the original query context.
 Hypotheses introduced while translating a binder cannot justify unconditional
@@ -181,6 +226,7 @@ def recordEncodingEvidence (expected proof : Expr) : TranslateM Bool := do
   let proof ← instantiateMVars (Meta.mkExpectedPropHint proof expected)
   if proof.hasMVar then return false
   let st ← get
+  checkDependencyLevelParams st.levelParams "encoding evidence" proof
   for id in (Lean.collectFVars {} proof).fvarIds do
     let some decl := st.inputLCtx.find? id | return false
     if decl.isImplementationDetail then return false
@@ -265,7 +311,10 @@ private def normalizeStructuralKey (key : StructuralKey) : TranslateM Structural
     Meta.Sym.normalizeLevels (← instantiateMVars e)
   let typeExprs ← key.typeExprs.mapM fun e => do
     let e ← instantiateMVars e
-    Meta.Sym.normalizeLevels (← Meta.withReducible <| Meta.reduceAll e)
+    if let some normalized := (← get).normalizedTypes[e]? then return normalized
+    let normalized ← Meta.Sym.normalizeLevels (← Meta.withReducible <| Meta.reduceAll e)
+    modify fun s => { s with normalizedTypes := s.normalizedTypes.insert e normalized }
+    return normalized
   return { key with exprs, typeExprs }
 
 /-- Look up or allocate an expression-derived symbol using structural identity. -/
@@ -284,6 +333,16 @@ def symbolForStructural (key : StructuralKey) (hint : String) : TranslateM Strin
 def structuralSymbol? (key : StructuralKey) : TranslateM (Option String) := do
   let key ← normalizeStructuralKey key
   return (← get).structuralToName.get? key
+
+/-- Record that a structural datatype identity is opaque for the rest of the query. -/
+def markOpaqueStructural (key : StructuralKey) : TranslateM Unit := do
+  let key ← normalizeStructuralKey key
+  modify fun s => { s with opaqueDatatypes := s.opaqueDatatypes.insert key }
+
+/-- Whether a structural datatype identity was made opaque earlier in the query. -/
+def isOpaqueStructural (key : StructuralKey) : TranslateM Bool := do
+  let key ← normalizeStructuralKey key
+  return (← get).opaqueDatatypes.contains key
 
 /-- Record that SMT symbol `name` stands for the Lean term `e`, for proof replay.
 Idempotent; the first recording wins, so a symbol reused across occurrences keeps its
@@ -309,6 +368,89 @@ def withBoundVar {α : Type} (fvar : FVarId) (name : String) (k : TranslateM α)
   let prev := (← get).boundVars
   modify fun s => { s with boundVars := s.boundVars.insert fvar name }
   try k finally modify fun s => { s with boundVars := prev }
+
+/-- Record `fvar`, an SMT `let` variable, as standing for `value` during `k`. -/
+def withLetValue {α : Type} (fvar : FVarId) (value : LetValue) (k : TranslateM α) :
+    TranslateM α := do
+  let prev := (← get).letValues
+  modify fun s => { s with letValues := s.letValues.insert fvar value }
+  try k finally modify fun s => { s with letValues := prev }
+
+/-- Run `k`, which translates the body of a closure's defining axiom: every `let`
+variable in scope is then a parameter of the closure, not its value. -/
+def withCapturedLets {α : Type} (k : TranslateM α) : TranslateM α := do
+  let prev := (← get).letValues
+  if prev.isEmpty then return ← k
+  let captured := prev.fold (fun m id v => m.insert id { v with captured := true }) {}
+  modify fun s => { s with letValues := captured }
+  try k finally modify fun s => { s with letValues := prev }
+
+/-- `e` with the SMT `let` variables in scope replaced by their values. A captured variable
+stays: its value does not hold in a closure's defining axiom. -/
+def expandLets (e : Expr) : TranslateM Expr := do
+  let lets := (← get).letValues
+  if lets.isEmpty || !e.hasFVar then return e
+  return e.replace fun
+    | .fvar id => (lets.get? id).bind fun v => if v.captured then none else some v.expanded
+    | _ => none
+
+/-- `e` without metadata, and, while it is a `let` variable, its value. Subterms keep
+their `let` variables. Opening a captured variable is recorded, so the translator can
+refuse a handler result that needed its value. -/
+partial def openLet (e : Expr) : TranslateM Expr := do
+  let e := e.consumeMData
+  let .fvar id := e | return e
+  let some v := (← get).letValues.get? id | return e
+  if v.captured then
+    modify fun s => { s with openedCaptured := s.openedCaptured.push id }
+  openLet v.value
+
+/-- Run `k` and return the captured `let` variables it opened directly. -/
+def trackingOpenedLets {α : Type} (k : TranslateM α) : TranslateM (α × Array FVarId) := do
+  let outer := (← get).openedCaptured
+  modify fun s => { s with openedCaptured := #[] }
+  try
+    let result ← k
+    return (result, (← get).openedCaptured)
+  finally modify fun s => { s with openedCaptured := outer }
+
+/-- `args` with the values of the `let` variables that satisfy `pick` substituted, or `none`
+if none occurs. The substitution repeats, since a captured value may mention variables
+captured by an enclosing closure. -/
+def substituteLets? (args : Array Expr) (pick : FVarId → LetValue → Bool) :
+    TranslateM (Option (Array Expr)) := do
+  let lets := (← get).letValues
+  if lets.isEmpty then return none
+  let picked : Expr → Option Expr
+    | .fvar id => (lets.get? id).bind fun v => if pick id v then some v.expanded else none
+    | _ => none
+  -- `find?` visits a shared subterm once; `hasAnyFVar` does not.
+  let mentions (arg : Expr) : Bool := (arg.find? (picked · |>.isSome)).isSome
+  unless args.any mentions do return none
+  let mut args := args
+  while args.any mentions do
+    args := args.map (·.replace picked)
+  return some args
+
+/-- The captured `let` variables `args` mention. -/
+def capturedLetsIn (args : Array Expr) : TranslateM (Array FVarId) := do
+  let lets := (← get).letValues
+  if lets.isEmpty then return #[]
+  let fvars := args.foldl (fun acc arg => Lean.collectFVars acc arg) {}
+  return fvars.fvarIds.filter fun id => (lets.get? id).any (·.captured)
+
+/-- The `let` variables in scope keyed by their expanded values: the uncaptured ones, and
+the captured ones too if `captured`. -/
+def letVarsByValue (captured := false) : TranslateM (Std.HashMap Expr FVarId) := do
+  let mut vars := {}
+  for (id, v) in (← get).letValues do
+    if captured || !v.captured then vars := vars.insert v.expanded id
+  return vars
+
+/-- `e` with each subterm that is a value in `vars` replaced by its `let` variable, which
+translates as the variable's SMT name. -/
+def collapseLets (vars : Std.HashMap Expr FVarId) (e : Expr) : Expr :=
+  if vars.isEmpty then e else e.replace fun sub => (vars.get? sub).map mkFVar
 
 /-- The SMT variable name for `fvar` if it is a bound quantifier variable. -/
 def boundVar? (fvar : FVarId) : TranslateM (Option String) := do

@@ -39,6 +39,10 @@ structure TranslationCtx where
       generating it via the supplied thunk on first request. Returns the symbol. -/
   declare   : (key : String) → (hint : String) →
                 (String → TranslateM (Array SMT.Command)) → TranslateM String
+  /-- A term without metadata, and if it is a variable standing for a shared `let`
+      value, that value. Subterms keep their `let` variables, so translating them keeps
+      the sharing. Generated lowerings open each subterm their pattern inspects. -/
+  openLet   : Expr → TranslateM Expr := TranslateM.openLet
 
 /-- A user translation handler. Returns `some t` to claim the term, or `none` to
 defer to the next handler / the default translator. Runs in `TranslateM`, so it

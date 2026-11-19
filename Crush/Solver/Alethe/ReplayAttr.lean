@@ -521,11 +521,10 @@ def ReplayRuleContext.runTactic (ctx : ReplayRuleContext)
     withReplayBindings ctx.bindings 0 #[] fun locals =>
       mkLetFVars (usedLetOnly := false) (generalizeNondepLet := false)
         locals implication
-  let stepParams ← collectProofParams #[implication]
-  let closedImplication ← instantiateMVars (← mkForallFVars stepParams implication)
+  let closedImplication ← closeTarget implication
   let saved ← saveState
   tryCatchRuntimeEx (do
-    let goal ← withLCtx {} {} do mkFreshExprMVar closedImplication
+    let goal ← withLCtx {} {} do mkFreshExprMVar closedImplication.type
     let tacticGoal ← introReplayBinders goal.mvarId!
     let goals ←
       withOptions (fun options =>
@@ -535,7 +534,7 @@ def ReplayRuleContext.runTactic (ctx : ReplayRuleContext)
             Tactic.withoutRecover (evalTactic tactic)
     if goals.isEmpty then
       let assigned ← instantiateMVars goal
-      let proof := mkAppN (mkAppN assigned stepParams) proofs
+      let proof := mkAppN (mkAppN assigned closedImplication.args) proofs
       return some proof
     restoreState saved
     return none
@@ -559,15 +558,14 @@ def ReplayRuleContext.runMeta (ctx : ReplayRuleContext)
     withReplayBindings ctx.bindings 0 #[] fun locals =>
       mkLetFVars (usedLetOnly := false) (generalizeNondepLet := false)
         locals implication
-  let stepParams ← collectProofParams #[implication]
-  let closedImplication ← instantiateMVars (← mkForallFVars stepParams implication)
+  let closedImplication ← closeTarget implication
   let saved ← saveState
   tryCatchRuntimeEx (do
-    let goal ← withLCtx {} {} do mkFreshExprMVar closedImplication
+    let goal ← withLCtx {} {} do mkFreshExprMVar closedImplication.type
     let procedureGoal ← introReplayBinders goal.mvarId!
     if ← procedure procedureGoal then
       let assigned ← instantiateMVars goal
-      let proof := mkAppN (mkAppN assigned stepParams) proofs
+      let proof := mkAppN (mkAppN assigned closedImplication.args) proofs
       return some proof
     restoreState saved
     return none
@@ -789,6 +787,7 @@ def runReplayRuleHandlersDetailed (registry : ReplayRuleRegistry)
       match result with
       | some proof =>
         let proof ← validateProofCandidate ctx.target proof
+          (validated := ctx.premises.map (·.proof) ++ ctx.scopedProofs)
         let source :=
           match entry.implementation with
           | .declaration declName _ => s!"handler:{declName}"
@@ -797,12 +796,13 @@ def runReplayRuleHandlersDetailed (registry : ReplayRuleRegistry)
       | none =>
         restoreState saved
     catch exception =>
+      -- A throwing handler declines; later handlers may still replay the step.
       restoreState saved
       let source :=
         match entry.implementation with
         | .declaration declName _ => m!"handler `{declName}`"
         | .pattern _ _ => m!"pattern for `{ctx.rule}`"
-      throwError "replay rule {source} failed:\n{exception.toMessageData}"
+      trace[crush.replay] "replay rule {source} failed:\n{exception.toMessageData}"
   return none
 
 /-- Compatibility wrapper for callers interested only in the reconstructed proof. -/

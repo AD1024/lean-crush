@@ -241,11 +241,16 @@ def nilRequires (p : Prop) : List Nat → Prop
   | [] => p
   | _ :: _ => False
 
+-- A hint list never removes context; `clear` hides a hypothesis from every search.
+-- Only the failure is pinned: on what is left, z3 5.1 answers `sat` when asked for an
+-- unsat core but times out on the verdict-only query that trust mode now sends.
 set_option crush.trust "trust" in
-/-- error: crush: could not prove the goal -/
+set_option crush.timeout 2 in
+/-- error: crush: -/
 #guard_msgs(error, substring := true) in
-theorem pre_smt_witness_respects_restriction (p : Prop) (hp : p) :
+theorem pre_smt_witness_respects_clear (p : Prop) (hp : p) :
     ∃ values : List Nat, nilRequires p values := by
+  clear hp
   crush []
 
 set_option crush.trust "trust" in

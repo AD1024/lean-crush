@@ -2,6 +2,7 @@ import Lean
 import Lean.Meta.Injective
 import Crush.Frontend.Collect
 import Crush.Translation.Attr
+import Crush.Util.Budget
 
 /-!
 # Proof-producing selected-definition normalization
@@ -63,24 +64,8 @@ private partial def constructorEqLemmas (facts : Array Fact) : MetaM (Array Name
 
 /-- Selected-definition normalization is an optional optimization. Keep its search
 bounded so a recursive equation cannot consume the enclosing tactic's entire budget. -/
-private def normalizationMaxSteps : Nat := 1000
-private def normalizationHeartbeatBudget : Nat := 2000000
-
-private def tryNormalization {α : Type} (action : MetaM α) : MetaM (Option α) := do
-  let saved ← saveState
-  tryCatchRuntimeEx (do
-    let now ← IO.getNumHeartbeats
-    let ctx ← readThe Core.Context
-    let remaining := ctx.maxHeartbeats - (now - ctx.initHeartbeats)
-    let budget := if ctx.maxHeartbeats == 0 then normalizationHeartbeatBudget
-      else min normalizationHeartbeatBudget (remaining / 2)
-    if budget == 0 then
-      throwError "crush: selected-definition normalization exhausted its local budget"
-    withTheReader Core.Context
-      ({ · with maxHeartbeats := budget, initHeartbeats := now }) do
-        return some (← action)) fun _ => do
-    saved.restore
-    return none
+private def tryNormalization {α : Type} (action : MetaM α) : MetaM (Option α) :=
+  withLocalBudget action
 
 private def selectedSimpContext (lemmas : Array Name) : MetaM Simp.Context := do
   let mut theorems : SimpTheorems := {}
@@ -90,7 +75,9 @@ private def selectedSimpContext (lemmas : Array Name) : MetaM Simp.Context := do
     seen := seen.insert lemma
     theorems ← theorems.addConst lemma
   Simp.mkContext
-    (config := { maxSteps := normalizationMaxSteps })
+    -- Keep `let`s: translation emits a data-valued `let` as an SMT `let`, while
+    -- zeta-reducing a nested chain here doubles the term per level.
+    (config := { maxSteps := localSimpMaxSteps, zeta := false })
     (simpTheorems := #[theorems])
     (congrTheorems := ← getSimpCongrTheorems)
 
@@ -123,10 +110,11 @@ Equation facts themselves are retained verbatim as quantified fallback axioms.
 Every other proof is transported across the simplifier's equality proof. Failed or
 resource-limited normalization restores its state and retains the original facts;
 this applies to context preparation as well as each individual simplification. -/
-def normalizeFacts (facts : Array Fact) (lemmas : Array Name) :
-    MetaM NormalizeReport := do
+def normalizeFacts (facts : Array Fact) (lemmas : Array Name)
+    (excluded : Std.HashSet Name := {}) : MetaM NormalizeReport := do
   let prepared ← tryNormalization do
-    let constructorLemmas ← constructorEqLemmas facts
+    -- Constructor injectivity lemmas are collected automatically; honor `-name`.
+    let constructorLemmas := (← constructorEqLemmas facts).filter (!excluded.contains ·)
     let lemmas := lemmas ++ constructorLemmas
     if lemmas.isEmpty then return none
     return some (← selectedSimpContext lemmas)

@@ -130,6 +130,14 @@ register_crush_replay rule <<
 private def invalidReplayRule : ReplayRuleHandler := fun _ =>
   return some (mkConst ``True.intro)
 
+@[crush_replay_rule "test_replay_throw_then_work" high]
+private def throwingReplayRule : ReplayRuleHandler := fun _ =>
+  throwError "replay handler exploded"
+
+register_crush_replay rule low <<
+  (test_replay_throw_then_work ..) => by exact True.intro
+>>
+
 private def parseTerm (source : String) : MetaM Sexp := do
   let some (term, rest) := parseSexp source
     | throwError "failed to parse Alethe term `{source}`"
@@ -174,6 +182,26 @@ run_meta do
     let symbols := ({} : Std.HashMap String Expr).insert "x" x
     assertDecoded symbols "((_ divisible 3) x)" expected
     assertDecoded symbols "(divisible 3 x)" expected
+
+/-- A record whose bits a registered `@bit_of` decoder projects. -/
+structure TwoBits where
+  bits : BitVec 2
+
+@[crush_replay "@bit_of"]
+def twoBitsBit : ReplayTermHandler := fun ctx => do
+  let #[word] := ctx.args | return none
+  unless (← inferType word).isConstOf ``TwoBits do return none
+  let #[.atom index] := ctx.indices | return none
+  let some index := index.toNat? | return none
+  return some (← mkAppM ``BitVec.getLsbD #[← mkAppM ``TwoBits.bits #[word], mkNatLit index])
+
+-- A registered `@bit_of` decoder also decodes the bits of a bit-blasted term.
+run_meta do
+  withLocalDeclD `w (mkConst ``TwoBits) fun w => do
+    let symbols := ({} : Std.HashMap String Expr).insert "w" w
+    let bits ← mkAppM ``TwoBits.bits #[w]
+    assertDecoded symbols "((_ @bit_of 1) w)" (← mkAppM ``BitVec.getLsbD #[bits, mkNatLit 1])
+    assertDecoded symbols "(@bbterm ((_ @bit_of 0) w) ((_ @bit_of 1) w))" bits
 
 private def replayTestRule (goal : MVarId) (rule arg : String) :
     TacticM (Option Expr) := goal.withContext do
@@ -260,19 +288,25 @@ example : True := by
 example : True := by
   assert_test_replay_condition_isolated
 
+-- A throwing condition or a rejected proof makes its handler decline; it does not
+-- abort replay.
 /-!
-error: replay condition `failingReplayCondition` failed:
+error: test replay rule `test_replay_condition_error` declined
 -/
 #guard_msgs(error, substring := true) in
 example : True := by
   run_test_replay "test_replay_condition_error" "unused"
 
 /-!
-error: crush: reconstructed proof failed kernel validation:
+error: test replay rule `test_replay_kernel_rejection` declined
 -/
 #guard_msgs(error, substring := true) in
 example : False := by
   run_test_replay "test_replay_kernel_rejection" "unused"
+
+-- A throwing handler is followed by a lower-priority handler that replays the step.
+example : True := by
+  run_test_replay "test_replay_throw_then_work" "unused"
 
 section Replay
 

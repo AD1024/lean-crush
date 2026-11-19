@@ -1,4 +1,4 @@
-import Crush.Frontend.Collect
+import Crush
 
 /-!
 Visible local lets contribute defining equalities with kernel-checked proofs,
@@ -47,5 +47,66 @@ run_meta do
     let facts ← collectFacts goal.mvarId! {} false
     unless facts.size == 1 && facts[0]!.negated do
       throwError "collector asserted an unsupported equality between types"
+
+/-! ## Checked proofs over let-bound locals (review round 3, N1/W1)
+
+A dependent let-bound local becomes a `let` binder of the closed implication that
+reconstruction proves, not a `∀` binder, so the checked proof must be applied only to
+the `∀` parameters (`closeTarget`). A nondependent `have` stays an ordinary argument. -/
+
+section
+set_option crush.timeout 10
+set_option crush.trust "reconstruct"
+
+-- Core reconstruction (z3).
+theorem withLetCore (f : Int → Int) (a b : Int) :
+    let x := f a; x = b → f b = a → f (f x) = b := by
+  intro x h h2
+  crush
+
+theorem withLetTactic (f : Int → Int) (a b : Int) (h : f a = b) (h2 : f b = a) :
+    f (f (f a)) = b := by
+  let y : Int := a
+  have hy : f y = b := h
+  clear h
+  crush
+
+theorem withHave (f : Int → Int) (a b : Int) (h : f a = b) (h2 : f b = a) :
+    f (f (f a)) = b := by
+  have hy : f a = b := h
+  clear h
+  crush
+
+-- Alethe replay (cvc5).
+set_option crush.backend "cvc5" in
+set_option crush.reconstruct "alethe" in
+theorem withLet (f : Int → Int) (a b : Int) :
+    let x := f a; x = b → f b = a → f (f x) = b := by
+  intro x h h2
+  crush
+
+set_option crush.backend "cvc5" in
+set_option crush.reconstruct "alethe" in
+theorem withLet2 (f : Int → Int) (a b : Int) (h : f a = b) (h2 : f b = a) :
+    f (f (f a)) = b := by
+  let y : Int := a
+  have hy : f y = b := h
+  clear h
+  crush
+
+set_option crush.backend "cvc5" in
+set_option crush.reconstruct "alethe" in
+theorem withHaveAlethe (f : Int → Int) (a b : Int) (h : f a = b) (h2 : f b = a) :
+    f (f (f a)) = b := by
+  have hy : f a = b := h
+  clear h
+  crush
+end
+
+run_meta do
+  for name in [``withLetCore, ``withLetTactic, ``withHave, ``withLet, ``withLet2,
+      ``withHaveAlethe] do
+    if (← collectAxioms name).contains ``Crush.crushSorry then
+      throwError "`{name}` was closed with the trust axiom"
 
 end SoundnessLocalLets

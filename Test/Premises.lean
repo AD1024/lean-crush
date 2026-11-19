@@ -49,11 +49,25 @@ theorem zero_bound_selects_nothing (x : Int) : SelectedP x := by
 theorem selection_disabled_by_default (x : Int) : SelectedP x := by
   crush
 
--- An explicit list remains a strict restriction even when the global option is on.
+-- A hint list adds hints and keeps premise selection.
+set_option crush.premises true in
+set_option crush.premises.max 1 in
+theorem list_keeps_selection (x : Int) : SelectedP x := by
+  crush []
+
+-- `-name` removes one lemma from premise selection.
+set_option crush.premises true in
+set_option crush.premises.max 1 in
+/-- error: crush: could not prove the goal -/
+#guard_msgs(error, substring := true) in
+theorem excluded_premise_not_selected (x : Int) : SelectedP x := by
+  crush [-selectedLemma]
+
+-- `only` drops premise selection even when the global option is on.
 set_option crush.premises true in
 /-- error: crush: could not prove the goal -/
 #guard_msgs(error, substring := true) in
-theorem explicit_list_disables_selection (x : Int) : SelectedP x := by
-  crush []
+theorem only_disables_selection (x : Int) : SelectedP x := by
+  crush only []
 
 end PremiseSelection

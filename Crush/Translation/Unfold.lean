@@ -101,38 +101,43 @@ initialize registerBuiltinAttribute {
 
 /-- All equation-lemma names contributed by marked definitions **relevant** to `seeds`
 — the constants appearing in the goal and hypotheses. Relevance is transitive through
-the marked set: if a marked `f` is reachable and its body mentions a marked `g`, then
-`g`'s equations are included too, since unfolding `f` exposes `g`.
+the marked set: if a marked `f` is reachable and one of its equations mentions a marked
+`g`, then `g`'s equations are included too, since unfolding `f` exposes `g`.
+
+The traversal follows the constants of the equation lemmas' types, not of the
+definition body: a well-founded definition's body mentions only its `_unary` worker,
+which hides the callees that its equations expose.
 
 This keeps a query from being flooded with quantified equations for definitions it
 never touches, which is what turns auto-unfold from a convenience into a source of
 solver instantiation loops. -/
-def relevantAutoUnfoldLemmas (seeds : Array Name) : MetaM (Array Name) := do
+def relevantAutoUnfoldLemmas (seeds : Array Name) (excluded : Std.HashSet Name := {}) :
+    MetaM (Array Name) := do
   let env ← getEnv
   let marked := crushUnfoldExt.getState env
   if marked.isEmpty then return #[]
-  -- Transitive closure over marked constants reachable from the seeds.
+  -- Transitive closure over marked constants reachable from the seeds. A constant
+  -- excluded with `-name` is neither unfolded nor followed.
   let mut frontier := seeds
-  let mut seen : Std.HashSet Name := {}
-  let mut relevant : Array (Name × UnfoldKind) := #[]
+  let mut seen : Std.HashSet Name := excluded
+  let mut names : Array Name := #[]
   while !frontier.isEmpty do
     let n := frontier.back!
     frontier := frontier.pop
     if seen.contains n then continue
     seen := seen.insert n
-    if let some kind := marked.get? n then
-      -- Follow into this definition's body: constants it uses may be marked too.
-      if let some ci := env.find? n then
-        let some body := ci.value? | do
-          logWarning m!"crush: skipping automatic unfolding of `{n}` because its definition body is unavailable"
-          continue
-        relevant := relevant.push (n, kind)
-        for c in body.getUsedConstants do
-          unless seen.contains c do frontier := frontier.push c
-  -- Resolve each relevant marked constant to its equation lemmas.
-  let mut names : Array Name := #[]
-  for (n, kind) in relevant do
-    names := names ++ (← eqnLemmasFor n kind)
+    let some kind := marked.get? n | continue
+    let eqns ← eqnLemmasFor n kind
+    if eqns.isEmpty then
+      logWarning m!"crush: skipping automatic unfolding of `{n}` because it has no equations"
+      continue
+    for eqn in eqns do
+      if excluded.contains eqn then continue
+      names := names.push eqn
+      -- Follow the equation: constants it exposes may be marked too.
+      let some eqnInfo := (← getEnv).find? eqn | continue
+      for c in eqnInfo.type.getUsedConstants do
+        unless seen.contains c do frontier := frontier.push c
   return names
 
 /-- Rewrite equations for directly relevant predicates marked `@[reducible]`.
@@ -147,10 +152,11 @@ general unfold equation. `simp only` can therefore reduce `p []` or `p (x :: xs)
 without expanding a symbolic `p xs`, and no recursive universal axiom reaches SMT.
 Users can still opt into that stronger quantified fallback with
 `@[crush_unfold]`. -/
-def relevantReducibleRewriteLemmas (seeds : Array Name) : MetaM (Array Name) := do
+def relevantReducibleRewriteLemmas (seeds : Array Name) (excluded : Std.HashSet Name := {}) :
+    MetaM (Array Name) := do
   let env ← getEnv
   let mut frontier := seeds
-  let mut seen : Std.HashSet Name := {}
+  let mut seen : Std.HashSet Name := excluded
   let mut names : Array Name := #[]
   while !frontier.isEmpty do
     let n := frontier.back!
@@ -165,7 +171,7 @@ def relevantReducibleRewriteLemmas (seeds : Array Name) : MetaM (Array Name) := 
       | .sort .zero => true
       | _ => false
     unless returnsProp ci.type do continue
-    let eqns ← eqnLemmasFor n .unfold
+    let eqns := (← eqnLemmasFor n .unfold).filter (!excluded.contains ·)
     if eqns.isEmpty then continue
     names := names ++ eqns
     -- Follow relevant predicate wrappers through equation types. A recursive

@@ -95,6 +95,17 @@ private def sameHead (a b : Expr) : Bool :=
   | .fvar aid, .fvar bid => aid == bid
   | _, _ => false
 
+/-- A hashable identity agreeing with `sameHead`: constants up to universe levels. -/
+private def headKey : Expr → Expr
+  | .const name _ => .const name []
+  | head => head
+
+/-- Deduplication key of an application occurrence (`sameHead`, arguments, origins). -/
+private abbrev AppKey := Expr × Array Expr × Array Nat
+
+private def AppOccurrence.key (occurrence : AppOccurrence) : AppKey :=
+  (headKey occurrence.head, occurrence.args, occurrence.origins)
+
 /-- Collect informative type patterns and explicit type arguments of applications.
 
 For `Except ε α`, the whole constructor application is retained and its children
@@ -137,22 +148,22 @@ private partial def collectTypePatterns (e : Expr) (binders : Array Expr) :
 /-- Collect first-order application spines from a query proposition. -/
 private partial def collectApplications (e : Expr) : Array AppOccurrence :=
   Id.run do
-    let mut out : Array AppOccurrence := #[]
-    let rec go (e : Expr) : StateM (Array AppOccurrence) Unit := do
+    let rec go (e : Expr) :
+        StateM (Array AppOccurrence × Std.HashSet AppKey) Unit := do
       let fn := e.getAppFn
       let args := e.getAppArgs
       unless args.isEmpty do
         if fn.isConst || fn.isFVar then
-          unless (← get).any (fun occurrence =>
-              sameHead occurrence.head fn && occurrence.args == args) do
-            modify (·.push { head := fn, args })
+          let occurrence : AppOccurrence := { head := fn, args }
+          unless (← get).2.contains occurrence.key do
+            modify fun (out, seen) => (out.push occurrence, seen.insert occurrence.key)
       match e with
       | .app f a => go f; go a
       | .lam _ ty body _ | .forallE _ ty body _ => go ty; go body
       | .letE _ ty value body _ => go ty; go value; go body
       | .mdata _ body | .proj _ _ body => go body
       | _ => pure ()
-    let (_, result) := (go e).run out
+    let (_, (result, _)) := (go e).run (#[], {})
     return result
 
 private def isBareBinderPattern (pattern : Expr) (binders : Array Expr) : Option Nat :=
@@ -310,15 +321,17 @@ def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := 
   -- but new substitutions still require pattern evidence.
   let mut queryTypes : Array TypeOccurrence := #[]
   let mut queryApps : Array AppOccurrence := #[]
+  -- Hash sets keyed on what the occurrence arrays are deduplicated by.
+  let mut seenTypes : Std.HashSet (Expr × Array Nat) := {}
+  let mut seenApps : Std.HashSet AppKey := {}
   for f in fixed do
     for c in ← collectCandidates (← instantiateMVars f.prop) do
-      unless queryTypes.any (fun occurrence =>
-          occurrence.expr == c && occurrence.origins.isEmpty) do
+      unless seenTypes.contains (c, #[]) do
+        seenTypes := seenTypes.insert (c, #[])
         queryTypes := queryTypes.push { expr := c }
     for occurrence in collectApplications (← instantiateMVars f.prop) do
-      unless queryApps.any (fun existing =>
-          sameHead existing.head occurrence.head && existing.args == occurrence.args
-            && existing.origins.isEmpty) do
+      unless seenApps.contains occurrence.key do
+        seenApps := seenApps.insert occurrence.key
         queryApps := queryApps.push occurrence
   let mut out := fixed
   let mut seen : Std.HashSet Expr := {}
@@ -365,14 +378,14 @@ def monomorphizeFacts (cfg : Config) (facts : Array Fact) : MetaM MonoReport := 
         let origins := Pattern.mergeOrigins substitution.origins #[factIndex]
         -- Expose new patterns to other facts while provenance prevents dependency cycles.
         for c in ← collectCandidates t do
-          unless queryTypes.any (fun occurrence =>
-              occurrence.expr == c && occurrence.origins == origins) do
+          unless seenTypes.contains (c, origins) do
+            seenTypes := seenTypes.insert (c, origins)
             queryTypes := queryTypes.push { expr := c, origins }
         for occurrence in collectApplications t do
-          unless queryApps.any (fun existing =>
-              sameHead existing.head occurrence.head && existing.args == occurrence.args
-                && existing.origins == origins) do
-            queryApps := queryApps.push { occurrence with origins }
+          let occurrence := { occurrence with origins }
+          unless seenApps.contains occurrence.key do
+            seenApps := seenApps.insert occurrence.key
+            queryApps := queryApps.push occurrence
       if generated >= cfg.monoFuel then
         exhausted := true
         break
