@@ -90,7 +90,7 @@ jobs:
       # The core suite runs before Mathlib is fetched, pinning that the root package
       # and all ordinary tests are independent of it.
       - name: Build core test suite
-        run: lake build Test
+        run: lake build -R -K ci=true Test
 
       - name: Download optional Mathlib cache
         working-directory: MathlibTest
@@ -110,7 +110,7 @@ jobs:
           # proof regressed to `sorry`. Match the literal message; note it is
           # backtick-quoted (declaration uses `sorry`), so the pattern is quote-
           # agnostic rather than assuming a particular quote character.
-          if lake build Test 2>&1 | grep -nE "declaration uses .sorry."; then
+          if lake build -R -K ci=true Test 2>&1 | grep -nE "declaration uses .sorry."; then
             echo "::error::a declaration uses sorry; the suite must be sorry-free"
             exit 1
           fi

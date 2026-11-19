@@ -23,3 +23,6 @@ lean_lib «Crush» where
 
 lean_lib «Test» where
   globs := #[.submodules `Test]
+  -- `-R -K ci=true` (CI) elaborates each test file sequentially. Parallel elaboration runs a
+  -- file's `crush` calls at once, and their solver launches exhausted a small runner's memory.
+  leanOptions := if (get_config? ci).isSome then #[⟨`Elab.async, false⟩] else #[]
