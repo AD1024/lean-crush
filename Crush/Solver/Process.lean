@@ -291,9 +291,13 @@ def runQuery (cfg : Config) (script : Array SMT.Command)
   let limitMs := max 1 (limitMs?.getD (cfg.timeout * 1000))
   let p ← spawn cfg limitMs request
   let deadline := budget.deadline
+  -- Sleeps in slices and stops once cancelled (`finally`): a task thread has a 1 GB stack,
+  -- and each solver launch forks this process with every live thread.
   let timerTask ← IO.asTask (prio := .dedicated) do
-    let now ← IO.monoMsNow
-    if now < deadline then IO.sleep (deadline - now).toUInt32
+    repeat
+      let now ← IO.monoMsNow
+      if now ≥ deadline || (← IO.checkCanceled) then break
+      IO.sleep (min 50 (deadline - now)).toUInt32
   -- Drained for the child's whole lifetime; see the module comment.
   let errTask ← IO.asTask (prio := .dedicated) p.stderr.readToEnd
   try
